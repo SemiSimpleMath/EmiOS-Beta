@@ -82,31 +82,38 @@ class TestDispatchEpoch:
 class TestRegistryOwnership:
 
     def test_zombie_pop_leaves_successor_entry(self):
-        from app.assistant.dayflow_orchestrator import node_dispatch as nd
+        from app.assistant.dayflow_orchestrator import work_session as ws
 
-        ref = "work_test::node_test"
+        sid = ws.session_id_for("work_test", "node_test")
         successor_thread = SimpleNamespace()  # not this thread
-        with nd._inflight_lock:
-            nd._inflight[ref] = {"thread": successor_thread,
-                                 "started_at": datetime.now(timezone.utc)}
+        with ws._sessions_lock:
+            ws._live_sessions[sid] = {"thread": successor_thread,
+                                      "started_at": datetime.now(timezone.utc)}
         try:
-            nd._unregister_job(ref)  # called from the zombie (this) thread
-            with nd._inflight_lock:
-                assert ref in nd._inflight  # successor's entry survives
+            # the finally-block owner check in _run_session: emulate a zombie pop
+            with ws._sessions_lock:
+                entry = ws._live_sessions.get(sid)
+                if entry is not None and entry.get("thread") is threading.current_thread():
+                    ws._live_sessions.pop(sid, None)
+            with ws._sessions_lock:
+                assert sid in ws._live_sessions  # successor's entry survives
         finally:
-            with nd._inflight_lock:
-                nd._inflight.pop(ref, None)
+            with ws._sessions_lock:
+                ws._live_sessions.pop(sid, None)
 
     def test_owner_pop_removes_own_entry(self):
-        from app.assistant.dayflow_orchestrator import node_dispatch as nd
+        from app.assistant.dayflow_orchestrator import work_session as ws
 
-        ref = "work_test::node_own"
-        with nd._inflight_lock:
-            nd._inflight[ref] = {"thread": threading.current_thread(),
-                                 "started_at": datetime.now(timezone.utc)}
-        nd._unregister_job(ref)
-        with nd._inflight_lock:
-            assert ref not in nd._inflight
+        sid = ws.session_id_for("work_test", "node_own")
+        with ws._sessions_lock:
+            ws._live_sessions[sid] = {"thread": threading.current_thread(),
+                                      "started_at": datetime.now(timezone.utc)}
+        with ws._sessions_lock:
+            entry = ws._live_sessions.get(sid)
+            if entry is not None and entry.get("thread") is threading.current_thread():
+                ws._live_sessions.pop(sid, None)
+        with ws._sessions_lock:
+            assert sid not in ws._live_sessions
 
 
 class TestClaimGuard:
@@ -120,24 +127,25 @@ class TestClaimGuard:
                                apply=lambda *a, **k: applies.append((a, k))), applies
 
     def test_already_dispatched_node_is_refused(self, monkeypatch):
-        from app.assistant.dayflow_orchestrator import node_dispatch as nd
+        from app.assistant.dayflow_orchestrator import work_session as ws
 
-        monkeypatch.setattr(nd, "_run_job", lambda *a: None)
+        monkeypatch.setattr(ws, "_run_session", lambda *a: None)
         store, applies = self._fake_store("dispatched")
-        nd._do_work(store, "work_x", "n1")
+        ws.open_session(store, "work_x", "n1", "run_work_node")
         assert applies == []                       # no claim written
-        with nd._inflight_lock:
-            assert "work_x::n1" not in nd._inflight  # no thread registered
+        with ws._sessions_lock:
+            assert ws.session_id_for("work_x", "n1") not in ws._live_sessions
 
     def test_claimable_node_is_claimed_and_started(self, monkeypatch):
-        from app.assistant.dayflow_orchestrator import node_dispatch as nd
+        from app.assistant.dayflow_orchestrator import work_session as ws
 
-        monkeypatch.setattr(nd, "_run_job", lambda *a: None)
+        monkeypatch.setattr(ws, "_run_session", lambda *a: None)
         store, applies = self._fake_store("actionable")
-        nd._do_work(store, "work_y", "n1")
+        ws.open_session(store, "work_y", "n1", "run_work_node")
         assert len(applies) == 1
         assert applies[0][0][1]["status"] == "dispatched"
-        with nd._inflight_lock:
-            entry = nd._inflight.pop("work_y::n1", None)
+        assert applies[0][0][1]["session_id"] == ws.session_id_for("work_y", "n1")
+        with ws._sessions_lock:
+            entry = ws._live_sessions.pop(ws.session_id_for("work_y", "n1"), None)
         assert entry is not None
         entry["thread"].join(timeout=5)

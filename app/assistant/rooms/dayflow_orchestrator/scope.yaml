@@ -39,13 +39,34 @@ tools:
     # specialist leaves stay reachable through those managers.
     # Deliberately WITHOUT master_room's search_work_objects/read_work_object:
     # those serve the owner's status questions in chat; the orchestrator reads
-    # work objects natively through its pipeline stages and dispatches via the
-    # work_objects substrate (which narrows its own coordinator separately).
+    # work objects natively through its pipeline stages.
+    # work_emi_team_manager (below) is the WORK-SESSION coordinator: since the
+    # work-session rewrite, dispatched workers run UNDER THIS ROOM'S SCOPE, so
+    # its narrower-cost roster lives here too (it used to ride the substrate's
+    # self-minted scope). Same rationale as emi_team_manager's rule.
     emi_team_manager:
       allow:
         - personal_admin_manager
         - devices_manager
         - web_manager
+        - playwright_manager
+        - bash_manager
+        - http_manager
+        - sandbox_manager
+        - find_tool
+        - install_tool
+        - ask_user
+        - pod_search
+        - pod_fetch
+        - mint_pod
+        - ask_kg
+        - discover_skills
+        - read_skill
+    work_emi_team_manager:
+      allow:
+        - work_web_manager
+        - personal_admin_manager
+        - devices_manager
         - playwright_manager
         - bash_manager
         - http_manager

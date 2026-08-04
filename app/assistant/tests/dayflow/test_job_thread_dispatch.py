@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import app.assistant.dayflow_orchestrator.node_dispatch as nd
+import app.assistant.dayflow_orchestrator.work_session as ws
 from app.assistant.control_nodes.work_node_dispatch_node import WorkNodeDispatchNode
 from app.assistant.dayflow_orchestrator.dispatch_sweeper import sweep_stuck_work_nodes
 from app.assistant.tests.dayflow.conftest import FakeBlackboard
@@ -67,14 +68,14 @@ class TestJobThread:
         import work_objects.discharge as wr
         monkeypatch.setattr(wr, "discharge_node", slow_work_on)
 
-        nd._do_work(store, wid, "n1")
+        ws.open_session(store, wid, "n1", "run_work_node")
         # Returned immediately: node claimed, job registered and alive, worker still running.
         assert store.load(wid).nodes["n1"].status == "dispatched"
-        assert nd.job_alive(ref) is True
+        assert ws.session_alive(wid, "n1") is True
 
         gate.set()
         assert _wait_for(lambda: store.load(wid).nodes["n1"].status == "done")
-        assert _wait_for(lambda: not nd.job_alive(ref))
+        assert _wait_for(lambda: not ws.session_alive(wid, "n1"))
         assert signals == [ref]
 
     def test_job_crash_fails_the_node(self, monkeypatch):
@@ -87,7 +88,7 @@ class TestJobThread:
             raise RuntimeError("worker exploded")
         monkeypatch.setattr(wr, "discharge_node", boom)
 
-        nd._do_work(store, wid, "n1")
+        ws.open_session(store, wid, "n1", "run_work_node")
         assert _wait_for(lambda: store.load(wid).nodes["n1"].status == "failed")
 
 
@@ -107,26 +108,26 @@ class TestSupervision:
         wid, gid = _mk_wo(store)
         _sub(store, wid, gid, "n1", status="actionable")
         store.apply("set_status", {"work_id": wid, "node_id": "n1", "status": "dispatched"})
-        ref = f"{wid}::n1"
-        with nd._inflight_lock:
-            nd._inflight[ref] = {"thread": SimpleNamespace(is_alive=lambda: True),
-                                 "started_at": datetime.now(timezone.utc)}
+        sid = ws.session_id_for(wid, "n1")
+        with ws._sessions_lock:
+            ws._live_sessions[sid] = {"thread": SimpleNamespace(is_alive=lambda: True),
+                                      "started_at": datetime.now(timezone.utc)}
         try:
             sweep_stuck_work_nodes()
             assert store.load(wid).nodes["n1"].status == "dispatched"
         finally:
-            with nd._inflight_lock:
-                nd._inflight.pop(ref, None)
+            with ws._sessions_lock:
+                ws._live_sessions.pop(sid, None)
 
     def test_frozen_job_is_failed_and_zombie_write_is_fenced(self):
         store = _store()
         wid, gid = _mk_wo(store)
         _sub(store, wid, gid, "n1", status="actionable")
         store.apply("set_status", {"work_id": wid, "node_id": "n1", "status": "dispatched"})
-        ref = f"{wid}::n1"
+        sid = ws.session_id_for(wid, "n1")
         old = datetime.now(timezone.utc) - timedelta(minutes=30)
-        with nd._inflight_lock:
-            nd._inflight[ref] = {"thread": SimpleNamespace(is_alive=lambda: True), "started_at": old}
+        with ws._sessions_lock:
+            ws._live_sessions[sid] = {"thread": SimpleNamespace(is_alive=lambda: True), "started_at": old}
         # Backdate the whole subtree so "no activity" holds.
         conn = getattr(store, "_conn", None)
         conn.execute("UPDATE nodes SET updated_at=? WHERE work_id=?", (old.isoformat(), wid))
@@ -140,8 +141,8 @@ class TestSupervision:
             with pytest.raises(ValueError):
                 store.apply("set_status", {"work_id": wid, "node_id": "n1", "status": "done"})
         finally:
-            with nd._inflight_lock:
-                nd._inflight.pop(ref, None)
+            with ws._sessions_lock:
+                ws._live_sessions.pop(sid, None)
 
     def test_goal_node_is_skipped(self):
         store = _store()
@@ -165,10 +166,10 @@ class TestSupervision:
         store.apply("add_node", {"work_id": wid, "id": "n1a1", "type": "subtask",
                                  "parent_id": "n1a", "title": "worker sub-sub-step"})
         store.apply("set_status", {"work_id": wid, "node_id": "n1a1", "status": "dispatched"})
-        ref = f"{wid}::n1"
-        with nd._inflight_lock:
-            nd._inflight[ref] = {"thread": SimpleNamespace(is_alive=lambda: True),
-                                 "started_at": datetime.now(timezone.utc)}
+        sid = ws.session_id_for(wid, "n1")
+        with ws._sessions_lock:
+            ws._live_sessions[sid] = {"thread": SimpleNamespace(is_alive=lambda: True),
+                                      "started_at": datetime.now(timezone.utc)}
         try:
             sweep_stuck_work_nodes()
             wo = store.load(wid)
@@ -176,8 +177,8 @@ class TestSupervision:
             assert wo.nodes["n1a"].status == "dispatched"
             assert wo.nodes["n1a1"].status == "dispatched"
         finally:
-            with nd._inflight_lock:
-                nd._inflight.pop(ref, None)
+            with ws._sessions_lock:
+                ws._live_sessions.pop(sid, None)
 
     def test_subtree_nodes_with_dead_root_job_are_failed(self):
         # No registered job anywhere on the spine (restart/crash) -> the root AND its
@@ -205,16 +206,16 @@ class TestSupervision:
                                  "parent_id": "n1", "title": "worker sub-step"})
         store.apply("set_status", {"work_id": wid, "node_id": "n1a", "status": "dispatched"})
         store.apply("set_status", {"work_id": wid, "node_id": "n1", "status": "failed"})
-        ref = f"{wid}::n1"
-        with nd._inflight_lock:
-            nd._inflight[ref] = {"thread": SimpleNamespace(is_alive=lambda: True),
-                                 "started_at": datetime.now(timezone.utc)}
+        sid = ws.session_id_for(wid, "n1")
+        with ws._sessions_lock:
+            ws._live_sessions[sid] = {"thread": SimpleNamespace(is_alive=lambda: True),
+                                      "started_at": datetime.now(timezone.utc)}
         try:
             sweep_stuck_work_nodes()
             assert store.load(wid).nodes["n1a"].status == "failed"
         finally:
-            with nd._inflight_lock:
-                nd._inflight.pop(ref, None)
+            with ws._sessions_lock:
+                ws._live_sessions.pop(sid, None)
 
 
 class TestOneDispatchPerTick:

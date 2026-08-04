@@ -364,7 +364,7 @@ def sweep_stuck_work_nodes(now_utc: Optional[datetime] = None) -> int:
 
     Returns count failed.
     """
-    from app.assistant.dayflow_orchestrator.node_dispatch import job_alive, job_started_at
+    from app.assistant.dayflow_orchestrator.work_session import session_alive, session_started_at
     from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
 
     now = now_utc or datetime.now(timezone.utc)
@@ -386,12 +386,12 @@ def sweep_stuck_work_nodes(now_utc: Optional[datetime] = None) -> int:
                 continue
             ref = f"{wo.id}::{node.id}"
             try:
-                if job_alive(ref):
-                    if _job_idle_seconds(wo, node, job_started_at(ref), now) > _WORK_NODE_FROZEN_TIMEOUT_S:
+                if session_alive(wo.id, node.id):
+                    if _job_idle_seconds(wo, node, session_started_at(wo.id, node.id), now) > _WORK_NODE_FROZEN_TIMEOUT_S:
                         reason = f"frozen (no activity for {_WORK_NODE_FROZEN_TIMEOUT_S // 60}+ min)"
                     else:
                         continue
-                elif _covered_by_live_ancestor_job(wo, node, job_alive):
+                elif _covered_by_live_ancestor_job(wo, node, session_alive):
                     # A live worker's own thread grew and owns this subtree node; the
                     # dispatch root's frozen check supervises the whole run.
                     continue
@@ -412,7 +412,7 @@ def sweep_stuck_work_nodes(now_utc: Optional[datetime] = None) -> int:
     return failed
 
 
-def _covered_by_live_ancestor_job(wo, node, job_alive) -> bool:
+def _covered_by_live_ancestor_job(wo, node, alive_fn) -> bool:
     """True when a live registered job on a still-``dispatched`` ownership ancestor owns
     this node's execution. node_dispatch registers ONE job per dispatched root; the worker
     marks sub-steps ``dispatched`` inside that same thread, so subtree nodes carry no job
@@ -426,7 +426,7 @@ def _covered_by_live_ancestor_job(wo, node, job_alive) -> bool:
         ancestor = wo.nodes.get(pid)
         if ancestor is None:
             return False
-        if ancestor.status == "dispatched" and job_alive(f"{wo.id}::{pid}"):
+        if ancestor.status == "dispatched" and alive_fn(wo.id, pid):
             return True
         pid = ancestor.parent_id
     return False
