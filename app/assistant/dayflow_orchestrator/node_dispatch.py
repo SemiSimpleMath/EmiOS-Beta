@@ -1,6 +1,6 @@
 """Route + dispatch ONE work-object node — the shared core used by BOTH the pipeline's
 work_node_dispatch_node (per tick, delegate_to already decided by the switchboard) AND the scheduler's
-precise time-wake fire (route_and_dispatch, which asks the switchboard itself).
+precise time-wake fire (a targeted room invocation routed by tick_router_node).
 
 A work node is anything DISPATCHABLE; the switchboard decides where by READING the node, not by a type:
   - create_dayflow_ticket -> surface a ticket to the user and await their response (which becomes the result).
@@ -34,30 +34,6 @@ def dispatch_node(store, work_id: str, node_id: str, delegate_to: str) -> None:
     both branches — ticket (surface + park) and work (room-scoped worker thread)."""
     from app.assistant.dayflow_orchestrator.work_session import open_session
     open_session(store, work_id, node_id, delegate_to)
-
-
-def route_and_dispatch(store, work_id: str, node_id: str, scope=None) -> None:
-    """A ready node needs routing OUTSIDE the planning tick (a precise time-wake fired). Ask the
-    switchboard — the SAME router the pipeline uses — by reading the node's content, then dispatch.
-    (Trigger-unification step replaces this with a targeted room invocation.)"""
-    node = store.load(work_id).nodes.get(node_id)
-    if node is None:
-        return
-    task = (f"{node.title}. {node.content}" if node.content else (node.title or "")).strip()
-    if scope is None:
-        from app.assistant.scope.loader import load_scope_for_source
-        scope = load_scope_for_source(kind="pipeline", source_id="dayflow", actor_id="node_dispatch")
-    try:
-        agent = DI.agent_factory.create_agent("dayflow_orchestrator::switchboard")
-        result = agent.action_handler(Message(task=task, scope_context=scope))
-        data = getattr(result, "data", {}) or {}
-        delegate_to = str(data.get("delegate_to", "") or "").strip()
-    except Exception as e:
-        logger.error("[node_dispatch] switchboard routing failed for %s::%s: %s — defaulting to work",
-                     work_id, node_id, e)
-        delegate_to = ""
-    logger.info("[node_dispatch] routed %s::%s -> %s", work_id, node_id, delegate_to or "run_work_node")
-    dispatch_node(store, work_id, node_id, delegate_to)
 
 
 def signal_work_progress(ref: str) -> None:

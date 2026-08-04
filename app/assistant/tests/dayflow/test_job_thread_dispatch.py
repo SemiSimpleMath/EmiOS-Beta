@@ -257,3 +257,42 @@ class TestOneDispatchPerTick:
         WorkNodeDispatchNode(name="work_node_dispatch_node", blackboard=bb,
                              agent_registry={}, tool_registry={}).action_handler(message=None)
         assert signals == []
+
+
+class TestTargetedWakeRouting:
+    """The trigger-unification path: a scheduler time-wake becomes a targeted room
+    invocation (data.triggered_work_node) that tick_router stages straight to the
+    switchboard — same flow, same room, no bespoke wake path."""
+
+    def _router(self, bb):
+        from app.assistant.control_nodes.tick_router_node import TickRouterNode
+        return TickRouterNode(name="tick_router_node", blackboard=bb,
+                              agent_registry={}, tool_registry={})
+
+    def test_ready_node_routes_to_switchboard(self):
+        store = _store()
+        wid, gid = _mk_wo(store)
+        _sub(store, wid, gid, "n1", status="actionable")
+        bb = FakeBlackboard({})
+        msg = SimpleNamespace(data={"triggered_work_node": f"{wid}::n1", "wake_reason": "t"})
+        self._router(bb).action_handler(msg)
+        assert bb.get_state_value("next_agent") == "dayflow_orchestrator::switchboard"
+        assert bb.get_state_value("acted_on_item_ids") == [f"{wid}::n1"]
+        assert bb.get_state_value("actionable_items") == [{"item_id": f"{wid}::n1"}]
+        assert "step n1" in bb.get_state_value("task")
+
+    def test_stale_wake_exits_cleanly(self):
+        store = _store()
+        wid, gid = _mk_wo(store)
+        _sub(store, wid, gid, "n1", status="actionable")
+        store.apply("set_status", {"work_id": wid, "node_id": "n1", "status": "dispatched"})
+        bb = FakeBlackboard({})
+        msg = SimpleNamespace(data={"triggered_work_node": f"{wid}::n1"})
+        self._router(bb).action_handler(msg)
+        assert bb.get_state_value("next_agent") == "post_room_finalize_node"
+
+    def test_missing_work_object_exits_cleanly(self):
+        bb = FakeBlackboard({})
+        msg = SimpleNamespace(data={"triggered_work_node": "work_gone::n1"})
+        self._router(bb).action_handler(msg)
+        assert bb.get_state_value("next_agent") == "post_room_finalize_node"

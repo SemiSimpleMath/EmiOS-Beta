@@ -492,18 +492,20 @@ class DayflowScheduler:
             logger.debug("[DayflowScheduler] arm work-wake exception details", exc_info=True)
 
     def _fire_work_node(self, work_id: str, node_id: str) -> None:
-        """A work node's deterministic time-wake fired: route THAT node through the switchboard NOW — off the
-        planning tick — exactly as the pipeline would (the switchboard reads the node and sends it to the
-        notify tool or the worker). No re-judgment: the wake decision was already made when the state_mover
-        set the timer. Gated by is_ready (status proposed/waiting + wake_at reached + deps satisfied), so a
-        re-planned, already-running, completed, or dep-blocked node simply no-ops. Runs in the app context;
-        never propagates (a leaf APScheduler job — a raise would just be swallowed)."""
+        """A work node's deterministic time-wake fired: run a TARGETED DISPATCH PASS through the
+        orchestrator room — the same room, scope, switchboard, and dispatch flow as the planning
+        tick; the trigger only changes what the message says (data.triggered_work_node). No
+        planning re-judgment: the wake decision was made when the state_mover set the timer.
+        Gated by is_ready here (cheap, avoids a manager run for a stale wake) and re-checked by
+        the router inside the invocation. Runs in the app context; never propagates (a leaf
+        APScheduler job — a raise would just be swallowed)."""
         if not setup_complete():
             return
         try:
             with self._app.app_context():
+                import uuid as _uuid
                 from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
-                from app.assistant.dayflow_orchestrator.node_dispatch import route_and_dispatch
+                from app.assistant.scope.loader import load_scope_for_source
                 from work_objects.model import utcnow
                 store = get_dayflow_work_store()
                 wo = store.load(work_id)
@@ -515,9 +517,26 @@ class DayflowScheduler:
                         "[DayflowScheduler] work-wake %s::%s fired but node not ready (status=%s) — "
                         "skipping.", work_id, node_id, node.status)
                     return
-                logger.info("[DayflowScheduler] work-wake firing node %s::%s -> switchboard.",
-                            work_id, node_id)
-                route_and_dispatch(store, work_id, node_id)
+                ref = f"{work_id}::{node_id}"
+                request_id = str(_uuid.uuid4())
+                scope = load_scope_for_source(
+                    kind="room", source_id="dayflow_orchestrator", actor_id="dayflow_node_wake",
+                    identity_overrides={
+                        "scope_id": f"dayflow_wake::{request_id}",
+                        "owner_id": "system",
+                        "surface": "internal",
+                        "room_id": "dayflow_orchestrator",
+                    },
+                )
+                msg = Message(
+                    event_topic="dayflow_tick", sender="system",
+                    data={"trigger": "work_node_wake", "wake_reason": f"work_node_wake:{ref}",
+                          "triggered_work_node": ref},
+                    request_id=request_id, scope_context=scope,
+                )
+                logger.info("[DayflowScheduler] work-wake %s -> targeted dispatch pass.", ref)
+                manager = DI.multi_agent_manager_factory.create_manager("dayflow_orchestrator_manager")
+                DI.manager_invoker.invoke(manager, msg)
         except Exception as e:
             logger.error("[DayflowScheduler] _fire_work_node(%s::%s) failed: %s", work_id, node_id, e)
             logger.debug("[DayflowScheduler] fire work-node exception details", exc_info=True)
