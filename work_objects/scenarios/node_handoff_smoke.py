@@ -30,7 +30,8 @@ import app.assistant.tests.test_setup  # noqa: F401 - bootstrap DI
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.logging_config import add_file_sink
 from app.assistant.utils.pydantic_classes import ToolResult
-from work_objects import discharge, scope as work_scope
+from work_objects import discharge
+from work_objects.scenarios._scenario_scope import scenario_scope
 from work_objects.store import WorkStore
 
 CAPTURED = []
@@ -73,7 +74,7 @@ def main():
     gid = wo.goal_node_id
 
     print("=== run_node(work_emi_team_manager) on the goal ===\n", flush=True)
-    discharge.discharge_node(store, wo.id, gid, manager_name="work_emi_team_manager", scope_context=work_scope.orchestrator_scope(work_id=wo.id))
+    discharge.discharge_node(store, wo.id, gid, manager_name="work_emi_team_manager", scope_context=scenario_scope(work_id=wo.id))
 
     final = store.load(wo.id)
     g = final.nodes[gid]

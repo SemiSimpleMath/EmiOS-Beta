@@ -13,6 +13,19 @@ logger = get_logger(__name__)
 # 1) records the message having plan_message subclass so we can tell apart messages before and after a plan
 # 2) resets critique variables if any exist
 # 3) Specifically references action variables to set next_agent or tool_call
+def _active_work_linkage() -> dict:
+    """{work_id, node_id} of the active work context, or {} outside one. Rides pod
+    metadata so a worker-minted pod carries its effort linkage as data (pods are
+    room-scoped since the work-session rewrite; the effort join is metadata, not scope).
+    Lazy + guarded import — app must not hard-depend on work_objects."""
+    try:
+        from work_objects.runtime import get_work_context
+        ctx = get_work_context()
+        return {"work_id": ctx.work_id, "node_id": ctx.node_id}
+    except Exception:
+        return {}
+
+
 class Planner(Agent):
     HISTORY_LIMIT = None
 
@@ -262,7 +275,8 @@ class Planner(Agent):
                 for_agents=[],
                 scope_id=room_scope,
                 created_by=self.name,
-                metadata={"unit": unit, "run": run, "source_urls": urls},
+                metadata={"unit": unit, "run": run, "source_urls": urls,
+                          **_active_work_linkage()},
             )
             store.put(pod)                                  # upsert by pod_id → de-dup per unit
             by_unit[unit] = {"unit": unit, "one_liner": pod.one_liner, "pod_id": pod_id}

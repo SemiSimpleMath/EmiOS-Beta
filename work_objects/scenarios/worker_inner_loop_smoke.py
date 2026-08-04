@@ -22,7 +22,7 @@ import app.assistant.tests.test_setup  # noqa: F401 - bootstrap DI
 
 from work_objects.store import WorkStore
 from work_objects.discharge import discharge_node
-from work_objects.scope import orchestrator_scope
+from work_objects.scenarios._scenario_scope import scenario_scope
 
 REQUEST = ("Write three distinct one-line taglines for a new coffee shop: one playful, one elegant, "
            "and one minimalist. Make each tagline its own checklist item and produce each as an "

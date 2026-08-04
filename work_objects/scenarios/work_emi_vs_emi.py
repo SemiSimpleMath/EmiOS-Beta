@@ -24,9 +24,10 @@ import app.assistant.tests.test_setup  # noqa: F401
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.logging_config import add_file_sink
 from app.assistant.utils.pydantic_classes import Message
-from work_objects import discharge, scope as work_scope
+from work_objects import discharge
+from work_objects.scenarios._scenario_scope import scenario_scope
 from work_objects.store import WorkStore
-from work_objects.scope import orchestrator_scope
+from work_objects.scenarios._scenario_scope import scenario_scope
 
 TASK = "Find out the age of Leonardo DiCaprio's current girlfriend."
 
@@ -65,7 +66,7 @@ def main():
     gid = wo.goal_node_id
     t0 = time.time()
     try:
-        discharge.discharge_node(store, wo.id, gid, manager_name="work_emi_team_manager", scope_context=work_scope.orchestrator_scope(work_id=wo.id))
+        discharge.discharge_node(store, wo.id, gid, manager_name="work_emi_team_manager", scope_context=scenario_scope(work_id=wo.id))
     except Exception as e:
         print(f"  ERROR: {type(e).__name__}: {e}", flush=True)
         traceback.print_exc()
@@ -94,7 +95,7 @@ def main():
     CALLS.clear()
     mgr = DI.multi_agent_manager_factory.create_manager("emi_team_manager")
     msg = Message(data_type="agent_activation", sender="User", receiver="Delegator",
-                  content=TASK, task=TASK, scope_context=orchestrator_scope(owner_id="jukka"))
+                  content=TASK, task=TASK, scope_context=scenario_scope(owner_id="jukka"))
     t0 = time.time()
     result = DI.manager_invoker.invoke(mgr, msg)
     dt_emi = time.time() - t0

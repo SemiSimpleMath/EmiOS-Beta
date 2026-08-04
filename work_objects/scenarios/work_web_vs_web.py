@@ -21,9 +21,10 @@ import app.assistant.tests.test_setup  # noqa: F401
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.logging_config import add_file_sink
 from app.assistant.utils.pydantic_classes import Message
-from work_objects import discharge, scope as work_scope
+from work_objects import discharge
+from work_objects.scenarios._scenario_scope import scenario_scope
 from work_objects.store import WorkStore
-from work_objects.scope import orchestrator_scope
+from work_objects.scenarios._scenario_scope import scenario_scope
 
 TASK = "Find out the age of Leonardo DiCaprio's current girlfriend."
 
@@ -64,7 +65,7 @@ def main():
                                             "satisfied_when_kind": "tool_success"}, actor="test")
     gid = wo.goal_node_id
     t0 = time.time()
-    discharge.discharge_node(store, wo.id, gid, manager_name="work_web_manager", scope_context=work_scope.orchestrator_scope(work_id=wo.id))
+    discharge.discharge_node(store, wo.id, gid, manager_name="work_web_manager", scope_context=scenario_scope(work_id=wo.id))
     dt_work = time.time() - t0
     work_cycles = CYCLES.get("work_web_manager::planner", 0)
     f = store.load(wo.id)
@@ -82,7 +83,7 @@ def main():
     CYCLES.clear()
     mgr = DI.multi_agent_manager_factory.create_manager("web_manager")
     msg = Message(data_type="agent_activation", sender="User", receiver="Delegator",
-                  content=TASK, task=TASK, scope_context=orchestrator_scope(owner_id="jukka"))
+                  content=TASK, task=TASK, scope_context=scenario_scope(owner_id="jukka"))
     t0 = time.time()
     result = DI.manager_invoker.invoke(mgr, msg)
     dt_web = time.time() - t0

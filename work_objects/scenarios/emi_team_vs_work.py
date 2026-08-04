@@ -25,9 +25,10 @@ import app.assistant.tests.test_setup  # noqa: F401 - bootstrap DI
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.logging_config import add_file_sink
 from app.assistant.utils.pydantic_classes import Message, ToolResult
-from work_objects import discharge, scope as work_scope
+from work_objects import discharge
+from work_objects.scenarios._scenario_scope import scenario_scope
 from work_objects.store import WorkStore
-from work_objects.scope import orchestrator_scope
+from work_objects.scenarios._scenario_scope import scenario_scope
 
 CAPTURED: list = []          # every stubbed write, tagged by which manager attempted it
 _CURRENT = {"by": "?"}       # which manager is running right now
@@ -128,7 +129,7 @@ def _run_emi(task: str):
     _CURRENT["by"] = "emi"
     mgr = DI.multi_agent_manager_factory.create_manager("emi_team_manager")
     msg = Message(data_type="agent_activation", sender="User", receiver="Delegator",
-                  content=task, task=task, scope_context=orchestrator_scope(owner_id="jukka"))
+                  content=task, task=task, scope_context=scenario_scope(owner_id="jukka"))
     t0 = time.time()
     result = DI.manager_invoker.invoke(mgr, msg)
     return _answer_of(result), time.time() - t0
@@ -141,7 +142,7 @@ def _run_work(task: str):
                                             "satisfied_when_kind": "tool_success"}, actor="test")
     gid = wo.goal_node_id
     t0 = time.time()
-    discharge.discharge_node(store, wo.id, gid, manager_name="work_emi_team_manager", scope_context=work_scope.orchestrator_scope(work_id=wo.id))
+    discharge.discharge_node(store, wo.id, gid, manager_name="work_emi_team_manager", scope_context=scenario_scope(work_id=wo.id))
     dt = time.time() - t0
     f = store.load(wo.id)
     g = f.nodes[gid]

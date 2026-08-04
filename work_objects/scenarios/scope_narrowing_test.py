@@ -22,7 +22,7 @@ from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.pydantic_classes import Message
 
-from work_objects.scope import orchestrator_scope
+from work_objects.scenarios._scenario_scope import scenario_scope
 from work_objects.work_tools import WORK_TOOL_NAMES
 
 WEB_EXPECTED = {"ask_user", "find_tool", "install_tool", "search_web", "scrape_url",
@@ -30,7 +30,7 @@ WEB_EXPECTED = {"ask_user", "find_tool", "install_tool", "search_web", "scrape_u
 
 
 def narrowed_tools(adapter, manager_name, manager_config):
-    msg = Message(scope_context=orchestrator_scope(), task="do work", information="")
+    msg = Message(scope_context=scenario_scope(), task="do work", information="")
     scoped = adapter.apply(manager_name=manager_name, manager_config=manager_config, message=msg)
     return set(scoped.scope_context.tools.allowed_tools or [])
 
@@ -60,7 +60,7 @@ def main() -> None:
        work_tools == set(WORK_TOOL_NAMES) | {"web_manager"})
 
     # the scope is enforced (scope_adapter set the runtime flag — no hand-hacking)
-    msg = Message(scope_context=orchestrator_scope(), task="x")
+    msg = Message(scope_context=scenario_scope(), task="x")
     scoped = adapter.apply(manager_name="web_manager", manager_config=web_cfg, message=msg)
     ck("scope_adapter set scope_contract_enforced=True on the runtime data",
        scoped.data.get("scope_contract_enforced") is True)
