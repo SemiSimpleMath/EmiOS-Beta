@@ -41,8 +41,7 @@ and a sooner already-scheduled run is never clobbered by a later one. `_execute_
 Its `finally` block **always** re-arms the next wake: `_schedule_next_from_items` (earliest
 `reactivate_at_utc` among waiting/watching items, clamped 120s–1800s; items overdue > 24h are ignored as
 broken) and **`_arm_work_node_wakes`** (a *separate* one-shot APScheduler job per time-gated work-object
-node, cap 200). When a node-wake fires, `_fire_work_node` runs **that node** via `work_on` **independent
-of the planning tick** — but only if `is_ready` still holds.
+node, cap 200). When a node-wake fires, `_fire_work_node` runs a **targeted room invocation** (`data.triggered_work_node` -> tick_router -> switchboard -> the same WorkSession dispatch as the planning pass) — but only if `is_ready` still holds.
 
 ### The tick body — `dayflow_orchestrator/dayflow_tick.py :: dayflow_orchestrator_cadence_tick`
 Ordered: (1) **block check** — if `blocked_until_utc` is in the future (master-room chat is active),
@@ -64,14 +63,7 @@ Assigns `short_id`s and persists via `write_dayflow_items_batch`.
 hard 2 h) and revives the source item to `actionable` only if still `dispatched`.
 `sweep_orphaned_dispatched_tasks` closes tasks stuck `dispatched` > 2 h with no live dispatch row (→
 `closed`, so the planner re-mints fresh). `sweep_zombie_waiting_items` closes `waiting` items overdue > 36 h
-(aged out of the 24 h freshness window, invisible to the cleaner). `sweep_stuck_work_nodes` supervises
-in-flight work-node jobs: ORPHANED (`dispatched` with no live job thread on the node **or any `parent_id`
-ancestor still `dispatched`** — a worker registers ONE job at its dispatch root and grows sub-steps inside
-that same thread, so subtree liveness is inherited up the ownership spine; fixed 2026-08-04 after false
-orphans spawned duplicate worker teams) and FROZEN (job alive but no subtree/job activity for 20+ min;
-checked only at the dispatch root, whose idle walk spans the subtree) both → `failed` for work_repair.
-A failed root's zombie thread does not shield its subtree — coverage lapses with the root's `dispatched`
-status. `list_active_dispatches` (read-only) is used by `view_materializer_node` to hide actionable items
+(aged out of the 24 h freshness window, invisible to the cleaner). `sweep_stuck_work_nodes` supervises in-flight work-node sessions: ownership is a GRAPH fact (`payload.session_id`, stamped at claim and inherited by every node grown under the session — work-session rewrite 2026-08-04, replacing the ancestor-liveness walk). ORPHANED = `dispatched` with no live owning session (or the session's root no longer `dispatched` — a frozen-failed root's zombie thread shields nothing); FROZEN = the session root alive but no subtree/session activity for 20+ min. Both -> `failed` for work_repair. `list_active_dispatches` (read-only) is used by `view_materializer_node` to hide actionable items
 already covered by an in-flight dispatch.
 
 ---
@@ -374,11 +366,7 @@ path to `closed`, so it is what completes a work object — `done` alone never d
 `next_agent → post_room_finalize_node → final_answer_node → manager_exit_node`. (On the work-object lane
 there are no item-lane dispatch records for finalize to reconcile.)
 
-**P7 — Precise work-node wake (out-of-band).** Independent of the planning tick, the scheduler's
-`_arm_work_node_wakes` arms a per-node APScheduler job for each time-gated node (`wake_kind=time`, status
-`proposed/waiting`, `wake_at` set). When it fires, `_fire_work_node` runs **that single node** via
-`work_on` — but only if `is_ready` still holds. This is how a nightly setpoint or a precise reminder fires
-on time without waiting for the next cadence tick.
+**P7 — Precise work-node wake (targeted dispatch pass).** The scheduler's `_arm_work_node_wakes` arms a per-node APScheduler job for each time-gated node (`wake_kind=time`, status `proposed/waiting`, `wake_at` set). When it fires, `_fire_work_node` invokes the ROOM with `data.triggered_work_node` — `tick_router_node` stages the due node straight to the switchboard, which flows into the SAME `work_node_dispatch -> WorkSession -> finalize` chain as the planning pass. One path; the trigger only changes what the message says. A stale wake exits cleanly (is_ready gated in the scheduler AND re-checked by the router).
 
 **P8 — Fast-tick path.** When the scheduler woke for one specific due *item* timer (`fast_tick` +
 `triggered_item_id`), `tick_router_node` routes `→ fast_tick_promoter_node` (atomically promotes that one

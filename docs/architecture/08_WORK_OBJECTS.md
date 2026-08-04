@@ -23,11 +23,11 @@ orchestrator + worker managers import `work_objects.*`).
 |---|---|
 | `model.py` | `WorkObject` / `WorkNode` / `Edge` Pydantic models, derived queries, invariant `validate()`, `SCHEMA_SQL` |
 | `store.py` | `WorkStore` — the validated event-sourced writer (`apply()`), transition machine, closure cascade, boot repair |
-| `work_runtime.py` | `run_node` / `work_on` — drive one node through a worker manager; result-as-evidence convention |
+| `discharge.py` | `discharge_node` / `drive_work` — drive one node through a worker manager; scope REQUIRED (caller-derived), session stamp at claim, result-as-evidence convention |
 | `runtime.py` | The work **contextvar** (`set_work_context` / `get_work_context`) binding graph tools to the active node |
 | `work_tools.py` | The `work_*` graph tools registered into the live tool registry + `register_manager_as_tool` |
 | `tools.py` | `WorkGraphTools` — the underlying op wrappers the tools call |
-| `scope.py` | `orchestrator_scope()` — the ceiling scope + stable per-effort identity |
+| `scenarios/_scenario_scope.py` | DEV-ONLY harness scope — production authority always derives from the caller (room / task run) |
 | `ui/blueprint.py` | The `/work` editor (list, graph view, event log, manual node edits) |
 | `README.md`, `DESIGN.md`, `EMI_TEAM_VS_WORK.md` | Design docs — node taxonomy, mission tier, worker split |
 
@@ -137,7 +137,7 @@ verification families have their own lifecycles (`assumed/verified/stale`,
   `payload.dispatch_epoch`. Completion paths pass `expected_dispatch_epoch`; a zombie
   thread whose node was sweeper-failed and repair-re-dispatched holds a stale epoch and
   its late write is **rejected** — it cannot overwrite the successor incarnation's
-  result (`work_runtime` logs "result DISCARDED").
+  result (`discharge` logs "result DISCARDED").
 - **Global node ids (slug-theft guard).** `nodes.id` is a global primary key;
   `add_node` refuses a caller-supplied id that already lives in *another* work object
   (INSERT OR REPLACE would silently re-home the row and strand the old graph's
@@ -154,7 +154,7 @@ consumers act on them:
 
 - **`time`** — the DayflowScheduler's `_arm_work_node_wakes` arms one APScheduler
   one-shot per time-gated node (cap 200); on fire, `_fire_work_node` runs that single
-  node through `work_on` iff `is_ready` still holds — precision wakes independent of the
+  node as a TARGETED ROOM INVOCATION (`data.triggered_work_node` -> switchboard -> the same dispatch flow) iff `is_ready` still holds — precision wakes without a bespoke path (work-session rewrite, 2026-08-04), off the
   planning tick (path P7 in 05a).
 - **`event` / `signal`** — the state_mover matches incoming intake against parked nodes
   (`work_wait_intake`) and clears the wait with the arrived evidence.
@@ -165,30 +165,37 @@ consumers act on them:
 
 ## The runtime — driving a node
 
-`work_runtime.run_node(store, work_id, node_id, manager_name="work_emi_team_manager")`:
+`discharge.discharge_node(store, work_id, node_id, *, scope_context, manager_name,
+session_id=None)` — **scope_context is required and always caller-derived** (the dayflow
+WorkSession passes the orchestrator room's scope, the task runner its run scope,
+scenarios their declared scope; a missing scope raises):
 
-1. **Claim** — flip `proposed/waiting/actionable → dispatched`, snapshot once, capture
-   `my_epoch`.
-2. **Hand off** — set the work **contextvar** (`runtime.set_work_context`) so the
-   `work_*` tools know which node/store they act on, then invoke the worker manager
-   through the standard `manager_invoker`. The manager's `node_input` config decides the
-   handoff shape: `"task"` (node content as the task + upstream `depends_on` results
-   rendered as information — web-manager style) or `"render"` (the manager's render node
-   projects the graph; the message still carries the node's real goal so a degraded
-   projection can't make the worker invent a task — the 06-23 hallucination fix).
-3. **Harvest** — the manager's final answer is recorded as an **evidence child** of the
-   node (the node's `content` is its directive — its identity — and is never
-   overwritten); a surfaced research pod is attached via `attach_pod`. The node closes
-   `done` (clean exit) or `failed` (abort/error) with the epoch fence.
-4. The manager's `ToolResult` is returned **verbatim** — calling a node manager is no
-   different from calling any manager; status is a graph property.
+1. **Claim** — flip `proposed/waiting/actionable → dispatched`, stamp
+   `payload.session_id` (ownership is a graph fact; children grown under the node
+   inherit the stamp at creation, store-level), snapshot once, capture `my_epoch`.
+2. **Hand off** — set the work **contextvar** so the `work_*` tools know which
+   node/store they act on, then invoke the worker manager through the standard
+   `manager_invoker` (which auto-registers the instance — @-mention reachability rides
+   the standard machinery). The manager's `node_input` config decides the handoff shape:
+   `"task"` (node content + upstream `depends_on` results) or `"render"` (graph
+   projection; the message still carries the node's real goal).
+3. **Harvest** — the manager's final answer is recorded as an **evidence child** (the
+   node's `content` is its directive and is never overwritten); a surfaced research pod
+   is attached; the node closes `done`/`failed` with the epoch fence.
 
-`work_on(store, work_id, node_id=None)` is the standalone arm: with a node id it runs
-that node; with none it drives ready top-level nodes (parent == goal) until the goal
-satisfies or only future-wake nodes remain (returns `"parked"` — it never fast-forwards
-time). Job-thread dispatch + tick-side supervision (orphaned/frozen, with liveness
-inherited up the `parent_id` spine — fixed 2026-08-04) are the dayflow layer:
-`node_dispatch.py` and `dispatch_sweeper.sweep_stuck_work_nodes`, documented in 05a §1.
+`drive_work(store, work_id, *, scope_context, node_id=None)` is the standalone arm
+(scenarios, run-to-goal): with a node id it runs that node; with none it drives ready
+top-level nodes until the goal satisfies or only future-wake nodes remain (`"parked"`).
+
+**Dayflow dispatch is the WorkSession** (`dayflow_orchestrator/work_session.py`): a copy
+of the orchestrator room, open until its call returns. `open_session` hosts both
+branches — ticket (surface + park, unchanged) and work: claim with session stamp, then
+`discharge_node` on the session thread under the ROOM'S OWN scope
+(`room_session_scope` — the standard loader over `rooms/dayflow_orchestrator/scope.yaml`:
+pods `[all]`, authority 95, write_kg). Supervision (`sweep_stuck_work_nodes`) reads the
+graph: a `dispatched` node is orphaned when its stamped session isn't live (or its
+session's root is no longer dispatched — a frozen-failed root's zombie thread shields
+nothing); frozen = the session root's subtree-wide idle walk.
 
 ### The worker's graph vocabulary
 
@@ -215,15 +222,15 @@ manager-as-tool wrappers at runtime.
 
 ### Scope — one stable identity per effort
 
-`scope.orchestrator_scope(work_id=…)` is the ceiling scope for a work effort (authority
-99, `allowed_tools: [all]`, and a `per_manager` rule narrowing the coordinator
-`work_emi_team_manager` to its ~16-manager delegate roster — exactly like master_room
-narrows emi_team). **`scope_id` and `room_id` are both `scope::work_objects::<work_id>`,
-shared by every node of the effort** — load-bearing for pods: a pod is minted with the
-minter's room_id, and a reader's `allowed_scopes: ["self"]` expands to its room_id, so
-an effort's pods are mutually visible across its nodes while distinct efforts stay
-isolated. The task runner threads its own run scope instead so an action node executes
-at the run's authority, not the substrate's 99 (finding R8).
+Authority is never minted below the room. Workers run under the **dayflow room's
+scope** loaded through the standard room loader; the task runner threads its run scope
+(R8 semantics); the node-handoff (`manager_interface`) passes the calling message's
+already-narrowed scope. Worker-minted pods are **room-scoped** (mutually visible across
+an effort's nodes via the room; master_room sees them through the system-scope
+equivalence) and carry `{work_id, node_id}` in pod **metadata** — the effort join is
+data, not scope. The room's `scope.yaml` also carries the `work_emi_team_manager`
+narrower-cost roster (~16 tools). Scenario harnesses, the only standalone consumers,
+declare a DEV-ONLY `scenario_scope()` under `scenarios/`.
 
 ## Who writes the graph (the tick touchpoints)
 
@@ -232,7 +239,7 @@ at the run's authority, not the substrate's 99 (finding R8).
 | **evaluator** (`strategic_planner_wo` via `work_persist`) | `create_work_object`, objective edits, `set_work_status` | converts intake to WOs; authoritative complete/abandon; forwards `constraints.concern_refs` from subconscious-born work |
 | **architect** (`work_architect_apply`) | `add_node` (born `proposed`), `add_edge` (`depends_on`), `defer_node` (wake gates), abandon deltas | decomposes new/replanned goals, ≤3/tick |
 | **state_mover** | `set_status` (`proposed/waiting → actionable`), wake clears | promotes ready nodes; LLM may only HOLD |
-| **dispatch** (`work_node_dispatch_node` / `run_node`) | `set_status` (`→ dispatched`, `→ done/failed`), `defer_node` (asks), `attach_pod`, evidence children | one node per tick + the worker's own subtree |
+| **dispatch** (`work_node_dispatch_node` -> `work_session.open_session` / `discharge_node`) | `set_status` (`→ dispatched`, `→ done/failed`), `defer_node` (asks), `attach_pod`, evidence children | one node per tick + the worker's own subtree |
 | **worker** (via `work_*` tools + reconcile hook) | subtasks, evidence, artifacts, questions, defers | inside the job thread |
 | **finalizer** (`work_finalizer_node`) | `set_status` (`done → closed`), `set_work_status` (resolve) | SOLE producer of `closed`; propagates concern outcomes |
 | **repair** (`work_repair_apply`) | `failed → proposed` (retry/escalate + `defer_node`), `set_work_status abandoned` | adjudicates failed nodes; user decline is authoritative |
@@ -269,4 +276,4 @@ every other writer.
 - [05a_DAYFLOW_ORCHESTRATOR_REFERENCE.md](05a_DAYFLOW_ORCHESTRATOR_REFERENCE.md) — per-agent detail, paths P3–P8, supervision.
 - `work_objects/README.md` / `DESIGN.md` — node taxonomy rationale, mission tier, worker-split design.
 - [14_PODS.md](14_PODS.md) — the pod scope wall the shared effort identity exists for.
-- [15_EMI_TEAM_AND_SCOPE.md](15_EMI_TEAM_AND_SCOPE.md) — the scope model `orchestrator_scope` participates in.
+- [15_EMI_TEAM_AND_SCOPE.MD](15_EMI_TEAM_AND_SCOPE.md) — the scope model the room-derived session scope participates in.
