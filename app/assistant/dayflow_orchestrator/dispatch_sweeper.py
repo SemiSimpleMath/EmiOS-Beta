@@ -348,12 +348,12 @@ def sweep_stuck_work_nodes(now_utc: Optional[datetime] = None) -> int:
     Two dead states, both -> mark the node ``failed`` so work_repair adjudicates it
     (retry / escalate / abandon) on this same tick:
 
-    - ORPHANED: the node is ``dispatched`` but no live job thread owns it — neither
-      directly nor via an ownership ancestor (a worker grows its subtree and marks
-      sub-steps ``dispatched`` inside the SAME thread; only the dispatch root has a
-      registered job, so subtree nodes inherit liveness up the ``parent_id`` spine).
-      A process restart or a thread crash strands the whole spine. Threads die with
-      the process; the graph doesn't.
+    - ORPHANED: the node is ``dispatched`` with no live owning session. Ownership is
+      a GRAPH fact: the session stamps ``payload.session_id`` at claim and every node
+      grown under it inherits the stamp at creation, so the liveness join is one
+      lookup — no ancestor walk. A restart or crash strands the whole subtree; a
+      frozen-failed root lapses its subtree's coverage. Threads die with the
+      process; the graph doesn't.
     - FROZEN: a job thread exists but neither the node's subtree nor the job has shown
       activity for ``_WORK_NODE_FROZEN_TIMEOUT_S``. Checked only on nodes that own a
       registered job (the dispatch root) — its idle walk already spans the subtree.
@@ -364,7 +364,8 @@ def sweep_stuck_work_nodes(now_utc: Optional[datetime] = None) -> int:
 
     Returns count failed.
     """
-    from app.assistant.dayflow_orchestrator.work_session import session_alive, session_started_at
+    from app.assistant.dayflow_orchestrator.work_session import (
+        session_alive_by_id, session_id_for, session_started_at_by_id)
     from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
 
     now = now_utc or datetime.now(timezone.utc)
@@ -386,17 +387,24 @@ def sweep_stuck_work_nodes(now_utc: Optional[datetime] = None) -> int:
                 continue
             ref = f"{wo.id}::{node.id}"
             try:
-                if session_alive(wo.id, node.id):
-                    if _job_idle_seconds(wo, node, session_started_at(wo.id, node.id), now) > _WORK_NODE_FROZEN_TIMEOUT_S:
+                own_sid = session_id_for(wo.id, node.id)
+                owning_sid = str(node.payload.get("session_id") or "")
+                if session_alive_by_id(own_sid):
+                    # The dispatch root of a live session — frozen supervision happens here
+                    # (its idle walk spans the whole subtree the session grew).
+                    if _job_idle_seconds(wo, node, session_started_at_by_id(own_sid), now) > _WORK_NODE_FROZEN_TIMEOUT_S:
                         reason = f"frozen (no activity for {_WORK_NODE_FROZEN_TIMEOUT_S // 60}+ min)"
                     else:
                         continue
-                elif _covered_by_live_ancestor_job(wo, node, session_alive):
-                    # A live worker's own thread grew and owns this subtree node; the
-                    # dispatch root's frozen check supervises the whole run.
+                elif (owning_sid and session_alive_by_id(owning_sid)
+                      and _session_root_dispatched(wo, owning_sid)):
+                    # Grown under a live session (the stamp inherited at creation) whose root
+                    # is still in flight — covered. Coverage lapses with the root's
+                    # `dispatched` status: a frozen-failed root's zombie thread must not
+                    # shield its abandoned subtree.
                     continue
                 else:
-                    reason = "orphaned (no live job thread on the node or its ownership ancestors)"
+                    reason = "orphaned (no live owning session — restart, crash, or lapsed coverage)"
                 store.apply("set_status", {"work_id": wo.id, "node_id": node.id, "status": "failed"},
                             actor="dispatch_sweeper")
                 failed += 1
@@ -412,24 +420,14 @@ def sweep_stuck_work_nodes(now_utc: Optional[datetime] = None) -> int:
     return failed
 
 
-def _covered_by_live_ancestor_job(wo, node, alive_fn) -> bool:
-    """True when a live registered job on a still-``dispatched`` ownership ancestor owns
-    this node's execution. node_dispatch registers ONE job per dispatched root; the worker
-    marks sub-steps ``dispatched`` inside that same thread, so subtree nodes carry no job
-    ref of their own. The ancestor must still be ``dispatched``: once the sweeper fails a
-    frozen root, coverage lapses and its abandoned subtree orphan-fails on the next pass —
-    a hung-but-alive zombie thread must not shield the subtree forever."""
-    seen: set[str] = set()
-    pid = node.parent_id
-    while pid and pid not in seen:
-        seen.add(pid)
-        ancestor = wo.nodes.get(pid)
-        if ancestor is None:
-            return False
-        if ancestor.status == "dispatched" and alive_fn(wo.id, pid):
-            return True
-        pid = ancestor.parent_id
-    return False
+def _session_root_dispatched(wo, sid: str) -> bool:
+    """True when the session's ROOT node (encoded in the session id,
+    work_session::<work_id>::<node_id>) is still ``dispatched``. Subtree coverage
+    requires it: once the sweeper fails a frozen root, its subtree orphan-fails on
+    the next pass even if the zombie thread is technically alive."""
+    root_node_id = sid.rsplit("::", 1)[-1]
+    root = wo.nodes.get(root_node_id)
+    return root is not None and root.status == "dispatched"
 
 
 def _job_idle_seconds(wo, node, started_at, now: datetime) -> float:

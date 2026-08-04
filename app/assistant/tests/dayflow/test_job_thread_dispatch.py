@@ -152,21 +152,25 @@ class TestSupervision:
         sweep_stuck_work_nodes()
         assert store.load(wid).nodes[gid].status == "dispatched"
 
-    def test_subtree_nodes_under_live_worker_are_not_orphaned(self):
-        # 2026-07-31 regression: a worker grows sub-steps inside its own thread and marks
-        # them dispatched; only the dispatch root has a registered job. The sweeper
-        # orphan-failed the live run's subtree, repair re-issued a sub-step, and a
-        # duplicate emi_team raced the first. Liveness must inherit up the parent_id spine.
+    def test_subtree_nodes_under_live_session_are_not_orphaned(self):
+        # A worker grows sub-steps inside its session; they inherit payload.session_id
+        # at creation (store-level), so supervision is one lookup — a live session's
+        # subtree is never orphan-failed (the 2026-07-31 duplicate-team class).
         store = _store()
         wid, gid = _mk_wo(store)
-        _sub(store, wid, gid, "n1", status="dispatched")
+        _sub(store, wid, gid, "n1", status="actionable")
+        sid = ws.session_id_for(wid, "n1")
+        store.apply("set_status", {"work_id": wid, "node_id": "n1",
+                                   "status": "dispatched", "session_id": sid})
         store.apply("add_node", {"work_id": wid, "id": "n1a", "type": "subtask",
                                  "parent_id": "n1", "title": "worker sub-step"})
         store.apply("set_status", {"work_id": wid, "node_id": "n1a", "status": "dispatched"})
         store.apply("add_node", {"work_id": wid, "id": "n1a1", "type": "subtask",
                                  "parent_id": "n1a", "title": "worker sub-sub-step"})
         store.apply("set_status", {"work_id": wid, "node_id": "n1a1", "status": "dispatched"})
-        sid = ws.session_id_for(wid, "n1")
+        wo = store.load(wid)
+        assert wo.nodes["n1a"].payload.get("session_id") == sid   # inherited at creation
+        assert wo.nodes["n1a1"].payload.get("session_id") == sid  # two levels deep
         with ws._sessions_lock:
             ws._live_sessions[sid] = {"thread": SimpleNamespace(is_alive=lambda: True),
                                       "started_at": datetime.now(timezone.utc)}
@@ -180,12 +184,15 @@ class TestSupervision:
             with ws._sessions_lock:
                 ws._live_sessions.pop(sid, None)
 
-    def test_subtree_nodes_with_dead_root_job_are_failed(self):
-        # No registered job anywhere on the spine (restart/crash) -> the root AND its
-        # dispatched sub-steps all orphan-fail for work_repair.
+    def test_subtree_nodes_with_dead_session_are_failed(self):
+        # No live session anywhere (restart/crash) -> root AND stamped sub-steps all
+        # orphan-fail for work_repair.
         store = _store()
         wid, gid = _mk_wo(store)
-        _sub(store, wid, gid, "n1", status="dispatched")
+        _sub(store, wid, gid, "n1", status="actionable")
+        sid = ws.session_id_for(wid, "n1")
+        store.apply("set_status", {"work_id": wid, "node_id": "n1",
+                                   "status": "dispatched", "session_id": sid})
         store.apply("add_node", {"work_id": wid, "id": "n1a", "type": "subtask",
                                  "parent_id": "n1", "title": "worker sub-step"})
         store.apply("set_status", {"work_id": wid, "node_id": "n1a", "status": "dispatched"})
@@ -196,17 +203,19 @@ class TestSupervision:
         assert wo.nodes["n1a"].status == "failed"
 
     def test_zombie_thread_does_not_shield_subtree_after_root_failed(self):
-        # A frozen root was already failed by an earlier pass but its hung thread is
-        # still alive. Coverage requires the ancestor to still be dispatched — the
+        # A frozen root was failed by an earlier pass but its hung thread is still
+        # alive. Coverage requires the session's ROOT to still be dispatched — the
         # zombie must not shield the abandoned subtree forever.
         store = _store()
         wid, gid = _mk_wo(store)
-        _sub(store, wid, gid, "n1", status="dispatched")
+        _sub(store, wid, gid, "n1", status="actionable")
+        sid = ws.session_id_for(wid, "n1")
+        store.apply("set_status", {"work_id": wid, "node_id": "n1",
+                                   "status": "dispatched", "session_id": sid})
         store.apply("add_node", {"work_id": wid, "id": "n1a", "type": "subtask",
                                  "parent_id": "n1", "title": "worker sub-step"})
         store.apply("set_status", {"work_id": wid, "node_id": "n1a", "status": "dispatched"})
         store.apply("set_status", {"work_id": wid, "node_id": "n1", "status": "failed"})
-        sid = ws.session_id_for(wid, "n1")
         with ws._sessions_lock:
             ws._live_sessions[sid] = {"thread": SimpleNamespace(is_alive=lambda: True),
                                       "started_at": datetime.now(timezone.utc)}

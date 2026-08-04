@@ -301,7 +301,16 @@ class WorkStore:
                 raise ValueError(f"add_node: authority {authority} exceeds parent ceiling {ceiling}")
         fields = {k: v for k, v in data.items()
                   if k in WorkNode.model_fields and k not in {"work_id", "created_at", "updated_at"}}
-        wo.add_node(WorkNode(work_id=wo.id, created_at=now, updated_at=now, **fields))
+        node = WorkNode(work_id=wo.id, created_at=now, updated_at=now, **fields)
+        # Ownership inherits down the parent_id spine BY CONSTRUCTION: a node grown
+        # under a session-owned parent carries the same payload.session_id, so the
+        # supervisor's liveness join is one lookup — no ancestor walk (work-session
+        # rewrite; replaces the 2026-08-04 ancestor-liveness patch class entirely).
+        if parent_id is not None and "session_id" not in node.payload:
+            parent_sid = wo.nodes[parent_id].payload.get("session_id")
+            if parent_sid:
+                node.payload["session_id"] = parent_sid
+        wo.add_node(node)
 
     def _op_add_edge(self, wo, data, now) -> None:
         if data["src"] not in wo.nodes or data["dst"] not in wo.nodes:

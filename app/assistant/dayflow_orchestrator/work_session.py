@@ -43,10 +43,10 @@ def session_id_for(work_id: str, node_id: str) -> str:
     return f"work_session::{work_id}::{node_id}"
 
 
-def session_alive(work_id: str, node_id: str) -> bool:
-    """True if a live session thread owns this node (or one registered within the grace window)."""
+def session_alive_by_id(sid: str) -> bool:
+    """True if the named session has a live thread (or registered within the grace window)."""
     with _sessions_lock:
-        entry = _live_sessions.get(session_id_for(work_id, node_id))
+        entry = _live_sessions.get(sid)
     if entry is None:
         return False
     if entry["thread"].is_alive():
@@ -55,11 +55,20 @@ def session_alive(work_id: str, node_id: str) -> bool:
     return age < _SESSION_GRACE_SECONDS
 
 
+def session_alive(work_id: str, node_id: str) -> bool:
+    """True if a live session owns this node directly (its own session id)."""
+    return session_alive_by_id(session_id_for(work_id, node_id))
+
+
+def session_started_at_by_id(sid: str):
+    with _sessions_lock:
+        entry = _live_sessions.get(sid)
+    return entry["started_at"] if entry else None
+
+
 def session_started_at(work_id: str, node_id: str):
     """The session's start time, or None when no session is registered."""
-    with _sessions_lock:
-        entry = _live_sessions.get(session_id_for(work_id, node_id))
-    return entry["started_at"] if entry else None
+    return session_started_at_by_id(session_id_for(work_id, node_id))
 
 
 def room_session_scope(work_id: str, node_id: str):
