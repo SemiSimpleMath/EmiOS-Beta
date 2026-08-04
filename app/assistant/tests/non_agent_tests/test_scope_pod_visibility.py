@@ -182,6 +182,38 @@ def test_dayflow_pod_readable_from_master_room_self():
     assert pod_in_scope("dayflow_orchestrator", allowed_t) is False
 
 
+# ---------------------------------------------------------------------------
+# Work-effort scope — everything under the orchestrator runs at the
+# orchestrator's pod visibility (dayflow scope.yaml `pods: [all]`). The
+# 2026-08-03 regression: orchestrator_scope() defaulted pods to ["self"], so a
+# dispatched worker could not see the email pod its goal referenced —
+# pod_search returned 0 for a pod that existed.
+# ---------------------------------------------------------------------------
+
+def test_work_effort_scope_carries_all_pod_visibility():
+    from work_objects.scope import orchestrator_scope
+    sc = orchestrator_scope(work_id="work_test123")
+    assert sc.pods.allowed_scopes == ["all"]
+
+
+def test_work_effort_scope_reads_out_of_effort_pods():
+    from work_objects.scope import orchestrator_scope
+    from app.assistant.pod_store.pod_utils import resolve_allowed_scopes, pod_in_scope
+    allowed = resolve_allowed_scopes(orchestrator_scope(work_id="work_test123"))
+    # an email pod minted under an account scope is readable from a work effort
+    assert pod_in_scope("google_user_primary", allowed) is True
+    # and the effort's own minted pods remain readable too
+    assert pod_in_scope("scope::work_objects::work_test123", allowed) is True
+
+
+def test_work_effort_identity_still_per_effort():
+    from work_objects.scope import orchestrator_scope
+    sc = orchestrator_scope(work_id="work_test123")
+    # the stable per-effort identity (pod-minting room_id) is unchanged
+    assert sc.room_id == "scope::work_objects::work_test123"
+    assert sc.scope_id == sc.room_id
+
+
 if __name__ == "__main__":
     import pytest
     sys.exit(pytest.main([__file__, "-v"]))

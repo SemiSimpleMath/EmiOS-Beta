@@ -14,7 +14,7 @@ from __future__ import annotations
 import uuid
 
 from app.assistant.utils.pydantic_classes import (
-    ScopeApprovalPolicy, ScopeContext, ScopeToolPolicy, ScopeToolRule)
+    ScopeApprovalPolicy, ScopeContext, ScopePodPolicy, ScopeToolPolicy, ScopeToolRule)
 
 # The work "room" narrows its coordinator (work_emi_team_manager) to its manager roster — exactly like
 # master_room's per_manager.emi_team_manager rule. Mirrors master_room's 16-manager pool with the node
@@ -53,5 +53,14 @@ def orchestrator_scope(*, work_id: str | None = None, owner_id: str = "user", au
             allowed_tools=list(allowed_tools),
             per_manager={"work_emi_team_manager": ScopeToolRule(allow=list(_WORK_COORDINATOR_ALLOW))},
         ),
+        # Work efforts run UNDER the dayflow orchestrator, whose scope sees pods from
+        # every room (dayflow scope.yaml `pods: [all]` — it correlates events across
+        # surfaces). The effort scope must carry that same visibility: with the default
+        # ["self"] a worker could read only its own effort's pods, so an email/chat pod
+        # that its goal referenced was silently invisible (pod_search returned 0 for a
+        # pod that existed — the 2026-08-03 forward-Jorma's-email flounder). The effort
+        # room_id above still gives MINTED pods one stable per-effort identity;
+        # per-pod min_authority bands still gate sensitive content on read.
+        pods=ScopePodPolicy(allowed_scopes=["all"]),
         approval=ScopeApprovalPolicy(authority_level=authority),
     )
