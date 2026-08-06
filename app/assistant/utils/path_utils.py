@@ -223,8 +223,23 @@ def setup_complete() -> bool:
     if os.environ.get("SETUP_COMPLETE", "").strip().lower() in {"true", "1", "yes"}:
         return True
 
-    setup_flag = get_repo_root() / ".setup_complete"
-    if setup_flag.exists():
+    # The flag lives in the data dir so a packaged or containerised install
+    # writes it somewhere persistent and writable rather than into its (often
+    # read-only, often rebuilt) install directory.
+    if (get_data_dir() / ".setup_complete").exists():
         return True
+
+    # Installs created before the flag moved still have it at the repo root.
+    # Without this fallback every one of them reads as "never set up" after an
+    # upgrade and gets sent back through the setup wizard. Checked second so a
+    # data-dir flag always wins; get_repo_root() can equal get_data_dir() in a
+    # dev checkout, which is harmless.
+    try:
+        if (get_repo_root() / ".setup_complete").exists():
+            return True
+    except Exception:
+        # get_repo_root() is best-effort — a packaged install may have no repo
+        # to find. Absence of the legacy flag is not an error.
+        pass
 
     return False

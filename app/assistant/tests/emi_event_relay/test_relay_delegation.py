@@ -130,3 +130,35 @@ def test_handler_resolves_reply_to_once_for_tts_and_queue():
     assert submitted[0][2] == resolved          # TTS job got the resolved dict
     _, _, queued_reply_to = relay.message_queue.get_nowait()
     assert queued_reply_to == resolved          # queued emit got the same dict
+
+
+# ── system alerts are not UserMessages ────────────────────────────
+#
+# llm_client._check_and_trip_quota publishes a plain Message on the
+# socket_emit topic to tell the user WHY the process is about to exit.
+# The handler assumed UserMessage and did `message.user_message_data`
+# unguarded, so it raised AttributeError inside the event hub: the
+# shutdown notice never rendered and EmiAi just disappeared.
+
+
+def test_system_alert_message_emits_instead_of_crashing():
+    relay = _relay()
+    emitted = []
+    relay._emit_to_room = lambda room, event, payload: emitted.append((room, event, payload))
+
+    alert = {
+        "event": "system_alert",
+        "payload": {"level": "error", "title": "API Quota Exhausted — Shutting Down"},
+    }
+    # A Message has .data but no .user_message_data.
+    relay.socket_emit_handler(SimpleNamespace(sender="system", data=alert))
+
+    assert emitted == [("master_room", "system_alert", alert["payload"])]
+
+
+def test_unusable_message_is_dropped_not_raised():
+    relay = _relay()
+    relay._emit_to_room = lambda *a: (_ for _ in ()).throw(AssertionError("should not emit"))
+
+    # Neither user_message_data nor a usable data dict — must not raise.
+    relay.socket_emit_handler(SimpleNamespace(sender="system", data=None))

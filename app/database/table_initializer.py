@@ -413,6 +413,7 @@ def _register_all_models() -> None:
     from app.assistant.database import kg_merge_log  # noqa: F401
     from app.assistant.database import kg_pipeline_models  # noqa: F401
     from app.assistant.database import kg_revision_log  # noqa: F401
+    from app.assistant.database.pending_question import PendingQuestion  # noqa: F401
 
 
 def initialize_all_tables():
