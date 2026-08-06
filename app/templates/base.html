@@ -7,6 +7,12 @@
 
     <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
     {% block optional_css %}{% endblock %}
+    <!-- Proxy mount path for JS. "" at the domain root, "/emi" (or whatever
+         EMI_PROXY_SUBPATH names) behind a prefix-stripping reverse proxy.
+         tojson quotes and escapes it — a bare "{{ ... }}" would break the
+         script on any value containing a quote. Must precede every script
+         that reads it. -->
+    <script>window.SCRIPT_NAME = {{ request.script_root | tojson }};</script>
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
 
 </head>

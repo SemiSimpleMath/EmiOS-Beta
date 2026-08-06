@@ -12,6 +12,9 @@
        chat_bot.html (vertical):  set chat_container_selector = '.widget--chat'
        chat_bot_desktop.html:     set chat_container_selector = '.d-chat'
 #}
+{# Proxy mount path for JS — see base.html. Redeclared here because the chat
+   partial is included by pages that do not all extend base.html. #}
+<script>window.SCRIPT_NAME = {{ request.script_root | tojson }};</script>
 <script src="https://code.jquery.com/jquery-3.6.0.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>

@@ -17,19 +17,19 @@
 
 <li class="menu-section-label">How {{ assistant_name }} acts</li>
 <li class="menu-item">
-  <a href="/personalize" target="_blank" class="menu-btn">
+  <a href="{{ request.script_root }}/personalize" target="_blank" class="menu-btn">
     <i class="fas fa-sliders-h"></i>
     <span>Personalize {{ assistant_name }}</span>
   </a>
 </li>
 <li class="menu-item">
-  <a href="/skills" target="_blank" class="menu-btn">
+  <a href="{{ request.script_root }}/skills" target="_blank" class="menu-btn">
     <i class="fas fa-graduation-cap"></i>
     <span>Skills</span>
   </a>
 </li>
 <li class="menu-item">
-  <a href="/settings/assistant" target="_blank" class="menu-btn">
+  <a href="{{ request.script_root }}/settings/assistant" target="_blank" class="menu-btn">
     <i class="fas fa-robot"></i>
     <span>{{ assistant_name }} voice + identity</span>
   </a>
@@ -41,27 +41,27 @@
     <i class="fas fa-chevron-down submenu-arrow"></i>
   </button>
   <ul class="submenu">
-    <li class="submenu-item"><a href="/preferences/general" class="menu-btn"><i class="fas fa-user"></i><span>About You</span></a></li>
-    <li class="submenu-item"><a href="/settings/user-bio" class="menu-btn"><i class="fas fa-user-pen"></i><span>Your Bio</span></a></li>
-    <li class="submenu-item"><a href="/settings/wellness" class="menu-btn"><i class="fas fa-heartbeat"></i><span>Wellness</span></a></li>
+    <li class="submenu-item"><a href="{{ request.script_root }}/preferences/general" class="menu-btn"><i class="fas fa-user"></i><span>About You</span></a></li>
+    <li class="submenu-item"><a href="{{ request.script_root }}/settings/user-bio" class="menu-btn"><i class="fas fa-user-pen"></i><span>Your Bio</span></a></li>
+    <li class="submenu-item"><a href="{{ request.script_root }}/settings/wellness" class="menu-btn"><i class="fas fa-heartbeat"></i><span>Wellness</span></a></li>
   </ul>
 </li>
 
 <li class="menu-section-label">How {{ assistant_name }} runs</li>
 <li class="menu-item">
-  <a href="/settings/quiet-mode" target="_blank" class="menu-btn">
+  <a href="{{ request.script_root }}/settings/quiet-mode" target="_blank" class="menu-btn">
     <i class="fas fa-moon"></i>
     <span>Quiet Hours</span>
   </a>
 </li>
 <li class="menu-item">
-  <a href="/settings/features" target="_blank" class="menu-btn">
+  <a href="{{ request.script_root }}/settings/features" target="_blank" class="menu-btn">
     <i class="fas fa-toggle-on"></i>
     <span>Features</span>
   </a>
 </li>
 <li class="menu-item">
-  <a href="/settings/api-keys" target="_blank" class="menu-btn">
+  <a href="{{ request.script_root }}/settings/api-keys" target="_blank" class="menu-btn">
     <i class="fas fa-key"></i>
     <span>API Keys</span>
   </a>
@@ -69,19 +69,19 @@
 
 <li class="menu-section-label">Integrations</li>
 <li class="menu-item">
-  <a href="/settings/integrations" target="_blank" class="menu-btn">
+  <a href="{{ request.script_root }}/settings/integrations" target="_blank" class="menu-btn">
     <i class="fas fa-plug"></i>
     <span>Integrations hub</span>
   </a>
 </li>
 <li class="menu-item">
-  <a href="/settings/accounts" target="_blank" class="menu-btn">
+  <a href="{{ request.script_root }}/settings/accounts" target="_blank" class="menu-btn">
     <i class="fas fa-id-card"></i>
     <span>{{ assistant_name }}'s Accounts</span>
   </a>
 </li>
 <li class="menu-item">
-  <a href="/settings/env" target="_blank" class="menu-btn">
+  <a href="{{ request.script_root }}/settings/env" target="_blank" class="menu-btn">
     <i class="fas fa-sliders-h"></i>
     <span>Environment variables</span>
   </a>

@@ -33,6 +33,59 @@ def _set_sqlite_pragma_flask(dbapi_conn, connection_record):
 def create_app(config_class="config.DevelopmentConfig"):
     import time as _time
     app = Flask(__name__)
+
+    # ── Reverse proxy support ────────────────────────────────────────────
+    # Two independent pieces: rewriting SCRIPT_NAME so Flask builds URLs under
+    # the proxy's mount path, and trusting X-Forwarded-* to recover the
+    # original scheme/host.
+    import os as _os
+
+    _proxy_path = _os.environ.get("EMI_PROXY_SUBPATH", "").strip().rstrip("/")
+    if _proxy_path:
+        _inner_wsgi_app = app.wsgi_app
+
+        def _script_name_middleware(environ, start_response):
+            environ["SCRIPT_NAME"] = _proxy_path
+            return _inner_wsgi_app(environ, start_response)
+
+        app.wsgi_app = _script_name_middleware
+
+    # X-Forwarded-* is attacker-controlled unless something in front of the app
+    # overwrites it. EmiOS commonly publishes its port on 0.0.0.0, so the app is
+    # reachable directly and not only through the proxy — trusting these headers
+    # unconditionally would let any direct caller forge the scheme, host and
+    # mount path, which in turn poisons every absolute URL Flask generates
+    # (password-reset style links, redirects, and so on).
+    #
+    # So: opt in. EMI_TRUST_PROXY_HEADERS is the number of trusted proxy hops.
+    # It defaults to 1 when EMI_PROXY_SUBPATH is set, because configuring a
+    # mount path already asserts "I am behind a proxy", and 0 otherwise.
+    # Set it to 0 to force the headers to be ignored even behind a proxy.
+    #
+    # NOTE this does not make direct access safe on its own: bind the app to
+    # localhost, or firewall its port, so the proxy is the only route in.
+    try:
+        _trusted_hops = int(
+            _os.environ.get("EMI_TRUST_PROXY_HEADERS", "1" if _proxy_path else "0")
+        )
+    except ValueError:
+        _trusted_hops = 1 if _proxy_path else 0
+
+    if _trusted_hops > 0:
+        from werkzeug.middleware.proxy_fix import ProxyFix
+
+        # Applied last, so it is the OUTERMOST middleware and therefore runs
+        # BEFORE _script_name_middleware. That ordering is deliberate: an
+        # explicitly configured EMI_PROXY_SUBPATH must win over whatever
+        # X-Forwarded-Prefix claims, not the other way round.
+        app.wsgi_app = ProxyFix(
+            app.wsgi_app,
+            x_for=_trusted_hops,
+            x_proto=_trusted_hops,
+            x_host=_trusted_hops,
+            x_prefix=_trusted_hops,
+        )
+
     app.config.from_object(config_class)
     # Uploads land under the writable data dir (EMI_DATA_DIR) so a packaged app
     # never writes into its install dir. Unchanged in dev (data dir == repo root).

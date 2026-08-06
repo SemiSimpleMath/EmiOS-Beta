@@ -34,6 +34,14 @@ else:
     _env_file = Path(__file__).resolve().parent / ".env"
 load_dotenv(dotenv_path=_env_file)
 
+# ── Reverse proxy support (Caddy / nginx / Tailscale Serve) ────────────────
+# When EMI_PROXY_SUBPATH is set (e.g. "/emi"), Flask generates correct URLs
+# behind a subpath reverse proxy. Pair with a proxy that strips the prefix
+# and sets X-Forwarded-* headers.
+_emi_proxy_path = os.environ.get("EMI_PROXY_SUBPATH", "").strip().rstrip("/")
+if _emi_proxy_path:
+    os.environ.setdefault("SCRIPT_NAME", _emi_proxy_path)
+
 # ── Auto-generate secrets on first run (MUST happen before create_app) ────────
 
 def _ensure_env_key(key: str) -> str:
@@ -51,6 +59,56 @@ def _ensure_env_key(key: str) -> str:
 
 _ensure_env_key('FLASK_SECRET_KEY')
 _ensure_env_key('JWT_SECRET_KEY')
+
+
+def _seed_runtime_configs() -> None:
+    """Copy default configs from the repo/image into the persistent volume.
+
+    At runtime get_configs_dir() resolves to <EMI_DATA_DIR>/configs (e.g.
+    /data/configs in Docker) so that users can edit them persistently, but a
+    fresh volume contains none of the shipped defaults (subsystems.yaml,
+    routines.json, routines/, model_tiers.yaml, ...). Without this seed the
+    routine manager finds 0 routines, subsystem flags default to disabled,
+    and every widget-producing scheduled task silently never runs.
+
+    Only missing files are copied — existing files are never overwritten, so
+    user edits to a config survive restarts. Run before any app import that
+    calls get_configs_dir().
+    """
+    import shutil
+
+    from pathlib import Path as _Path
+
+    try:
+        source = _Path(__file__).resolve().parent / "configs"
+        if not source.is_dir():
+            print(f"⚠ config seed: no default configs at {source}", file=sys.stderr)
+            return
+        data_dir = os.environ.get("EMI_DATA_DIR")
+        if not data_dir:
+            return  # dev mode: get_configs_dir already points at repo configs
+        dest = _Path(data_dir) / "configs"
+        dest.mkdir(parents=True, exist_ok=True)
+        copied = 0
+        for src_file in sorted(source.rglob("*")):
+            if not src_file.is_file():
+                continue
+            rel = src_file.relative_to(source)
+            dst_file = dest / rel
+            if dst_file.exists():
+                continue  # never clobber user edits
+            dst_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src_file, dst_file)
+            copied += 1
+        if copied:
+            print(f"✔ config seed: copied {copied} default config(s) to {dest}")
+        else:
+            print("✔ config seed: volume already has all default configs")
+    except Exception as e:
+        print(f"⚠ config seed skipped: {e}", file=sys.stderr)
+
+
+_seed_runtime_configs()
 
 
 def _enforce_project_venv() -> None:
