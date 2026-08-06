@@ -324,6 +324,13 @@
                                 <div class="provider-desc">Claude 4.5 Haiku · Claude Sonnet 4.6</div>
                             </div>
                         </label>
+                        <label class="provider-card" id="provider-card-opencode">
+                            <input type="radio" name="llm_provider" value="opencode">
+                            <div class="provider-card-body">
+                                <div class="provider-name">OpenCode Go</div>
+                                <div class="provider-desc">Kimi K2.7 · DeepSeek V4 · GLM-5.2 · Grok 4.5</div>
+                            </div>
+                        </label>
                     </div>
                 </div>
 
@@ -373,6 +380,26 @@
                         <select id="anthropic_model">
                             <option value="claude-haiku-4-5-20251001">Claude 4.5 Haiku — recommended (fast &amp; affordable)</option>
                             <option value="claude-sonnet-4-6-20250514">Claude Sonnet 4.6 — most capable</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- OpenCode fields -->
+                <div id="fields-opencode" class="provider-fields" style="display:none">
+                    <div class="form-group">
+                        <label for="opencode_api_key">OpenCode Go API Key <span class="required">*</span></label>
+                        <input type="password" id="opencode_api_key" placeholder="sk-...">
+                        <small>Subscribe at <a href="https://opencode.ai/go" target="_blank">opencode.ai/go</a> ($5 first month, then $10/month)</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="opencode_model">Model</label>
+                        <select id="opencode_model">
+                            <option value="kimi-k2.7-code">Kimi K2.7 Code — recommended (best all-round)</option>
+                            <option value="deepseek-v4-flash">DeepSeek V4 Flash — fast &amp; cheap</option>
+                            <option value="deepseek-v4-pro">DeepSeek V4 Pro — strong reasoning</option>
+                            <option value="glm-5.2">GLM-5.2 — smart &amp; balanced</option>
+                            <option value="qwen3.7-plus">Qwen3.7 Plus — complex multi-step</option>
+                            <option value="grok-4.5">Grok 4.5 — most capable</option>
                         </select>
                     </div>
                 </div>
@@ -488,8 +515,10 @@
         </div>
     </template>
 
+    <!-- Must come BEFORE setup_wizard.js: that file prefixes its request URLs
+         with window.SCRIPT_NAME, so declaring it afterwards leaves the value
+         undefined for anything the script does at load time. See base.html. -->
+    <script>window.SCRIPT_NAME = {{ request.script_root | tojson }};</script>
     <script src="{{ url_for('static', filename='js/setup_wizard.js') }}"></script>
 </body>
 </html>
-
-

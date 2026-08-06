@@ -114,8 +114,14 @@ def _write_env_file(env_file: Path, env_content: dict) -> None:
     # Preserve existing lines (comments + order) by rewriting the whole file.
     # We keep a defined section order and dump remaining keys at the end.
     KNOWN_SECTIONS = [
+        # The provider selection belongs at the top, next to the keys it selects
+        # between. Without this section DEFAULT_LLM_PROVIDER and the OPENCODE_*
+        # pair survived a save but were flushed into the trailing "# Other"
+        # bucket, well below OPENAI_API_KEY — which reads as though OpenAI is
+        # the only real choice.
+        ("# LLM Provider", ["DEFAULT_LLM_PROVIDER", "DEFAULT_LLM_MODEL"]),
         ("# Core Settings", ["OPENAI_API_KEY", "TIMEZONE", "PRIMARY_USER", "ASSISTANT_NAME"]),
-        ("# Optional API Keys", ["GOOGLE_API_KEY", "ANTHROPIC_API_KEY", "ELEVENLABS_API_KEY", "DEEPGRAM_API_KEY"]),
+        ("# Optional API Keys", ["OPENCODE_API_KEY", "OPENCODE_BASE_URL", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY", "ELEVENLABS_API_KEY", "DEEPGRAM_API_KEY"]),
         ("# Email / Gmail Integration", ["EMAIL_ADDR", "EMAIL_PASSWORD", "EMAIL_IMAP_URL"]),
         ("# Telegram", ["TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET"]),
         ("# Runtime Flags", ["SCOPE_CONTRACT_STRICT"]),
@@ -2143,6 +2149,7 @@ def update_env_settings():
         # API keys (only update if non-empty)
         for field, key in [
             ('openai_api_key', 'OPENAI_API_KEY'),
+            ('opencode_api_key', 'OPENCODE_API_KEY'),
             ('google_api_key', 'GOOGLE_API_KEY'),
             ('anthropic_api_key', 'ANTHROPIC_API_KEY'),
             ('elevenlabs_api_key', 'ELEVENLABS_API_KEY'),

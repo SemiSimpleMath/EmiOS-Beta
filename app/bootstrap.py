@@ -115,9 +115,18 @@ def _auto_detect_default_llm_provider() -> None:
     if os.environ.get("DEFAULT_LLM_PROVIDER", "").strip():
         return  # already explicitly configured
 
-    from app.configs.llm_classes_dict import _key_is_present, _PROVIDER_DEFAULT_MODEL
+    from app.configs.llm_classes_dict import (
+        _key_is_present, _PROVIDER_DEFAULT_MODEL, _PROVIDER_KEY_ENV,
+    )
 
-    available = [p for p in ("openai", "gemini", "anthropic") if _key_is_present(p)]
+    # Derive the candidate list from the provider registry rather than repeating
+    # it literally. The hardcoded ("openai", "gemini", "anthropic") tuple this
+    # replaces silently omitted opencode, so an install whose ONLY credential was
+    # OPENCODE_API_KEY fell into the len(available) == 0 branch: it logged
+    # "No LLM provider API keys found" and never set DEFAULT_LLM_PROVIDER, even
+    # though a perfectly usable provider was configured. Registry-driven so the
+    # next provider added to llm_classes_dict is picked up here for free.
+    available = [p for p in _PROVIDER_KEY_ENV if _key_is_present(p)]
     if len(available) == 1:
         provider = available[0]
         os.environ["DEFAULT_LLM_PROVIDER"] = provider

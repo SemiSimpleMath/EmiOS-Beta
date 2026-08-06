@@ -100,7 +100,9 @@ def get_api_keys_status():
     try:
         settings_manager = get_settings_manager()
         
-        providers = ['openai', 'google', 'gemini', 'anthropic', 'elevenlabs', 'deepgram']
+        # 'opencode' resolves to OPENCODE_API_KEY via get_api_key's
+        # f"{provider.upper()}_API_KEY" convention, same as the rest.
+        providers = ['openai', 'google', 'gemini', 'anthropic', 'opencode', 'elevenlabs', 'deepgram']
         status = {}
         
         for provider in providers:
@@ -127,17 +129,21 @@ def get_features():
     """Get all feature flags"""
     try:
         settings_manager = get_settings_manager()
-        features = settings_manager.get('features', {})
+        # Shallow copy so reported state is a pure projection — never mutate
+        # the singleton's in-memory dict via the live reference.
+        features = dict(settings_manager.get('features', {}))
         
-        # Auto-disable features that can't run (missing OAuth/API keys)
+        # Auto-disable features that can't run (missing OAuth/API keys).
+        # Reported state only — never persisted. A temporarily-missing key
+        # (e.g. provider swapped during setup) must not permanently flip the
+        # stored flag, or the feature can never recover without manual edit.
         availability = settings_manager.get_available_features()
         for feature_name, status in availability.items():
             feature_key = f"enable_{feature_name}"
             if feature_key in features:
-                # If feature is enabled but missing requirements, auto-disable it
+                # If feature is enabled but missing requirements, report it disabled
                 if features[feature_key] and not status['can_enable']:
                     features[feature_key] = False
-                    settings_manager.enable_feature(feature_name, False)
         
         return jsonify({
             'success': True,

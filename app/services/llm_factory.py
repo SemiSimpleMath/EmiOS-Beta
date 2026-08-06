@@ -86,7 +86,7 @@ class LLMFactory:
         before calling structured_output().
         """
         kwargs = dict(kwargs)
-        requested_provider = kwargs.get('llm_provider', 'openai').lower()
+        requested_provider = kwargs.get('llm_provider', os.environ.get("DEFAULT_LLM_PROVIDER", "openai")).lower()
 
         # Provider rerouting
         default_provider = os.environ.get("DEFAULT_LLM_PROVIDER", "").strip().lower()

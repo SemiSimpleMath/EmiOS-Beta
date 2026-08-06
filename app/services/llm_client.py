@@ -457,14 +457,49 @@ class OpenAIJsonSchemaStrategy(OpenAIStructuredOutputStrategy):
 # unstructured. Returns None for non-quota errors (caller handles them).
 
 
-def _translate_openai_exception(e: Exception) -> Optional[Exception]:
+# Plan-level usage caps (OpenCode Zen's "GoUsageLimitError", and weekly /
+# monthly caps generally). These arrive as HTTP 429 — indistinguishable by
+# status code from a per-minute rate limit — but they do not clear for hours
+# or days. Classified as transient they make the retry ladder and the
+# scheduler spin on them forever, so they must resolve to billing, which the
+# circuit breaker treats as fatal.
+_LONG_WINDOW_LIMIT_MARKERS = (
+    "gousagelimiterror",
+    "usage limit reached",
+    "weekly usage limit",
+    "monthly usage limit",
+    "daily usage limit",
+)
+_LONG_WINDOW_NAMES = ("weekly", "monthly", "daily")
+
+
+def _is_long_window_usage_limit(e: Exception) -> bool:
+    """True for a usage cap that will not clear inside any sane retry window."""
+    s = str(e).lower()
+    if any(m in s for m in _LONG_WINDOW_LIMIT_MARKERS):
+        return True
+    # OpenCode names the window in its own field: {"limitName": "weekly"}
+    if "limitname" in s and any(w in s for w in _LONG_WINDOW_NAMES):
+        return True
+    return False
+
+
+def _translate_openai_exception(e: Exception, provider: str = "openai") -> Optional[Exception]:
     """OpenAI marks the two 429 cases explicitly: error.code
     "insufficient_quota" = billing exhaustion; "rate_limit_exceeded" (any
     RateLimitError that isn't insufficient_quota) = transient window, with
-    the suggested wait in the Retry-After header."""
+    the suggested wait in the Retry-After header.
+
+    OpenAI-compatible third parties do not use those markers: OpenCode Zen
+    returns a plain 429 whose body carries GoUsageLimitError plus the window
+    name, so that shape is checked before the generic RateLimitError branch."""
     code = getattr(e, "code", None) or getattr(e, "type", None)
     if code == "insufficient_quota":
-        return BillingQuotaExhausted(provider="openai", message=str(e))
+        return BillingQuotaExhausted(provider=provider, message=str(e))
+    # Must precede the RateLimitError branch below — a weekly cap is a 429 and
+    # would otherwise be misread as a transient per-minute window.
+    if _is_long_window_usage_limit(e):
+        return BillingQuotaExhausted(provider=provider, message=str(e))
     if isinstance(e, OpenAIRateLimitError):
         retry_after = None
         headers = getattr(getattr(e, "response", None), "headers", None)
@@ -478,7 +513,7 @@ def _translate_openai_exception(e: Exception) -> Optional[Exception]:
         return TransientRateLimit(str(e), retry_after=retry_after)
     kind = classify_quota(e)
     if kind == "billing":
-        return BillingQuotaExhausted(provider="openai", message=str(e))
+        return BillingQuotaExhausted(provider=provider, message=str(e))
     if kind == "rate":
         return TransientRateLimit(str(e))
     return None
@@ -567,11 +602,81 @@ class BaseLLMProvider:
     (The old send_query / build_messages / streaming methods had zero
     callers anywhere — every consumer goes through structured output.)"""
 
+    # Prefix for this provider's log lines. Subclasses override.
+    _log_tag = "LLM"
+
     def structured_output(self, messages, **send_params):
         raise NotImplementedError("This method should be implemented by subclasses.")
 
     def structured_output_json(self, messages, **send_params):
         raise NotImplementedError("This method should be implemented by subclasses.")
+
+    def _structured_output_once(self, messages, **send_params):
+        raise NotImplementedError("This method should be implemented by subclasses.")
+
+    def _structured_output_with_timeout_ladder(self, messages, **send_params):
+        """Run _structured_output_once against progressively longer timeouts.
+
+        Structured-output calls occasionally hang for minutes even though they
+        would eventually succeed; a short first attempt catches those and
+        usually succeeds on retry. If the caller already budgeted a large
+        timeout (>= LLM_STRUCTURED_OUTPUT_SKIP_RETRY_ABOVE) they are expecting a
+        slow call, so the ladder is skipped rather than burning 60s + 120s on
+        attempts that were always going to need the full budget.
+
+        Shared by every OpenAI-protocol provider. It lived as two byte-identical
+        copies in OpenAILLM and OpenCodeLLM, which is precisely the kind of
+        duplicate that gets fixed in one copy and not the other.
+        """
+        original_timeout = send_params.get('timeout', 240)
+        try:
+            large_timeout_threshold = int(
+                os.environ.get("LLM_STRUCTURED_OUTPUT_SKIP_RETRY_ABOVE", "180"))
+        except ValueError:
+            large_timeout_threshold = 180
+
+        if original_timeout >= large_timeout_threshold:
+            attempt_timeouts = [original_timeout]
+        else:
+            try:
+                short = min(original_timeout, int(
+                    os.environ.get("LLM_STRUCTURED_OUTPUT_FAST_TIMEOUT", "60")))
+                medium = min(original_timeout, int(
+                    os.environ.get("LLM_STRUCTURED_OUTPUT_MEDIUM_TIMEOUT", "120")))
+            except ValueError:
+                short, medium = 60, 120
+            attempt_timeouts = [t for t in (short, medium, original_timeout) if t > 0]
+            # Deduplicate while preserving order.
+            seen = set()
+            attempt_timeouts = [t for t in attempt_timeouts if not (t in seen or seen.add(t))]
+
+        last_exc: Optional[Exception] = None
+        for idx, t in enumerate(attempt_timeouts):
+            # Copy-and-overwrite rather than passing timeout= alongside
+            # **send_params: send_params already carries 'timeout' whenever the
+            # caller set one, and Python raises TypeError on the duplicate
+            # keyword before the request is ever made.
+            send_params_copy = dict(send_params)
+            send_params_copy['timeout'] = t
+            try:
+                return self._structured_output_once(messages, **send_params_copy)
+            except TimeoutError as exc:
+                # Only timeouts earn another attempt. Quota, schema and parse
+                # failures are deterministic — retrying them just spends the
+                # same budget three times over.
+                last_exc = exc
+                if idx < len(attempt_timeouts) - 1:
+                    logger.warning(
+                        "[%s] structured_output timed out at %ss (attempt %d/%d); retrying with %ss",
+                        self._log_tag, t, idx + 1, len(attempt_timeouts),
+                        attempt_timeouts[idx + 1],
+                    )
+                    continue
+                raise
+        if last_exc:
+            raise last_exc
+        raise RuntimeError("structured_output: no attempts were made")
+
 
 class OpenAILLM(BaseLLMProvider):
     _instance = None  # Singleton instance
@@ -613,54 +718,13 @@ class OpenAILLM(BaseLLMProvider):
 
 
     def structured_output(self, messages, **send_params):
-        """Public entrypoint — runs _structured_output_once with retry-on-timeout
-        backoff. OpenAI structured-output calls occasionally hang at ~4 min even
-        though they eventually succeed; retrying with a shorter first attempt
-        catches those hangs and usually succeeds on retry.
-        """
-        original_timeout = send_params.get('timeout', 240)
-        # Progressive attempts: short first (catches OpenAI structured-output
-        # slow-mode calls), then longer, then the caller's full timeout.
-        #
-        # If the caller already budgeted a large timeout (>=180s), they expect
-        # slow calls — skip the fast-retry ladder to avoid burning 60s+120s
-        # on attempts that consistently need the full budget. Fact_extractor
-        # on gpt-5.4 is a typical case here.
-        try:
-            large_timeout_threshold = int(os.environ.get("LLM_STRUCTURED_OUTPUT_SKIP_RETRY_ABOVE", "180"))
-        except ValueError:
-            large_timeout_threshold = 180
-        if original_timeout >= large_timeout_threshold:
-            attempt_timeouts = [original_timeout]
-        else:
-            try:
-                short = min(original_timeout, int(os.environ.get("LLM_STRUCTURED_OUTPUT_FAST_TIMEOUT", "60")))
-                medium = min(original_timeout, int(os.environ.get("LLM_STRUCTURED_OUTPUT_MEDIUM_TIMEOUT", "120")))
-            except ValueError:
-                short, medium = 60, 120
-            attempt_timeouts = [t for t in (short, medium, original_timeout) if t > 0]
-            # Deduplicate while preserving order
-            seen = set()
-            attempt_timeouts = [t for t in attempt_timeouts if not (t in seen or seen.add(t))]
+        """Public entrypoint — progressive-timeout ladder around
+        _structured_output_once. See BaseLLMProvider for the mechanics.
 
-        last_exc: Optional[Exception] = None
-        for idx, t in enumerate(attempt_timeouts):
-            send_params_copy = dict(send_params)
-            send_params_copy['timeout'] = t
-            try:
-                return self._structured_output_once(messages, **send_params_copy)
-            except TimeoutError as exc:
-                last_exc = exc
-                if idx < len(attempt_timeouts) - 1:
-                    logger.warning(
-                        "LLM structured_output timed out at %ss (attempt %d/%d); retrying with %ss",
-                        t, idx + 1, len(attempt_timeouts), attempt_timeouts[idx + 1],
-                    )
-                    continue
-                raise
-        if last_exc:
-            raise last_exc
-        raise RuntimeError("structured_output: no attempts were made")
+        Fact_extractor on gpt-5.4 is the typical caller that budgets a large
+        timeout up front and therefore skips the ladder entirely.
+        """
+        return self._structured_output_with_timeout_ladder(messages, **send_params)
 
     def _structured_output_once(self, messages, **send_params):
         import time as _time
@@ -805,6 +869,210 @@ class OpenAILLM(BaseLLMProvider):
         Gemini and Anthropic already alias the same way.
         """
         return self.structured_output(messages, **send_params)
+
+
+class OpenCodeLLM(BaseLLMProvider):
+    """OpenCode Zen (Go plan) — the OpenAI-compatible API at opencode.ai/zen/go.
+
+    A separate singleton from OpenAILLM so both can coexist. Reads
+    OPENCODE_API_KEY and OPENCODE_BASE_URL from the environment.
+
+    Deliberately a sibling of OpenAILLM rather than a subclass: it shares the
+    wire protocol but not the behaviour. It cannot use response_format (the
+    schema is injected into the prompt instead), its 429s mean a weekly plan
+    quota rather than a per-minute window, and it is a separate singleton. The
+    one part that genuinely is common — the timeout ladder — lives on
+    BaseLLMProvider and is inherited by both.
+    """
+    _log_tag = "OpenCodeLLM"
+    _instance = None
+    _instance_lock = threading.Lock()
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = super(OpenCodeLLM, cls).__new__(cls)
+                    cls._instance._init_once(*args, **kwargs)
+        else:
+            if not hasattr(cls._instance, "client"):
+                with cls._instance_lock:
+                    cls._instance._init_once(*args, **kwargs)
+        return cls._instance
+
+    def _init_once(self, engine="kimi-k2.7-code", temperature=0.1, **kwargs):
+        if hasattr(self, "client"):
+            return
+
+        self.api_key = os.environ.get('OPENCODE_API_KEY')
+        if _is_placeholder_api_key(self.api_key):
+            raise ValueError("OPENCODE_API_KEY is missing or invalid. "
+                             "Set a real OpenCode Go API key in environment.")
+
+        base_url = os.environ.get('OPENCODE_BASE_URL',
+                                  'https://opencode.ai/zen/go/v1')
+        self.engine = engine
+        self.temperature = temperature
+        self.last_usage = None
+        self.client = OpenAI(api_key=self.api_key, base_url=base_url)
+
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+    def structured_output(self, messages, **send_params):
+        """Public entrypoint — progressive-timeout ladder around
+        _structured_output_once. See BaseLLMProvider for the mechanics.
+        """
+        return self._structured_output_with_timeout_ladder(messages, **send_params)
+
+    def _structured_output_once(self, messages, **send_params):
+        """Single attempt at structured output via chat.completions.create + response_format."""
+        import time as _time
+        import json as _json
+
+        messages = _normalize_openai_responses_messages(messages)
+        response_format = send_params.get('response_format')
+        model = send_params.get('engine') or self.engine
+        temperature = send_params.get('temperature', self.temperature)
+        timeout = send_params.get('timeout', 240)
+        max_tokens = send_params.get('max_tokens', 8192)
+
+        if response_format is None:
+            raise ValueError("Invalid response format: None")
+
+        _thread = threading.current_thread()
+        logger.info(f"[OpenCodeLLM] model={model} temperature={temperature} timeout={timeout}s")
+
+        timer_id = performance_monitor.start_timer('llm_structured_output', f"{model}_{len(messages)}")
+        log_status = "error"
+        _call_started = _time.monotonic()
+        # The provider is a singleton, so a failed call would otherwise log the
+        # PREVIOUS call's token counts in the finally block below.
+        self.last_usage = None
+
+        try:
+            from pydantic import BaseModel as _BaseModel
+            if not isinstance(model, str) or not model.strip():
+                raise ValueError("model must be a non-empty string")
+
+            # Build request kwargs: model, messages, temperature, max_tokens.
+            # `timeout` must reach the SDK — without it every attempt runs on
+            # the client default (600s) and the ladder above is decorative.
+            create_kwargs = {"max_tokens": max_tokens, "timeout": timeout}
+
+            # OpenCode Go: skip response_format — inject JSON instruction into
+            # prompt instead. response_format is guaranteed non-None here (the
+            # None case raised above), so no re-check.
+            schema_desc = ""
+            if isinstance(response_format, type) and issubclass(response_format, _BaseModel):
+                schema_desc = _json.dumps(response_format.model_json_schema(), indent=2)
+            elif isinstance(response_format, dict):
+                schema_desc = _json.dumps(response_format, indent=2)
+            if schema_desc:
+                messages = list(messages) + [{
+                    "role": "system",
+                    "content": f"Respond ONLY with a single valid JSON object. Do not include markdown fences, explanations, or any other text. The JSON must match this schema:\n{schema_desc}"
+                }]
+
+            response = self.client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                **create_kwargs,
+            )
+            self.last_usage = getattr(response, "usage", None)
+
+            raw = response.choices[0].message.content
+            if response.choices[0].message.refusal:
+                raise ValueError(f"OpenCodeLLM refused: {response.choices[0].message.refusal}")
+
+            # Parse JSON from the response. _parse_first_json_object RAISES on
+            # empty or unparseable input rather than returning a sentinel, so
+            # it has to be guarded: unguarded, the json.loads fallback below is
+            # unreachable and an empty completion surfaces as a bare
+            # "empty json text" with no hint at the cause.
+            result = None
+            if isinstance(raw, str) and raw.strip():
+                try:
+                    result = _parse_first_json_object(raw)
+                except Exception:
+                    logger.debug(
+                        "[OpenCodeLLM] tolerant JSON scan failed; trying strict json.loads",
+                        exc_info=True,
+                    )
+                    try:
+                        result = _json.loads(raw.strip())
+                    except _json.JSONDecodeError:
+                        result = None
+
+            if isinstance(result, dict):
+                log_status = "ok"
+                return result
+
+            if not (isinstance(raw, str) and raw.strip()):
+                # Reasoning models can spend the entire max_tokens budget before
+                # emitting any content, making the completion legitimately empty.
+                finish = getattr(response.choices[0], "finish_reason", None)
+                raise ValueError(
+                    f"OpenCodeLLM returned an empty completion (non-JSON; "
+                    f"finish_reason={finish!r}, max_tokens={max_tokens}) — raise "
+                    f"max_tokens if this model reasons before answering"
+                )
+            raise ValueError(f"OpenCodeLLM returned non-JSON: {raw[:200]}")
+
+        except Exception as e:
+            performance_monitor.end_timer(timer_id, {
+                'status': 'error', 'model': model,
+                'message_count': len(messages), 'temperature': temperature,
+                'timeout': timeout, 'error': str(e),
+            })
+            logger.error(f"[OpenCodeLLM] structured_output error: {e}")
+            logger.debug("[OpenCodeLLM] structured_output exception details", exc_info=True)
+
+            if isinstance(e, (BillingQuotaExhausted, TransientRateLimit)):
+                log_status = "quota" if isinstance(e, BillingQuotaExhausted) else "rate_limit"
+                raise
+            canonical = _translate_openai_exception(e, provider="opencode")
+            if canonical is not None:
+                if isinstance(canonical, BillingQuotaExhausted):
+                    log_status = "quota"
+                else:
+                    log_status = "rate_limit"
+                raise canonical from e
+            error_str = str(e).lower()
+            if "timeout" in error_str or "timed out" in error_str:
+                log_status = "timeout"
+                raise TimeoutError(f"LLM request timed out after {timeout} seconds") from e
+            if "rate limit" in error_str:
+                log_status = "rate_limit"
+                raise TransientRateLimit(str(e)) from e
+            # "non-json" / "empty completion" are the two shapes raised above
+            # when the model answers with prose (or nothing) instead of JSON.
+            if (
+                "invalid json" in error_str
+                or "validation error" in error_str
+                or "non-json" in error_str
+                or "empty completion" in error_str
+            ):
+                log_status = "parse_error"
+            else:
+                log_status = "error"
+            raise RuntimeError(f"LLM structured_output failed: {e}") from e
+        finally:
+            try:
+                from app.services.llm_call_logger import record_llm_call
+                duration_ms = int((_time.monotonic() - _call_started) * 1000.0)
+                record_llm_call(
+                    engine=model, provider="opencode",
+                    usage=getattr(self, 'last_usage', None),
+                    duration_ms=duration_ms, status=log_status,
+                )
+            except Exception:
+                pass
+
+    def structured_output_json(self, messages, **send_params):
+        return self.structured_output(messages, **send_params)
+
 
 # ---------------------------------------------------------------------------
 # Gemini schema utilities — available for manually inlining $ref/$defs or

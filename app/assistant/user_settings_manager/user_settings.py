@@ -21,12 +21,49 @@ class UserSettingsManager:
             settings_file: Path to settings file. If None, uses default location.
         """
         if settings_file is None:
-            # Default to user_settings.json in user_settings_data subdirectory
-            settings_file = Path(__file__).parent / 'user_settings_data' / 'user_settings.json'
+            # Default to user_settings.json in user_settings_data subdirectory.
+            # In the packaged/Docker deployment the file must live on the
+            # persistent volume (EMI_DATA_DIR), not inside the image — an
+            # image-local copy is silently discarded on every rebuild and
+            # every feature toggle is lost. The repo-tree location is kept as
+            # the dev default.
+            emi_data_dir = os.environ.get("EMI_DATA_DIR")
+            if emi_data_dir:
+                settings_file = Path(emi_data_dir) / 'user_settings_data' / 'user_settings.json'
+            else:
+                settings_file = Path(__file__).parent / 'user_settings_data' / 'user_settings.json'
+            self._maybe_migrate_image_copy(Path(settings_file) if settings_file else Path(__file__).parent / 'user_settings_data' / 'user_settings.json')
         
         self.settings_file = Path(settings_file)
         self._settings: Dict[str, Any] = {}
         self._load_settings()
+
+    def _maybe_migrate_image_copy(self, data_dir_file: Path) -> None:
+        """Copy an image-local settings file to the persistent volume on first boot.
+
+        Older images stored user_settings.json next to the source file inside
+        /app; the rebuild that moves it to EMI_DATA_DIR would otherwise discard
+        the user's feature toggles. Only copies when the volume copy is absent
+        and the image-local copy exists.
+        """
+        try:
+            if data_dir_file.exists():
+                return
+            image_copy = Path(__file__).parent / 'user_settings_data' / 'user_settings.json'
+            if not image_copy.exists():
+                return
+            data_dir_file.parent.mkdir(parents=True, exist_ok=True)
+            import shutil
+            shutil.copy2(image_copy, data_dir_file)
+            from app.assistant.utils.logging_config import get_logger
+            get_logger(__name__).info(
+                "Migrated settings from image-local copy to %s", data_dir_file
+            )
+        except Exception as e:
+            from app.assistant.utils.logging_config import get_logger
+            get_logger(__name__).warning(
+                "Could not migrate image-local settings: %s", e
+            )
     
     def _load_settings(self) -> None:
         """Load settings from JSON file"""
@@ -393,6 +430,7 @@ class UserSettingsManager:
             'openai': self.has_api_key('openai'),
             'google': self.has_api_key('google'),
             'anthropic': self.has_api_key('anthropic'),
+            'opencode': self.has_api_key('opencode'),
             'elevenlabs': self.has_api_key('elevenlabs'),
             'deepgram': self.has_api_key('deepgram')
         }
@@ -444,16 +482,20 @@ class UserSettingsManager:
                 'description': 'Scheduler events (no API key required)'
             },
             'kg': {
-                'requires_api_keys': ['openai'],
+                # The LLM requirement is satisfied by whichever provider is
+                # actually configured (opencode in this deployment, openai for
+                # others). 'llm' is resolved at check time to the active
+                # DEFAULT_LLM_PROVIDER key.
+                'requires_api_keys': ['llm'],
                 'requires_oauth': [],
                 'requires_features': [],
-                'description': 'Knowledge graph requires OpenAI API for processing'
+                'description': 'Knowledge graph requires an LLM API key for processing'
             },
             'entity_cards': {
-                'requires_api_keys': ['openai'],
+                'requires_api_keys': ['llm'],
                 'requires_oauth': [],
                 'requires_features': [],
-                'description': 'Entity cards require OpenAI API for extraction'
+                'description': 'Entity cards require an LLM API key for extraction'
             },
             'speak_mode': {
                 'requires_api_keys': ['elevenlabs', 'deepgram'],
@@ -491,6 +533,19 @@ class UserSettingsManager:
         
         # Check API key requirements
         for api_key_provider in deps.get('requires_api_keys', []):
+            # 'llm' is a virtual provider: the requirement is satisfied by
+            # whichever provider is the active default (DEFAULT_LLM_PROVIDER),
+            # falling back to any configured LLM key.
+            if api_key_provider == 'llm':
+                active = (os.environ.get("DEFAULT_LLM_PROVIDER") or "").strip() or "openai"
+                if self.get_api_key(active):
+                    continue
+                # Fall back to any known LLM provider key so the feature can
+                # still enable when a key exists but the default is unset.
+                if any(self.get_api_key(p) for p in ("opencode", "openai", "anthropic", "gemini", "google")):
+                    continue
+                missing_api_keys.append("llm")
+                continue
             if not self.get_api_key(api_key_provider):
                 missing_api_keys.append(api_key_provider)
         

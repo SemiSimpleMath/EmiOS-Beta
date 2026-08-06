@@ -1023,10 +1023,20 @@ input[type="time"]:focus {
     color: #333;
 }
 
-.bio-section .section-hint {
+/* Explanatory line under a section heading. Was only ever defined scoped to
+   .bio-section; the API-keys page needs the same treatment, so the base rule
+   is unscoped and .bio-section just inherits it. */
+.section-hint {
     margin: 0 0 0.75rem 0;
     font-size: 0.85rem;
     color: #888;
+}
+
+.section-hint code {
+    background: rgba(0, 0, 0, 0.06);
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+    font-size: 0.95em;
 }
 
 .bio-facts-list {
