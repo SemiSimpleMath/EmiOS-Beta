@@ -247,6 +247,11 @@ def initialize_system():
             ServiceLocator.register("pod_classifier_service", pod_classifier_service)
             ingest_service.register_subscriber(pod_classifier_service.handle_envelope)
 
+            pod_classifier_service.start()
+            logger.info("✅ Ingest: pod_classifier subscribed (cold start — no consumers yet)")
+        else:
+            logger.info("⏸️ PodClassifier DISABLED via subsystems.yaml")
+
         if is_subsystem_enabled("system_audit"):
             from app.assistant.system_audit.signal_service import AuditSignalService
             audit_signal_service = AuditSignalService()
@@ -255,10 +260,6 @@ def initialize_system():
             logger.info("👂 System-audit friction ear subscribed to the gut.")
         else:
             logger.info("⏸️ System audit DISABLED via subsystems.yaml")
-            pod_classifier_service.start()
-            logger.info("✅ Ingest: pod_classifier subscribed (cold start — no consumers yet)")
-        else:
-            logger.info("⏸️ PodClassifier DISABLED via subsystems.yaml")
 
         ingest_service.start()
         logger.info("✅ Ingest service initialized")
