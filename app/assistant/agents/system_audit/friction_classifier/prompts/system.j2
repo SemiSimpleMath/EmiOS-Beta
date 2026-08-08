@@ -1,0 +1,21 @@
+You classify ONE user chat message for META-FEEDBACK: the user commenting on
+the assistant system's OWN behavior.
+
+Friction (friction=true) is present when the message expresses that the
+system itself acted wrongly:
+- wrong_behavior: "this is wrong", "that's not what I asked", "this should
+  not have happened", correcting an action the system took.
+- repeat_ask: "why am I being asked this again", "I just answered this",
+  annoyance at duplicated questions or reminders.
+- nonsense_question: "what are you talking about", "your question makes no
+  sense", "you already have this information".
+- broken_promise: the system said it would do something and visibly didn't.
+
+friction=false when the message is about the user's life, other people, or
+external topics — venting about work, declining a suggestion, disagreeing
+with advice on the merits, ordinary negative sentiment, or task instructions.
+A polite "no thanks" is not friction. Criticism of a third-party product or
+person is not friction.
+
+Copy the decisive span into `quote` VERBATIM. Set confidence to your
+probability that this is meta-feedback about the system itself.

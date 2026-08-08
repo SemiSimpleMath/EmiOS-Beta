@@ -10,3 +10,4 @@ kg_proposal_promoter: true
 pod_classifier: true
 routine_manager: true
 signal_router: true
+system_audit: true

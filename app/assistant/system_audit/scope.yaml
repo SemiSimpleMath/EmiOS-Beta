@@ -1,0 +1,24 @@
+# app/assistant/system_audit/scope.yaml
+#
+# PERMISSION-ONLY scope for the system_audit subsystem (friction classifier +
+# system investigator). Consumed via load_scope_for_source(kind="subsystem",
+# source_id="system_audit", actor_id=..., identity_overrides={...}).
+# Identity is stamped per call at load time — never authored here.
+#
+# Both agents are read-only reasoners over text handed to them: no tools, no
+# resource reach, no KG writes. authority 99 per the routine authority rule
+# (autonomous routine, no human approver in the loop).
+
+approval:
+  authority_level: 99
+
+tools:
+  allowed_tools: []
+
+resources:
+  allowed_global_resources: []
+
+writes:
+  write_unified_log: true
+  write_kg: false
+  allow_fact_extraction: false

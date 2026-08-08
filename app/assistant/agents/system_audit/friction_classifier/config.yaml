@@ -1,0 +1,19 @@
+name: system_audit::friction_classifier
+description: "Detects user meta-feedback about the assistant's own behavior (friction) in chat messages; opens system audit cases."
+class_name: Agent
+
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.6-luna"
+  model_tier: "mini"
+  temperature: 0.0
+
+action_required: false
+
+user_context_items:
+  - task
+
+system_context_items: []
+
+tools:
+  allowed_tools: []
