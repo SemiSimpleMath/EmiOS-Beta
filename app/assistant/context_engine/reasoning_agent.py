@@ -108,8 +108,8 @@ def run_reasoning_agent(
             data={
                 "visible_tools": ["ask_kg"],
                 "task_llm_params": {
-                    "llm_provider": "gemini",
-                    "engine": "gemini-3-flash-preview",
+                    "llm_provider": "openai",
+                    "engine": "gpt-5.6-luna",
                 },
             },
         )

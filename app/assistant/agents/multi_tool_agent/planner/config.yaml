@@ -1,8 +1,8 @@
 name: multi_tool_agent::planner
 class_name: MultiToolAgent
 llm_params:
-  llm_provider: "gemini"
-  engine: "gemini-3-flash-preview"
+  llm_provider: "openai"
+  engine: "gpt-5.6-luna"
   model_tier: "mini"
   temperature: 1
 

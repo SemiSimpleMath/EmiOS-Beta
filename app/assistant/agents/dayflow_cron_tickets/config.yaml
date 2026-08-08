@@ -1,8 +1,8 @@
 name: dayflow_cron_tickets
 class_name: Agent
 llm_params:
-  llm_provider: "gemini"
-  engine: "gemini-3-flash-preview"
+  llm_provider: "openai"
+  engine: "gpt-5.6-luna"
   model_tier: "mini"
   temperature: 0.8
 entity_scan_keys: [incoming_message, task, information, recent_history, recent_chat_messages]

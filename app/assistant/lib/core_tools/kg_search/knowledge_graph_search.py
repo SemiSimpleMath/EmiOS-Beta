@@ -412,7 +412,7 @@ class KnowledgeGraphSearch(BaseTool):
             min_similarity = 0.18
             max_description_chars = 400
             include_attributes = True
-            engine = "gemini-3-flash-preview"
+            engine = "gpt-5.6-luna"
             timeout = 60
             return_evidence = False
 
