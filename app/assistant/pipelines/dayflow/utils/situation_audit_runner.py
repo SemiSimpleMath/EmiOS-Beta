@@ -34,6 +34,13 @@ def run_situation_audit() -> dict:
         logger.info("[situation_audit] Empty snapshot, nothing to audit.")
         return {"status": "skipped", "reason": "empty_snapshot"}
 
+    # System-audit context: recent user friction + open audit cases, so the
+    # auditor's consistency findings correlate with what the user is feeling.
+    try:
+        snapshot = snapshot + "\n\n" + _audit_case_section()
+    except Exception as e:
+        logger.error("[situation_audit] audit-case section failed: %s", e)
+
     # 2. Call the auditor agent.
     try:
         scope_context = load_scope_for_source(kind="pipeline", source_id="dayflow", actor_id="situation_auditor_runner", identity_overrides={"room_id": "dayflow_orchestrator", "surface": ("ui") or "pipeline"})
@@ -66,9 +73,15 @@ def run_situation_audit() -> dict:
         overall_health, len(findings),
     )
 
-    # 4. Notify user if there are findings.
+    # 4. Findings enter the audit register (nothing evaporates); chat ping
+    # only when overall health is red (owner decision D4).
     if findings:
-        _notify_user_of_findings(findings, overall_health)
+        _findings_to_cases(findings)
+        if str(overall_health).lower() == "red":
+            _notify_user_of_findings(findings, overall_health)
+
+    # 5. Drive the audit-case pipeline: assemble -> investigate -> digest -> ingest.
+    _drive_audit_pipeline()
 
     return {
         "status": "completed",
@@ -125,3 +138,61 @@ def _notify_user_of_findings(findings: list, overall_health: str) -> None:
         logger.info("[situation_audit] Notified user of %d findings.", len(findings))
     except Exception as e:
         logger.warning("[situation_audit] Failed to notify user: %s", e)
+
+
+def _audit_case_section() -> str:
+    NL = chr(10)
+    from app.assistant.system_audit import case_store
+    lines = ["### Recent User Friction & Open Audit Cases"]
+    cases = case_store.list_cases(
+        statuses=["open", "assembled", "investigated", "awaiting_claude", "regressed"], limit=10)
+    if not cases:
+        return NL.join(lines + ["(none)"])
+    for c in cases:
+        quotes = "; ".join(q.get("quote", "") for q in (c.get("friction_quotes") or [])[:2])
+        lines.append(f"- [{c['status']}] {c['id']}: {c['summary']}"
+                     + (f" — user said: \"{quotes}\"" if quotes else ""))
+    return NL.join(lines)
+
+
+def _findings_to_cases(findings) -> None:
+    """Auditor findings open/attach id-bound cases instead of evaporating."""
+    from app.assistant.system_audit import case_store
+    for f in findings:
+        try:
+            desc = f.get("description") if isinstance(f, dict) else str(f)
+            ids = f.get("related_ids") if isinstance(f, dict) else None
+            if not (isinstance(ids, list) and ids):
+                # No ids = no dedup join — an id-less case would twin on every
+                # hourly pass. Id-less findings stay in the chat/log surface only.
+                logger.info("[situation_audit] finding without related_ids not cased: %s",
+                            str(desc)[:100])
+                continue
+            case_store.open_case(trigger_kind="auditor_finding",
+                                 room_id="dayflow_orchestrator",
+                                 bound_ids={"work_ids": [str(x) for x in ids]},
+                                 summary=f"auditor: {str(desc)[:140]}")
+        except Exception as e:
+            logger.error("[situation_audit] case for finding failed: %s", e)
+
+
+def _drive_audit_pipeline() -> None:
+    """Each stage contained: one broken stage must not silence the others."""
+    from app.assistant.system_audit import case_store, evidence, inbox, investigator_runner
+    try:
+        for c in case_store.list_cases(statuses=["open"], limit=5):
+            evidence.assemble(c["id"])
+    except Exception as e:
+        logger.error("[situation_audit] evidence assembly failed: %s", e, exc_info=True)
+    try:
+        investigator_runner.run_investigations()
+    except Exception as e:
+        logger.error("[situation_audit] investigation failed: %s", e, exc_info=True)
+    try:
+        investigator_runner.maybe_digest()
+    except Exception as e:
+        logger.error("[situation_audit] digest failed: %s", e, exc_info=True)
+    try:
+        inbox.ingest()
+    except Exception as e:
+        logger.error("[situation_audit] inbox ingest failed: %s", e, exc_info=True)

@@ -27,7 +27,7 @@ ALLOWED_TRANSITIONS: Dict[str, set] = {
     "assembled": {"investigated", "dismissed"},
     "investigated": {"awaiting_claude", "resolved", "dismissed"},
     "awaiting_claude": {"resolved", "dismissed"},
-    "regressed": {"assembled", "dismissed"},   # a regression re-enters the pipeline
+    "regressed": {"awaiting_claude", "dismissed"},   # a regression goes straight to the inbox
     "resolved": set(),
     "dismissed": set(),
 }
@@ -170,6 +170,7 @@ def list_cases(*, statuses: Optional[List[str]] = None, limit: int = 50) -> List
             "recurrence_of": c.recurrence_of, "opened_at": c.opened_at,
             "preliminary_read": c.preliminary_read,
             "repair_suggestions": c.repair_suggestions,
+            "resolution": c.resolution,
         } for c in q.limit(int(limit)).all()]
     finally:
         session.close()

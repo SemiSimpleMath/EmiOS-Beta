@@ -1,0 +1,19 @@
+name: system_audit::investigator
+description: "Deep pass over an assembled audit dossier: causal chain, implicated subsystem, repair options. Read-only reasoner; repairs are never applied autonomously."
+class_name: Agent
+
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.4"
+  model_tier: "powerful"
+  temperature: 0.1
+
+action_required: false
+
+user_context_items:
+  - task
+
+system_context_items: []
+
+tools:
+  allowed_tools: []
