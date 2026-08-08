@@ -67,7 +67,7 @@ See: [16_BELIEF_ENGINE.md](16_BELIEF_ENGINE.md)
 ### Subconscious
 The autonomous background "mind": a concerns register, proactive outreach (questions woven into chat), a daily digest, and proposer/arbiter lanes (meal, wellness, romantic, scheduling).
 
-See: [SUBCONSCIOUS.md](SUBCONSCIOUS.md), [MEAL_PLANNING.md](MEAL_PLANNING.md)
+See: [SUBCONSCIOUS.md](SUBCONSCIOUS.md), [MEAL_PLANNING.md](MEAL_PLANNING.md), [25_SYSTEM_AUDITOR.md](25_SYSTEM_AUDITOR.md)
 
 ### Pods
 Typed, URI-addressable artifacts (`datapod:kind:id`) — chat clusters, images, emails, research findings, secrets. Agents pass references, not bytes; the KG links to pods by URI (no mirror); reads go through a scope + authority gate.
