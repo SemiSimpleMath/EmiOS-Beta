@@ -160,18 +160,29 @@ def _findings_to_cases(findings) -> None:
     from app.assistant.system_audit import case_store
     for f in findings:
         try:
-            desc = f.get("description") if isinstance(f, dict) else str(f)
-            ids = f.get("related_ids") if isinstance(f, dict) else None
+            if isinstance(f, dict):
+                desc = str(f.get("summary") or "").strip()
+                details = str(f.get("details") or "").strip()
+                ids = f.get("related_ids")
+            else:
+                desc = str(getattr(f, "summary", "") or "").strip()
+                details = str(getattr(f, "details", "") or "").strip()
+                ids = getattr(f, "related_ids", None)
             if not (isinstance(ids, list) and ids):
                 # No ids = no dedup join — an id-less case would twin on every
                 # hourly pass. Id-less findings stay in the chat/log surface only.
                 logger.info("[situation_audit] finding without related_ids not cased: %s",
-                            str(desc)[:100])
+                            desc[:100])
                 continue
+            bound = {"work_ids": [], "item_ids": []}
+            for x in ids:
+                key = "work_ids" if str(x).startswith("work_") else "item_ids"
+                bound[key].append(str(x))
+            summary = f"auditor: {desc[:140]}" + (f" — {details[:120]}" if details else "")
             case_store.open_case(trigger_kind="auditor_finding",
                                  room_id="dayflow_orchestrator",
-                                 bound_ids={"work_ids": [str(x) for x in ids]},
-                                 summary=f"auditor: {str(desc)[:140]}")
+                                 bound_ids={k: v for k, v in bound.items() if v},
+                                 summary=summary)
         except Exception as e:
             logger.error("[situation_audit] case for finding failed: %s", e)
 

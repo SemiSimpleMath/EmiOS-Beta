@@ -55,6 +55,8 @@ Don't assert what's true. Reason about which signal is more reliable:
 
 ## Rules
 
+- Every finding that concerns a work object, task, or plan MUST carry their ids in `related_ids`, copied VERBATIM from the snapshot (work_... ids, task ids, plan ids). Ids are how the system joins your finding to its evidence — a finding about an identifiable object without its id cannot be acted on.
+
 - Only report genuine findings. If everything is consistent, say so.
 - Don't report things that are merely interesting but not actionable.
 - Each finding should be something a human would want to know about.

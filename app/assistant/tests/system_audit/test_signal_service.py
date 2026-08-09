@@ -99,3 +99,34 @@ class TestCaseOpening:
         monkeypatch.setattr(svc, "_classify", boom)
         svc.handle_envelope(_envelope())   # must not raise (gut contract)
         assert cs.list_cases() == []
+
+
+class TestAuditorFindingsBridge:
+    def test_finding_with_ids_opens_bucketed_case(self):
+        from app.assistant.pipelines.dayflow.utils.situation_audit_runner import _findings_to_cases
+        _findings_to_cases([{
+            "category": "conflict", "summary": "planner re-created declined work",
+            "details": "user declined; evaluator re-minted", "severity": "medium",
+            "related_ids": ["work_abc123def456", "17"],
+        }])
+        rows = cs.list_cases()
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["trigger_kind"] == "auditor_finding"
+        assert row["bound_ids"]["work_ids"] == ["work_abc123def456"]
+        assert row["bound_ids"]["item_ids"] == ["17"]
+        assert "planner re-created declined work" in row["summary"]
+
+    def test_finding_without_ids_is_not_cased(self):
+        from app.assistant.pipelines.dayflow.utils.situation_audit_runner import _findings_to_cases
+        _findings_to_cases([{"category": "anomaly", "summary": "calendar feels dense",
+                             "details": "", "severity": "medium", "related_ids": []}])
+        assert cs.list_cases() == []
+
+    def test_repeat_finding_attaches_by_id_join(self):
+        from app.assistant.pipelines.dayflow.utils.situation_audit_runner import _findings_to_cases
+        f = {"category": "conflict", "summary": "same conflict", "details": "",
+             "severity": "high", "related_ids": ["work_repeat01"]}
+        _findings_to_cases([f])
+        _findings_to_cases([f])   # next hourly pass
+        assert len(cs.list_cases()) == 1

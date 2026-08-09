@@ -19,6 +19,10 @@ class Finding(BaseModel):
         default=None,
         description="Optional: what should be done about this. Verify with user, dismiss, flag to planner, etc."
     )
+    related_ids: List[str] = Field(
+        default_factory=list,
+        description="The ids of the objects this finding is about, copied VERBATIM from the snapshot: work object ids (work_...), task ids, plan ids. Empty only when the finding concerns no identifiable object."
+    )
 
 
 class AgentForm(BaseModel):
