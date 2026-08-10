@@ -49,13 +49,13 @@ class TestClosureCascade:
         _add(store, wo.id, "prep")                       # proposed
         _add(store, wo.id, "broken", status="failed")
 
-        closed = store.apply("set_work_status", {"work_id": wo.id, "status": "done"}, actor="steward")
+        closed = store.apply("set_work_status", {"work_id": wo.id, "status": "done", "reason": "test"}, actor="steward")
 
         for node_id in ("reminder", "prep", "broken"):
             node = closed.nodes[node_id]
             assert node.status == "abandoned"
             assert node.wake_kind is None and node.wake_at is None and node.wake_ref is None
-            assert node.payload["abandoned_reason"] == "work_object_done"
+            assert node.payload["terminal"]["reason"].startswith("work_object_done")
         assert closed.nodes[closed.goal_node_id].status == "done"   # goal mirror unchanged
         # the exact incident query: no startable node inside the terminal object
         assert not [n for n in closed.nodes.values()
@@ -66,7 +66,7 @@ class TestClosureCascade:
         wo = _make_wo(store)
         _add(store, wo.id, "inflight", status="dispatched")
 
-        closed = store.apply("set_work_status", {"work_id": wo.id, "status": "abandoned"},
+        closed = store.apply("set_work_status", {"work_id": wo.id, "status": "abandoned", "reason": "test"},
                              actor="steward")
         assert closed.nodes["inflight"].status == "dispatched"      # in-flight left to land
 
@@ -89,8 +89,10 @@ class TestClosureCascade:
                                  "satisfied_when_kind": "tool_success"}, actor="test")
         _add(store, wo.id, "straggler")                  # proposed root node, outside the goal subtree
         for status in ("dispatched", "done", "closed"):
-            result = store.apply("set_status", {"work_id": wo.id, "node_id": "step",
-                                                "status": status}, actor="test")
+            d = {"work_id": wo.id, "node_id": "step", "status": status}
+            if status == "closed":
+                d["reason"] = "test"
+            result = store.apply("set_status", d, actor="test")
         assert result.status == "done"                   # rollup auto-completed the object
         assert result.nodes["straggler"].status == "abandoned"
 
@@ -111,8 +113,49 @@ class TestClosureCascade:
         healed = store.load(wo.id)
         assert healed.nodes["reminder"].status == "abandoned"
         assert healed.nodes["reminder"].wake_at is None
-        assert healed.nodes["reminder"].payload["abandoned_reason"] == "work_object_done"
+        assert healed.nodes["reminder"].payload["terminal"]["reason"].startswith("work_object_done")
         assert store.repair_terminal_zombies() == 0      # idempotent
         # the repair is itself event-logged
         ops = [e["op"] for e in store.events(wo.id)]
         assert "cascade_closure_repair" in ops
+
+
+class TestTerminalEpitaphs:
+    """Finalizer-has-final-say (owner ruling 2026-08-10): every node ENDING carries
+    its reason through the one chokepoint; reasonless terminal writes are refused."""
+
+    def test_terminal_without_reason_is_refused(self, tmp_path):
+        store = _store(tmp_path)
+        wo = store.apply("create_work_object", {"title": "t", "goal_content": "g"})
+        store.apply("add_node", {"work_id": wo.id, "id": "n1", "type": "subtask",
+                                 "parent_id": wo.goal_node_id, "title": "n1"})
+        import pytest
+        with pytest.raises(ValueError, match="requires a non-empty 'reason'"):
+            store.apply("set_status", {"work_id": wo.id, "node_id": "n1", "status": "abandoned"})
+        with pytest.raises(ValueError, match="requires a non-empty 'reason'"):
+            store.apply("set_work_status", {"work_id": wo.id, "status": "abandoned"})
+
+    def test_terminal_reason_lands_in_payload(self, tmp_path):
+        store = _store(tmp_path)
+        wo = store.apply("create_work_object", {"title": "t", "goal_content": "g"})
+        store.apply("add_node", {"work_id": wo.id, "id": "n1", "type": "subtask",
+                                 "parent_id": wo.goal_node_id, "title": "n1"})
+        store.apply("set_status", {"work_id": wo.id, "node_id": "n1", "status": "abandoned",
+                                   "verdict": "pruned_by_replan",
+                                   "reason": "deps can never satisfy"})
+        n = store.load(wo.id).nodes["n1"]
+        assert n.payload["terminal"]["reason"] == "deps can never satisfy"
+        assert n.payload["terminal"]["verdict"] == "pruned_by_replan"
+
+    def test_epitaph_rendered_for_next_planning_pass(self, tmp_path):
+        store = _store(tmp_path)
+        from app.assistant.control_nodes.work_architect_node import _render_existing_graph
+        from app.assistant.dayflow_orchestrator.work_portfolio import render_work_portfolio
+        wo = store.apply("create_work_object", {"title": "t", "goal_content": "g"})
+        store.apply("add_node", {"work_id": wo.id, "id": "n1", "type": "subtask",
+                                 "parent_id": wo.goal_node_id, "title": "doomed chain"})
+        store.apply("set_status", {"work_id": wo.id, "node_id": "n1", "status": "abandoned",
+                                   "reason": "user declined this follow-up"})
+        loaded = store.load(wo.id)
+        assert "user declined this follow-up" in _render_existing_graph(loaded)
+        assert "user declined this follow-up" in render_work_portfolio(loaded)

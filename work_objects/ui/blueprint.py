@@ -172,7 +172,8 @@ def api_node_status(work_id, node_id):
     status = str((request.get_json(silent=True) or {}).get("status") or "").strip()
     if not status:
         return jsonify({"ok": False, "error": "status required"}), 400
-    return _apply("set_status", {"work_id": work_id, "node_id": node_id, "status": status})
+    return _apply("set_status", {"work_id": work_id, "node_id": node_id, "status": status,
+                                 "reason": "owner manual edit via /work"})
 
 
 @work_ui_bp.route("/api/work/<work_id>/node/<node_id>/edit", methods=["POST"])
@@ -189,7 +190,8 @@ def api_node_edit(work_id, node_id):
 @work_ui_bp.route("/api/work/<work_id>/node/<node_id>/remove", methods=["POST"])
 def api_node_remove(work_id, node_id):
     """Soft-remove a single node: abandon it (terminal; it drops out of the active graph)."""
-    return _apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "abandoned"})
+    return _apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "abandoned",
+                                 "reason": "owner removed via /work"})
 
 
 @work_ui_bp.route("/api/work/<work_id>/node", methods=["POST"])

@@ -62,7 +62,9 @@ def persist_steward_output(store, output: Dict[str, Any]) -> Dict[str, Any]:
     for work_id in output.get("complete_work_ids", []) or []:
         work_id = str(work_id).strip()
         try:
-            store.apply("set_work_status", {"work_id": work_id, "status": "done"}, actor="steward")
+            store.apply("set_work_status", {"work_id": work_id, "status": "done",
+                                            "reason": "steward: objective judged complete against current context"},
+                        actor="steward")
             completed.append(work_id)
             propagate_work_outcome(store, work_id, "done")
         except Exception as e:
@@ -72,7 +74,9 @@ def persist_steward_output(store, output: Dict[str, Any]) -> Dict[str, Any]:
     for work_id in output.get("abandon_work_ids", []) or []:
         work_id = str(work_id).strip()
         try:
-            store.apply("set_work_status", {"work_id": work_id, "status": "abandoned"}, actor="steward")
+            store.apply("set_work_status", {"work_id": work_id, "status": "abandoned",
+                                            "reason": "steward: objective dropped (superseded, declined, or no longer relevant)"},
+                        actor="steward")
             abandoned.append(work_id)
             propagate_work_outcome(store, work_id, "abandoned")
         except Exception as e:

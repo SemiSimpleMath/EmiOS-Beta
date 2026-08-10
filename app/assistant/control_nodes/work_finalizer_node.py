@@ -106,15 +106,25 @@ class WorkFinalizerNode(ControlNode):
         if verdict == "resolve":
             disp = str(data.get("resolve_disposition") or "close").strip().lower()
             if disp == "abandon":
-                store.apply("set_work_status", {"work_id": wo.id, "status": "abandoned"}, actor="finalizer")
+                store.apply("set_work_status", {"work_id": wo.id,
+                                        "reason": f"finalizer resolve: {str(data.get('reasoning') or '')[:300]}",
+                                        "status": "abandoned"}, actor="finalizer")
                 propagate_work_outcome(store, wo.id, "abandoned")
                 return {"note": "resolve -> WO abandoned"}
-            store.apply("set_status", {"work_id": wo.id, "node_id": node.id, "status": "closed"}, actor="finalizer")
-            store.apply("set_work_status", {"work_id": wo.id, "status": "done"}, actor="finalizer")
+            store.apply("set_status", {"work_id": wo.id, "node_id": node.id, "status": "closed",
+                                   "verdict": verdict,
+                                   "reason": str(data.get("reasoning") or "finalizer accepted the result")},
+                    actor="finalizer")
+            store.apply("set_work_status", {"work_id": wo.id,
+                                        "reason": f"finalizer resolve: {str(data.get('reasoning') or '')[:300]}",
+                                        "status": "done"}, actor="finalizer")
             propagate_work_outcome(store, wo.id, "done")
             return {"note": "resolve -> WO done"}
         # proceed AND amend both close the node (its result is consumed); amend additionally re-plans.
-        store.apply("set_status", {"work_id": wo.id, "node_id": node.id, "status": "closed"}, actor="finalizer")
+        store.apply("set_status", {"work_id": wo.id, "node_id": node.id, "status": "closed",
+                                   "verdict": verdict,
+                                   "reason": str(data.get("reasoning") or "finalizer accepted the result")},
+                    actor="finalizer")
         if verdict == "amend":
             return {"replan": True, "amend_intent": str(data.get("amend_intent") or ""), "note": "amend -> closed + replan"}
         return {"note": "proceed -> closed"}

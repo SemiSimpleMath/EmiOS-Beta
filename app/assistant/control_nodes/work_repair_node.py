@@ -55,7 +55,8 @@ class WorkRepairNode(ControlNode):
                         ask = str(data.get("ask") or "")
                         if not disp:
                             continue
-                        res = apply_adjudication(store, wo.id, disp, ask=ask)
+                        res = apply_adjudication(store, wo.id, disp, ask=ask,
+                                                 reason=str(data.get("reasoning") or "").strip())
                         repaired.append(res)
                         logger.info("[%s] %s -> %s (targets=%s)", self.name, wo.id, disp, res.get("targets"))
                     except Exception as e:

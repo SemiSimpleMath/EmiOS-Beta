@@ -75,7 +75,7 @@ class TestDispatchEpoch:
         store.apply("set_status", {"work_id": wid, "node_id": nid, "status": "dispatched"}, actor="t")
         # Finalizer/sweeper-style writes carry no expected epoch — no fence applied.
         store.apply("set_status", {"work_id": wid, "node_id": nid, "status": "done"}, actor="worker")
-        store.apply("set_status", {"work_id": wid, "node_id": nid, "status": "closed"}, actor="finalizer")
+        store.apply("set_status", {"work_id": wid, "node_id": nid, "status": "closed", "reason": "test"}, actor="finalizer")
         assert store.load(wid).nodes[nid].status == "closed"
 
 

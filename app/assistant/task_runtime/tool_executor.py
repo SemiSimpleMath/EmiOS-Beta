@@ -74,13 +74,17 @@ def execute_claimed_tool_node(store, work_id: str, node_id: str, scope,
             _record_loop_iteration(store, work_id, node_id)
         if _rearm_if_incomplete(store, work_id, node_id):
             return   # loop: the node's done-condition isn't met yet -> re-armed, runs again
-        store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "done"}, actor="task_runner")
-        store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "closed"}, actor="task_runner")
+        store.apply("set_status", {"reason": "task runner: tool node result recorded",
+                                   "work_id": work_id, "node_id": node_id, "status": "done"}, actor="task_runner")
+        store.apply("set_status", {"reason": "task runner: tool node result recorded",
+                                   "work_id": work_id, "node_id": node_id, "status": "closed"}, actor="task_runner")
         if node.payload.get("is_end"):     # reach-end completion (not all-children-done)
-            store.apply("set_work_status", {"work_id": work_id, "status": "done"}, actor="task_runner")
+            store.apply("set_work_status", {"work_id": work_id, "status": "done",
+                                            "reason": "task runner: goal satisfied"}, actor="task_runner")
     except Exception as e:
         logger.error("[task_runner] tool node %s::%s failed: %s", work_id, node_id, e)
-        store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "failed",
+        store.apply("set_status", {"reason": "task runner: tool node result recorded",
+                                   "work_id": work_id, "node_id": node_id, "status": "failed",
                                    "content": str(e)[:500]}, actor="task_runner")
 
 
@@ -142,7 +146,8 @@ def _rearm_if_incomplete(store, work_id: str, node_id: str) -> bool:
                                            "status": "actionable"}, actor="task_runner")
                 return True
 
-    store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "waiting"}, actor="task_runner")
+    store.apply("set_status", {"reason": "task runner: tool node result recorded",
+                                   "work_id": work_id, "node_id": node_id, "status": "waiting"}, actor="task_runner")
     return True
 
 

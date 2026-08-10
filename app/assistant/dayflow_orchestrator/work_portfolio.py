@@ -108,7 +108,9 @@ def render_work_portfolio(wo, now=None) -> str:
             unmet = [d for d in wo.deps_of(n.id) if d in wo.nodes and not wo.is_satisfied(wo.nodes[d])]
             blk = f" BLOCKED({len(unmet)} dep)" if unmet else ""
             flag = " ⚠FAILED" if n.status == "failed" else ""
-            L.append(f"  - [{n.status}]{roll}{blk}{flag} {_t(n)}")
+            term = (n.payload or {}).get("terminal")
+            why = f"  — why: {str(term.get('reason'))[:100]}" if isinstance(term, dict) else ""
+            L.append(f"  - [{n.status}]{roll}{blk}{flag} {_t(n)}{why}")
 
     waiting = [n for n in wo.nodes.values()
                if n.status == "waiting" or (n.wake_at is not None and n.wake_at > now)]

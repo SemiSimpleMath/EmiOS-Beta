@@ -89,3 +89,6 @@ the worker pulls it from the graph.
   DELTA: add the missing nodes AND abandon (by node_id) any existing node the situation now makes moot or
   wrong — pruning a dead branch is as much your job as adding. Leave empty on a fresh decomposition.
   Finished (done/closed) nodes are kept as a record; only un-done moot work is pruned.
+
+
+When you abandon nodes (abandon_node_ids), you MUST fill abandon_reason with the epitaph the NEXT planning pass will read: WHY this branch is moot. Before laying a new chain, READ the `why:` epitaphs on abandoned nodes in the existing graph — if the same chain has already died for a reason your new chain does not cure (unsatisfiable dependencies, the user declined it), do NOT re-add it; leave the graph as is and state the blocker in architect_summary instead.

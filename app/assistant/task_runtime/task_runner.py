@@ -96,7 +96,9 @@ def _close_dead_branches(store, wo, facts) -> None:
             if _is_wait_like(n):
                 continue
             if _guard_or_fail(store, wo, n, facts) is False:
-                store.apply("set_status", {"work_id": wo.id, "node_id": n.id, "status": "abandoned"},
+                store.apply("set_status", {"work_id": wo.id, "node_id": n.id, "status": "abandoned",
+                                       "verdict": "branch_closed",
+                                       "reason": "task runner: guard provably false — branch not taken"},
                             actor="task_runner")
 
 
@@ -121,7 +123,8 @@ def _run_action_node(store, work_id: str, node_id: str, scope=None) -> None:
         return
     cur = store.load(work_id).nodes.get(node_id)
     if cur is not None and cur.status == "done":
-        store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "closed"}, actor="task_runner")
+        store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "closed",
+                                   "reason": "task runner: action node done (a task has no separate finalizer)"}, actor="task_runner")
 
 
 def _has_future_wake(wo, now) -> bool:
@@ -183,7 +186,8 @@ def drive(store, work_id: str, *, scope, scope_contract_enforced: bool = True) -
                 logger.error("[task_runner] %s STALLED — non-terminal work with nothing runnable: %s",
                              work_id, remaining)
                 return "stalled"
-            store.apply("set_work_status", {"work_id": work_id, "status": "done"}, actor="task_runner")
+            store.apply("set_work_status", {"work_id": work_id, "status": "done",
+                                        "reason": "task runner: reach-end — all work resolved"}, actor="task_runner")
             return "done"
 
         # Claim the whole ready frontier synchronously (no double-dispatch), then run it in ONE

@@ -25,7 +25,7 @@ def find_failed_targets(wo):
     return top or [n for n in wo.nodes.values() if n.status == "failed"]
 
 
-def apply_adjudication(store, work_id, disposition, ask="", actor="work_repair"):
+def apply_adjudication(store, work_id, disposition, ask="", actor="work_repair", reason=""):
     """Apply ONE disposition to work_id's failed node(s). Returns {work_id, disposition, targets}."""
     disposition = (disposition or "").strip().lower()
     if disposition not in DISPOSITIONS:
@@ -33,7 +33,9 @@ def apply_adjudication(store, work_id, disposition, ask="", actor="work_repair")
 
     if disposition == "abandon_goal":
         from app.assistant.subconscious.concern_feedback import propagate_work_outcome
-        store.apply("set_work_status", {"work_id": work_id, "status": "abandoned"}, actor=actor)
+        store.apply("set_work_status", {"work_id": work_id, "status": "abandoned",
+                                        "reason": f"work_repair abandon_goal: {reason or 'unachievable or no longer wanted'}"},
+                    actor=actor)
         propagate_work_outcome(store, work_id, "abandoned")
         logger.info("work_repair[%s]: abandon_goal", work_id)
         return {"work_id": work_id, "disposition": disposition, "targets": []}

@@ -50,6 +50,9 @@ class AgentForm(BaseModel):
     nodes: List[WorkNode] = Field(
         default_factory=list,
         description="The DAG of work nodes for this goal. Keep it lean — 1-5 nodes for most goals.")
+    abandon_reason: str = Field(
+        default="",
+        description="RE-PLAN ONLY: WHY the abandoned nodes are moot — one sentence, written for the NEXT planning pass to read as the epitaph (e.g. 'deps can never satisfy: research nodes are done but unclosable' or 'user declined this follow-up'). Required whenever abandon_node_ids is non-empty.")
     abandon_node_ids: List[str] = Field(
         default_factory=list,
         description="RE-PLAN ONLY (leave empty on a fresh decomposition): node_ids of EXISTING nodes the "

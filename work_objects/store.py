@@ -47,7 +47,8 @@ def _cascade_abandon_startable(wo: WorkObject, now: str, reason: str) -> int:
             node.wake_kind = None
             node.wake_at = None
             node.wake_ref = None
-            node.payload["abandoned_reason"] = reason
+            node.payload["terminal"] = {"status": "abandoned", "verdict": "cascade",
+                                        "reason": reason, "at": now}
             node.updated_at = now
             count += 1
     return count
@@ -344,6 +345,24 @@ class WorkStore:
             if target not in allowed:
                 raise ValueError(
                     f"illegal transition {node.status!r}->{target!r} for {node.type} ({family})")
+        # FINALIZER HAS FINAL SAY (owner ruling 2026-08-10): every node ENDING goes
+        # through this one chokepoint and must carry its epitaph. A terminal write
+        # without a reason is refused — the graph records WHY, not just what, so the
+        # next planning pass reads epitaphs instead of a mute corpse pile (the
+        # AC-object replan loop: 187 reasonless abandons).
+        _TERMINAL_TARGETS = {"closed", "abandoned", "superseded"}
+        if target in _TERMINAL_TARGETS and target != node.status:
+            reason = str(data.get("reason") or "").strip()
+            if not reason:
+                raise ValueError(
+                    f"set_status: terminal transition to {target!r} for node "
+                    f"{node.id!r} requires a non-empty 'reason'")
+            node.payload["terminal"] = {
+                "status": target,
+                "verdict": str(data.get("verdict") or target),
+                "reason": reason,
+                "at": now,
+            }
         prev = node.status
         node.status = target
         if target == "dispatched" and prev != "dispatched":
@@ -398,13 +417,22 @@ class WorkStore:
         target = data["status"]
         if target not in ("active", "done", "abandoned", "blocked"):
             raise ValueError(f"set_work_status: bad status {target!r}")
+        if target in ("done", "abandoned"):
+            reason = str(data.get("reason") or "").strip()
+            if not reason:
+                raise ValueError(
+                    f"set_work_status: terminal status {target!r} for {wo.id!r} "
+                    f"requires a non-empty 'reason'")
+            wo.constraints["terminal"] = {"status": target, "reason": reason, "at": now}
         wo.status = target
         if target in ("done", "abandoned"):
             goal = wo.nodes.get(wo.goal_node_id or "")
             if goal is not None and goal.status not in _TERMINAL_STATUSES:
                 goal.status = target
+                goal.payload["terminal"] = {"status": target, "verdict": "work_object_terminal",
+                                            "reason": str(data.get("reason")), "at": now}
                 goal.updated_at = now
-            _cascade_abandon_startable(wo, now, reason=f"work_object_{target}")
+            _cascade_abandon_startable(wo, now, reason=f"work_object_{target}: {data.get('reason')}")
 
     # ----------------------------- persistence ----------------------------- #
     def _persist(self, wo: WorkObject, now: str) -> None:

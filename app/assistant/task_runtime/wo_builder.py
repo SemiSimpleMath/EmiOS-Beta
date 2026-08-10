@@ -360,6 +360,7 @@ def instantiate_template(store, template: dict, *, created_by: str = "task_runne
                                      "payload": {"data_id": str(f["data_id"]), "value": f.get("value")}},
                         actor=created_by)
     except Exception:
-        store.apply("set_work_status", {"work_id": wid, "status": "abandoned"}, actor=created_by)
+        store.apply("set_work_status", {"work_id": wid, "status": "abandoned",
+                                        "reason": "task builder: superseded/invalid build"}, actor=created_by)
         raise
     return wid

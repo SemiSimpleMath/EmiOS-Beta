@@ -49,7 +49,8 @@ def _work_ns(work_id: str) -> str:
 
 
 def apply_architect_dag(store, work_id: str, nodes: List[Dict[str, Any]],
-                        abandon_node_ids: List[str] | None = None) -> Dict[str, Any]:
+                        abandon_node_ids: List[str] | None = None,
+                        abandon_reason: str = "") -> Dict[str, Any]:
     """Apply an architect DELTA onto a work object's graph. On a fresh decompose it just adds nodes; on a
     RE-PLAN it can also PRUNE: abandon each `abandon_node_ids` node + its un-finished ownership subtree
     (the store does not cascade — dependent-pruning #54 — so we recurse children here, leaving done/closed
@@ -71,7 +72,10 @@ def apply_architect_dag(store, work_id: str, nodes: List[Dict[str, Any]],
         if wo.nodes[nid].status in _ABANDON_SKIP:
             continue   # finished/already-gone — preserve the record, don't recurse a done branch
         try:
-            store.apply("set_status", {"work_id": work_id, "node_id": nid, "status": "abandoned"}, actor="architect")
+            store.apply("set_status", {"work_id": work_id, "node_id": nid, "status": "abandoned",
+                                       "verdict": "pruned_by_replan",
+                                       "reason": abandon_reason or "architect re-plan pruned this branch (no stated reason)"},
+                        actor="architect")
             abandoned.append(nid)
         except Exception as e:
             logger.warning("apply_architect_dag: abandon %s failed: %s", nid, e)

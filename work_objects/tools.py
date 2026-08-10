@@ -137,7 +137,8 @@ class WorkGraphTools:
         self.store.apply("set_status", {"work_id": self.work_id, "node_id": self.node_id, "status": "failed"}, actor=self.actor)
 
     def abandon(self, reason: str = "") -> None:
-        self.store.apply("set_status", {"work_id": self.work_id, "node_id": self.node_id, "status": "abandoned"}, actor=self.actor)
+        self.store.apply("set_status", {"work_id": self.work_id, "node_id": self.node_id, "status": "abandoned",
+                                        "reason": f"worker abandoned: {reason or 'no stated reason'}"}, actor=self.actor)
 
     # ----------------------------- helpers ----------------------------- #
     @staticmethod

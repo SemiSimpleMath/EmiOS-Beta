@@ -32,7 +32,9 @@ def _render_existing_graph(wo) -> str:
         if n.id == wo.goal_node_id:
             continue
         wake = f" wake={n.wake_kind}" if getattr(n, "wake_kind", None) else ""
-        lines.append(f"- {n.id} | {n.title} | status={n.status}{wake}")
+        term = (n.payload or {}).get("terminal") if hasattr(n, "payload") else None
+        why = f" | why: {str(term.get('reason'))[:100]}" if isinstance(term, dict) else ""
+        lines.append(f"- {n.id} | {n.title} | status={n.status}{wake}{why}")
     return "\n".join(lines) or "(no subtask nodes yet)"
 
 
@@ -132,6 +134,7 @@ class WorkArchitectNode(ControlNode):
                         result = agent.action_handler(Message(task=task, information=info, scope_context=scope))
                         data = getattr(result, "data", {}) or {}
                         res = apply_architect_dag(store, work_id, data.get("nodes", []) or [],
+                                                  abandon_reason=str(data.get("abandon_reason") or "").strip(),
                                                   abandon_node_ids=data.get("abandon_node_ids", []) or [])
                         replanned.append({"work_id": work_id, "added": len(res.get("added", [])),
                                           "abandoned": len(res.get("abandoned", []))})

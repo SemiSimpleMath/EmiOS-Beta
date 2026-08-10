@@ -73,7 +73,8 @@ def _after_drive(store, work_id: str, status: str) -> None:
             # A dead run is TERMINAL — a retry is a fresh instance. Leaving it `active`
             # accumulated permanent residue the boot re-arm rescanned forever
             # (2026-07-12 incident: three stuck-active morning_briefing husks).
-            store.apply("set_work_status", {"work_id": work_id, "status": "abandoned"},
+            store.apply("set_work_status", {"work_id": work_id, "status": "abandoned",
+                                            "reason": "task runner: run cancelled/failed at entry"},
                         actor="task_runner")
 
 
