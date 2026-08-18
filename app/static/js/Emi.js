@@ -1,9 +1,43 @@
+// ==================== Proxy prefix support ====================
+// Templates set window.SCRIPT_NAME from Flask's request.script_root. It is ""
+// when EmiOS is served at the domain root, and the mount path (e.g. "/emi")
+// when EMI_PROXY_SUBPATH puts it behind a prefix-stripping reverse proxy.
+window.SCRIPT_NAME = window.SCRIPT_NAME || "";
+
+// Auto-prefix root-absolute fetch URLs so the many hardcoded "/api/..." call
+// sites keep working behind a subpath proxy.
+(function () {
+    var _fetch = window.fetch;
+    window.fetch = function (url, opts) {
+        var prefix = window.SCRIPT_NAME || "";
+        // The "already prefixed" guard must compare against the CONFIGURED
+        // prefix, not a literal "/emi/". Hardcoding that string meant any
+        // other EMI_PROXY_SUBPATH value ("/assistant", say) double-prefixed
+        // every URL that had already been built correctly, while an install
+        // genuinely mounted at /emi skipped app routes that happen to start
+        // with those characters.
+        if (
+            prefix &&
+            typeof url === "string" &&
+            url.charAt(0) === "/" &&
+            url.charAt(1) !== "/" &&           // leave protocol-relative //host alone
+            url !== prefix &&
+            !url.startsWith(prefix + "/")
+        ) {
+            url = prefix + url;
+        }
+        return _fetch.call(this, url, opts);
+    };
+})();
+
 // ==================== Global Variables ====================
 let audioChunks = [];
 let isRecording = false;
 let mediaRecorder;
 let mediaStream;
-let socket = io.connect(`${window.location.protocol}//${document.domain}:${location.port}`);
+let socket = io.connect(`${window.location.protocol}//${document.domain}:${location.port}`, {
+    path: (window.SCRIPT_NAME || "") + "/socket.io"
+});
 // Global accessor so other modules (e.g. EmiTaskCreatePanel) can get the live socket id.
 window.EmiGetSocketId = () => (socket ? socket.id : "");
 let audioQueue = [];
@@ -1578,7 +1612,7 @@ function renderCalendarEvents() {
  * @returns {Promise<Object>} - The parsed JSON response.
  */
 async function callToolRoute(toolName, action, payload = {}) {
-    const url = /tool/;
+    const url = '/tool/';
     try {
         const response = await fetch(url, {
             method: 'POST',
