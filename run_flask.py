@@ -105,7 +105,10 @@ def _seed_runtime_configs() -> None:
         else:
             print("✔ config seed: volume already has all default configs")
     except Exception as e:
-        print(f"⚠ config seed skipped: {e}", file=sys.stderr)
+        # A half-seeded configs volume boots into silently-missing routines and
+        # disabled subsystems — refuse to start instead of warning and limping on.
+        print(f"✗ config seed FAILED: {e}", file=sys.stderr)
+        raise
 
 
 _seed_runtime_configs()

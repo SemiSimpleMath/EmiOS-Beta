@@ -537,14 +537,16 @@ class UserSettingsManager:
             # whichever provider is the active default (DEFAULT_LLM_PROVIDER),
             # falling back to any configured LLM key.
             if api_key_provider == 'llm':
-                active = (os.environ.get("DEFAULT_LLM_PROVIDER") or "").strip() or "openai"
-                if self.get_api_key(active):
-                    continue
-                # Fall back to any known LLM provider key so the feature can
-                # still enable when a key exists but the default is unset.
-                if any(self.get_api_key(p) for p in ("opencode", "openai", "anthropic", "gemini", "google")):
-                    continue
-                missing_api_keys.append("llm")
+                # Satisfied by ANY registered LLM provider key. The candidate
+                # list derives from the provider registry (_PROVIDER_KEY_ENV)
+                # so it can never drift from llm_classes_dict; the settings
+                # name is the env var minus _API_KEY, which is also why
+                # gemini's key checks under 'google', not 'gemini'.
+                from app.configs.llm_classes_dict import _PROVIDER_KEY_ENV
+                llm_names = {v[: -len("_API_KEY")].lower()
+                             for v in _PROVIDER_KEY_ENV.values()}
+                if not any(self.get_api_key(p) for p in sorted(llm_names)):
+                    missing_api_keys.append("llm")
                 continue
             if not self.get_api_key(api_key_provider):
                 missing_api_keys.append(api_key_provider)

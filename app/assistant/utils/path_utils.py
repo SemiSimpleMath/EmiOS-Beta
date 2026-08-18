@@ -230,16 +230,16 @@ def setup_complete() -> bool:
         return True
 
     # Installs created before the flag moved still have it at the repo root.
-    # Without this fallback every one of them reads as "never set up" after an
-    # upgrade and gets sent back through the setup wizard. Checked second so a
-    # data-dir flag always wins; get_repo_root() can equal get_data_dir() in a
-    # dev checkout, which is harmless.
+    # Without this legacy probe every one of them reads as "never set up" after
+    # an upgrade and gets sent back through the setup wizard. Checked second so
+    # a data-dir flag always wins; get_repo_root() can equal get_data_dir() in
+    # a dev checkout, which is harmless. OSError only: a malformed EMI_ROOT
+    # path must not read as "setup incomplete", and nothing else here can
+    # fail — any other exception is a bug and propagates.
     try:
         if (get_repo_root() / ".setup_complete").exists():
             return True
-    except Exception:
-        # get_repo_root() is best-effort — a packaged install may have no repo
-        # to find. Absence of the legacy flag is not an error.
+    except OSError:
         pass
 
     return False

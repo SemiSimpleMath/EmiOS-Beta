@@ -64,12 +64,15 @@ def create_app(config_class="config.DevelopmentConfig"):
     #
     # NOTE this does not make direct access safe on its own: bind the app to
     # localhost, or firewall its port, so the proxy is the only route in.
+    _hops_raw = _os.environ.get("EMI_TRUST_PROXY_HEADERS", "1" if _proxy_path else "0")
     try:
-        _trusted_hops = int(
-            _os.environ.get("EMI_TRUST_PROXY_HEADERS", "1" if _proxy_path else "0")
-        )
+        _trusted_hops = int(_hops_raw)
     except ValueError:
-        _trusted_hops = 1 if _proxy_path else 0
+        # This knob decides whether attacker-controllable headers are trusted —
+        # a malformed value must refuse to boot, never fall back to a guess.
+        raise ValueError(
+            f"EMI_TRUST_PROXY_HEADERS must be an integer hop count, got {_hops_raw!r}"
+        ) from None
 
     if _trusted_hops > 0:
         from werkzeug.middleware.proxy_fix import ProxyFix
