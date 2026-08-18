@@ -107,6 +107,66 @@ class TestOpenAITranslation:
         assert lc._translate_openai_exception(_FakeOpenAIError("500 boom")) is None
 
 
+# ── OpenCode Zen: plan-level caps arrive as an ordinary 429 ───────
+#
+# OpenAI-compatible third parties do not set error.code == "insufficient_quota".
+# OpenCode returns a 429 whose body carries GoUsageLimitError plus the window
+# name, so without an explicit check it reads as a per-minute rate limit and
+# gets retried — for as long as the cap lasts (observed: 3 days).
+
+_OPENCODE_WEEKLY_429 = (
+    "Error code: 429 - {'type': 'error', 'error': {'type': 'GoUsageLimitError', "
+    "'message': 'Weekly usage limit reached. Resets in 3 days. To continue using "
+    "this model now, enable usage from your available balance: "
+    "https://opencode.ai/workspace/wrk_TEST/go'}, "
+    "'metadata': {'workspace': 'wrk_TEST', 'limitName': 'weekly'}}"
+)
+
+
+class TestOpenCodeUsageLimits:
+    def test_weekly_usage_limit_is_billing_not_transient(self):
+        out = lc._translate_openai_exception(
+            _FakeRateLimitError(_OPENCODE_WEEKLY_429), provider="opencode"
+        )
+        assert isinstance(out, BillingQuotaExhausted)
+        assert out.provider == "opencode"
+        assert is_transient(out) is False
+
+    def test_weekly_limit_without_sdk_type_still_billing(self):
+        out = lc._translate_openai_exception(
+            _FakeOpenAIError(_OPENCODE_WEEKLY_429), provider="opencode"
+        )
+        assert isinstance(out, BillingQuotaExhausted)
+
+    def test_per_minute_rate_limit_still_retries(self):
+        # A genuine short-window 429 must stay retryable.
+        out = lc._translate_openai_exception(
+            _FakeRateLimitError("429 rate_limit_exceeded: requests per minute"),
+            provider="opencode",
+        )
+        assert isinstance(out, TransientRateLimit)
+        assert is_transient(out) is True
+
+    def test_openai_translation_unchanged_by_default_provider(self):
+        out = lc._translate_openai_exception(
+            _FakeOpenAIError("Error 429", code="insufficient_quota")
+        )
+        assert out.provider == "openai"
+
+    @pytest.mark.parametrize(
+        "message,expected",
+        [
+            ("Weekly usage limit reached", True),
+            ("GoUsageLimitError", True),
+            ("{'limitName': 'monthly'}", True),
+            ("429 requests per minute", False),
+            ("500 internal error", False),
+        ],
+    )
+    def test_marker_detection(self, message, expected):
+        assert lc._is_long_window_usage_limit(Exception(message)) is expected
+
+
 class _FakeGeminiError(Exception):
     def __init__(self, message, code=429, status="RESOURCE_EXHAUSTED", details=None):
         super().__init__(message)

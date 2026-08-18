@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from app.services.llm_factory import LLMFactory
+from app.configs.llm_classes_dict import _key_is_present
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -30,17 +31,39 @@ def _load_model_tiers() -> dict:
 
 
 def _is_provider_available(provider: str) -> bool:
-    """Check if a provider has credentials configured."""
-    if provider == "openai":
-        key = os.environ.get("OPENAI_API_KEY", "").strip()
-        return bool(key) and not key.startswith("your_") and not key.startswith("sk-placeholder")
-    elif provider == "gemini":
-        key = os.environ.get("GOOGLE_API_KEY", "").strip()
-        return bool(key) and not key.startswith("your_") and not key.startswith("placeholder")
-    elif provider == "anthropic":
-        key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-        return bool(key) and not key.startswith("your_") and not key.startswith("placeholder")
-    return False
+    """Check if a provider has credentials configured.
+
+    Thin alias over the provider registry's _key_is_present. This used to be a
+    hand-rolled if/elif chain that needed extending for every new provider and
+    had already drifted from the registry's rules — it tested prefixes where
+    the registry tested exact matches, so the two disagreed on values like
+    "your_opencode_api_key_here". Registry-driven now, so a provider added to
+    llm_classes_dict is understood here with no further edits.
+    """
+    return _key_is_present(provider)
+
+
+# Warn once per (requested provider, fallback provider, tier). Without this
+# the fallback emits a WARNING on literally every agent call, which is what
+# buried the real errors in the log.
+_fallback_warned: set[tuple[str, str, str]] = set()
+
+
+def _fallback_provider_order(provider: str) -> tuple[str, ...]:
+    """Providers to try, most-preferred first, excluding *provider* itself.
+
+    DEFAULT_LLM_PROVIDER is tried first so this agrees with the rerouting
+    LLMFactory.resolve_effective_params already performs. This used to be a
+    hardcoded tuple, so the correct provider was only ever chosen by accident
+    of ordering — and a deployment whose default was not listed first would
+    silently land on a different provider than the factory picked.
+    """
+    order = ["opencode", "openai", "gemini", "anthropic"]
+    default = os.environ.get("DEFAULT_LLM_PROVIDER", "").strip().lower()
+    if default in order:
+        order.remove(default)
+        order.insert(0, default)
+    return tuple(p for p in order if p != provider)
 
 
 def _resolve_provider_fallback(
@@ -53,9 +76,7 @@ def _resolve_provider_fallback(
     tiers = _load_model_tiers()
 
     # Find a fallback provider.
-    for fallback_provider in ("openai", "gemini", "anthropic"):
-        if fallback_provider == provider:
-            continue
+    for fallback_provider in _fallback_provider_order(provider):
         if not _is_provider_available(fallback_provider):
             continue
 
@@ -65,13 +86,22 @@ def _resolve_provider_fallback(
         fallback_engine = str(tier_cfg.get(fallback_provider) or "").strip()
         if not fallback_engine:
             # Last resort hardcoded defaults.
-            _defaults = {"openai": "gpt-5.6-luna", "gemini": "gemini-3-flash-preview", "anthropic": "claude-3-5-haiku-20241022"}
+            _defaults = {"openai": "gpt-5.6-luna", "gemini": "gemini-3-flash-preview", "anthropic": "claude-3-5-haiku-20241022", "opencode": "kimi-k2.7-code"}
             fallback_engine = _defaults.get(fallback_provider, "gpt-5-mini")
 
-        logger.warning(
-            "[%s] Provider '%s' not available, falling back to '%s' engine='%s' (tier=%s).",
-            agent_name, provider, fallback_provider, fallback_engine, tier,
-        )
+        _warn_key = (provider, fallback_provider, tier)
+        if _warn_key not in _fallback_warned:
+            _fallback_warned.add(_warn_key)
+            logger.warning(
+                "[%s] Provider '%s' not available, falling back to '%s' engine='%s' (tier=%s). "
+                "Repeats of this pairing log at debug level.",
+                agent_name, provider, fallback_provider, fallback_engine, tier,
+            )
+        else:
+            logger.debug(
+                "[%s] Provider '%s' not available, falling back to '%s' engine='%s' (tier=%s).",
+                agent_name, provider, fallback_provider, fallback_engine, tier,
+            )
         params = dict(params)
         params["llm_provider"] = fallback_provider
         params["engine"] = fallback_engine

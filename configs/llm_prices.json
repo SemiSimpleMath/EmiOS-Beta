@@ -24,5 +24,13 @@
   "claude-3-5-sonnet-20241022": {"input_per_1m_usd": 3.0,  "output_per_1m_usd": 15.0},
 
   "gemini-3-flash-preview": {"input_per_1m_usd": 0.50, "output_per_1m_usd": 3.00},
-  "gemini-3-pro-preview":   {"input_per_1m_usd": 1.25, "output_per_1m_usd": 5.00}
+  "gemini-3-pro-preview":   {"input_per_1m_usd": 1.25, "output_per_1m_usd": 5.00},
+
+  "_opencode_comment": "OpenCode Zen (Go plan) is a flat-rate subscription: tokens are drawn against a weekly quota, not billed per token, so the marginal USD cost of a call really is 0. These entries exist to record that deliberately rather than leaving the engines unpriced — an absent entry ALSO records $0 but emits a 'no price entry' warning per engine, which is indistinguishable from a genuine pricing gap. Track OpenCode consumption via token counts and the quota window, not cost_usd. If you switch to pay-as-you-go balance billing (opencode.ai/workspace → available balance), replace these zeros with the per-model rates from the Zen pricing page.",
+  "kimi-k2.5":         {"input_per_1m_usd": 0.0, "output_per_1m_usd": 0.0},
+  "kimi-k2.7-code":    {"input_per_1m_usd": 0.0, "output_per_1m_usd": 0.0},
+  "glm-5.2":           {"input_per_1m_usd": 0.0, "output_per_1m_usd": 0.0},
+  "deepseek-v4-pro":   {"input_per_1m_usd": 0.0, "output_per_1m_usd": 0.0},
+  "deepseek-v4-flash": {"input_per_1m_usd": 0.0, "output_per_1m_usd": 0.0},
+  "grok-4.5":          {"input_per_1m_usd": 0.0, "output_per_1m_usd": 0.0}
 }

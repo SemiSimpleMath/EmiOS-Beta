@@ -194,6 +194,7 @@ try:
     from app.assistant.database import kg_pipeline_models  # noqa: F401
     from app.assistant.database import kg_revision_log  # noqa: F401
     from app.assistant.database import processed_entity_log  # noqa: F401
+    from app.assistant.database.pending_question import PendingQuestion  # noqa: F401
     Base.metadata.create_all(engine, checkfirst=True)
     print("   Knowledge Graph tables created.")
 except Exception as e:
@@ -451,7 +452,7 @@ def print_next_steps():
     print()
     print("2. On first launch, the setup wizard will guide you through:")
     print("   - Your profile and preferences")
-    print("   - Choosing an AI provider (OpenAI, Gemini, or Claude)")
+    print("   - Choosing an AI provider (OpenAI, Gemini, Claude, or OpenCode Go)")
     print("   - Naming and personalising your assistant")
     print()
     print("Documentation:")

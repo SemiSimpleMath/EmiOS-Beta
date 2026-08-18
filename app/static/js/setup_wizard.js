@@ -94,11 +94,15 @@ document.addEventListener('DOMContentLoaded', async function() {
 
 // ── Provider selection ────────────────────────────────────────────────────────
 
+function apiUrl(path) {
+    return (window.SCRIPT_NAME || '') + path;
+}
+
 function handleProviderChange() {
     const provider = document.querySelector('input[name="llm_provider"]:checked').value;
 
     // Toggle field panels
-    ['openai', 'gemini', 'anthropic'].forEach(p => {
+    ['openai', 'gemini', 'anthropic', 'opencode'].forEach(p => {
         const fields = document.getElementById(`fields-${p}`);
         const card = document.getElementById(`provider-card-${p}`);
         if (fields) fields.style.display = p === provider ? 'block' : 'none';
@@ -117,6 +121,7 @@ function getProviderApiKey() {
         openai: 'openai_api_key',
         gemini: 'gemini_api_key',
         anthropic: 'anthropic_api_key',
+        opencode: 'opencode_api_key',
     };
     const el = document.getElementById(fieldMap[provider]);
     return el ? el.value.trim() : '';
@@ -128,6 +133,7 @@ function getProviderModel() {
         openai: 'openai_model',
         gemini: 'gemini_model',
         anthropic: 'anthropic_model',
+        opencode: 'opencode_model',
     };
     const el = document.getElementById(fieldMap[provider]);
     return el ? el.value : '';
@@ -150,7 +156,7 @@ async function handleKgInit() {
     messageSpan.textContent = 'Loading embedding model and seeding core nodes (this may take 30–60 s on first run)…';
 
     try {
-        const response = await fetch('/api/setup/seed-kg', { method: 'POST' });
+        const response = await fetch(apiUrl('/api/setup/seed-kg'), { method: 'POST' });
         const result = await response.json();
 
         if (result.success) {
@@ -170,7 +176,7 @@ async function handleKgInit() {
 
         // Show a continue button after short delay
         setTimeout(() => {
-            window.location.href = '/chat_bot';
+            window.location.href = apiUrl('/chat_bot');
         }, result.success ? 3000 : 0);
 
     } catch (error) {
@@ -185,7 +191,7 @@ async function handleKgInit() {
 }
 
 function handleKgSkip() {
-    window.location.href = '/chat_bot';
+    window.location.href = apiUrl('/chat_bot');
 }
 
 // ── Existing helpers (unchanged) ─────────────────────────────────────────────
@@ -342,7 +348,7 @@ function validateStep(step) {
         const provider = getSelectedProvider();
         const apiKey = getProviderApiKey();
         if (!apiKey) {
-            const labels = { openai: 'OpenAI', gemini: 'Google Gemini', anthropic: 'Anthropic' };
+            const labels = { openai: 'OpenAI', gemini: 'Google Gemini', anthropic: 'Anthropic', opencode: 'OpenCode Go' };
             showError(`Please enter your ${labels[provider]} API key`);
             return false;
         }
@@ -479,6 +485,7 @@ function collectFormData() {
         openai_api_key: (document.getElementById('openai_api_key') || {}).value?.trim() || null,
         gemini_api_key: (document.getElementById('gemini_api_key') || {}).value?.trim() || null,
         anthropic_api_key: (document.getElementById('anthropic_api_key') || {}).value?.trim() || null,
+        opencode_api_key: (document.getElementById('opencode_api_key') || {}).value?.trim() || null,
         timezone: document.getElementById('timezone').value
     };
 }
@@ -488,7 +495,7 @@ function collectFormData() {
 function saveDraft() {
     const data = collectFormData();
     data._step = currentStep;
-    fetch('/api/setup/save-draft', {
+    fetch(apiUrl('/api/setup/save-draft'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -497,7 +504,7 @@ function saveDraft() {
 
 async function restoreDraft() {
     try {
-        const resp = await fetch('/api/setup/load-draft');
+        const resp = await fetch(apiUrl('/api/setup/load-draft'));
         const result = await resp.json();
         if (!result.success || !result.draft) return false;
         const d = result.draft;
@@ -578,7 +585,7 @@ async function restoreDraft() {
         }
         // Model selects (set after provider change toggled visibility)
         if (d.llm_model) {
-            const modelFields = { openai: 'openai_model', gemini: 'gemini_model', anthropic: 'anthropic_model' };
+            const modelFields = { openai: 'openai_model', gemini: 'gemini_model', anthropic: 'anthropic_model', opencode: 'opencode_model' };
             const mf = document.getElementById(modelFields[d.llm_provider]);
             if (mf) mf.value = d.llm_model;
         }
@@ -611,7 +618,7 @@ async function submitSetup() {
     if (nextBtn) nextBtn.disabled = true;
     
     try {
-        const response = await fetch('/api/setup/complete', {
+        const response = await fetch(apiUrl('/api/setup/complete'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(formData)
@@ -651,7 +658,7 @@ function showError(message) {
 // Google OAuth Functions
 async function checkGoogleOAuthStatus() {
     try {
-        const response = await fetch('/api/oauth/google/status');
+        const response = await fetch(apiUrl('/api/oauth/google/status'));
         const data = await response.json();
         
         if (data.success && data.configured) {
@@ -671,7 +678,7 @@ async function handleGoogleOAuth() {
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Starting OAuth...';
     
     try {
-        const response = await fetch('/api/oauth/google/start?redirect_to=setup');
+        const response = await fetch(apiUrl('/api/oauth/google/start?redirect_to=setup'));
         const data = await response.json();
         
         if (data.success && data.authorization_url) {

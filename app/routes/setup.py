@@ -268,7 +268,7 @@ def complete_setup():
             return jsonify({'success': False, 'error': 'Timezone is required'}), 400
 
         llm_provider = (data.get('llm_provider') or 'openai').lower()
-        _VALID_PROVIDERS = {'openai', 'gemini', 'anthropic'}
+        _VALID_PROVIDERS = {'openai', 'gemini', 'anthropic', 'opencode'}
         if llm_provider not in _VALID_PROVIDERS:
             return jsonify({'success': False, 'error': f'Invalid LLM provider: {llm_provider}'}), 400
 
@@ -276,10 +276,11 @@ def complete_setup():
             'openai': 'openai_api_key',
             'gemini': 'gemini_api_key',
             'anthropic': 'anthropic_api_key',
+            'opencode': 'opencode_api_key',
         }
         api_key_field = _PROVIDER_KEY_FIELD[llm_provider]
         if not data.get(api_key_field):
-            provider_label = {'openai': 'OpenAI', 'gemini': 'Google Gemini', 'anthropic': 'Anthropic'}[llm_provider]
+            provider_label = {'openai': 'OpenAI', 'gemini': 'Google Gemini', 'anthropic': 'Anthropic', 'opencode': 'OpenCode Go'}[llm_provider]
             return jsonify({'success': False, 'error': f'{provider_label} API key is required'}), 400
         
         # Create resources directory if it doesn't exist
@@ -308,6 +309,7 @@ def complete_setup():
             'openai': 'OPENAI_API_KEY',
             'gemini': 'GOOGLE_API_KEY',
             'anthropic': 'ANTHROPIC_API_KEY',
+            'opencode': 'OPENCODE_API_KEY',
         }
         api_key_value = data[api_key_field]
         env_content[_PROVIDER_ENV_VAR[llm_provider]] = api_key_value
@@ -321,7 +323,7 @@ def complete_setup():
         # all other steps succeed — see below)
         _KEY_ORDER = [
             'DEFAULT_LLM_PROVIDER', 'DEFAULT_LLM_MODEL',
-            'OPENAI_API_KEY', 'GOOGLE_API_KEY', 'ANTHROPIC_API_KEY',
+            'OPENAI_API_KEY', 'GOOGLE_API_KEY', 'ANTHROPIC_API_KEY', 'OPENCODE_API_KEY',
             'TIMEZONE',
         ]
         with open(env_file, 'w') as f:
@@ -485,8 +487,8 @@ def complete_setup():
 
         # Write a simple flag file so setup_complete() works across restarts
         # without relying on .env or checking resource file contents.
-        from app.assistant.utils.path_utils import get_repo_root
-        (get_repo_root() / ".setup_complete").write_text("true\n", encoding="utf-8")
+        from app.assistant.utils.path_utils import get_repo_root, get_data_dir
+        (get_data_dir() / ".setup_complete").write_text("true\n", encoding="utf-8")
 
         # Clean up draft file
         try:
