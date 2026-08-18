@@ -43,7 +43,8 @@ class BillingQuotaExhausted(RuntimeError):
     also fail, so continuing lets batch loops (KG pipeline, entity cards)
     race through items marking work attempted with no results. The interface
     layer stops the world on this type. Raised at the provider boundary from
-    the SDK's typed markers (OpenAI error.code == "insufficient_quota";
+    the SDK's typed markers (OpenAI "insufficient_quota" /
+    "credit_balance_exhausted" in error.code or error.type;
     Gemini 429 RESOURCE_EXHAUSTED without a per-minute violation).
     """
 
@@ -57,6 +58,12 @@ class BillingQuotaExhausted(RuntimeError):
 _RATE_WINDOW_MARKERS = (
     "per minute", "perminute", "per_minute", "per-minute",
     "requests per min", "tokens per min", "rate_limit_exceeded",
+)
+
+# Billing wording that never says "quota" — OpenAI's credits billing model
+# says "You have no credits remaining" (code credit_balance_exhausted).
+_BILLING_WORDING_MARKERS = (
+    "credit_balance_exhausted", "no credits remaining",
 )
 
 # Substrings (matched case-insensitively against str(exc)) that mark a retryable transient failure.
@@ -95,6 +102,8 @@ def classify_quota(exc: Exception) -> Optional[str]:
     if isinstance(exc, TransientRateLimit):
         return "rate"
     s = str(exc).lower()
+    if any(m in s for m in _BILLING_WORDING_MARKERS):
+        return "billing"
     if "quota" not in s:
         return None
     if any(m in s for m in _RATE_WINDOW_MARKERS):

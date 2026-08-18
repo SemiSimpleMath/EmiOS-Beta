@@ -50,6 +50,17 @@ class TestClassifyQuota:
     def test_ambiguous_quota_is_billing_conservative(self):
         assert classify_quota(Exception("project quota reached")) == "billing"
 
+    def test_no_credits_wording_is_billing(self):
+        # OpenAI's credits billing model says "no credits remaining" —
+        # the word "quota" never appears in the message. Unstructured
+        # arrivals of that wording must still stop the world.
+        exc = Exception(
+            "Error code: 429 - You have no credits remaining. "
+            "Add credits to continue using the API."
+        )
+        assert classify_quota(exc) == "billing"
+        assert is_transient(exc) is False
+
     def test_non_quota_is_none(self):
         assert classify_quota(Exception("503 Service Unavailable")) is None
 
@@ -101,6 +112,31 @@ class TestOpenAITranslation:
         # OpenAI billing exhaustion IS a RateLimitError — code decides.
         exc = _FakeRateLimitError()
         exc.code = "insufficient_quota"
+        assert isinstance(lc._translate_openai_exception(exc), BillingQuotaExhausted)
+
+    def test_credit_balance_exhausted_is_billing(self):
+        # The 2026-08-17 incident: the credits billing model returns
+        # code="credit_balance_exhausted" with type="insufficient_quota".
+        # A truthy unknown code must not shadow the type marker.
+        exc = _FakeRateLimitError(
+            "Error code: 429 - {'error': {'message': 'You have no credits "
+            "remaining. Add credits to continue using the API at "
+            "https://platform.openai.com/settings/organization/billing/.', "
+            "'type': 'insufficient_quota', 'param': None, "
+            "'code': 'credit_balance_exhausted'}}"
+        )
+        exc.code = "credit_balance_exhausted"
+        exc.type = "insufficient_quota"
+        out = lc._translate_openai_exception(exc)
+        assert isinstance(out, BillingQuotaExhausted)
+        assert out.provider == "openai"
+
+    def test_insufficient_quota_type_alone_is_billing(self):
+        # Same guard without RateLimitError involved: type carries the
+        # marker while code holds unrelated truthy junk.
+        exc = _FakeOpenAIError(
+            "Error 429", code="some_new_code", type_="insufficient_quota"
+        )
         assert isinstance(lc._translate_openai_exception(exc), BillingQuotaExhausted)
 
     def test_non_quota_returns_none(self):

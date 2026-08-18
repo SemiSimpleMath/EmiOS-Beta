@@ -456,6 +456,11 @@ class OpenAIJsonSchemaStrategy(OpenAIStructuredOutputStrategy):
 # classify_quota's message matching only for errors that arrive
 # unstructured. Returns None for non-quota errors (caller handles them).
 
+# OpenAI billing-exhaustion markers. Legacy quota billing:
+# code="insufficient_quota". Credits billing model:
+# code="credit_balance_exhausted", type="insufficient_quota".
+_OPENAI_BILLING_MARKERS = frozenset({"insufficient_quota", "credit_balance_exhausted"})
+
 
 # Plan-level usage caps (OpenCode Zen's "GoUsageLimitError", and weekly /
 # monthly caps generally). These arrive as HTTP 429 — indistinguishable by
@@ -485,16 +490,19 @@ def _is_long_window_usage_limit(e: Exception) -> bool:
 
 
 def _translate_openai_exception(e: Exception, provider: str = "openai") -> Optional[Exception]:
-    """OpenAI marks the two 429 cases explicitly: error.code
-    "insufficient_quota" = billing exhaustion; "rate_limit_exceeded" (any
-    RateLimitError that isn't insufficient_quota) = transient window, with
-    the suggested wait in the Retry-After header.
+    """OpenAI marks billing exhaustion with a typed marker in error.code or
+    error.type; any other RateLimitError = transient window, with the
+    suggested wait in the Retry-After header. Billing markers must be checked
+    in BOTH fields: the credits billing model returns
+    code="credit_balance_exhausted" with type="insufficient_quota"
+    (2026-08-17 incident — the unknown code shadowed the type and the burn
+    never tripped the breaker).
 
     OpenAI-compatible third parties do not use those markers: OpenCode Zen
     returns a plain 429 whose body carries GoUsageLimitError plus the window
     name, so that shape is checked before the generic RateLimitError branch."""
-    code = getattr(e, "code", None) or getattr(e, "type", None)
-    if code == "insufficient_quota":
+    fields = {getattr(e, "code", None), getattr(e, "type", None)}
+    if fields & _OPENAI_BILLING_MARKERS:
         return BillingQuotaExhausted(provider=provider, message=str(e))
     # Must precede the RateLimitError branch below — a weekly cap is a 429 and
     # would otherwise be misread as a transient per-minute window.
