@@ -40,6 +40,35 @@ def _migrate_node_active_to_dispatched(conn) -> None:
         logger.error("[work_store] active->dispatched migration failed: %s", e)
 
 
+def _migrate_parked_asks_to_dispatched(conn) -> None:
+    """One-time (2026-08-18 owner ruling): a surfaced ask is an IN-FLIGHT tool call and its
+    status must say so. Old rows parked surfaced asks as 'waiting' + wake_kind=user_reply with
+    a re-ask timer; the re-ask timer is retired — flip them to 'dispatched' and clear wake_at
+    so nothing re-promotes them. Their tickets resolve them (reply -> done) or the sweeper
+    times them out (expired ticket -> failed, work_repair adjudicates).
+
+    Guarded by a marker (work_store_meta) because it must run EXACTLY once: under the new
+    model 'waiting' + user_reply legitimately reappears for PRE-surface asks parked by a
+    state_mover HOLD — a re-run would mis-flip those to in-flight."""
+    _KEY = "parked_asks_to_dispatched_2026_08_18"
+    try:
+        with conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS work_store_meta (key TEXT PRIMARY KEY, value TEXT)")
+            done = conn.execute("SELECT value FROM work_store_meta WHERE key=?", (_KEY,)).fetchone()
+            if done is not None:
+                return
+            cur = conn.execute(
+                "UPDATE nodes SET status='dispatched', wake_at=NULL "
+                "WHERE status='waiting' AND wake_kind='user_reply'")
+            conn.execute("INSERT INTO work_store_meta(key, value) VALUES(?, ?)",
+                         (_KEY, str(cur.rowcount or 0)))
+        n = cur.rowcount or 0
+        if n > 0:
+            logger.info("[work_store] migrated %d parked ask(s) 'waiting' -> 'dispatched'", n)
+    except Exception as e:
+        logger.error("[work_store] parked-ask migration failed: %s", e)
+
+
 def dayflow_work_db_path() -> str:
     """The path of the dayflow WorkObject store — emi.db by default, DAYFLOW_WORK_DB if set."""
     override = os.environ.get("DAYFLOW_WORK_DB")
@@ -67,9 +96,10 @@ def get_dayflow_work_store():
         if store is None:
             from work_objects.store import WorkStore
             store = WorkStore(path, busy_timeout_ms=_BUSY_TIMEOUT_MS)
-            # Same-package private access, on purpose: the migration runs on the
-            # store's own connection and logs its own failures loudly.
+            # Same-package private access, on purpose: the migrations run on the
+            # store's own connection and log their own failures loudly.
             _migrate_node_active_to_dispatched(store._conn)
+            _migrate_parked_asks_to_dispatched(store._conn)
             # Closure-cascade repair (2026-07-30 zombie-wake incident): terminal work
             # objects created before closure cascaded may still hold startable nodes
             # with armed wakes. Must run before any apply() touches those rows — the

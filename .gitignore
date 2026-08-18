@@ -503,3 +503,6 @@ app/assistant/tests/manager_tests/web_manager/last_run_transcript.md
 
 # KG embedding sync status (runtime state, written by the hourly/nightly reconciler)
 kg_embedding_sync_status.json
+
+# Private contributor-review log (owner's study notes on external PRs; never published)
+/contrib_log/

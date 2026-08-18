@@ -92,11 +92,12 @@ class WorkNodeMaterializerNode(ControlNode):
         from work_objects.model import new_id
         wo = store.load(work_id)
         goal_id = wo.goal_node_id
-        # actionable included: a due re-ask promotes before this pre-step runs, and a reply that arrived
-        # meanwhile must still win over the re-dispatch (this runs before the node is listed).
+        # dispatched = the in-flight ask (question out, reply is its result). proposed/waiting/
+        # actionable = pre-surface asks (repair re-issues, state_mover holds) whose reply may
+        # still arrive from an earlier ticket and must win over a fresh surface.
         asks = [n for n in wo.nodes.values()
                 if n.id != goal_id and getattr(n, "wake_kind", None) == "user_reply"
-                and n.status in ("proposed", "waiting", "actionable")]
+                and n.status in ("proposed", "waiting", "actionable", "dispatched")]
         if not asks:
             return
         tm = get_ticket_manager()

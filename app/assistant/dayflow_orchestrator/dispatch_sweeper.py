@@ -386,6 +386,26 @@ def sweep_stuck_work_nodes(now_utc: Optional[datetime] = None) -> int:
             if node.id == goal_id or node.status != "dispatched":
                 continue
             ref = f"{wo.id}::{node.id}"
+            if node.wake_kind == "user_reply":
+                # An in-flight ASK: a tool call whose result is the user's reply. No
+                # thread to supervise — its deadline is the ticket's validity window.
+                # Expired unanswered = a timed-out tool call -> failed (work_repair
+                # adjudicates); a responded ticket is left for the materializer's
+                # reply pre-step to land as the node's result.
+                try:
+                    reason = _ask_timed_out(ref, now)
+                    if reason is None:
+                        continue
+                    store.apply("set_status", {"work_id": wo.id, "node_id": node.id,
+                                               "status": "failed", "content": reason},
+                                actor="dispatch_sweeper")
+                    failed += 1
+                    logger.warning(
+                        "dispatch_sweeper: ask %s timed out — %s; work_repair adjudicates. (%r)",
+                        ref, reason, (node.title or "")[:80])
+                except Exception:
+                    logger.error("dispatch_sweeper: ask supervision failed for %s", ref, exc_info=True)
+                continue
             try:
                 own_sid = session_id_for(wo.id, node.id)
                 owning_sid = str(node.payload.get("session_id") or "")
@@ -418,6 +438,36 @@ def sweep_stuck_work_nodes(now_utc: Optional[datetime] = None) -> int:
     if failed:
         logger.info("dispatch_sweeper: failed %d stuck work node(s).", failed)
     return failed
+
+
+def _ask_timed_out(ref: str, now: datetime) -> Optional[str]:
+    """The timeout judgment for an in-flight ask: join the ask's ticket by its
+    trigger_context.work_node tag (pure id join, no wording). Returns the failure
+    reason when the question is dead (ticket expired / validity lapsed / no ticket
+    found), or None while it is still live in the UI or has a response the
+    materializer will land as the node's result."""
+    from app.assistant.ticket_manager import get_ticket_manager
+    tm = get_ticket_manager()
+    latest = None
+    for t in tm.get_tickets(ticket_type="dayflow_orchestrator", suggestion_type="work_notify",
+                            since_utc=now - timedelta(hours=48), limit=200):
+        if ((getattr(t, "trigger_context", {}) or {}).get("work_node")) != ref:
+            continue
+        if latest is None or (t.created_at or now) > (latest.created_at or now):
+            latest = t
+    if latest is None:
+        return "ask timed out (no ticket found for this ask within 48h — the question is gone from the UI)"
+    state = str(getattr(latest, "state", "") or "").lower()
+    if state == "expired":
+        return "ask timed out (ticket expired unanswered)"
+    if state in ("pending", "proposed"):
+        valid_until = getattr(latest, "valid_until", None)
+        if valid_until is not None:
+            vu = valid_until if valid_until.tzinfo else valid_until.replace(tzinfo=timezone.utc)
+            if vu <= now:
+                return "ask timed out (ticket validity window passed unanswered)"
+        return None       # question still live in the UI
+    return None           # responded (accepted/dismissed/snoozed) — the materializer lands it
 
 
 def _session_root_dispatched(wo, sid: str) -> bool:

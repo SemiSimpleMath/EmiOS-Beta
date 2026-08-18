@@ -153,10 +153,10 @@ class StateMoverPrepNode(ControlNode):
                     continue
                 if str(getattr(n, "wake_kind", None) or "") in {"event", "signal"}:
                     continue   # external waits are shown in WORK-OBJECT WAITS instead
-                # user_reply asks appear here once DUE: an in-flight ask has wake_at (its re-ask time) in
-                # the future so is_ready holds it out; a due re-ask — or a repair-escalated ask with no
-                # wake_at awaiting its first surface — is promotable, and the state_mover may HOLD it like
-                # any other ready node (quiet hours, meetings, away).
+                # Only PRE-SURFACE user_reply asks appear here (repair-escalated, or parked by a HOLD) —
+                # promotable toward their surface, and the state_mover may HOLD them like any other ready
+                # node (quiet hours, meetings, away). An in-flight ask is `dispatched` and invisible here:
+                # it ends by reply/dismissal or ticket timeout, never a re-ask timer.
                 if not wo.is_ready(n, now):
                     continue
                 family = FAMILY_BY_TYPE.get(n.type, "spine")

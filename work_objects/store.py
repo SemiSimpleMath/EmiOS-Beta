@@ -38,11 +38,14 @@ def _cascade_abandon_startable(wo: WorkObject, now: str, reason: str) -> int:
     """Closure obligation: a terminal WorkObject may contain nothing the engine could ever
     start again. Abandon every startable node and clear its wake so no timer or promotion
     path can resurrect it (validate() enforces the invariant). In-flight ``dispatched``
-    nodes are left to land their result — inert in a terminal object, and the sweep skips
-    terminal work objects. Idempotent; returns the number of nodes cascaded."""
+    WORKER nodes are left to land their result — inert in a terminal object, and the sweep
+    skips terminal work objects. A dispatched ASK (wake_kind=user_reply) has no thread and
+    no result to land — the object's closure moots the question, so it cascades too (its
+    ticket dies on its own valid_until). Idempotent; returns the number of nodes cascaded."""
     count = 0
     for node in wo.nodes.values():
-        if node.status in _STARTABLE_STATUSES:
+        if node.status in _STARTABLE_STATUSES or (
+                node.status == "dispatched" and node.wake_kind == "user_reply"):
             node.status = "abandoned"
             node.wake_kind = None
             node.wake_at = None
@@ -67,7 +70,10 @@ TRANSITIONS: dict[str, dict[str, set[str]]] = {
     "spine": {
         # proposed = architect's inbox (born here). state_mover promotes proposed->actionable
         # when the node's gates (time/deps) are clear; only THEN may the action_selector dispatch it.
-        # dispatched = in-flight (a worker is on it, or an ask is out) — the action_selector/gate are blind to it.
+        # dispatched = in-flight (a worker is on it, or an ask is out) — the action_selector/gate are blind
+        # to it. A surfaced ask IS dispatched (wake_kind=user_reply marks it): the reply is its result
+        # (-> done); an expired-unanswered ticket is a timed-out tool call (sweeper -> failed, work_repair
+        # adjudicates). There is no re-ask timer.
         # done = work was done (manager's verdict) | incomplete = acted on but couldn't (+ why). Both await the
         # finalizer, which ALONE produces closed (the satisfied terminal). [step 2 keys is_satisfied on closed]
         "proposed": {"actionable", "dispatched", "waiting", "failed", "abandoned"},   # failed = dispatch broke before the node ran
@@ -352,6 +358,19 @@ class WorkStore:
         # AC-object replan loop: 187 reasonless abandons).
         _TERMINAL_TARGETS = {"closed", "abandoned", "superseded"}
         if target in _TERMINAL_TARGETS and target != node.status:
+            # IN-FLIGHT ASK FENCE (2026-08-18 walk-storm): a dispatched ask
+            # (wake_kind == "user_reply") is an in-progress tool call — the
+            # question is out to the user and the reply is its result. A
+            # terminal write here orphans that reply. The ask ends like any
+            # tool call: the reply/dismiss lands it -> done, an expired
+            # ticket times it out (sweeper -> failed, work_repair decides),
+            # or the whole object closes (the cascade clears it without
+            # passing through here).
+            if node.status == "dispatched" and node.wake_kind == "user_reply":
+                raise ValueError(
+                    f"set_status: node {node.id!r} is an in-flight ask (question out to "
+                    f"the user) — terminal {target!r} refused; it ends by reply, "
+                    f"dismissal, or ticket timeout")
             reason = str(data.get("reason") or "").strip()
             if not reason:
                 raise ValueError(
@@ -404,7 +423,10 @@ class WorkStore:
         node.wake_kind = wake_kind
         node.wake_at = data.get("wake_at")
         node.wake_ref = data.get("wake_ref")
-        if node.status == "dispatched":
+        # A worker deferring its in-flight node parks it (dispatched -> waiting).
+        # A user_reply wake is the exception: it marks an in-flight ASK — the
+        # question is out, the node STAYS dispatched until reply or timeout.
+        if node.status == "dispatched" and wake_kind != "user_reply":
             node.status = "waiting"
         node.updated_at = now
 

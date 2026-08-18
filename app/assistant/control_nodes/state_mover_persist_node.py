@@ -69,11 +69,10 @@ class StateMoverPersistNode(ControlNode):
                     continue
                 if str(getattr(n, "wake_kind", None) or "") in {"event", "signal"}:
                     continue   # external waits are woken via node_wakes when the state_mover matches intake
-                # A user_reply ask rides this same promotion: while the ask is OUT its wake_at (the re-ask
-                # time) is in the future, so is_ready holds it; once the re-ask is due — or for a
-                # repair-escalated ask that has no wake_at and awaits its FIRST surface — it promotes and
-                # the dispatch (re-)tickets it. A reply always wins over a re-ask: the materializer's
-                # reply pre-step runs before dispatch and completes the node.
+                # A pre-surface user_reply ask (repair-escalated, or parked here by a HOLD) rides this
+                # same promotion toward its surface. An IN-FLIGHT ask is `dispatched` and invisible
+                # here by design — it ends by reply/dismissal (materializer -> done) or ticket
+                # timeout (sweeper -> failed); there is no re-ask timer.
                 if not wo.is_ready(n, now):
                     continue   # time/dep gate not clear — leave it parked
                 family = FAMILY_BY_TYPE.get(n.type, "spine")

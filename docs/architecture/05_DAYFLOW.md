@@ -94,13 +94,18 @@ and the graph is the return channel. Each tick supervises the in-flight jobs
 activity for 20+ min) fails the node for work_repair — and the transition machine rejects a zombie
 thread's late writes (`failed -> done` is illegal), so no torn state.
 
-**Asks (user_reply).** A ticketed node parks `waiting + wake_kind=user_reply + wake_at=<re-ask time>`
-(currently +1h). The reply is matched back by `trigger_context.work_node`, recorded as an EVIDENCE child
-(the node's `content` is its immutable directive), and the node completes -> the finalizer judges the
-reply like any result. An unanswered ask re-promotes when its re-ask time passes and is re-ticketed; the
-state_mover can hold re-asks during quiet hours (a held ask keeps `wake_kind=user_reply` so a reply
-still matches). A repair-escalated ask (`proposed + user_reply`, no wake_at) promotes for its first
-surface the same way. There is no one-way ticket — every ticket awaits a response.
+**Asks (user_reply).** An ask is a TOOL CALL whose result is the user's reply. Surfacing it creates the
+ticket (validity window = the call's timeout, currently 1h; a new ask ticket expires prior open asks of
+the same work object) and marks the node `dispatched + wake_kind=user_reply` — in flight, exactly like a
+worker job; one live ask per work object (a second ask node queues behind it). The reply/dismissal is
+matched back by `trigger_context.work_node`, recorded as an EVIDENCE child (the node's `content` is its
+immutable directive), and the node completes -> the finalizer judges the reply like any result. An
+unanswered ticket expiring is a TIMED-OUT call: the sweeper fails the node (reason on the node) and
+work_repair adjudicates — re-asking is a repair decision, not a timer; there is no re-ask loop. The
+store fence refuses terminal writes on an in-flight ask (replan cannot prune a question that is out).
+A repair-escalated ask (`proposed + user_reply`, no wake_at) promotes for its first surface via the
+state_mover, which may HOLD it (a held pre-surface ask parks `waiting` and keeps `wake_kind=user_reply`
+so a late reply to an earlier ticket still matches).
 
 **Completion.** A worker-`done` node is only a RESULT. The finalizer (runs BEFORE the architect, so an
 AMEND re-plans same-tick) reads the node's full result against the whole work object and emits one

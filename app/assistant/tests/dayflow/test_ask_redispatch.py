@@ -1,10 +1,15 @@
-"""Ask (user_reply) nodes re-enter dispatch — the re-ask / first-surface guard.
+"""Ask (user_reply) lifecycle — an ask is a TOOL CALL whose result is the user's reply.
 
-An ask parks `waiting + wake_kind=user_reply + wake_at=<re-ask time>` when its ticket is surfaced
-(node_dispatch._ticket), and a repair-escalated ask sits `proposed + user_reply` with no wake_at.
-Promotion (state_mover_persist) must pick BOTH up once due, the materializer must list them for the
-switchboard to (re-)ticket, and a reply must always win over a re-dispatch via the reply pre-step.
-The 2026-07-01 timesheets ask parked forever because every one of these paths excluded user_reply.
+Surfaced ask = `dispatched + wake_kind=user_reply` (in flight; no re-ask timer). It ends by
+reply/dismissal (materializer -> done), ticket timeout (sweeper -> failed, work_repair
+adjudicates), or the work object closing (cascade). A repair-escalated ask sits
+`proposed + user_reply` with no wake_at and promotes for its first surface; the state_mover
+may HOLD a pre-surface ask (parks `waiting`, keeps user_reply so a late reply still matches).
+
+History: asks used to park `waiting + wake_at=<re-ask time>` and re-ticket hourly — the
+2026-07-01 timesheets ask parked forever when promotion paths excluded user_reply, and the
+2026-08-17 walk storm minted five tickets for one question. The 2026-08-18 owner ruling
+retired the re-ask timer and made the status truthful.
 """
 from __future__ import annotations
 
@@ -27,20 +32,28 @@ def _mk_wo(store, title="Ask WO"):
     return wo.id, wo.goal_node_id
 
 
-def _ask_node(store, wid, gid, *, node_id, status, wake_at, wake_ref="What do you say?"):
+def _add_node(store, wid, gid, node_id):
     store.apply("add_node", {"work_id": wid, "id": node_id, "type": "subtask", "parent_id": gid,
                              "title": "Ask the user something", "content": "Ask the user something."})
-    if status != "proposed":
-        if status == "waiting":
-            store.apply("set_status", {"work_id": wid, "node_id": node_id, "status": "waiting"})
-        else:
-            store.apply("set_status", {"work_id": wid, "node_id": node_id, "status": status})
+
+
+def _inflight_ask(store, wid, gid, *, node_id, wake_ref="What do you say?"):
+    """A surfaced ask: dispatched + user_reply, no wake_at (the ticket owns the timeout)."""
+    _add_node(store, wid, gid, node_id)
+    store.apply("set_status", {"work_id": wid, "node_id": node_id, "status": "dispatched"})
     store.apply("defer_node", {"work_id": wid, "node_id": node_id, "wake_kind": "user_reply",
-                               "wake_at": wake_at, "wake_ref": wake_ref})
+                               "wake_at": None, "wake_ref": wake_ref})
 
 
-def _node_status(store, wid, nid):
-    return _store().load(wid).nodes[nid].status
+def _presurface_ask(store, wid, gid, *, node_id, wake_ref="What do you say?"):
+    """A repair-escalated ask awaiting its FIRST surface: proposed + user_reply, no wake_at."""
+    _add_node(store, wid, gid, node_id)
+    store.apply("defer_node", {"work_id": wid, "node_id": node_id, "wake_kind": "user_reply",
+                               "wake_at": None, "wake_ref": wake_ref})
+
+
+def _node(store, wid, nid):
+    return _store().load(wid).nodes[nid]
 
 
 def _run_promote(bb=None):
@@ -66,34 +79,23 @@ class FakeTicketManager:
 
 class TestAskPromotion:
 
-    def test_due_reask_promotes(self):
-        """waiting + user_reply whose re-ask time has passed -> actionable (the timesheets case)."""
+    def test_inflight_ask_is_invisible_to_promotion(self):
+        """dispatched + user_reply = the question is OUT — promotion never touches it."""
         store = _store()
         wid, gid = _mk_wo(store)
-        past = datetime.now(timezone.utc) - timedelta(hours=2)
-        _ask_node(store, wid, gid, node_id="ask1", status="waiting", wake_at=past)
+        _inflight_ask(store, wid, gid, node_id="ask1")
 
         _run_promote()
-        assert _node_status(store, wid, "ask1") == "actionable"
-
-    def test_inflight_ask_stays_parked(self):
-        """waiting + user_reply with wake_at still in the future = the ask is OUT; leave it."""
-        store = _store()
-        wid, gid = _mk_wo(store)
-        future = datetime.now(timezone.utc) + timedelta(minutes=50)
-        _ask_node(store, wid, gid, node_id="ask1", status="waiting", wake_at=future)
-
-        _run_promote()
-        assert _node_status(store, wid, "ask1") == "waiting"
+        assert _node(store, wid, "ask1").status == "dispatched"
 
     def test_repair_escalated_ask_promotes_for_first_surface(self):
         """proposed + user_reply + no wake_at (work_repair escalate) -> actionable next tick."""
         store = _store()
         wid, gid = _mk_wo(store)
-        _ask_node(store, wid, gid, node_id="ask1", status="proposed", wake_at=None)
+        _presurface_ask(store, wid, gid, node_id="ask1")
 
         _run_promote()
-        assert _node_status(store, wid, "ask1") == "actionable"
+        assert _node(store, wid, "ask1").status == "actionable"
 
     def test_event_wait_still_not_promoted(self):
         store = _store()
@@ -105,36 +107,36 @@ class TestAskPromotion:
                                    "wake_at": None, "wake_ref": "a reply from the brother"})
 
         _run_promote()
-        assert _node_status(store, wid, "ev1") == "waiting"
+        assert _node(store, wid, "ev1").status == "waiting"
 
-    def test_prep_shows_due_ask_as_promotion_candidate(self):
-        """What the state_mover LLM sees must match what the persist promotes (hold parity)."""
+    def test_prep_lists_presurface_ask_not_inflight_ask(self):
+        """What the state_mover LLM sees must match what the persist promotes."""
         store = _store()
         wid, gid = _mk_wo(store)
-        past = datetime.now(timezone.utc) - timedelta(hours=2)
-        _ask_node(store, wid, gid, node_id="ask1", status="waiting", wake_at=past)
+        _presurface_ask(store, wid, gid, node_id="fresh")
+        _inflight_ask(store, wid, gid, node_id="out")
 
         bb = FakeBlackboard()
         prep = StateMoverPrepNode(name="state_mover_prep_node", blackboard=bb,
                                   agent_registry={}, tool_registry={})
         prep.action_handler(message=None)
-        ready = bb.get_state_value("ready_work_nodes", [])
-        assert any(r["task_id"] == f"{wid}::ask1" for r in ready)
+        ready = {r["task_id"] for r in bb.get_state_value("ready_work_nodes", [])}
+        assert f"{wid}::fresh" in ready
+        assert f"{wid}::out" not in ready
 
-    def test_held_ask_keeps_user_reply_wake(self):
-        """A state_mover HOLD on a due ask pushes wake_at back but keeps wake_kind=user_reply so a
-        reply arriving during the hold still matches."""
+    def test_held_presurface_ask_keeps_user_reply_wake(self):
+        """A state_mover HOLD on a pre-surface ask parks it `waiting` with the pushed wake_at
+        but keeps wake_kind=user_reply so a late reply to an earlier ticket still matches."""
         store = _store()
         wid, gid = _mk_wo(store)
-        past = datetime.now(timezone.utc) - timedelta(hours=2)
-        _ask_node(store, wid, gid, node_id="ask1", status="waiting", wake_at=past)
+        _presurface_ask(store, wid, gid, node_id="ask1")
 
         wake = (datetime.now(timezone.utc) + timedelta(hours=8)).isoformat()
         bb = FakeBlackboard({"held_work_nodes": [
             {"task_id": f"{wid}::ask1", "hold_reason": "quiet hours", "reactivate_at": wake},
         ]})
         _run_promote(bb)
-        node = store.load(wid).nodes["ask1"]
+        node = _node(store, wid, "ask1")
         assert node.status == "waiting"
         assert node.wake_kind == "user_reply"
         assert node.wake_at is not None and node.wake_at > datetime.now(timezone.utc)
@@ -145,8 +147,7 @@ class TestAskReplyAndListing:
     def test_promoted_ask_is_listed_for_dispatch(self):
         store = _store()
         wid, gid = _mk_wo(store)
-        past = datetime.now(timezone.utc) - timedelta(hours=2)
-        _ask_node(store, wid, gid, node_id="ask1", status="waiting", wake_at=past)
+        _presurface_ask(store, wid, gid, node_id="ask1")
         _run_promote()
 
         bb = FakeBlackboard()
@@ -156,15 +157,11 @@ class TestAskReplyAndListing:
         items = bb.get_state_value("actionable_items", [])
         assert any(i["item_id"] == f"{wid}::ask1" for i in items)
 
-    def test_reply_wins_over_redispatch(self, monkeypatch):
-        """A reply that arrived by materialize time completes the ask (evidence + done) instead of
-        re-ticketing it — even when promotion already made it actionable this tick."""
+    def test_reply_completes_inflight_ask(self, monkeypatch):
+        """A reply to an in-flight (dispatched) ask IS its result: evidence + done, no re-listing."""
         store = _store()
         wid, gid = _mk_wo(store)
-        past = datetime.now(timezone.utc) - timedelta(hours=2)
-        _ask_node(store, wid, gid, node_id="ask1", status="waiting", wake_at=past)
-        _run_promote()
-        assert _node_status(store, wid, "ask1") == "actionable"
+        _inflight_ask(store, wid, gid, node_id="ask1")
 
         import app.assistant.ticket_manager as tm_mod
         monkeypatch.setattr(tm_mod, "get_ticket_manager",
