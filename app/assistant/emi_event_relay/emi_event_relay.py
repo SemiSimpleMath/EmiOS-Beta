@@ -42,7 +42,26 @@ class EmiEventRelay:
 
     def socket_emit_handler(self, message: UserMessage):
         """Queue messages for WebSocket emission, processing TTS if needed."""
-        payload = message.user_message_data
+        # System alerts publish a plain Message carrying {"event", "payload"}
+        # instead of a UserMessage — llm_client._check_and_trip_quota does this
+        # for the "quota exhausted, shutting down" notice. Those have no
+        # user_message_data and no TTS, so emit them straight to the room.
+        # Without this branch the handler raised AttributeError inside the
+        # event hub and the shutdown notice never reached the UI: the process
+        # exited and the user saw the app vanish with no explanation.
+        payload = getattr(message, "user_message_data", None)
+        if payload is None:
+            data = getattr(message, "data", None)
+            if isinstance(data, dict) and data.get("event"):
+                self._emit_to_room("master_room", data["event"], data.get("payload", {}))
+            else:
+                logger.warning(
+                    "socket_emit_handler: no user_message_data and no usable "
+                    "data payload (sender=%s) — dropping",
+                    getattr(message, "sender", "?"),
+                )
+            return
+
         preferred_reply_to = None
         try:
             meta = getattr(message, "metadata", None)
