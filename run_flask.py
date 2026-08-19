@@ -67,9 +67,21 @@ def _seed_runtime_configs() -> None:
     At runtime get_configs_dir() resolves to <EMI_DATA_DIR>/configs (e.g.
     /data/configs in Docker) so that users can edit them persistently, but a
     fresh volume contains none of the shipped defaults (subsystems.yaml,
-    routines.json, routines/, model_tiers.yaml, ...). Without this seed the
-    routine manager finds 0 routines, subsystem flags default to disabled,
-    and every widget-producing scheduled task silently never runs.
+    routines.json, routines/, sleep_tracking.yaml, ...). Without this seed:
+
+      - the routine manager finds 0 routines (routines.json and
+        configs/routines/{public,private}/ are all read through
+        get_configs_dir), so every scheduled task silently never runs;
+      - subsystem flags fall back to their defaults. Note that default is
+        ENABLED, not disabled — subsystem_flags._load_config returns {} for a
+        missing file and is_subsystem_enabled treats an unset name as True. So
+        an unseeded volume runs everything, it just cannot be configured;
+      - anything else read via get_configs_dir (e.g. sleep_tracking.yaml)
+        silently uses built-in defaults.
+
+    model_tiers.yaml is deliberately NOT in that list: llm_factory loads it
+    from the code tree (Path(__file__).parents[2] / "configs"), not from
+    get_configs_dir, so tier resolution works on an unseeded volume.
 
     Only missing files are copied — existing files are never overwritten, so
     user edits to a config survive restarts. Run before any app import that
