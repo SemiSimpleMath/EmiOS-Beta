@@ -100,9 +100,19 @@ def get_api_keys_status():
     try:
         settings_manager = get_settings_manager()
         
-        # 'opencode' resolves to OPENCODE_API_KEY via get_api_key's
-        # f"{provider.upper()}_API_KEY" convention, same as the rest.
-        providers = ['openai', 'google', 'gemini', 'anthropic', 'opencode', 'elevenlabs', 'deepgram']
+        # get_api_key resolves f"{provider.upper()}_API_KEY", so the settings
+        # name for an LLM provider is its env var minus the _API_KEY suffix.
+        # Deriving them from the registry keeps this in step with
+        # llm_classes_dict and drops the phantom 'gemini' entry that used to sit
+        # here: gemini's key is GOOGLE_API_KEY, so 'gemini' resolved to
+        # GEMINI_API_KEY, which nothing sets or reads — the row could never
+        # report as configured.
+        from app.configs.llm_classes_dict import _PROVIDER_KEY_ENV
+        _llm_providers = sorted(
+            v[: -len('_API_KEY')].lower() for v in _PROVIDER_KEY_ENV.values()
+        )
+        # Non-LLM keys follow the same env convention but are not in the registry.
+        providers = [*_llm_providers, 'elevenlabs', 'deepgram']
         status = {}
         
         for provider in providers:

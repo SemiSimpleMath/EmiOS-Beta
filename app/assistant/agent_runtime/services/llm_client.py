@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from app.services.llm_factory import LLMFactory
-from app.configs.llm_classes_dict import _key_is_present
+from app.configs.llm_classes_dict import _key_is_present, _PROVIDER_KEY_ENV
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -58,7 +58,13 @@ def _fallback_provider_order(provider: str) -> tuple[str, ...]:
     of ordering — and a deployment whose default was not listed first would
     silently land on a different provider than the factory picked.
     """
-    order = ["opencode", "openai", "gemini", "anthropic"]
+    # Explicit preference first, then every other provider the registry knows
+    # about. The preference cannot be derived — it is a judgement about which
+    # provider to reach for — but the SET must not be hardcoded, or a provider
+    # added to llm_classes_dict is silently unreachable as a fallback.
+    _preferred = ("opencode", "openai", "gemini", "anthropic")
+    order = [p for p in _preferred if p in _PROVIDER_KEY_ENV]
+    order += [p for p in _PROVIDER_KEY_ENV if p not in order]
     default = os.environ.get("DEFAULT_LLM_PROVIDER", "").strip().lower()
     if default in order:
         order.remove(default)
