@@ -267,20 +267,26 @@ def complete_setup():
         if not data.get('timezone'):
             return jsonify({'success': False, 'error': 'Timezone is required'}), 400
 
+        # The provider registry is the single source of truth for WHICH providers
+        # exist. Every list below derives from it, so adding a provider to
+        # llm_classes_dict cannot leave this route behind.
+        from app.configs.llm_classes_dict import _PROVIDER_KEY_ENV
+
         llm_provider = (data.get('llm_provider') or 'openai').lower()
-        _VALID_PROVIDERS = {'openai', 'gemini', 'anthropic', 'opencode'}
-        if llm_provider not in _VALID_PROVIDERS:
+        if llm_provider not in _PROVIDER_KEY_ENV:
             return jsonify({'success': False, 'error': f'Invalid LLM provider: {llm_provider}'}), 400
 
-        _PROVIDER_KEY_FIELD = {
-            'openai': 'openai_api_key',
-            'gemini': 'gemini_api_key',
-            'anthropic': 'anthropic_api_key',
-            'opencode': 'opencode_api_key',
-        }
-        api_key_field = _PROVIDER_KEY_FIELD[llm_provider]
+        # The wizard's form field is f"{provider}_api_key" for every provider,
+        # so the mapping is the convention itself rather than a fifth table.
+        api_key_field = f'{llm_provider}_api_key'
         if not data.get(api_key_field):
-            provider_label = {'openai': 'OpenAI', 'gemini': 'Google Gemini', 'anthropic': 'Anthropic', 'opencode': 'OpenCode Go'}[llm_provider]
+            # Display names only — a provider missing here still works, it just
+            # shows its bare name in the error.
+            _PROVIDER_LABEL = {
+                'openai': 'OpenAI', 'gemini': 'Google Gemini',
+                'anthropic': 'Anthropic', 'opencode': 'OpenCode Go',
+            }
+            provider_label = _PROVIDER_LABEL.get(llm_provider, llm_provider.title())
             return jsonify({'success': False, 'error': f'{provider_label} API key is required'}), 400
         
         # Create resources directory if it doesn't exist
@@ -304,15 +310,12 @@ def complete_setup():
                         key, value = line.split('=', 1)
                         env_content[key.strip()] = value.strip()
         
-        # Write the chosen provider's API key and mark it as default
-        _PROVIDER_ENV_VAR = {
-            'openai': 'OPENAI_API_KEY',
-            'gemini': 'GOOGLE_API_KEY',
-            'anthropic': 'ANTHROPIC_API_KEY',
-            'opencode': 'OPENCODE_API_KEY',
-        }
+        # Write the chosen provider's API key and mark it as default. The env
+        # var name comes straight from the registry — this used to be a local
+        # copy of _PROVIDER_KEY_ENV, which is exactly the kind of duplicate that
+        # drifts (note gemini's key is GOOGLE_API_KEY, not GEMINI_API_KEY).
         api_key_value = data[api_key_field]
-        env_content[_PROVIDER_ENV_VAR[llm_provider]] = api_key_value
+        env_content[_PROVIDER_KEY_ENV[llm_provider]] = api_key_value
         env_content['DEFAULT_LLM_PROVIDER'] = llm_provider
         llm_model = data.get('llm_model') or ''
         if llm_model:
@@ -323,7 +326,7 @@ def complete_setup():
         # all other steps succeed — see below)
         _KEY_ORDER = [
             'DEFAULT_LLM_PROVIDER', 'DEFAULT_LLM_MODEL',
-            'OPENAI_API_KEY', 'GOOGLE_API_KEY', 'ANTHROPIC_API_KEY', 'OPENCODE_API_KEY',
+            *_PROVIDER_KEY_ENV.values(),
             'TIMEZONE',
         ]
         with open(env_file, 'w') as f:
