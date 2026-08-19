@@ -504,6 +504,7 @@ class DayflowScheduler:
         try:
             with self._app.app_context():
                 import uuid as _uuid
+                from app.assistant.ServiceLocator.service_locator import DI
                 from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
                 from app.assistant.scope.loader import load_scope_for_source
                 from work_objects.model import utcnow
