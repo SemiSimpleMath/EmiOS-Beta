@@ -61,14 +61,14 @@ def _get_user_location() -> Dict:
 
 
 def _geocode_city(city: str) -> Dict:
-    """Geocode a city name to lat/lon via OpenWeatherMap.
+    """Geocode a city name to lat/lon.
 
-    Appends user's home country to disambiguate bare city names.
+    Tries OpenWeatherMap when OPENWEATHER_API_KEY is configured, then falls
+    back to Open-Meteo's keyless geocoding API — the same provider family the
+    forecast fetch already uses, so the weather tool works with no API key at
+    all. Appends user's home country to disambiguate bare city names.
     Returns dict with latitude, longitude, name, country — or {"error": "..."}.
     """
-    if not OPENWEATHER_API_KEY:
-        return {"error": "OPENWEATHER_API_KEY not configured. Cannot geocode city."}
-
     # Append country if bare city name (no comma qualifier).
     if "," not in city:
         user_loc = _get_user_location()
@@ -76,19 +76,47 @@ def _geocode_city(city: str) -> Dict:
         if country:
             city = f"{city},{country}"
 
-    url = f"https://api.openweathermap.org/geo/1.0/direct?q={city}&limit=1&appid={OPENWEATHER_API_KEY}"
-    response = requests.get(url, timeout=10)
-    if response.status_code != 200:
-        return {"error": f"Geocoding HTTP {response.status_code}: {response.text}"}
-    data = response.json()
-    if not data:
-        return {"error": f"City '{city}' not found."}
-    return {
-        "latitude": data[0]["lat"],
-        "longitude": data[0]["lon"],
-        "name": data[0].get("name", "Unknown"),
-        "country": data[0].get("country", "Unknown"),
-    }
+    if OPENWEATHER_API_KEY:
+        url = f"https://api.openweathermap.org/geo/1.0/direct?q={city}&limit=1&appid={OPENWEATHER_API_KEY}"
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            payload = response.json()
+            if isinstance(payload, list) and payload:
+                return {
+                    "latitude": payload[0]["lat"],
+                    "longitude": payload[0]["lon"],
+                    "name": payload[0].get("name", "Unknown"),
+                    "country": payload[0].get("country", "Unknown"),
+                }
+        # Fall through to the keyless provider rather than erroring out: a bad
+        # key or a transient 5xx should not make the tool unusable.
+
+    # Keyless fallback: https://open-meteo.com/en/docs/geocoding-api
+    # Accepts "City,CC" two-letter country codes; a bare name resolves to the
+    # most prominent match, which is good enough for a home-city anchor.
+    # Params are passed as a dict so city names with spaces are encoded.
+    try:
+        response = requests.get(
+            "https://geocoding-api.open-meteo.com/v1/search",
+            params={"name": city, "count": 1, "language": "en", "format": "json"},
+            timeout=10,
+        )
+        if response.status_code != 200:
+            return {"error": f"Geocoding HTTP {response.status_code}: {response.text}"}
+        payload = response.json()
+        if not isinstance(payload, dict):
+            return {"error": f"City '{city}' not found."}
+        results = payload.get("results")
+        if not results:
+            return {"error": f"City '{city}' not found."}
+        return {
+            "latitude": results[0]["latitude"],
+            "longitude": results[0]["longitude"],
+            "name": results[0].get("name", "Unknown"),
+            "country": results[0].get("country_code", "Unknown"),
+        }
+    except Exception as e:
+        return {"error": f"Geocoding failed: {e}"}
 
 
 class GetWeather(BaseTool):
