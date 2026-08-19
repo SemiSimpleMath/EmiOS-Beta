@@ -83,7 +83,7 @@ def _ticket(store, work_id: str, node_id: str, node) -> None:
                                    "wake_at": utcnow() + timedelta(hours=_ASK_TIMEOUT_HOURS),
                                    "wake_ref": node.wake_ref}, actor="node_dispatch")
         return
-    _surface_ticket(work_id, node_id, node)
+    _surface_ticket(work_id, node_id, node, wo)
     store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "dispatched"},
                 actor="node_dispatch")
     store.apply("defer_node", {"work_id": work_id, "node_id": node_id, "wake_kind": "user_reply",
@@ -110,7 +110,27 @@ def _supersede_open_asks(tm, work_id: str, node_id: str) -> None:
                     old.ticket_id, work_id, node_id)
 
 
-def _surface_ticket(work_id: str, node_id: str, node) -> None:
+def _upstream_results(wo, node) -> str:
+    """The PRODUCED outputs this node depends on: evidence/artifact children of
+    its depends_on upstream nodes, concatenated in graph order. This is the
+    deterministic join that puts the actual RESULT into a deliver-to-user
+    ticket — without it the ticket carries only the instruction ('give the
+    user the assessment') while the assessment sits unread in the graph, and
+    the ticket_builder writes messages asking the user for the very content
+    the graph already holds (the 2026-08-19 PR-assessment ticket garbage)."""
+    parts = []
+    for dep_id in wo.deps_of(node.id):
+        for child_id in wo.children_of(dep_id):
+            child = wo.nodes.get(child_id)
+            if child is None or child.type not in ("evidence", "artifact"):
+                continue
+            text = str(child.content or "").strip()
+            if text:
+                parts.append(text)
+    return "\n\n".join(parts)
+
+
+def _surface_ticket(work_id: str, node_id: str, node, wo) -> None:
     """Phrase + surface the node's communication as a ticket tagged with this node; the reply is matched
     back via trigger_context.work_node on a later tick."""
     from app.assistant.lib.tools.create_dayflow_ticket.create_dayflow_ticket import CreateDayflowTicketTool
@@ -121,8 +141,14 @@ def _surface_ticket(work_id: str, node_id: str, node) -> None:
     # "planner + pencil + instrument on Aug 21" reached the user as "check on
     # the supplies needed for music class".
     want = str(node.content or "").strip() or str(getattr(node, "wake_ref", "") or "").strip()
+    results = _upstream_results(wo, node)
+    results_block = (
+        f"THE COMPLETED RESULT TO DELIVER — the message IS the delivery, so carry its "
+        f"substance in full, never a pointer to it:\n{results}\n" if results else ""
+    )
     brief = (f"Communicate with the user so a task can proceed. Task: {node.title}. "
-             f"What I need from them: {want}. Phrase it as a warm, direct message addressed to them; "
+             f"What I need from them: {want}. {results_block}"
+             f"Phrase it as a warm, direct message addressed to them; "
              f"keep every concrete detail (who, what, when) — do not generalize them away.")
     formatted = CreateDayflowTicketTool._format_brief(brief)
     title = (str(formatted.get("title") or node.title or "I need your input").strip())[:80]

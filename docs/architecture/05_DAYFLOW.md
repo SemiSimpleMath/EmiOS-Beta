@@ -100,9 +100,14 @@ the same work object) and marks the node `dispatched + wake_kind=user_reply` —
 worker job; one live ask per work object (a second ask node queues behind it). The reply/dismissal is
 matched back by `trigger_context.work_node`, recorded as an EVIDENCE child (the node's `content` is its
 immutable directive), and the node completes -> the finalizer judges the reply like any result. An
-unanswered ticket expiring is a TIMED-OUT call: the sweeper fails the node (reason on the node) and
-work_repair adjudicates — re-asking is a repair decision, not a timer; there is no re-ask loop. The
-store fence refuses terminal writes on an in-flight ask (replan cannot prune a question that is out).
+unanswered ticket expiring is a TIMED-OUT call: the sweeper fails the node (reason appended to
+`payload.status_notes` — never `content`, which is the immutable directive) and work_repair
+adjudicates — re-asking is a repair decision, not a timer, and it is BOUNDED: after 3 unanswered
+timeouts the ask abandons with verdict `ask_unanswered_ceiling` (the user's silence is the result;
+the evaluator judges it at goal level). A deliver-to-user ticket carries the PRODUCED RESULT: the
+dispatch deterministically folds the evidence/artifact children of the node's depends_on upstreams
+into the ticket body, so the message IS the delivery, never a pointer. The store fence refuses
+terminal writes on an in-flight ask (replan cannot prune a question that is out).
 A repair-escalated ask (`proposed + user_reply`, no wake_at) promotes for its first surface via the
 state_mover, which may HOLD it (a held pre-surface ask parks `waiting` and keeps `wake_kind=user_reply`
 so a late reply to an earlier ticket still matches).

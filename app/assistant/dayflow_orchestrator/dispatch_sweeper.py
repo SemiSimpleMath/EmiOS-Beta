@@ -397,7 +397,7 @@ def sweep_stuck_work_nodes(now_utc: Optional[datetime] = None) -> int:
                     if reason is None:
                         continue
                     store.apply("set_status", {"work_id": wo.id, "node_id": node.id,
-                                               "status": "failed", "content": reason},
+                                               "status": "failed", "note": reason},
                                 actor="dispatch_sweeper")
                     failed += 1
                     logger.warning(

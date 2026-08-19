@@ -392,6 +392,14 @@ class WorkStore:
             node.payload["session_id"] = str(data["session_id"])
         if data.get("content") is not None:   # optional closing note / evidence written on transition
             node.content = data["content"]
+        if data.get("note") is not None:
+            # Append-only lifecycle note (e.g. the sweeper's timeout reason).
+            # Lives in the payload so the node's `content` — its immutable
+            # directive — is never clobbered by status bookkeeping (the
+            # 2026-08-19 ticket-garbage incident: a timeout reason overwrote a
+            # deliver node's directive and every later surface rendered it).
+            node.payload.setdefault("status_notes", []).append(
+                {"note": str(data["note"]), "at": now})
         node.updated_at = now
 
     def _op_edit_node(self, wo, data, now) -> None:

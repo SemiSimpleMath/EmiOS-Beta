@@ -74,15 +74,19 @@ class TestInflightAskFence:
         assert store.load(wid).nodes["ask1"].status == "done"
 
     def test_timeout_path_failed_not_fenced(self):
+        """The timeout reason rides an append-only payload note — the node's
+        content (its immutable directive) must survive the lifecycle write."""
         store = _store()
         wid, gid = _mk_wo(store)
         _inflight_ask(store, wid, gid, node_id="ask1")
         store.apply("set_status", {"work_id": wid, "node_id": "ask1", "status": "failed",
-                                   "content": "ask timed out (ticket expired unanswered)"},
+                                   "note": "ask timed out (ticket expired unanswered)"},
                     actor="dispatch_sweeper")
         node = store.load(wid).nodes["ask1"]
         assert node.status == "failed"
-        assert "timed out" in node.content
+        assert node.content == "Ask the user the full question."          # directive untouched
+        notes = node.payload.get("status_notes") or []
+        assert any("timed out" in n["note"] for n in notes)
 
     def test_presurface_ask_can_be_pruned(self):
         """A never-surfaced ask (proposed + user_reply) has no question out — replan may prune it."""
@@ -228,10 +232,93 @@ class TestTicketContext:
         fake_tm.create_ticket = lambda **kw: None      # stop after composing — no publish path
         monkeypatch.setattr(tm_pkg, "get_ticket_manager", lambda: fake_tm)
 
-        nd._surface_ticket(wid, "ask1", node)
+        nd._surface_ticket(wid, "ask1", node, store.load(wid))
 
         assert len(briefs) == 1
         assert "instrument on August 21" in briefs[0]           # content made it through
+
+
+# ── 4b. deliver tickets carry the produced result ─────────────────
+
+
+class TestTicketCarriesResult:
+
+    def test_brief_includes_upstream_evidence(self, monkeypatch):
+        """A deliver node's ticket must carry the RESULT its upstream produced,
+        not just the instruction — the 2026-08-19 PR-assessment garbage was a
+        day of tickets asking the user for content the graph already held."""
+        store = _store()
+        wid, gid = _mk_wo(store)
+        _add_node(store, wid, gid, "assess", content="Assess the thing.")
+        store.apply("add_node", {"work_id": wid, "id": "finding1", "type": "evidence",
+                                 "parent_id": "assess", "title": "finding",
+                                 "content": "VERDICT: safe to merge; the timeout handling is correct."})
+        _add_node(store, wid, gid, "deliver", content="Give the user the assessment.")
+        store.apply("add_edge", {"work_id": wid, "src": "assess", "dst": "deliver",
+                                 "relation": "depends_on"})
+        store.apply("set_status", {"work_id": wid, "node_id": "deliver", "status": "actionable"})
+
+        briefs = []
+        from app.assistant.lib.tools.create_dayflow_ticket.create_dayflow_ticket import (
+            CreateDayflowTicketTool,
+        )
+        monkeypatch.setattr(CreateDayflowTicketTool, "_format_brief",
+                            staticmethod(lambda brief: briefs.append(brief) or {}))
+        import app.assistant.ticket_manager as tm_pkg
+        fake_tm = _FakeTM([])
+        fake_tm.create_ticket = lambda **kw: None
+        monkeypatch.setattr(tm_pkg, "get_ticket_manager", lambda: fake_tm)
+
+        nd._ticket(store, wid, "deliver", store.load(wid).nodes["deliver"])
+
+        assert len(briefs) == 1
+        assert "VERDICT: safe to merge" in briefs[0]          # the result itself
+        assert "Give the user the assessment" in briefs[0]    # plus the instruction
+
+
+# ── 4c. repair: ask ceiling + directive preservation ─────────────
+
+
+class TestRepairAskCeiling:
+
+    def _failed_ask(self, store, wid, gid, *, node_id, timeouts):
+        _add_node(store, wid, gid, node_id, content="Deliver the brief.")
+        store.apply("set_status", {"work_id": wid, "node_id": node_id, "status": "dispatched"})
+        store.apply("defer_node", {"work_id": wid, "node_id": node_id, "wake_kind": "user_reply",
+                                   "wake_at": None, "wake_ref": None})
+        for i in range(timeouts):
+            store.apply("set_status", {"work_id": wid, "node_id": node_id, "status": "failed",
+                                       "note": "ask timed out (ticket expired unanswered)"},
+                        actor="dispatch_sweeper")
+            if i < timeouts - 1:   # re-open between timeouts, as repair would
+                store.apply("set_status", {"work_id": wid, "node_id": node_id, "status": "proposed"})
+                store.apply("set_status", {"work_id": wid, "node_id": node_id, "status": "dispatched"})
+                store.apply("defer_node", {"work_id": wid, "node_id": node_id,
+                                           "wake_kind": "user_reply", "wake_at": None, "wake_ref": None})
+
+    def test_third_timeout_hits_ceiling(self):
+        from app.assistant.dayflow_orchestrator.work_repair_apply import apply_adjudication
+        store = _store()
+        wid, gid = _mk_wo(store)
+        self._failed_ask(store, wid, gid, node_id="ask1", timeouts=3)
+
+        apply_adjudication(store, wid, "escalate", ask="Please answer the brief question.")
+        node = store.load(wid).nodes["ask1"]
+        assert node.status == "abandoned"
+        assert node.payload["terminal"]["verdict"] == "ask_unanswered_ceiling"
+
+    def test_under_ceiling_reasks_without_touching_content(self):
+        from app.assistant.dayflow_orchestrator.work_repair_apply import apply_adjudication
+        store = _store()
+        wid, gid = _mk_wo(store)
+        self._failed_ask(store, wid, gid, node_id="ask1", timeouts=1)
+
+        apply_adjudication(store, wid, "escalate", ask="Please answer the brief question.")
+        node = store.load(wid).nodes["ask1"]
+        assert node.status == "proposed"
+        assert node.wake_kind == "user_reply"
+        assert node.wake_ref == "Please answer the brief question."   # ask rides wake_ref
+        assert node.content == "Deliver the brief."                   # directive untouched
 
 
 # ── 5. sweeper timeout judgment ───────────────────────────────────

@@ -17,6 +17,20 @@ logger = get_logger(__name__)
 
 DISPOSITIONS = {"escalate", "retry", "abandon_goal"}
 
+# ASK CEILING (owner ruling 2026-08-19): an ask that has timed out unanswered
+# this many times stops being re-surfaced — the user's silence IS the answer,
+# and the evaluator judges what it means at goal level. Without this, the
+# timeout -> repair -> re-ask loop ran hourly forever (ten work objects deep
+# on 2026-08-19).
+_MAX_ASK_TIMEOUTS = 3
+
+
+def _ask_timeout_count(node) -> int:
+    """How many times this node's ask has expired unanswered — counted from the
+    sweeper's append-only status notes (deterministic; no wording judgment)."""
+    notes = (node.payload or {}).get("status_notes") or []
+    return sum(1 for x in notes if "ask timed out" in str(x.get("note", "")).lower())
+
 
 def find_failed_targets(wo):
     """The logical failures to act on: failed subtasks directly under the goal; else any failed node."""
@@ -44,13 +58,31 @@ def apply_adjudication(store, work_id, disposition, ask="", actor="work_repair",
     targets = find_failed_targets(wo)
     done = []
     for n in targets:
+        # Ceiling before any re-surface: a repeatedly-unanswered ask is not
+        # re-asked again. The node ends abandoned with its epitaph; the
+        # finalizer/evaluator read the silence at goal level.
+        timeouts = _ask_timeout_count(n)
+        if disposition in ("retry", "escalate") and timeouts >= _MAX_ASK_TIMEOUTS:
+            store.apply("set_status", {
+                "work_id": work_id, "node_id": n.id, "status": "abandoned",
+                "verdict": "ask_unanswered_ceiling",
+                "reason": (f"asked the user {timeouts} times with no answer — "
+                           f"re-asking again is noise; the user's silence is the result"),
+            }, actor=actor)
+            logger.warning("work_repair[%s]: ask %s hit the %d-timeout ceiling — abandoned, not re-asked",
+                           work_id, n.id, timeouts)
+            done.append(n.id)
+            continue
         if disposition == "retry":
             store.apply("set_status", {"work_id": work_id, "node_id": n.id, "status": "proposed"}, actor=actor)
         else:  # escalate
-            content = (n.content or "").rstrip()
-            note = f"{content}\n\n[Re-issued as an ask to the user: {ask}]" if ask else content
-            store.apply("set_status", {"work_id": work_id, "node_id": n.id, "status": "proposed",
-                                       "content": note}, actor=actor)
+            # The ask text rides wake_ref ONLY. It must never be written into
+            # node.content — that is the node's immutable directive, and
+            # appending repair-authored prose there is how internal confusion
+            # ("please provide a way to deliver this") reached the user's
+            # screen verbatim on 2026-08-19.
+            store.apply("set_status", {"work_id": work_id, "node_id": n.id, "status": "proposed"},
+                        actor=actor)
             store.apply("defer_node", {"work_id": work_id, "node_id": n.id, "wake_kind": "user_reply",
                                        "wake_at": None, "wake_ref": ask or n.title}, actor=actor)
         done.append(n.id)
