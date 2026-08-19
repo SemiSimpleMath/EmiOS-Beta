@@ -1,0 +1,69 @@
+# EmiOS — reference Docker deployment.
+#
+#   cp .env.example .env      # then fill in at least one provider key
+#   docker compose up -d --build
+#   # open http://localhost:8000 and walk the setup wizard
+#
+services:
+  emios:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: emios
+    ports:
+      - "8000:8000"
+    volumes:
+      # ALL persistent state lives here: emi.db, .env, .setup_complete,
+      # configs/, resources/, chroma_db, logs.
+      #
+      # Never mount a volume over /app. A named volume there shadows the
+      # image's code: the first `up` seeds it, and every rebuild afterwards
+      # keeps serving the stale copy.
+      - emios-data:/data
+    environment:
+      # Infrastructure — owned by this file.
+      EMI_DATA_DIR: /data
+      EMI_HOST: 0.0.0.0
+      EMI_PORT: "8000"
+
+      # Serving under a subpath behind a reverse proxy (optional):
+      # EMI_PROXY_SUBPATH: /emi
+      # EMI_TRUST_PROXY_HEADERS: "1"   # ProxyFix hop count; must be an integer
+
+      # Provider + credential config is owned by /data/.env, which the setup
+      # wizard writes. These are declared with NO value so Compose passes them
+      # through only when they are set in the host environment.
+      #
+      # Do NOT give these a default (e.g. ${OPENAI_API_KEY:-}): Compose would
+      # then set them to the empty string, and load_dotenv() does not override
+      # variables that are already set, so the empty value would permanently
+      # shadow the real key in /data/.env.
+      DEFAULT_LLM_PROVIDER:
+      DEFAULT_LLM_MODEL:
+      OPENAI_API_KEY:
+      GOOGLE_API_KEY:
+      ANTHROPIC_API_KEY:
+      OPENCODE_API_KEY:
+      OPENCODE_BASE_URL:
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      # FIRST boot on an empty volume also downloads chroma's ONNX embedding
+      # model (~79 MB) into the image cache, so it is much slower than the
+      # ~50s of a warm restart. 300s covers both; the container is simply
+      # "starting" until then rather than being reported unhealthy.
+      start_period: 300s
+
+    # NOTE the execute_code tool is NOT functional in this configuration.
+    # It shells out to `docker run` on the host to spawn an emi-sandbox
+    # container per call (see docker/sandbox/README.md), and this container has
+    # neither the docker CLI nor a socket. Making it work means installing the
+    # CLI and bind-mounting /var/run/docker.sock, which grants the container
+    # root-equivalent access to the host — a deliberate security decision, so
+    # it is left out of the reference deployment rather than enabled quietly.
+
+volumes:
+  emios-data:

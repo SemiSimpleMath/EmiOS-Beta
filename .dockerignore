@@ -1,0 +1,33 @@
+# Build context hygiene. Without this the whole repo — .git, the virtualenv,
+# local data — is sent to the daemon on every build.
+.git
+.gitignore
+.venv
+venv
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+
+# Local state that must never be baked into an image.
+.env
+.env.*
+!.env.example
+data/
+logs/
+uploads/
+instance/
+chroma_db/
+*.db
+*.db-shm
+*.db-wal
+
+# Retired code — not needed at runtime, and it is large.
+_archived/
+
+# Test/CI scratch
+.pytest_cache
+.mypy_cache
+.ruff_cache
+htmlcov
+.coverage
