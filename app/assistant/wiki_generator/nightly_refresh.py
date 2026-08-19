@@ -73,7 +73,7 @@ def _default_vault() -> Path:
     if override:
         return Path(override)
     if os.environ.get("EMI_DATA_DIR"):
-        from app.assistant.utils.path_utils import get_data_dir, get_resources_dir
+        from app.assistant.utils.path_utils import get_data_dir
         return get_data_dir() / "wiki"
     return Path.home() / f"{_get_assistant_name()}Wiki"
 

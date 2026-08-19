@@ -31,3 +31,50 @@ _archived/
 .ruff_cache
 htmlcov
 .coverage
+
+# ── Private / live personal data ─────────────────────────────────────────────
+# The reference image is meant to be built from a CLEAN CLONE. On a machine
+# with a live EmiOS install, the trees COPYed into the image (app/, resources/,
+# skills/) also hold gitignored personal data and credentials — these patterns
+# keep a maintainer-machine build from baking them in. Mirrors .gitignore's
+# private patterns; keep the two in sync when adding private paths.
+
+# Credentials and tokens — NEVER in an image.
+app/assistant/lib/credentials/
+app/assistant/lib/core_tools/credentials/
+app/certs/
+
+# Live personal resources (runtime-generated or user-authored).
+resources/user/resource_user_data.json
+resources/user/user_bio.json
+resources/user/resource_wiki_sections.json
+resources/user/.setup_draft.json
+resources/resource_emi_accounts.json
+resources/env_registry_user.json
+resources/assistant/assistant_core.json
+resources/assistant/resource_assistant_data.json
+resources/assistant/resource_assistant_personality_data.json
+resources/assistant/resource_chat_guidelines_data.json
+resources/assistant/resource_relationship_config.json
+resources/subconscious/
+resources/identity/
+resources/instructions/
+resources/context/user/
+resources/context/global/resource_weather.json
+resources/context_engine/
+resources/dayflow_pipeline_outputs/
+resources/daily_insights_pipeline_outputs/
+resources/weekly_insights_pipeline_outputs/
+resources/kg_derived/
+resources/status/
+resources/day_context/
+resources/resource_routine_status.json
+resources/resource_user_location.json
+resources/resource_current_location.json
+skills/private/
+app/assistant/rooms/justin/
+app/assistant/user_settings_manager/user_settings_data/user_settings.json
+app/subconscious_digests/
+app/static/temp_audio/
+app/chroma_db/
+contrib_log/

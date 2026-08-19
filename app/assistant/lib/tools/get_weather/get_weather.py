@@ -89,7 +89,15 @@ def _geocode_city(city: str) -> Dict:
                     "country": payload[0].get("country", "Unknown"),
                 }
         # Fall through to the keyless provider rather than erroring out: a bad
-        # key or a transient 5xx should not make the tool unusable.
+        # key or a transient 5xx should not make the tool unusable. Logged
+        # loudly so a dead key stays VISIBLE — the tool keeps working either
+        # way, which would otherwise mask the misconfiguration forever.
+        logger.warning(
+            "[get_weather] OpenWeatherMap geocoding failed (HTTP %s) despite a "
+            "configured key — using the keyless Open-Meteo geocoder instead. If "
+            "this repeats, OPENWEATHER_API_KEY is likely invalid.",
+            response.status_code,
+        )
 
     # Keyless fallback: https://open-meteo.com/en/docs/geocoding-api
     # Accepts "City,CC" two-letter country codes; a bare name resolves to the
