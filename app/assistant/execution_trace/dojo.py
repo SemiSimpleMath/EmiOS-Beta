@@ -198,23 +198,40 @@ def _execute_run(
         manager = DI.multi_agent_manager_factory.create_manager("playwright_manager")
         return DI.manager_invoker.invoke(manager, msg)
 
+    # NOT a `with` block. Returning from inside one calls
+    # ThreadPoolExecutor.__exit__ -> shutdown(wait=True), which blocks until the
+    # worker finishes -- so the timeout below bounded nothing and a hung run hung
+    # forever regardless of run_timeout. Measured: worker 6s, timeout 1s, the
+    # TimeoutError fired at 1.00s but the caller did not regain control until
+    # 6.00s.
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(_run_manager)
-            try:
-                result = future.result(timeout=run_timeout)
-            except concurrent.futures.TimeoutError:
-                logger.warning("[dojo] Run timed out after %ds", run_timeout)
-                # Signal the manager to stop via blackboard cancellation.
-                # The thread will finish on its own; we just don't wait for it.
-                return {
-                    "task_id": task_id,
-                    "spec_version": spec_version,
-                    "success": False,
-                    "elapsed_seconds": round(time.monotonic() - t0, 1),
-                    "error": f"Timed out after {run_timeout}s",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                }
+        future = pool.submit(_run_manager)
+        try:
+            result = future.result(timeout=run_timeout)
+        except concurrent.futures.TimeoutError:
+            logger.warning("[dojo] Run timed out after %ds", run_timeout)
+            # Abandon the worker deliberately so the caller regains control at
+            # the deadline and can record the timeout / move to the next run.
+            #
+            # This does NOT stop the run. The future cannot be cancelled once
+            # started, and since 3.9 concurrent.futures registers an atexit hook
+            # that joins worker threads, so the PROCESS still waits for it at
+            # interpreter exit (measured: caller free at 1.02s, process exit at
+            # 6.08s). Genuinely stopping it needs a cooperative cancellation
+            # signal the manager checks -- which the comment previously here
+            # claimed ("signal the manager to stop via blackboard cancellation")
+            # but which was never implemented; grep found no such signal.
+            pool.shutdown(wait=False)
+            return {
+                "task_id": task_id,
+                "spec_version": spec_version,
+                "success": False,
+                "elapsed_seconds": round(time.monotonic() - t0, 1),
+                "error": f"Timed out after {run_timeout}s",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        pool.shutdown(wait=True)
 
         elapsed = time.monotonic() - t0
         success = False
@@ -246,6 +263,9 @@ def _execute_run(
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     finally:
+        # Never block here: on the timeout path we have deliberately abandoned
+        # the worker, and on the error path we do not want to inherit its wait.
+        pool.shutdown(wait=False)
         if old_bypass is None:
             os.environ.pop("EMI_BYPASS_APPROVAL", None)
         else:
