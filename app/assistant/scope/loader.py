@@ -204,9 +204,31 @@ def load_scope_for_source(
         # Routines OPTIONALLY declare a scope as a sibling YAML next to the routine
         # config. Missing file -> None (the routine attaches no scope; its payload
         # self-scopes or hits the system floor). See project_scope_resolution_model.
-        from app.assistant.utils.path_utils import get_repo_root
-        scope_path = get_repo_root() / "configs" / "routines" / "public" / f"{sid}.scope.yaml"
-        if not scope_path.exists():
+        #
+        # Resolved through get_configs_dir(), the same helper routine_manager.py:45
+        # and routines_admin.py:33 use to find the routines themselves. This used
+        # to be get_repo_root()/"configs", so under EMI_DATA_DIR a routine and its
+        # own .scope.yaml — authored side by side in the data dir — were read from
+        # two different trees and the scope was never found.
+        #
+        # Both folders are searched, private first, matching the precedence in
+        # routines_admin._load_config where private overrides public on id
+        # collision. Only "public" used to be checked, so a private routine — the
+        # user-authored kind most likely to need a scope — could never have one.
+        from app.assistant.utils.path_utils import get_configs_dir
+        routines_dir = get_configs_dir() / "routines"
+        for _folder in ("private", "public"):
+            candidate = routines_dir / _folder / f"{sid}.scope.yaml"
+            if candidate.exists():
+                scope_path = candidate
+                break
+        else:
+            # Deliberately absent is the common case, so this is debug, not info:
+            # no routine in the repo ships a .scope.yaml today.
+            logger.debug(
+                "load_scope_for_source: no .scope.yaml for routine %r under %s "
+                "(private/, public/) — attaching no scope.", sid, routines_dir,
+            )
             return None
         default_surface = "system"
     elif kind_n == "job":
