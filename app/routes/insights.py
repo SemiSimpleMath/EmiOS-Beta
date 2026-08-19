@@ -8,7 +8,7 @@ from pathlib import Path
 from flask import Blueprint, jsonify, render_template, request
 
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_repo_root
+from app.assistant.utils.path_utils import get_repo_root, get_resources_dir
 
 logger = get_logger(__name__)
 
@@ -105,7 +105,7 @@ def api_weekly_insights():
         return jsonify({"success": False, "message": "Invalid date format"})
 
     # Find the weekly insights file that covers this date
-    weekly_dir = get_repo_root() / "resources" / "weekly_insights_pipeline_outputs"
+    weekly_dir = get_resources_dir() / "weekly_insights_pipeline_outputs"
 
     # Check latest first
     latest_path = weekly_dir / "resource_weekly_insights_latest.json"
@@ -155,7 +155,7 @@ def api_weekly_insights():
 
 @insights_bp.route("/api/insights/beliefs")
 def api_beliefs():
-    beliefs_path = get_repo_root() / "resources" / "kg_derived" / "resource_user_beliefs.json"
+    beliefs_path = get_resources_dir() / "kg_derived" / "resource_user_beliefs.json"
 
     if not beliefs_path.exists():
         return jsonify({"success": False, "message": "No beliefs file found"})

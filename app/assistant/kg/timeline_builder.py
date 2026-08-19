@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from app.assistant.importance import effective_importance
 from app.assistant.kg.db.knowledge_graph_db_sqlite import Edge, Node
 from app.assistant.kg_core.kg_utils.date_display import format_node_date
-from app.assistant.utils.path_utils import get_repo_root
+from app.assistant.utils.path_utils import get_resources_dir
 from app.assistant.utils.time_utils import utc_now
 
 logger = logging.getLogger(__name__)
@@ -43,7 +43,7 @@ from app.assistant.importance.display import (
 # Bands: ≥ IMPORTANCE_BAND_MAJOR renders ★; ≥ IMPORTANCE_BAND_MID renders ·;
 # below IMPORTANCE_BAND_MID renders without a prefix (still included).
 
-_OUTPUT_DIR = get_repo_root() / "resources" / "kg_derived" / "timelines"
+_OUTPUT_DIR = get_resources_dir() / "kg_derived" / "timelines"
 
 
 @dataclass

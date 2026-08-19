@@ -171,9 +171,9 @@ def _build_addressable_concerns() -> str:
     """Concerns_register filtered to concerns where addressable_by
     includes wellness_proposer."""
     import json
-    from app.assistant.utils.path_utils import get_repo_root
+    from app.assistant.utils.path_utils import get_resources_dir
 
-    path = get_repo_root() / "resources" / "subconscious" / "resource_concerns_register.json"
+    path = get_resources_dir() / "subconscious" / "resource_concerns_register.json"
     if not path.is_file():
         return "(no concerns_register yet)"
     try:

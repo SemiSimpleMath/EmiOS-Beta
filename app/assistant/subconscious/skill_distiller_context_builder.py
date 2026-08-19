@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_repo_root
+from app.assistant.utils.path_utils import get_resources_dir
 from app.assistant.utils.time_utils import get_local_time
 
 logger = get_logger(__name__)
@@ -197,7 +197,7 @@ def _build_recent_outcome_chat() -> str:
 
 
 def _build_current_priority_rules() -> str:
-    path = get_repo_root() / "resources" / "instructions" / "resource_scheduler_priority_rules.md"
+    path = get_resources_dir() / "instructions" / "resource_scheduler_priority_rules.md"
     if not path.is_file():
         return "(no priority_rules file — distiller can propose new priority rules freely)"
     try:
@@ -219,7 +219,7 @@ def _build_house_rules_index() -> str:
     ]
     lines: List[str] = []
     for fname in files:
-        path = get_repo_root() / "resources" / "instructions" / fname
+        path = get_resources_dir() / "instructions" / fname
         if not path.is_file():
             lines.append(f"## {fname} — (not present)")
             continue
@@ -236,7 +236,7 @@ def _build_house_rules_index() -> str:
 
 
 def _build_prior_distillations() -> str:
-    path = get_repo_root() / "resources" / "subconscious" / "resource_learned_skills_proposed.md"
+    path = get_resources_dir() / "subconscious" / "resource_learned_skills_proposed.md"
     if not path.is_file():
         return "(no prior distillations — this is the first run)"
     try:

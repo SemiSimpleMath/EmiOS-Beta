@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_repo_root
+from app.assistant.utils.path_utils import get_resources_dir
 
 logger = get_logger(__name__)
 
@@ -33,7 +33,7 @@ def apply_skill_distiller_output(output: Dict[str, Any]) -> Dict[str, Any]:
         now_utc_iso=now_utc_iso,
     )
 
-    path = get_repo_root() / "resources" / "subconscious" / "resource_learned_skills_proposed.md"
+    path = get_resources_dir() / "subconscious" / "resource_learned_skills_proposed.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
         header = (

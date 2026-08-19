@@ -23,7 +23,7 @@ from app.assistant.subconscious.context_builder import (
     _NO_DATA_FMT,
 )
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_repo_root
+from app.assistant.utils.path_utils import get_resources_dir
 from app.assistant.utils.time_utils import get_local_time
 
 logger = get_logger(__name__)
@@ -162,7 +162,7 @@ def _build_wellness_calendar(*, now_local: datetime) -> str:
 
 def _build_addressable_concerns() -> str:
     """concerns_register filtered to those routed to romantic_proposer."""
-    path = get_repo_root() / "resources" / "subconscious" / "resource_concerns_register.json"
+    path = get_resources_dir() / "subconscious" / "resource_concerns_register.json"
     if not path.is_file():
         return "(no concerns_register yet)"
     try:
@@ -226,7 +226,7 @@ def _build_key_dates(*, now_local: datetime) -> str:
     """Anniversary, Katy's birthday, his birthday, kids' birthdays from
     resource_user_data. Renders relative-distance for the next 90 days."""
     try:
-        user_data_path = get_repo_root() / "resources" / "user" / "resource_user_data.json"
+        user_data_path = get_resources_dir() / "user" / "resource_user_data.json"
         user_data = json.loads(user_data_path.read_text(encoding="utf-8"))
     except Exception as e:
         logger.warning("[romantic_context] user_data read failed: %s", e)

@@ -347,8 +347,8 @@ def _build_routine() -> str:
 def _build_user_directives() -> str:
     try:
         from pathlib import Path
-        from app.assistant.utils.path_utils import get_repo_root
-        directives_path = get_repo_root() / "resources" / "instructions" / "resource_orchestrator_user_prefs.md"
+        from app.assistant.utils.path_utils import get_resources_dir
+        directives_path = get_resources_dir() / "instructions" / "resource_orchestrator_user_prefs.md"
         if directives_path.exists():
             content = directives_path.read_text(encoding="utf-8").strip()
             if content:
