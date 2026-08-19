@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_repo_root
+from app.assistant.utils.path_utils import get_resources_dir
 from app.assistant.utils.resource_formatting import format_resource_value
 
 logger = get_logger(__name__)
@@ -35,7 +35,7 @@ class RoomResourceInjectionService:
 
     @staticmethod
     def _subscriptions_path() -> Path:
-        return get_repo_root() / "resources" / "context" / "global" / "resource_subscriptions.json"
+        return get_resources_dir() / "context" / "global" / "resource_subscriptions.json"
 
     @staticmethod
     def _normalize_subscriptions(raw: Any) -> dict[str, dict[str, Any]]:

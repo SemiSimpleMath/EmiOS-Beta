@@ -36,9 +36,9 @@ def _get_assistant_name() -> str:
     resources/assistant/assistant_core.json. Falls back to "Emi" if the
     file is missing or unreadable."""
     try:
-        from app.assistant.utils.path_utils import get_repo_root
+        from app.assistant.utils.path_utils import get_resources_dir
         import json as _json
-        path = get_repo_root() / "resources" / "assistant" / "assistant_core.json"
+        path = get_resources_dir() / "assistant" / "assistant_core.json"
         if not path.exists():
             return "Emi"
         with open(path, "r", encoding="utf-8") as f:

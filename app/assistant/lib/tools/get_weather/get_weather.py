@@ -8,7 +8,7 @@ from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
 from app.assistant.lib.tools.get_weather.utils import openmeteo
 from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_repo_root
+from app.assistant.utils.path_utils import get_resources_dir
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.event_repository.event_repository import EventRepositoryManager
 
@@ -24,10 +24,10 @@ def _get_user_location() -> Dict:
     1. resource_current_location.json → current_location (dynamic)
     2. resource_user_data.json → home_city (permanent)
     """
-    root = get_repo_root()
+    root = get_resources_dir()
 
     # 1. Dynamic current location.
-    current_loc_path = root / "resources" / "resource_current_location.json"
+    current_loc_path = root / "resource_current_location.json"
     if current_loc_path.exists():
         try:
             loc_data = json.loads(current_loc_path.read_text(encoding="utf-8"))
@@ -45,7 +45,7 @@ def _get_user_location() -> Dict:
             logger.error("Error loading current location: %s", e)
 
     # 2. Permanent home_city.
-    user_data_path = root / "resources" / "user" / "resource_user_data.json"
+    user_data_path = root / "user" / "resource_user_data.json"
     if user_data_path.exists():
         try:
             user_data = json.loads(user_data_path.read_text(encoding="utf-8"))
@@ -221,13 +221,13 @@ class GetWeather(BaseTool):
                 })
 
         # Write to disk.
-        resources_path = get_repo_root() / "resources" / "context" / "global" / "resource_weather.json"
+        resources_path = get_resources_dir() / "context" / "global" / "resource_weather.json"
         resources_path.parent.mkdir(parents=True, exist_ok=True)
         with open(resources_path, "w", encoding="utf-8") as f:
             json.dump(weather_resource, f, indent=2, ensure_ascii=False)
 
         # Remove legacy duplicate if present.
-        legacy_path = get_repo_root() / "resources" / "resource_weather.json"
+        legacy_path = get_resources_dir() / "resource_weather.json"
         if legacy_path.exists() and legacy_path.resolve() != resources_path.resolve():
             legacy_path.unlink()
 

@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_repo_root
+from app.assistant.utils.path_utils import get_resources_dir
 from app.assistant.utils.identity_names import get_required_primary_user_name
 from app.assistant.utils.time_utils import get_local_time, get_local_time_str
 
@@ -80,7 +80,7 @@ def _resolve_household_members() -> List[str]:
 
     Future: refine with KG cohabits-with / lives-with / is-family-of edges.
     """
-    user_data_path = get_repo_root() / "resources" / "user" / "resource_user_data.json"
+    user_data_path = get_resources_dir() / "user" / "resource_user_data.json"
     data = json.loads(user_data_path.read_text(encoding="utf-8"))
     members = [get_required_primary_user_name()]
     # important_people: [{name, relationship, birthdate}, ...]
@@ -105,7 +105,7 @@ def _build_diet_log() -> str:
     sidecar `_text.md`. We prefer the markdown sidecar for human-readable
     injection; fall back to the JSON if the .md isn't present.
     """
-    base = get_repo_root() / "resources" / "dayflow_pipeline_outputs"
+    base = get_resources_dir() / "dayflow_pipeline_outputs"
     md_path = base / "resource_diet_log_today_text.md"
     if md_path.is_file():
         text = md_path.read_text(encoding="utf-8").strip()
@@ -407,7 +407,7 @@ def _build_sleep_log() -> str:
 
 def _build_activity_log() -> str:
     """Read the activity_tracker output if present."""
-    base = get_repo_root() / "resources" / "dayflow_pipeline_outputs"
+    base = get_resources_dir() / "dayflow_pipeline_outputs"
     md_path = base / "resource_activity_log_today_text.md"
     if md_path.is_file():
         text = md_path.read_text(encoding="utf-8").strip()
@@ -481,7 +481,7 @@ def _build_ambient_state_digest(members: List[str]) -> str:
 
 def _build_concerns_register_active() -> str:
     """Read the concerns_register JSON and render active + addressing concerns."""
-    path = get_repo_root() / "resources" / "subconscious" / "resource_concerns_register.json"
+    path = get_resources_dir() / "subconscious" / "resource_concerns_register.json"
     if not path.is_file():
         return _NO_DATA_FMT.format(kind="concerns register")
     try:
@@ -705,7 +705,7 @@ def _build_watchlist_summary() -> str:
 
     Returns the file's content if present, or a clearly-marked fallback
     so Pass B knows nothing's configured."""
-    path = get_repo_root() / "resources" / "subconscious" / "resource_subconscious_watchlist.md"
+    path = get_resources_dir() / "subconscious" / "resource_subconscious_watchlist.md"
     if not path.is_file():
         return "(no watchlist file — Pass B's external scouting has nothing curated to watch)"
     try:
@@ -736,7 +736,7 @@ def _build_family_graph_digest() -> str:
     from datetime import date, timedelta as _td
 
     try:
-        user_data_path = get_repo_root() / "resources" / "user" / "resource_user_data.json"
+        user_data_path = get_resources_dir() / "user" / "resource_user_data.json"
         if not user_data_path.is_file():
             return "(no resource_user_data.json — no family graph to project)"
         user_data = json.loads(user_data_path.read_text(encoding="utf-8"))
@@ -830,7 +830,7 @@ def _build_recurring_obligations() -> str:
     surfaces an anticipated_need when today is within lead_time of next_due.
 
     Returns the file's content if present, or a clearly-marked fallback."""
-    path = get_repo_root() / "resources" / "subconscious" / "resource_recurring_obligations.md"
+    path = get_resources_dir() / "subconscious" / "resource_recurring_obligations.md"
     if not path.is_file():
         return "(no recurring obligations file — Pass B's anticipated_need scanning has nothing curated)"
     try:

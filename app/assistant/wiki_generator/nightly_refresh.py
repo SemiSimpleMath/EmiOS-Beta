@@ -50,9 +50,9 @@ def _get_assistant_name() -> str:
     """Read assistant name (e.g. 'Floppy') from resources/assistant/
     assistant_core.json. Fallback: 'Emi'."""
     try:
-        from app.assistant.utils.path_utils import get_repo_root
+        from app.assistant.utils.path_utils import get_resources_dir
         import json as _json
-        path = get_repo_root() / "resources" / "assistant" / "assistant_core.json"
+        path = get_resources_dir() / "assistant" / "assistant_core.json"
         if not path.exists():
             return "Emi"
         with open(path, "r", encoding="utf-8") as f:
@@ -73,7 +73,7 @@ def _default_vault() -> Path:
     if override:
         return Path(override)
     if os.environ.get("EMI_DATA_DIR"):
-        from app.assistant.utils.path_utils import get_data_dir
+        from app.assistant.utils.path_utils import get_data_dir, get_resources_dir
         return get_data_dir() / "wiki"
     return Path.home() / f"{_get_assistant_name()}Wiki"
 
