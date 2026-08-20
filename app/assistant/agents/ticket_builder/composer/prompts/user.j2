@@ -1,0 +1,15 @@
+**Current Time:** {{ date_time }}{% if day_of_week %} — {{ day_of_week }}{% endif %}
+
+########## TICKET BRIEF ##########
+{{ task }}
+
+{% if recent_history %}
+########## GATHERED CONTEXT (what was pulled from the work graph / pods for this message) ##########
+{{ recent_history }}
+{% endif %}
+{% if entity_card %}
+########## ENTITY CONTEXT ##########
+{{ entity_card }}
+{% endif %}
+
+Write the final ticket fields now. Remember: the message is the delivery — substance in full.

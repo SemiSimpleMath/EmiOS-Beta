@@ -24,4 +24,3 @@ class AgentForm(BaseModel):
     message: str = Field(
         description="Natural-language message body shown to the user.",
     )
-

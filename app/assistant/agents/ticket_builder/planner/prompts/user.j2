@@ -1,0 +1,26 @@
+Ticket brief: {{ task }}
+
+{% if information %}
+Node reference and extra context: {{ information }}
+{% endif %}
+
+{% if checklist %}
+Checklist:
+{{ checklist }}
+{% endif %}
+
+{% if progress_report %}
+Progress so far:
+{{ progress_report }}
+{% endif %}
+
+{% if recent_history %}
+Gathered so far:
+{{ recent_history }}
+{% endif %}
+
+Today is {{ date_time }}.
+
+You are at action {{ action_count }} (cap 4 — a self-contained brief should return_control at
+action 0). What is your next action? When the substance is in view, or the brief needs nothing,
+or the graph provably lacks what the goal promises, set action to `return_control`.

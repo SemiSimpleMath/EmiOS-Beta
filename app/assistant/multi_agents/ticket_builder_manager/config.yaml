@@ -1,0 +1,120 @@
+name: ticket_builder_manager
+class_name: MultiAgentManager
+description: "Composes user-facing tickets. A read-only planner pulls the SUBSTANCE a communicate-goal promises (work graph via read_work_object, pods by id via pod_fetch), then the composer writes the final {title, message} — the message IS the delivery. Replaces the single-shot ticket_builder agent, whose starved brief produced content-free tickets (2026-08-19 incident). Simple self-contained briefs return_control at action 0, so the common case costs one planner step + the compose."
+max_cycles: 14
+role_bindings:
+  delegator: emi_team::delegator
+  tool_selector: shared::tool_selector
+
+agents:
+  - name: emi_team::delegator
+    class: Delegator
+  - name: ticket_builder::planner
+    class: Planner
+  - name: emi_team::summary
+    class: Agent
+  - name: ticket_builder::composer
+    class: Agent
+
+control_nodes:
+  - name: tool_return_router
+    class: ToolReturnRouter
+  - name: summary_pre_node
+    class: SummaryPreNode
+    config:
+      enabled: true
+      summary_agent: "emi_team::summary"
+      resume_agent: "ticket_builder::planner"
+      planner_agent: "ticket_builder::planner"
+      cadence_every_actions: 4
+      min_messages: 20
+      trigger_on_large_result_chars: 6000
+      allow_summarize_latest_tool_result: false
+      protect_last_n_results: 3
+  - name: summary_post_node
+    class: SummaryPostNode
+    config:
+      summary_agent: "emi_team::summary"
+      resume_agent: "ticket_builder::planner"
+  - name: tool_caller
+    class: ToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: return_control
+    class: ReturnControlNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+tool_visibility:
+  always_show:
+    - read_work_object
+    - search_work_objects
+    - pod_fetch
+  use_narrower: false
+
+# Read-only messenger: the graph and pods (by id) hold everything a deliver
+# ticket needs. Deliberately absent:
+# - pod_search: a messenger that can rummage the pod store can pull unrelated
+#   personal data into a message; ids come from the graph, dereference is exact.
+# - anything world-facing (web, email, playwright): if the graph lacks the
+#   promised result, the correct outcome is an honest "it doesn't exist yet",
+#   never re-doing the work inside the delivery step.
+tools:
+  allowed_tools:
+    - read_work_object
+    - search_work_objects
+    - pod_fetch
+  except_tools: []
+
+scope_contract:
+  tools:
+    allowed_tools:
+      - read_work_object
+      - search_work_objects
+      - pod_fetch
+    blocked_tools:
+      - install_tool
+      - ask_user
+      - send_email
+      - execute_code
+      - search_web
+      - playwright_browse
+      - pod_search
+    requires_approval_tools: []
+    allow_external_side_effects: false
+  writes:
+    write_kg: false
+    allow_fact_extraction: false
+
+flow_config:
+  strict_routing: true
+  tool_return:
+    tool_call_result_handler_node: "tool_result_handler"
+  summary:
+    enabled: true
+    source_agent: "tool_return_router"
+    summary_agent: "emi_team::summary"
+    resume_agent: "ticket_builder::planner"
+    planner_agent: "ticket_builder::planner"
+    cadence_every_actions: 4
+    action_count_state_key: "{planner_agent}_action_count"
+    min_messages: 20
+    trigger_on_large_result_chars: 6000
+    payload_key: "summary_payload"
+    payload_recent_history_messages: 80
+    allow_summarize_latest_tool_result: false
+    protect_last_n_results: 3
+  state_map:
+    "emi_team::delegator": "ticket_builder::planner"
+    "ticket_builder::planner": "tool_caller"
+    "tool_result_handler": "tool_return_router"
+    "tool_return_router": "summary_pre_node"
+    "summary_pre_node": "ticket_builder::planner"
+    "emi_team::summary": "summary_post_node"
+    "summary_post_node": "ticket_builder::planner"
+    "ticket_builder::planner_return_control": "ticket_builder::composer"
+    "ticket_builder::composer": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "ticket_builder::composer"

@@ -125,17 +125,21 @@ class CreateDayflowTicketTool(BaseTool):
             return ToolResult(result_type="error", content=f"create_dayflow_ticket failed: {e}", data={})
 
     @staticmethod
-    def _format_brief(brief: str) -> dict[str, str]:
-        """Use the ticket_builder agent to convert a brief into ticket fields."""
+    def _format_brief(brief: str, work_node_ref: str = "") -> dict[str, str]:
+        """Compose ticket fields via ticket_builder_manager: a read-only planner
+        pulls the substance the goal promises (work graph + pods by id), then the
+        composer writes the final {title, message}. `work_node_ref` is the
+        `work_id::node_id` the ticket delivers for, when it comes from a work
+        object — the planner uses it to read the graph; empty for standalone
+        tickets (cron reminders, subconscious questions), where the planner
+        simply returns control and the composer works from the brief alone."""
         try:
             from app.assistant.ServiceLocator.service_locator import DI
             from app.assistant.utils.pydantic_classes import Message
             from app.assistant.scope.loader import load_scope_for_source
 
-            agent = DI.agent_factory.create_agent("dayflow_orchestrator::ticket_builder")
-
             # Scope is the dayflow_orchestrator room scope.yaml (resources: [all]
-            # there is a superset of the resource_user_data this agent resolves).
+            # there is a superset of what this manager's read-only tools need).
             scope = load_scope_for_source(
                 kind="room",
                 source_id="dayflow_orchestrator",
@@ -147,27 +151,31 @@ class CreateDayflowTicketTool(BaseTool):
                     "room_id": "dayflow_orchestrator",
                 },
             )
-
-            msg = Message(
-                agent_input={"ticket_brief": brief},
-                scope_context=scope,
+            information = (
+                f"Work node reference for graph reads: {work_node_ref}" if work_node_ref else ""
             )
-            agent.blackboard.update_state_value("ticket_brief", brief)
+            mgr = DI.multi_agent_manager_factory.create_manager("ticket_builder_manager")
+            msg = Message(task=brief, information=information, scope_context=scope)
+            DI.manager_invoker.invoke(mgr, msg)
 
-            result = agent.action_handler(msg)
-            data = getattr(result, "data", None)
-            if isinstance(data, dict):
-                # Agent form fields: ticket_kind, suggestion_type, title, message
-                if data.get("title"):
+            # The composer's structured output rides its audit message on the
+            # manager blackboard — same extraction pattern as finding_processor.
+            for m in reversed(mgr.blackboard.get_messages()):
+                sender = str(getattr(m, "sender", "") or "")
+                if not sender.endswith("composer") or "ticket_builder" not in sender:
+                    continue
+                data = getattr(m, "data", None)
+                if isinstance(data, dict) and data.get("title"):
                     return {
                         "ticket_kind": str(data.get("ticket_kind") or "advice"),
                         "suggestion_type": str(data.get("suggestion_type") or "general"),
                         "title": str(data.get("title") or ""),
                         "message": str(data.get("message") or brief),
                     }
+                break
         except Exception as e:
-            logger.warning("create_dayflow_ticket: ticket_builder agent failed: %s", e)
-            logger.debug("create_dayflow_ticket: ticket_builder exception details", exc_info=True)
+            logger.warning("create_dayflow_ticket: ticket_builder_manager failed: %s", e)
+            logger.debug("create_dayflow_ticket: ticket_builder_manager exception details", exc_info=True)
 
         # Fallback: mechanical extraction if agent fails.
         is_decision = any(w in brief.lower() for w in ("ask", "decide", "choice", "confirm", "whether"))

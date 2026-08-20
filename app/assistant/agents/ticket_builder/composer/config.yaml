@@ -1,0 +1,26 @@
+# ticket_builder::composer — the final voice of ticket_builder_manager. Turns the
+# brief + everything the planner gathered (visible via recent_history) into the
+# {ticket_kind, title, message} the create_dayflow_ticket contract expects.
+name: ticket_builder::composer
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.6-luna"
+  model_tier: "mini"
+
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+entity_scan_keys: [task, recent_history]
+entity_card_level: 0
+
+user_context_items:
+  - date_time
+  - day_of_week
+  - task
+  - recent_history
+  - entity_card
+
+system_context_items:
+  - resource_user_data

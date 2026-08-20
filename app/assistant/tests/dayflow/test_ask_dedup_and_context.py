@@ -226,44 +226,40 @@ class TestTicketContext:
             CreateDayflowTicketTool,
         )
         monkeypatch.setattr(CreateDayflowTicketTool, "_format_brief",
-                            staticmethod(lambda brief: briefs.append(brief) or {}))
+                            staticmethod(lambda brief, work_node_ref="": briefs.append(brief) or {}))
         import app.assistant.ticket_manager as tm_pkg
         fake_tm = _FakeTM([])
         fake_tm.create_ticket = lambda **kw: None      # stop after composing — no publish path
         monkeypatch.setattr(tm_pkg, "get_ticket_manager", lambda: fake_tm)
 
-        nd._surface_ticket(wid, "ask1", node, store.load(wid))
+        nd._surface_ticket(wid, "ask1", node)
 
         assert len(briefs) == 1
         assert "instrument on August 21" in briefs[0]           # content made it through
 
 
-# ── 4b. deliver tickets carry the produced result ─────────────────
+# ── 4b. dispatch hands the composer manager ids, not pre-chewed content ──
 
 
-class TestTicketCarriesResult:
+class TestTicketManagerWiring:
 
-    def test_brief_includes_upstream_evidence(self, monkeypatch):
-        """A deliver node's ticket must carry the RESULT its upstream produced,
-        not just the instruction — the 2026-08-19 PR-assessment garbage was a
-        day of tickets asking the user for content the graph already held."""
+    def test_dispatch_passes_the_work_node_ref(self, monkeypatch):
+        """Content gathering belongs to ticket_builder_manager's planner: dispatch
+        hands over the node ref (ids, not content) so the planner reads the graph
+        itself. This replaced the topology-staple that pre-folded upstream
+        evidence into the brief (retired 2026-08-19 by owner design ruling)."""
         store = _store()
         wid, gid = _mk_wo(store)
-        _add_node(store, wid, gid, "assess", content="Assess the thing.")
-        store.apply("add_node", {"work_id": wid, "id": "finding1", "type": "evidence",
-                                 "parent_id": "assess", "title": "finding",
-                                 "content": "VERDICT: safe to merge; the timeout handling is correct."})
         _add_node(store, wid, gid, "deliver", content="Give the user the assessment.")
-        store.apply("add_edge", {"work_id": wid, "src": "assess", "dst": "deliver",
-                                 "relation": "depends_on"})
         store.apply("set_status", {"work_id": wid, "node_id": "deliver", "status": "actionable"})
 
-        briefs = []
+        calls = []
         from app.assistant.lib.tools.create_dayflow_ticket.create_dayflow_ticket import (
             CreateDayflowTicketTool,
         )
-        monkeypatch.setattr(CreateDayflowTicketTool, "_format_brief",
-                            staticmethod(lambda brief: briefs.append(brief) or {}))
+        monkeypatch.setattr(
+            CreateDayflowTicketTool, "_format_brief",
+            staticmethod(lambda brief, work_node_ref="": calls.append((brief, work_node_ref)) or {}))
         import app.assistant.ticket_manager as tm_pkg
         fake_tm = _FakeTM([])
         fake_tm.create_ticket = lambda **kw: None
@@ -271,9 +267,10 @@ class TestTicketCarriesResult:
 
         nd._ticket(store, wid, "deliver", store.load(wid).nodes["deliver"])
 
-        assert len(briefs) == 1
-        assert "VERDICT: safe to merge" in briefs[0]          # the result itself
-        assert "Give the user the assessment" in briefs[0]    # plus the instruction
+        assert len(calls) == 1
+        brief, ref = calls[0]
+        assert ref == f"{wid}::deliver"                        # ids in
+        assert "Give the user the assessment" in brief         # the goal text rides the brief
 
 
 # ── 4c. repair: ask ceiling + directive preservation ─────────────

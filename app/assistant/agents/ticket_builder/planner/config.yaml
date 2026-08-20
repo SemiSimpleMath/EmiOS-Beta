@@ -1,0 +1,34 @@
+# ticket_builder::planner — the context-gatherer half of ticket_builder_manager.
+# Reads the work graph / pods (by id, read-only) so the composed ticket carries
+# the SUBSTANCE a communicate-goal promises, wherever it lives in the graph.
+# See multi_agents/ticket_builder_manager/config.yaml for the manager rationale.
+name: ticket_builder::planner
+class_name: Planner
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.6-luna"
+  model_tier: "mini"
+
+# Read-only, never world-facing: a messenger, not a researcher. pod_fetch is
+# by-id dereference only (pod ids come from the graph) — pod_search is
+# deliberately absent so the composer can never rummage the pod store.
+allowed_tools:
+  - read_work_object
+  - search_work_objects
+  - pod_fetch
+except_tools: []
+allowed_nodes: [return_control]
+entity_scan_keys: [task]
+entity_card_level: 0
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - recent_history
+  - checklist
+  - progress_report
+
+# System prompt is static (cache-stable across cycles); all dynamic context
+# rides the user prompt — same pattern as kg_investigation::planner.
+system_context_items: []

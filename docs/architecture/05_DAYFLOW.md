@@ -104,10 +104,15 @@ unanswered ticket expiring is a TIMED-OUT call: the sweeper fails the node (reas
 `payload.status_notes` — never `content`, which is the immutable directive) and work_repair
 adjudicates — re-asking is a repair decision, not a timer, and it is BOUNDED: after 3 unanswered
 timeouts the ask abandons with verdict `ask_unanswered_ceiling` (the user's silence is the result;
-the evaluator judges it at goal level). A deliver-to-user ticket carries the PRODUCED RESULT: the
-dispatch deterministically folds the evidence/artifact children of the node's depends_on upstreams
-into the ticket body, so the message IS the delivery, never a pointer. The store fence refuses
-terminal writes on an in-flight ask (replan cannot prune a question that is out).
+the evaluator judges it at goal level). Ticket text is composed by `ticket_builder_manager`
+(multi_agents/): dispatch hands over ids and the goal (`work_id::node_id` + the node's directive),
+a read-only planner pulls the SUBSTANCE the goal promises — `read_work_object` on the graph,
+`pod_fetch` to dereference pod ids (never pod_search, never anything world-facing) — and the
+composer writes the final message. The message IS the delivery: a deliver-goal's ticket carries
+the produced result itself, and if the graph provably lacks it, the ticket says so honestly
+(loud failure reveals broken work). Self-contained briefs return_control at action 0, so the
+common case costs one planner step. The store fence refuses terminal writes on an in-flight ask
+(replan cannot prune a question that is out).
 A repair-escalated ask (`proposed + user_reply`, no wake_at) promotes for its first surface via the
 state_mover, which may HOLD it (a held pre-surface ask parks `waiting` and keeps `wake_kind=user_reply`
 so a late reply to an earlier ticket still matches).
