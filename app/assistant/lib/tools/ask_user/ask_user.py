@@ -13,6 +13,17 @@ logger = get_logger(__name__)
 _TICKET_POLL_INTERVAL_SECONDS = 1.0
 _TICKET_VALID_HOURS = 1
 
+# No answer within the window is the user's absence, not a tool failure — so it
+# returns a SURVIVABLE error (abort_tool), never an abort_task that kills the
+# calling manager. This text is the calling agent's entire instruction for the
+# no-answer case; there is deliberately no matching guidance in the tool
+# description or worker prompts.
+_UNREACHABLE_MESSAGE = (
+    "User could not be reached at this time. Decide whether to proceed on your "
+    "best judgment; if their answer is essential, finish and state exactly what "
+    "you still need from them. Asking again will not reach them."
+)
+
 
 class AskUserTool(BaseTool):
     def __init__(self):
@@ -222,8 +233,8 @@ class AskUserTool(BaseTool):
             if state in ("expired", "failed"):
                 return make_tool_error(
                     error_code="ask_user_timeout",
-                    message=f"ask_user ticket {state} for ticket {ticket_id}.",
-                    abort_policy="abort_task",
+                    message=_UNREACHABLE_MESSAGE,
+                    abort_policy="abort_tool",
                     retryable=False,
                     details={"ticket_id": ticket_id, "state": state},
                 )
@@ -236,8 +247,8 @@ class AskUserTool(BaseTool):
         )
         return make_tool_error(
             error_code="ask_user_timeout",
-            message=f"ask_user timed out after {timeout_seconds:.1f}s (ticket {ticket_id}).",
-            abort_policy="abort_task",
+            message=_UNREACHABLE_MESSAGE,
+            abort_policy="abort_tool",
             retryable=False,
             details={"ticket_id": ticket_id, "timeout_seconds": timeout_seconds},
         )
@@ -337,8 +348,8 @@ class AskUserTool(BaseTool):
             logger.error("[ask_user] Inline timeout question_id=%s error=%s", question_id, e)
             return make_tool_error(
                 error_code="ask_user_timeout",
-                message=f"ask_user timed out after {timeout_seconds:.1f}s (question_id={question_id}).",
-                abort_policy="abort_task",
+                message=_UNREACHABLE_MESSAGE,
+                abort_policy="abort_tool",
                 retryable=False,
                 details={
                     "question_id": question_id,
