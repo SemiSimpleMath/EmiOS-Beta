@@ -157,14 +157,16 @@ class EnrichExtractionStep:
         if agent_targets:
             from app.assistant.ServiceLocator.service_locator import DI
 
-            try:
-                agent = DI.agent_factory.create_agent(ENRICHER_AGENT_NAME)
-                if agent is None:
-                    logger.warning("[kg_pipeline.enrich] could not create meta_data_add agent")
-                    agent = None
-            except Exception as exc:
-                logger.warning("[kg_pipeline.enrich] meta_data_add unavailable: %s", exc)
-                agent = None
+            # Enrichment is not optional: persisting the KGWindowEnrichment row is
+            # what removes this extraction from the pending pool FOREVER, so degrading
+            # to "no metadata" ships date/validity/confidence-less facts into the
+            # graph recorded as enriched. Any failure raises — the extraction stays
+            # pending and the runner's quota-HALT machinery sees the typed error.
+            agent = DI.agent_factory.create_agent(ENRICHER_AGENT_NAME)
+            if agent is None:
+                raise RuntimeError(
+                    f"[kg_pipeline.enrich] could not create agent {ENRICHER_AGENT_NAME!r}"
+                )
 
             if agent is not None:
                 node_payloads = [
@@ -194,12 +196,8 @@ class EnrichExtractionStep:
                     kind="pipeline", source_id="kg_pipeline", actor_id="enrich_extraction",
                 )
 
-                try:
-                    resp = agent.action_handler(Message(agent_input=agent_input, scope_context=scope))
-                    data = resp.data if resp and hasattr(resp, "data") else {}
-                except Exception as exc:
-                    logger.warning("[kg_pipeline.enrich] meta_data_add call failed: %s", exc)
-                    data = {}
+                resp = agent.action_handler(Message(agent_input=agent_input, scope_context=scope))
+                data = resp.data if resp and hasattr(resp, "data") else {}
 
                 meta_nodes = data.get("Nodes") or [] if isinstance(data, dict) else []
                 for mn in meta_nodes:

@@ -118,8 +118,9 @@ def tag_bullets(
     Uses the cache for unchanged bullets and batches uncached bullets through
     the tagger LLM. Each batch is an independent call — no accumulator state
     flows between batches, so one bad batch doesn't poison the others. A
-    batch that raises logs a warning and emits empty tag lists for its
-    bullets; the rest of the bullets continue.
+    batch that raises ABORTS the run (no tags are invented for its bullets —
+    an emitted [] would persist in the sidecar as a permanent "no section"
+    verdict); bullets a successful batch omits are left uncached for retry.
 
     When ``bullet_windows`` and ``window_loader`` are both provided, the
     prompt is built window-grouped — each unique source window's resolved
@@ -191,19 +192,27 @@ def tag_bullets(
                 clean = [t for t in clean if t in allowed_keys]
                 by_number[n] = clean
             for i, bkey in enumerate(batch_keys, start=1):
-                tags[bkey] = by_number.get(i, [])
                 if i not in by_number:
+                    # No verdict is NOT a "belongs nowhere" verdict: the map is
+                    # persisted as the durable tag sidecar, and a [] written here
+                    # would permanently exclude this fact from the wiki. Leaving
+                    # the key out keeps it uncached, so the next run retries it.
                     logger.warning(
-                        "Tagger omitted bullet %d in batch starting at %d for %s",
+                        "Tagger omitted bullet %d in batch starting at %d for %s — left uncached",
                         i, start, entity_label,
                     )
-        except Exception as e:
-            logger.warning(
-                "Tagger failed for batch starting at %d for %s: %s",
-                start, entity_label, e,
+                    continue
+                tags[bkey] = by_number[i]
+        except Exception:
+            # A failed batch must not mint verdicts (the old path wrote [] per
+            # bullet into the sidecar — a permanent "no section" judgment from an
+            # outage). Raise: the page's generation aborts, it stays dirty, and
+            # the caller records the error.
+            logger.error(
+                "Tagger failed for batch starting at %d for %s — aborting page tagging",
+                start, entity_label,
             )
-            for bkey in batch_keys:
-                tags.setdefault(bkey, [])
+            raise
 
     return tags
 

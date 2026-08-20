@@ -218,18 +218,16 @@ def build_card(entity_node_id: str) -> Dict[str, Any]:
         if not section_facts:
             continue
 
-        # Stage 2: chunked rendering
+        # Stage 2: chunked rendering. A failed chunk ABORTS the whole build:
+        # swallowing it used to let the persist phase delete the card's existing
+        # sections, write the survivors (possibly nothing), stamp last_built_at,
+        # and mark the failed chunk's facts as renderer-REJECTED — an LLM outage
+        # recorded as a fresh successful rebuild. Raising leaves the old card
+        # intact and still stale, so the next refresh retries it.
         rendered_bullets: List[Dict[str, Any]] = []
         for chunk_start in range(0, len(section_facts), RENDERER_CHUNK_SIZE):
             chunk = section_facts[chunk_start:chunk_start + RENDERER_CHUNK_SIZE]
-            try:
-                chunk_out = _run_bullet_renderer(entity, section_name, chunk)
-                rendered_bullets.extend(chunk_out)
-            except Exception as e:
-                logger.warning(
-                    "bullet_renderer failed for %s chunk %d: %s",
-                    section_name, chunk_start // RENDERER_CHUNK_SIZE, e,
-                )
+            rendered_bullets.extend(_run_bullet_renderer(entity, section_name, chunk))
 
         if not rendered_bullets:
             continue
@@ -1394,11 +1392,10 @@ def _build_summary_section(
         "card_bullets": "\n".join(section_blocks) if section_blocks else "(no bullets)",
     }
 
-    try:
-        result = agent.action_handler(Message(agent_input=agent_input, scope_context=_scope()))
-    except Exception as e:
-        logger.warning("summary_writer failed for %s: %s", entity.label, e)
-        return None
+    # A summary_writer failure aborts the build (no swallow): returning None here
+    # let the persist phase replace the card with a summary-less version and stamp
+    # it freshly built.
+    result = agent.action_handler(Message(agent_input=agent_input, scope_context=_scope()))
 
     data = result.data if result and hasattr(result, 'data') else {}
     if hasattr(data, 'model_dump'):

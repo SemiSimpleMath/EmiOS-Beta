@@ -38,7 +38,10 @@ def generate_lead(
     entity_type: str,
     article_body: str,
 ) -> str:
-    """Return a 1–2 paragraph markdown lead, or "" on failure.
+    """Return a 1–2 paragraph markdown lead. "" only when there is no body to
+    summarize, the agent is unconfigured, or the model returned empty output —
+    an LLM call failure RAISES (a "" from an outage used to delete the page's
+    existing lead on republish).
 
     ``article_body`` should be the full article markdown BELOW the H1 title
     (sections + see_also) — that is, the text the lead should faithfully
@@ -66,11 +69,10 @@ def generate_lead(
         scope_context=_scope(),
     )
 
-    try:
-        result = agent.action_handler(msg)
-    except Exception as exc:
-        logger.warning("[wiki_lead] %s call failed for %r: %s", LEAD_AGENT, entity_name, exc)
-        return ""
+    # A lead-writer failure raises (no swallow-to-""): the incremental refresh
+    # stitches `lead` into the rewritten page, so a "" from an outage silently
+    # DELETED the page's existing lead paragraph while republishing it.
+    result = agent.action_handler(msg)
 
     data = getattr(result, "data", None) or {}
     lead = str(data.get("lead_markdown") or "").strip()

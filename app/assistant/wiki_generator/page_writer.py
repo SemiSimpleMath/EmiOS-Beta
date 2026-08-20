@@ -400,17 +400,18 @@ def generate_prose_page_tagged(
             },
             scope_context=_SCOPE_SECTION_WRITER,
         )
-        try:
-            result = writer.action_handler(msg)
-            data = getattr(result, "data", None) or {}
-            prose = data.get("page_markdown")
-            if isinstance(prose, str) and prose.strip():
-                cleaned = strip_debug_scaffolding(prose.strip()).strip()
-                if cleaned.lower().startswith("(nothing new to add)"):
-                    continue
-                section_outputs.append((key, cleaned))
-        except Exception as e:
-            logger.error("wiki_writer failed on section %s of %s: %s", key, entity_label, e)
+        # A writer failure ABORTS the page (no swallow): dropping the section used
+        # to let an all-sections outage return None below, which growth records as
+        # a permanent "not biographical enough" skip marker. Only a writer that
+        # RAN and produced nothing may reach that verdict.
+        result = writer.action_handler(msg)
+        data = getattr(result, "data", None) or {}
+        prose = data.get("page_markdown")
+        if isinstance(prose, str) and prose.strip():
+            cleaned = strip_debug_scaffolding(prose.strip()).strip()
+            if cleaned.lower().startswith("(nothing new to add)"):
+                continue
+            section_outputs.append((key, cleaned))
 
     if not section_outputs:
         # Expected, not an error: nothing in this entity tagged into a biographical section — it just isn't
@@ -826,25 +827,27 @@ def regenerate_affected_sections(
                 "removed_facts": "",
             }
         msg = Message(agent_input=agent_input, scope_context=_SCOPE_SECTION_WRITER)
-        try:
-            result = writer.action_handler(msg)
-            data = getattr(result, "data", None) or {}
-            prose = data.get("page_markdown")
-            if isinstance(prose, str) and prose.strip():
-                cleaned = strip_debug_scaffolding(prose.strip()).strip()
-                low = cleaned.lower()
-                if low.startswith("(no changes needed)"):
-                    # Reviser judged the cached prose still correct — keep it.
+        # A writer failure ABORTS the refresh (no swallow): keeping the stale
+        # cached prose used to fall through to the sidecar checkpoints below,
+        # which cleared the dirty signal and republished the page with a fresh
+        # generated_at — a removed fact stayed asserted and read as refreshed.
+        # Raising leaves the page dirty; the caller records the error.
+        result = writer.action_handler(msg)
+        data = getattr(result, "data", None) or {}
+        prose = data.get("page_markdown")
+        if isinstance(prose, str) and prose.strip():
+            cleaned = strip_debug_scaffolding(prose.strip()).strip()
+            low = cleaned.lower()
+            if low.startswith("(no changes needed)"):
+                # Reviser judged the cached prose still correct — keep it.
+                continue
+            if low.startswith("(nothing new to add)"):
+                if mode == "revise":
+                    # Additions not wiki-worthy — keep the cached prose.
                     continue
-                if low.startswith("(nothing new to add)"):
-                    if mode == "revise":
-                        # Additions not wiki-worthy — keep the cached prose.
-                        continue
-                    new_outputs.pop(key, None)
-                    continue
-                new_outputs[key] = cleaned
-        except Exception as e:
-            logger.error("wiki_writer failed on section %s of %s: %s", key, entity_label, e)
+                new_outputs.pop(key, None)
+                continue
+            new_outputs[key] = cleaned
 
     if not new_outputs:
         logger.error("All sections empty after incremental regen for %s", entity_label)
