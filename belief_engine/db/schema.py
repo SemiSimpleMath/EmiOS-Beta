@@ -25,10 +25,17 @@ CREATE TABLE IF NOT EXISTS user_beliefs (
     scope               TEXT NOT NULL,          -- chronic | temporary
     status              TEXT NOT NULL DEFAULT 'active',  -- active | contested | deprecated
     locked              INTEGER NOT NULL DEFAULT 0,      -- owner lock: 1 = engine must not modify/deprecate (manual correction via /beliefs)
+    kind                TEXT,                   -- decay v2: drives half-life (durable_fact = no decay)
     conditions          TEXT,                   -- JSON, reserved for future structured qualifiers
     observation_count   INTEGER NOT NULL DEFAULT 1,
     first_observed      TEXT,                   -- ISO8601
     last_confirmed      TEXT,                   -- ISO8601
+    last_contradicted_at TEXT,                  -- ISO8601
+    -- Snapshot columns — written nightly by RecomputeBeliefSnapshotStep.
+    current_support_weight       REAL,
+    current_contradiction_weight REAL,
+    current_net_weight           REAL,
+    current_confidence_band      TEXT,
     created_at          TEXT NOT NULL,          -- ISO8601
     updated_at          TEXT NOT NULL           -- ISO8601
 );
@@ -36,6 +43,8 @@ CREATE TABLE IF NOT EXISTS user_beliefs (
 CREATE INDEX IF NOT EXISTS idx_user_beliefs_domain   ON user_beliefs(domain);
 CREATE INDEX IF NOT EXISTS idx_user_beliefs_status   ON user_beliefs(status);
 CREATE INDEX IF NOT EXISTS idx_user_beliefs_key      ON user_beliefs(belief_key);
+CREATE INDEX IF NOT EXISTS ix_user_beliefs_kind         ON user_beliefs(kind);
+CREATE INDEX IF NOT EXISTS ix_user_beliefs_current_band ON user_beliefs(current_confidence_band);
 
 CREATE TABLE IF NOT EXISTS belief_evidence (
     id                  TEXT PRIMARY KEY,       -- UUID
