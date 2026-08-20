@@ -13,7 +13,7 @@ Safety:
 """
 import mimetypes
 
-from flask import Blueprint, abort, jsonify, send_file
+from flask import Blueprint, abort, jsonify, render_template, send_file
 
 from app.assistant.pod_store.pod_store import PodStore
 from app.assistant.pod_store.pod_uri import POD_URI_RE
@@ -71,6 +71,57 @@ def get_pod_contents(pod_id: str):
         "created_at": pod.get("created_at") or "",
         "source_urls": pod.get("source_urls") or [],
     })
+
+
+@pod_api_bp.route("/research/<pod_id>")
+def research_page(pod_id: str):
+    """Render a displayable research pod as a full report page — the click target of the
+    ticket's deterministic "Full report: /research/<pod_id>" link (node_dispatch appends
+    it; the proactive popup linkifies it). Same two fences as get_pod_contents: the gated
+    read under the owner UI's master_room scope, then the displayable-kind allowlist.
+    """
+    pod_id_clean = (pod_id or "").strip()
+    if not POD_URI_RE.fullmatch(pod_id_clean):
+        abort(404)
+
+    from app.assistant.pod_store import pod_utils
+    from app.assistant.pod_store.authority import PodAuthorityError
+    from app.assistant.room_session_manager.services.pod_command import build_room_scope
+
+    try:
+        scope = build_room_scope("master_room", "ui")
+        pod = pod_utils.read_pod_gated(pod_id_clean, scope)
+    except (pod_utils.PodNotFound, PodAuthorityError):
+        abort(404)
+    except Exception as e:
+        logger.warning("[pod_api] read_pod_gated failed for %s: %s", pod_id_clean, e)
+        abort(500)
+
+    if pod.get("kind") not in DISPLAYABLE_POD_KINDS:
+        abort(404)
+
+    import markdown as md
+    from markupsafe import Markup, escape
+
+    # A research body may quote raw HTML lifted from researched pages — escape it BEFORE
+    # the markdown pass so only markdown-authored structure becomes markup. (Inside code
+    # spans this double-escapes angle brackets; safety over cosmetics.)
+    body_src = str(pod.get("body") or "")
+    body_html = md.markdown(str(escape(body_src)), extensions=["tables", "fenced_code"])
+
+    from app.assistant.utils.identity_names import get_assistant_name
+
+    return render_template(
+        "research.html",
+        assistant_name=get_assistant_name(),
+        one_liner=pod.get("one_liner") or "Research finding",
+        body_html=Markup(body_html),
+        pod_id=pod["pod_id"],
+        kind=pod["kind"],
+        tags=pod.get("tags") or [],
+        created_at=str(pod.get("created_at") or "")[:10],
+        source_urls=pod.get("source_urls") or [],
+    )
 
 
 @pod_api_bp.route("/api/pods/<path:pod_id>/image")

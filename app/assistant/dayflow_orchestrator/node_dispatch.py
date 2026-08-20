@@ -83,7 +83,7 @@ def _ticket(store, work_id: str, node_id: str, node) -> None:
                                    "wake_at": utcnow() + timedelta(hours=_ASK_TIMEOUT_HOURS),
                                    "wake_ref": node.wake_ref}, actor="node_dispatch")
         return
-    _surface_ticket(work_id, node_id, node)
+    _surface_ticket(store, work_id, node_id, node)
     store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "dispatched"},
                 actor="node_dispatch")
     store.apply("defer_node", {"work_id": work_id, "node_id": node_id, "wake_kind": "user_reply",
@@ -110,7 +110,25 @@ def _supersede_open_asks(tm, work_id: str, node_id: str) -> None:
                     old.ticket_id, work_id, node_id)
 
 
-def _surface_ticket(work_id: str, node_id: str, node) -> None:
+def _research_pod_ids(wo, node_id: str) -> list[str]:
+    """Research pods this delivery hands over: the pod_refs on the node itself, its
+    depends_on upstreams, and those upstreams' evidence/artifact children (parent-linked
+    or produces-linked). Pure id walk — the kind is read off the pod URI, no wording."""
+    ups = [e.src for e in wo.edges if e.dst == node_id and e.relation == "depends_on"]
+    pool = {node_id, *ups}
+    for uid in ups:
+        produced = {e.dst for e in wo.edges if e.src == uid and e.relation == "produces"}
+        pool |= {m.id for m in wo.nodes.values() if m.parent_id == uid} | produced
+    ids: list[str] = []
+    for nid in sorted(pool):
+        n = wo.nodes.get(nid)
+        ref = str(getattr(n, "pod_ref", "") or "") if n is not None else ""
+        if ref.startswith("datapod:research_finding:") and ref not in ids:
+            ids.append(ref)
+    return ids
+
+
+def _surface_ticket(store, work_id: str, node_id: str, node) -> None:
     """Phrase + surface the node's communication as a ticket tagged with this node; the reply is matched
     back via trigger_context.work_node on a later tick. Content gathering is the
     ticket_builder_manager's job: its planner reads this work object's graph (and
@@ -131,6 +149,13 @@ def _surface_ticket(work_id: str, node_id: str, node) -> None:
     formatted = CreateDayflowTicketTool._format_brief(brief, work_node_ref=f"{work_id}::{node_id}")
     title = (str(formatted.get("title") or node.title or "I need your input").strip())[:80]
     message = str(formatted.get("message") or want or title).strip()
+    # Full-report page links ride DETERMINISTICALLY after the composed message — a pod id
+    # must reach the user exactly or not at all, never via LLM transcription. The popup
+    # linkifies /research/... paths into anchors.
+    report_pods = _research_pod_ids(store.load(work_id), node_id)
+    if report_pods:
+        links = "\n".join(f"Full report: /research/{p}" for p in report_pods)
+        message = f"{message}\n\n{links}"
     tm = get_ticket_manager()
     _supersede_open_asks(tm, work_id, node_id)
     ticket = tm.create_ticket(ticket_type="dayflow_orchestrator", suggestion_type=_TICKET_SUGGESTION_TYPE,

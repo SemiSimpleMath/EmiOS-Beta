@@ -1,0 +1,177 @@
+/* /research/<pod_id> — a research pod rendered as a report page.
+   Palette and typography carried over from the owner-approved PR-assessment demo
+   page (2026-08-19): paper/ink/green-accent, mono headings, provenance footer. */
+
+:root {
+    --paper: #FAFAF7;
+    --ink: #20281F;
+    --muted: #5A6B63;
+    --line: #DDE3DC;
+    --accent: #2E7D4F;
+    --accent-soft: #E4F0E8;
+    --caution: #B07A2A;
+    --caution-soft: #F6EDDD;
+    --card: #FFFFFF;
+    --mono: ui-monospace, "Cascadia Code", "Consolas", "SF Mono", monospace;
+    --sans: -apple-system, "Segoe UI", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+    :root {
+        --paper: #14181A;
+        --ink: #E4E9E2;
+        --muted: #93A29A;
+        --line: #2A332D;
+        --accent: #5FB585;
+        --accent-soft: #1D2B22;
+        --caution: #D9A254;
+        --caution-soft: #2B2318;
+        --card: #1A211C;
+    }
+}
+
+body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.6;
+    margin: 0;
+    padding: 3rem 1.25rem 4rem;
+}
+main {
+    max-width: 68ch;
+    margin: 0 auto;
+}
+
+.eyebrow {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 0.75rem;
+}
+h1 {
+    font-family: var(--mono);
+    font-size: 1.55rem;
+    line-height: 1.25;
+    margin: 0 0 0.9rem;
+    text-wrap: balance;
+    font-weight: 600;
+}
+
+.tags {
+    margin: 0 0 2rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+.tag {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 0.12em 0.7em;
+}
+
+/* Markdown-rendered body */
+.report-body h1,
+.report-body h2 {
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 2.4rem 0 0.8rem;
+    padding-top: 1.4rem;
+    border-top: 1px solid var(--line);
+    font-weight: 600;
+}
+.report-body h3,
+.report-body h4 {
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    color: var(--ink);
+    margin: 1.6rem 0 0.5rem;
+    font-weight: 600;
+}
+.report-body p {
+    margin: 0 0 1rem;
+}
+.report-body ul,
+.report-body ol {
+    margin: 0 0 1rem;
+    padding-left: 1.4rem;
+}
+.report-body li {
+    margin: 0 0 0.35rem;
+}
+.report-body code {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: var(--accent-soft);
+    padding: 0.1em 0.4em;
+    border-radius: 3px;
+}
+.report-body pre {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 0.9rem 1.1rem;
+    overflow-x: auto;
+    margin: 0 0 1rem;
+}
+.report-body pre code {
+    background: none;
+    padding: 0;
+}
+.report-body blockquote {
+    background: var(--caution-soft);
+    border-left: 3px solid var(--caution);
+    border-radius: 0 4px 4px 0;
+    padding: 0.9rem 1.1rem;
+    margin: 0 0 1rem;
+}
+.report-body blockquote p:last-child {
+    margin-bottom: 0;
+}
+.report-body table {
+    border-collapse: collapse;
+    margin: 0 0 1rem;
+    display: block;
+    overflow-x: auto;
+    font-size: 0.92rem;
+}
+.report-body th,
+.report-body td {
+    border: 1px solid var(--line);
+    padding: 0.4rem 0.7rem;
+    text-align: left;
+}
+.report-body th {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--muted);
+    background: var(--card);
+}
+.report-body a {
+    color: var(--accent);
+}
+
+.provenance {
+    margin-top: 3rem;
+    padding-top: 1.2rem;
+    border-top: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--muted);
+    line-height: 1.9;
+    overflow-wrap: anywhere;
+}
+.provenance a {
+    color: var(--accent);
+}
+.provenance code {
+    font-family: var(--mono);
+}

@@ -300,7 +300,7 @@ class ProactiveSuggestionPopup {
                     <button class="proactive-item-close" data-idx="${idx}" title="Close without action">&times;</button>
                     <div class="proactive-item-content">
                         <div class="proactive-item-title">${this.escapeHtml(s.title || 'Suggestion')}</div>
-                        <div class="proactive-item-message">${isToolApproval ? this.formatApprovalMessage(s.message || '') : this.escapeHtml(s.message || '')}</div>
+                        <div class="proactive-item-message">${isToolApproval ? this.formatApprovalMessage(s.message || '') : this.linkifyEscaped(this.escapeHtml(s.message || ''))}</div>
                         <div class="proactive-item-meta">${isToolApproval ? '🔐 Tool Approval' : (s.suggestion_type || '')}</div>
                     </div>
                     <div class="proactive-item-actions">
@@ -605,6 +605,16 @@ class ProactiveSuggestionPopup {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    linkifyEscaped(escaped) {
+        // Runs AFTER escapeHtml, so the input carries no live markup. Turns full URLs and
+        // site-relative report paths (the ticket's "Full report: /research/<pod_id>" line)
+        // into anchors so a delivered report is one click away.
+        return escaped.replace(
+            /(https?:\/\/[^\s<]+[^\s<.,)]|\/research\/[^\s<]+[^\s<.,)])/g,
+            (url) => `<a href="${url}" target="_blank" rel="noopener" class="proactive-item-link">${url}</a>`
+        );
     }
 
     formatApprovalMessage(raw) {

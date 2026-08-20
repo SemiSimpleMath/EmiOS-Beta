@@ -232,7 +232,7 @@ class TestTicketContext:
         fake_tm.create_ticket = lambda **kw: None      # stop after composing — no publish path
         monkeypatch.setattr(tm_pkg, "get_ticket_manager", lambda: fake_tm)
 
-        nd._surface_ticket(wid, "ask1", node)
+        nd._surface_ticket(store, wid, "ask1", node)
 
         assert len(briefs) == 1
         assert "instrument on August 21" in briefs[0]           # content made it through

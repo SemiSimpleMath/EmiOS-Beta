@@ -73,6 +73,16 @@ def render_work_portfolio(wo, now=None) -> str:
     top = [n for n in wo.nodes.values() if n.parent_id == gid and n.type == "subtask"]
     done_top = [n for n in top if wo.is_satisfied(n)]
     L.append(f"progress: {len(done_top)}/{len(top)} top-level tasks complete")
+    # Unrun tasks, LOUD on their own line: completing the work object now discards them.
+    # 2026-08-20: the steward completed a review WO whose give-the-user-the-assessment
+    # hand-off was still `proposed` — the assessment existed on the graph but never
+    # reached the user. Produced is not delivered.
+    unrun = [n for n in top
+             if n.status not in ("done", "closed", "verified", "passed", "abandoned", "failed")]
+    if unrun:
+        L.append(f"STILL UNRUN ({len(unrun)}) — completing this work object now would DISCARD these:")
+        for n in unrun:
+            L.append(f"  - [{n.status}] {_t(n)}")
 
     # FAILED nodes — LOUD, any depth. A failed node blocks the goal until adjudicated. This is the signal
     # the steward must act on (abandon / re-plan / re-scope).

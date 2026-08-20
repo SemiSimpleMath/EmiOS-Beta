@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ one_liner }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/research.css') }}">
+</head>
+<body>
+<main>
+    <p class="eyebrow">{{ assistant_name }} research{% if created_at %} · {{ created_at }}{% endif %}</p>
+    <h1>{{ one_liner }}</h1>
+    {% if tags %}
+    <p class="tags">{% for t in tags %}<span class="tag">{{ t }}</span>{% endfor %}</p>
+    {% endif %}
+
+    <article class="report-body">{{ body_html }}</article>
+
+    <p class="provenance">
+        pod: <code>{{ pod_id }}</code><br>
+        {% if source_urls %}sources:
+        {% for u in source_urls %}<a href="{{ u }}" target="_blank" rel="noopener">{{ u }}</a>{% if not loop.last %} · {% endif %}{% endfor %}<br>
+        {% endif %}
+        produced by {{ assistant_name }}'s research pipeline · rendered live from the pod store
+    </p>
+</main>
+</body>
+</html>

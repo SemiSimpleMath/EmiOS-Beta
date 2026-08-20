@@ -89,21 +89,36 @@ def render_work_projection(wo, node_id: str) -> str:
             detail = _node_detail(o)
             L.append(f"- [{o.type}] {o.title}" + (f" -> {detail}" if detail else ""))
 
-    # DEPENDENCIES — upstream nodes' produced outputs (content inline; no peeking)
+    # DEPENDENCIES — upstream nodes' results, inlined. A dependency's result lives in its
+    # evidence/artifact children (parent-linked — how WorkPlanner findings and discharge
+    # manager-results land) and produces-linked nodes; a checklist child also carries its
+    # closing evidence in its own content. Rendering produces-edges ONLY (pre-2026-08-20)
+    # showed every dependency as a bare title: the live writers never mint produces edges,
+    # so workers were told "already solved, do not peek" over an empty list and improvised
+    # (the ask_kg-for-PR-findings churn).
     dep_ids = [e.src for e in wo.edges if e.dst == node_id and e.relation == "depends_on"]
     if dep_ids:
         L.append("")
-        L.append("## DEPENDENCIES  (already solved — use these directly; do NOT peek them)")
+        L.append("## DEPENDENCIES  (already solved — their results are inlined below; build on them "
+                 "directly, and work_graph_peek(node_id) can hydrate more detail)")
         for did in dep_ids:
             d = wo.nodes.get(did)
             if d is None:
                 continue
             L.append(f"- {d.title}:")
-            for e in wo.edges:
-                if e.src == did and e.relation == "produces" and e.dst in wo.nodes:
-                    p = wo.nodes[e.dst]
-                    detail = _node_detail(p)
-                    L.append(f"    * [{p.type}] {p.title}" + (f" -> {detail}" if detail else ""))
+            produced = {e.dst for e in wo.edges if e.src == did and e.relation == "produces"}
+            outs = [m for m in wo.nodes.values()
+                    if (m.parent_id == did or m.id in produced)
+                    and m.type in {"evidence", "artifact"}]
+            for p in outs:
+                detail = _node_detail(p)
+                L.append(f"    * [{p.type}] {p.title}" + (f" -> {detail}" if detail else ""))
+            if not outs:
+                detail = _node_detail(d)
+                if detail:
+                    L.append(f"    * recorded on the node: {detail}")
+                else:
+                    L.append("    * (no recorded result — work_graph_peek this node if you need it)")
 
     # THE WORK TREE (summaries; mark YOU ARE HERE)
     L.append("")

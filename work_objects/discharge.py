@@ -210,7 +210,7 @@ def _render_dependencies(wo, node_id: str) -> str:
                  if (m.parent_id == did or m.id in produced)
                  and getattr(m, "type", "") in ("evidence", "artifact") and (m.content or m.pod_ref)]
         if parts:
-            lines.append(f"- {d.title}: {(' | '.join(parts))[:400]}")
+            lines.append(f"- {d.title}: {' | '.join(parts)}")
     return "\n".join(lines) if len(lines) > 1 else ""
 
 
