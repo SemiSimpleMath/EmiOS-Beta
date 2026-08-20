@@ -1673,14 +1673,24 @@ _quota_tripped_lock = threading.Lock()
 
 
 def _check_and_trip_quota(provider: str, exc: Exception) -> bool:
-    """If *exc* is a confirmed BILLING quota exhaustion, notify the user and
-    terminate the process.
+    """If *exc* is a confirmed BILLING quota exhaustion, trip the circuit
+    breaker for *provider* and return True so the caller raises
+    QuotaExhaustedError.
 
-    This is intentionally aggressive: billing exhaustion means every
-    subsequent LLM call will also fail. Continuing would let batch loops
-    (KG pipeline, entity cards, etc.) race through items, catch the
-    exception, and mark work as done without results. The only safe action
-    is to stop immediately.
+    Billing exhaustion means every subsequent LLM call will also fail. The
+    danger is batch loops (KG pipeline, entity cards, etc.) racing through
+    items, swallowing the exception, and marking work as done without
+    results. The breaker is what prevents that: once tripped, _guard_quota()
+    raises QuotaExhaustedError *before* any further call is attempted, so
+    those loops fail fast and loudly instead of completing empty.
+
+    This used to `os._exit(1)` instead of returning. That made the process
+    die on the first billing 429 — and under `restart: unless-stopped` the
+    container simply came back, called the same exhausted provider, and died
+    again, roughly every 20 seconds. A crash loop is strictly worse than a
+    surfaced error: it takes down the UI and every non-LLM feature too, and
+    the hard exit skipped the `raise QuotaExhaustedError(...)` the call sites
+    were already written to expect, leaving that path unreachable.
 
     The judgement rides classify_quota — provider boundaries translate the
     SDKs' structured markers (OpenAI error.code, Gemini QuotaFailure.quotaId)
@@ -1700,7 +1710,9 @@ def _check_and_trip_quota(provider: str, exc: Exception) -> bool:
         return True
 
     logger.error(
-        "🚨 QUOTA EXHAUSTED for provider '%s'. Notifying user and shutting down to prevent data corruption.",
+        "🚨 QUOTA EXHAUSTED for provider '%s'. Circuit breaker tripped — further "
+        "LLM calls will raise QuotaExhaustedError until billing is restored and "
+        "reset_quota_breaker() is called. The app stays up.",
         provider,
     )
 
@@ -1717,22 +1729,20 @@ def _check_and_trip_quota(provider: str, exc: Exception) -> bool:
                     "event": "system_alert",
                     "payload": {
                         "level": "error",
-                        "title": "API Quota Exhausted — Shutting Down",
+                        "title": "API Quota Exhausted",
                         "message": f"The {provider.upper()} API quota has been exceeded. "
-                                   "EmiAi is shutting down to prevent data corruption. "
-                                   "Please check your billing and restart.",
+                                   "LLM features are paused until billing is restored; "
+                                   "everything else keeps running.",
                     },
                 },
             ))
     except Exception:
         logger.debug("Could not publish quota alert to UI", exc_info=True)
 
-    # Give the socket notification a moment to flush, then exit.
-    import time
-    time.sleep(2)
-
-    logger.error("🛑 Terminating process due to quota exhaustion (provider=%s).", provider)
-    os._exit(1)  # Hard exit — avoids atexit hooks that might trigger more LLM calls
+    # Return True so the caller raises QuotaExhaustedError. The breaker stays
+    # tripped, so every later call short-circuits in _guard_quota() without
+    # touching the network. Recover with reset_quota_breaker(provider).
+    return True
 
 
 def reset_quota_breaker(provider: str | None = None) -> None:
