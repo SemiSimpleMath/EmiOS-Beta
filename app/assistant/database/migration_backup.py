@@ -2,9 +2,10 @@
 
 A schema migration can corrupt or destroy data, so emi.db is snapshotted to a restorable copy BEFORE
 a migration alters an existing db. backup_database() takes a SQLite-consistent online snapshot (safe
-even while the app is writing — unlike a raw file copy, which can tear a WAL-mode db) into the
-gitignored repo_root/backups/ dir (contains the full user DB = PII; never committed), pruned to the
-last few.
+even while the app is writing — unlike a raw file copy, which can tear a WAL-mode db) into a
+`backups/` dir beside the DB itself (contains the full user DB = PII; never committed), pruned to
+the last few. Beside-the-DB is the only location writable in every deployment — see
+_default_backups_dir.
 
 PRIMARY integration: the schema migration runner (app/database/migration_runner.py) calls
 backup_database() before applying pending ALTER steps to an EXISTING db. A fresh install builds the
@@ -34,8 +35,20 @@ def _default_db_path() -> Path:
     return get_repo_root() / "emi.db"
 
 
-def _default_backups_dir() -> Path:
-    # repo_root/backups/ is gitignored (.gitignore: /backups/) and purpose-named for migration backups.
+def _default_backups_dir(db_path: Optional[Path] = None) -> Path:
+    """Where snapshots go: a `backups/` dir beside the DB itself.
+
+    The DB's own directory is writable by definition — SQLite could not open the db
+    read-write otherwise — so this is the one location guaranteed to work in every
+    deployment. In a dev checkout the db is repo_root/emi.db, so this still resolves
+    to the gitignored repo_root/backups/ (.gitignore: /backups/) exactly as before.
+
+    Deriving from the code root instead used to break every containerized install:
+    /app is root-owned and the app runs unprivileged, so the mkdir raised
+    PermissionError and took down startup the moment any migration was pending.
+    """
+    if db_path is not None:
+        return Path(db_path).parent / "backups"
     return get_repo_root() / "backups"
 
 
@@ -67,7 +80,7 @@ def backup_database(
     the migration rather than proceed without a rollback point.
     """
     db_path = Path(db_path) if db_path is not None else _default_db_path()
-    backups_dir = Path(backups_dir) if backups_dir is not None else _default_backups_dir()
+    backups_dir = Path(backups_dir) if backups_dir is not None else _default_backups_dir(db_path)
 
     if not db_path.exists():
         logger.info("backup_database: no DB at %s — nothing to back up (fresh install?)", db_path)
