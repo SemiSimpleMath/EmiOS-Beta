@@ -20,13 +20,17 @@
         </div>
 
         <form id="apiKeysForm">
-            <!-- Core Settings -->
+            <!-- AI Provider -->
             <div class="settings-section">
-                <h2>Core Settings</h2>
-                
+                <h2>AI Provider</h2>
+
                 <p class="section-hint">
-                    At least one LLM provider key is required. Whichever you use, make sure
-                    <code>DEFAULT_LLM_PROVIDER</code> in your <code>.env</code> names it.
+                    <strong>Pick one.</strong> EmiOS runs on any single provider below &mdash; you
+                    do not need more than one. Set <code>DEFAULT_LLM_PROVIDER</code> in your
+                    <code>.env</code> to whichever you configure (<code>openai</code>,
+                    <code>opencode</code>, <code>anthropic</code> or <code>gemini</code>). A
+                    request aimed at a provider you have not set up is rerouted to that default
+                    automatically, so nothing else needs changing.
                 </p>
 
                 <div class="form-group">
@@ -35,7 +39,7 @@
                         <span class="key-status" id="openai_status"></span>
                     </label>
                     <input type="password" id="openai_api_key" placeholder="sk-...">
-                    <small>Get one at <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com</a></small>
+                    <small>GPT models. Get one at <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com</a></small>
                 </div>
 
                 <div class="form-group">
@@ -44,8 +48,35 @@
                         <span class="key-status" id="opencode_status"></span>
                     </label>
                     <input type="password" id="opencode_api_key" placeholder="sk-...">
-                    <small>OpenAI-compatible. Kimi K2.7 · DeepSeek V4 · GLM-5.2 · Grok 4.5 — key at <a href="https://opencode.ai/workspace" target="_blank">opencode.ai/workspace</a></small>
+                    <small>OpenAI-compatible. Kimi K2.7 &middot; DeepSeek V4 &middot; GLM-5.2 &middot; Grok 4.5 &mdash; key at <a href="https://opencode.ai/workspace" target="_blank">opencode.ai/workspace</a></small>
                 </div>
+
+                <div class="form-group">
+                    <label for="anthropic_api_key">
+                        Anthropic API Key
+                        <span class="key-status" id="anthropic_status"></span>
+                    </label>
+                    <input type="password" id="anthropic_api_key" placeholder="sk-ant-...">
+                    <small>Claude models. Use <code>DEFAULT_LLM_PROVIDER=anthropic</code>.</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="google_api_key">
+                        Google API Key
+                        <span class="key-status" id="google_status"></span>
+                    </label>
+                    <input type="password" id="google_api_key" placeholder="AIza...">
+                    <small>
+                        Gemini models &mdash; use <code>DEFAULT_LLM_PROVIDER=gemini</code>. The same
+                        key also drives Gemini text-to-speech and the Google integrations (Gmail,
+                        Calendar, Tasks), so it serves as your AI provider <em>and</em> unlocks those.
+                    </small>
+                </div>
+            </div>
+
+            <!-- Core Settings -->
+            <div class="settings-section">
+                <h2>Core Settings</h2>
 
                 <div class="form-group">
                     <label for="timezone">Your Timezone <span class="required">*</span></label>
@@ -68,21 +99,12 @@
             <!-- Optional Integrations -->
             <div class="settings-section">
                 <h2>Optional Integrations</h2>
-                
-                <div class="form-group">
-                    <label for="google_api_key">
-                        Google API Key
-                        <span class="key-status" id="google_status"></span>
-                    </label>
-                    <input type="password" id="google_api_key" placeholder="Optional">
-                    <small>For Google services (Gmail, Calendar, Tasks)</small>
-                </div>
-                
+
                 <div class="form-group">
                     <label for="gmail_address">Gmail Address</label>
                     <input type="email" id="gmail_address" placeholder="your.email@gmail.com">
                 </div>
-                
+
                 <div class="form-group">
                     <label for="gmail_app_password">
                         Gmail App Password
@@ -90,16 +112,7 @@
                     <input type="password" id="gmail_app_password" placeholder="xxxx xxxx xxxx xxxx">
                     <small><a href="https://myaccount.google.com/apppasswords" target="_blank">Generate app password</a></small>
                 </div>
-                
-                <div class="form-group">
-                    <label for="anthropic_api_key">
-                        Anthropic API Key
-                        <span class="key-status" id="anthropic_status"></span>
-                    </label>
-                    <input type="password" id="anthropic_api_key" placeholder="Optional">
-                    <small>For Claude models</small>
-                </div>
-                
+
                 <div class="form-group">
                     <label for="elevenlabs_api_key">
                         ElevenLabs API Key
@@ -108,7 +121,7 @@
                     <input type="password" id="elevenlabs_api_key" placeholder="Optional">
                     <small>For text-to-speech</small>
                 </div>
-                
+
                 <div class="form-group">
                     <label for="deepgram_api_key">
                         Deepgram API Key
