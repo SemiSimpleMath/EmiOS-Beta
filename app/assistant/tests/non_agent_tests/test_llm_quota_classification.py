@@ -271,17 +271,23 @@ def _breaker_reset():
     lc._quota_tripped.clear()
 
 
-class TestKillSwitch:
-    def test_billing_trips_and_exits(self, monkeypatch, _breaker_reset):
+class TestCircuitBreaker:
+    """Billing exhaustion trips the breaker and RAISES. It must never kill the
+    process: under `restart: unless-stopped` a hard exit becomes a crash loop —
+    the container returns, calls the same exhausted provider, and dies again
+    (observed at ~20s intervals), taking the UI and every non-LLM feature with
+    it. The breaker is what stops batch loops completing empty: once tripped,
+    _guard_quota() raises before any further call is attempted."""
+
+    def test_billing_trips_breaker_and_returns_true(self, monkeypatch, _breaker_reset):
         exits = []
         monkeypatch.setattr(lc.os, "_exit", lambda code: exits.append(code))
-        import time as _time_mod
-        monkeypatch.setattr(_time_mod, "sleep", lambda s: None)
-        lc._check_and_trip_quota("openai", BillingQuotaExhausted(provider="openai"))
-        assert exits == [1]
+        out = lc._check_and_trip_quota("openai", BillingQuotaExhausted(provider="openai"))
+        assert out is True
         assert lc._quota_tripped.get("openai") is True
+        assert exits == [], "billing exhaustion must not terminate the process"
 
-    def test_rate_window_never_reaches_the_kill(self, monkeypatch, _breaker_reset):
+    def test_rate_window_never_trips_the_breaker(self, monkeypatch, _breaker_reset):
         exits = []
         monkeypatch.setattr(lc.os, "_exit", lambda code: exits.append(code))
         out = lc._check_and_trip_quota(
@@ -291,16 +297,43 @@ class TestKillSwitch:
         assert exits == []
         assert not lc._quota_tripped
 
-    def test_unstructured_billing_string_still_kills(self, monkeypatch, _breaker_reset):
+    def test_unstructured_billing_string_still_trips(self, monkeypatch, _breaker_reset):
         exits = []
         monkeypatch.setattr(lc.os, "_exit", lambda code: exits.append(code))
-        import time as _time_mod
-        monkeypatch.setattr(_time_mod, "sleep", lambda s: None)
-        lc._check_and_trip_quota(
+        out = lc._check_and_trip_quota(
             "openai",
             Exception("insufficient_quota: you exceeded your current quota"),
         )
-        assert exits == [1]
+        assert out is True
+        assert exits == []
+
+    def test_tripped_breaker_short_circuits_later_calls(self, _breaker_reset):
+        """After tripping, no further network call is attempted — the guard
+        raises first. This is what keeps a KG batch from marking items done."""
+        calls = []
+
+        class _Provider:
+            provider_name = "openai"
+
+            def structured_output(self, message, **params):
+                calls.append(message)
+                raise BillingQuotaExhausted(provider="openai")
+
+        iface = lc.LLMInterface(_Provider())
+
+        with pytest.raises(lc.QuotaExhaustedError):
+            iface.structured_output("first")
+        assert len(calls) == 1
+
+        # Second call must not reach the provider at all.
+        with pytest.raises(lc.QuotaExhaustedError):
+            iface.structured_output("second")
+        assert len(calls) == 1, "breaker did not short-circuit the second call"
+
+    def test_reset_breaker_allows_calls_again(self, _breaker_reset):
+        lc._quota_tripped["openai"] = True
+        lc.reset_quota_breaker("openai")
+        assert not lc._quota_tripped.get("openai")
 
 
 # ── talking about quotas is not a quota error (audit L2) ─────────
