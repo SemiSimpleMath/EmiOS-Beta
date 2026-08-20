@@ -78,3 +78,15 @@ app/subconscious_digests/
 app/static/temp_audio/
 app/chroma_db/
 contrib_log/
+
+# ── Seed templates must survive the excludes above ───────────────────────────
+# bootstrap._seed_personal_resources() copies .example -> .json on first run,
+# reading the templates from the CODE layer. The private-data patterns above
+# exclude whole directories (resources/instructions/, resources/subconscious/),
+# which also swallowed the sanitized .example templates living in them — so a
+# fresh-volume container had nothing to seed from.
+#
+# .example files are sanitized templates by definition and are tracked in git,
+# so re-including all of them is safe and keeps this working if new seeds are
+# added later. Must come AFTER the excludes: last matching pattern wins.
+!**/*.example
