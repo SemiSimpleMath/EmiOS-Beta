@@ -58,6 +58,13 @@ brother — so name the recipient when a goal is to email one of them ("email th
 reach-the-user node its OWN node; never bundle other work into it. Only a genuine emergency (urgent AND
 safety-relevant) warrants reaching the user on every channel at once.
 
+The split cuts BOTH ways: a work node never carries reaching the user as its tail. A goal shaped
+"do/check X and tell the user (if ...)" is TWO nodes — the work node does X and records what it found,
+and a reach-the-user node depends_on it with any condition written in its detail ("tell the user only
+if care was unconfirmed"). A conditional delivery that turns out moot is simply pruned on re-plan. A
+notify clause left inside a work node sends the message through a worker, which must then improvise a
+channel — that is how a routine dog-care check became an email.
+
 ## A result the user asked for ENDS by giving it to them
 If the goal's purpose is to produce something for the USER — a recommendation, a chosen option, research
 findings, an answer to their question — the graph MUST end with a node whose goal is to give the user that
