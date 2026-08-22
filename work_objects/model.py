@@ -203,6 +203,17 @@ class WorkObject(BaseModel):
         return [n.id for n in self.nodes.values() if n.parent_id == node_id]
 
     def is_satisfied(self, node: WorkNode) -> bool:
+        # A worker's OWN checklist child (parent != goal) is final at `done`: the
+        # finalizer judges only TOP-LEVEL nodes, so `done` is the last state any
+        # machine ever gives a child. Requiring `closed` of one made every
+        # dependency wired into a worker subtree permanently unsatisfiable — the
+        # "blocked by obsolete dependencies" replan churn (2026-08-22): the
+        # architect's flat graph render invites deps onto result-bearing children,
+        # which then never satisfy. Goal-counting is untouched: top-level nodes
+        # (parent == goal) still require the finalizer's `closed`.
+        if (node.type == "subtask" and node.status == "done"
+                and node.parent_id and node.parent_id != self.goal_node_id):
+            return True
         kind = node.satisfied_when_kind
         if kind == "tool_success":
             return node.status == "closed"   # finalizer-closed, not raw worker `done`

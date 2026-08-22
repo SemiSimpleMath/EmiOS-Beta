@@ -102,6 +102,44 @@ class TestChurnFence:
         assert store.load(wid).nodes["queued"].status == "abandoned"
 
 
+class TestChildDoneSatisfies:
+    """The churn ENGINE (2026-08-22): deps wired onto a worker's checklist child
+    were permanently unsatisfiable — the finalizer judges top-level nodes only,
+    so a child never leaves `done`. A done child now satisfies; a done TOP-LEVEL
+    node still needs the finalizer's `closed` (Stage-3 goal-counting gate)."""
+
+    def test_dep_on_done_worker_child_is_ready(self):
+        store = _store()
+        wid, gid = _mk_wo(store)
+        _node(store, wid, gid, "top_worker", status="dispatched")
+        store.apply("add_node", {"work_id": wid, "id": "child_result", "type": "subtask",
+                                 "parent_id": "top_worker", "title": "the synthesis"})
+        store.apply("set_status", {"work_id": wid, "node_id": "child_result", "status": "dispatched"})
+        store.apply("set_status", {"work_id": wid, "node_id": "child_result", "status": "done"})
+        _node(store, wid, gid, "deliver")
+        store.apply("add_edge", {"work_id": wid, "src": "child_result", "dst": "deliver",
+                                 "relation": "depends_on"})
+        wo = store.load(wid)
+        assert wo.is_satisfied(wo.nodes["child_result"])
+        assert wo.is_ready(wo.nodes["deliver"])
+
+    def test_top_level_done_still_needs_finalizer_close(self):
+        store = _store()
+        wid, gid = _mk_wo(store)
+        _node(store, wid, gid, "top_a", status="dispatched")
+        store.apply("set_status", {"work_id": wid, "node_id": "top_a", "status": "done"})
+        _node(store, wid, gid, "dependent")
+        store.apply("add_edge", {"work_id": wid, "src": "top_a", "dst": "dependent",
+                                 "relation": "depends_on"})
+        wo = store.load(wid)
+        assert not wo.is_satisfied(wo.nodes["top_a"])       # done != closed at top level
+        assert not wo.is_ready(wo.nodes["dependent"])
+        store.apply("set_status", {"work_id": wid, "node_id": "top_a", "status": "closed",
+                                   "reason": "finalizer accepted the result"}, actor="finalizer")
+        wo = store.load(wid)
+        assert wo.is_ready(wo.nodes["dependent"])
+
+
 class TestApplierLicenseFlow:
 
     def test_unlicensed_replan_prune_is_skipped_not_fatal(self):
