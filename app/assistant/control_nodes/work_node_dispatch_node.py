@@ -25,7 +25,7 @@ class WorkNodeDispatchNode(ControlNode):
         delegate_to = str(self.blackboard.get_state_value("delegate_to", "") or "").strip()
         acted = self.blackboard.get_state_value("acted_on_item_ids", []) or []
         work_id = node_id = None
-        ref = str(acted[0]) if acted else ""
+        ref = self._canonicalize_ref(str(acted[0]) if acted else "")
         # The work lane consumes the pick; post_room's acted-on bookkeeping is item-lane only and would
         # otherwise try to close a nonexistent item row named like a work ref.
         self.blackboard.update_state_value("acted_on_item_ids", [])
@@ -52,6 +52,28 @@ class WorkNodeDispatchNode(ControlNode):
                 self._fail_node(work_id, node_id)
         self._signal_if_more_ready(ref)
         self.blackboard.update_state_value("last_agent", self.name)
+
+    def _canonicalize_ref(self, ref):
+        """The selector ECHOES an id from its rendered list, and echoes arrive decorated —
+        the prompt's "- task: " label glued on ("task:work_x::node_y"), stray whitespace.
+        Join the echo back to the offered set (the item_ids the runtime itself put on the
+        blackboard) and dispatch the CANONICAL id, never the transcription. No unique
+        match -> return the echo unchanged, so the loud dispatch failure below stands
+        (sink, not drop). This also keeps _fail_node working: a glued work_id used to
+        poison the failure path too, leaving the node ready to re-fire every pass."""
+        ref = (ref or "").strip()
+        if not ref or "::" not in ref:
+            return ref
+        items = self.blackboard.get_state_value("actionable_items", []) or []
+        offered = [str(i.get("item_id") or "") for i in items
+                   if isinstance(i, dict) and "::" in str(i.get("item_id") or "")]
+        if ref in offered:
+            return ref
+        matches = [o for o in offered if o in ref or ref in o]
+        if len(matches) == 1:
+            logger.warning("[%s] canonicalized selector ref %r -> %r", self.name, ref, matches[0])
+            return matches[0]
+        return ref
 
     def _signal_if_more_ready(self, dispatched_ref):
         """More ready work nodes were listed this tick beyond the one dispatched — ask the scheduler for

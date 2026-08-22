@@ -268,6 +268,63 @@ class TestOneDispatchPerTick:
         assert signals == []
 
 
+class TestRefCanonicalization:
+    """The selector ECHOES ids from its rendered list; the runtime dispatches the
+    CANONICAL id from the offered set, never the transcription (2026-08-22: the
+    prompt's "- task: " label glued onto the id made dispatch AND the fail path
+    KeyError, so the node re-fired every pass)."""
+
+    def _node(self, bb):
+        return WorkNodeDispatchNode(name="work_node_dispatch_node", blackboard=bb,
+                                    agent_registry={}, tool_registry={})
+
+    def test_glued_label_prefix_is_canonicalized(self, monkeypatch):
+        dispatched = []
+        monkeypatch.setattr(nd, "dispatch_node", lambda store, w, n, d: dispatched.append((w, n)))
+        monkeypatch.setattr(nd, "signal_work_progress", lambda r: None)
+        bb = FakeBlackboard({
+            "acted_on_item_ids": ["task:work_2a403d23f195::deliver_x--2a403d"],
+            "delegate_to": "create_dayflow_ticket",
+            "actionable_items": [{"item_id": "work_2a403d23f195::deliver_x--2a403d"}],
+        })
+        self._node(bb).action_handler(message=None)
+        assert dispatched == [("work_2a403d23f195", "deliver_x--2a403d")]
+
+    def test_exact_match_passes_through(self, monkeypatch):
+        dispatched = []
+        monkeypatch.setattr(nd, "dispatch_node", lambda store, w, n, d: dispatched.append((w, n)))
+        monkeypatch.setattr(nd, "signal_work_progress", lambda r: None)
+        bb = FakeBlackboard({
+            "acted_on_item_ids": ["work_a::n1"],
+            "delegate_to": "run_work_node",
+            "actionable_items": [{"item_id": "work_a::n1"}, {"item_id": "work_b::n2"}],
+        })
+        self._node(bb).action_handler(message=None)
+        assert dispatched == [("work_a", "n1")]
+
+    def test_ambiguous_echo_left_unchanged_and_fails_loud(self, monkeypatch):
+        """Two offered ids both contained in the echo -> no unique join; the echo
+        dispatches as-is and the existing loud failure path handles it."""
+        calls = []
+
+        def boom(store, w, n, d):
+            calls.append((w, n))
+            raise KeyError(w)
+
+        monkeypatch.setattr(nd, "dispatch_node", boom)
+        monkeypatch.setattr(nd, "signal_work_progress", lambda r: None)
+        bb = FakeBlackboard({
+            "acted_on_item_ids": ["work_a::n1 and work_a::n12"],
+            "delegate_to": "run_work_node",
+            "actionable_items": [{"item_id": "work_a::n1"}, {"item_id": "work_a::n12"}],
+        })
+        self._node(bb).action_handler(message=None)   # must not raise out of the node
+        assert len(calls) == 1
+        # The echo dispatched verbatim (mangled node part) — NOT silently rewritten
+        # to either candidate id.
+        assert calls[0] == ("work_a", "n1 and work_a::n12")
+
+
 class TestTargetedWakeRouting:
     """The trigger-unification path: a scheduler time-wake becomes a targeted room
     invocation (data.triggered_work_node) that tick_router stages straight to the
