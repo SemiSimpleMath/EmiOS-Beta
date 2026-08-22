@@ -94,6 +94,16 @@ def _resolve_ticket_provenance(ticket_id: str, ticket_manager, status_by_id) -> 
     return out
 
 
+def _goal_epitaph(wo) -> str:
+    """The WO-level ending reason: the goal node's payload.terminal.reason, where
+    set_work_status records WHY the object ended (steward drop reasons, finalizer
+    resolve reasoning, hand-written DO-NOT-RECREATE epitaphs)."""
+    nodes = getattr(wo, "nodes", {}) or {}
+    goal = nodes.get(getattr(wo, "goal_node_id", "") or "")
+    term = (getattr(goal, "payload", {}) or {}).get("terminal") if goal is not None else None
+    return str(term.get("reason") or "").strip().replace("\n", " ") if isinstance(term, dict) else ""
+
+
 def _abandoned_line(summary, wo) -> str:
     """One RECENTLY DROPPED entry: title + when + WHY.
 
@@ -112,6 +122,12 @@ def _abandoned_line(summary, wo) -> str:
     if wo is None:
         return line
     nodes = getattr(wo, "nodes", {}) or {}
+    # The RECORDED EPITAPH (goal node's terminal reason) is the load-bearing WHY —
+    # it is where "user declined — DO NOT RECREATE" actually lives, and it renders
+    # FULL (owner ruling: never truncate decision input in prompts).
+    epitaph = _goal_epitaph(wo)
+    if epitaph:
+        line += f"\n  recorded reason: {epitaph}"
     replies = [
         n for n in nodes.values()
         if getattr(n, "type", "") == "evidence"
@@ -233,15 +249,17 @@ class StrategicPlannerWoPrepNode(ControlNode):
             title = str(s.get("title") or "").strip()
             if not title:
                 continue
-            if status == "done":
-                done.append(f"- {title}")
-            elif status == "abandoned":
+            if status in ("done", "abandoned"):
                 wo = None
                 try:
                     wo = store.load(s["id"])
                 except Exception as e:
-                    logger.debug("[%s] could not load abandoned WO %r for annotation: %s",
+                    logger.debug("[%s] could not load terminal WO %r for annotation: %s",
                                  self.name, s.get("id"), e)
+            if status == "done":
+                epitaph = _goal_epitaph(wo) if wo is not None else ""
+                done.append(f"- {title}" + (f"\n  ended: {epitaph}" if epitaph else ""))
+            elif status == "abandoned":
                 abandoned.append(_abandoned_line(s, wo))
         done_str = "\n".join(done) if done else f"(nothing completed in the last {window_hours}h)"
         abandoned_str = "\n".join(abandoned) if abandoned else ""

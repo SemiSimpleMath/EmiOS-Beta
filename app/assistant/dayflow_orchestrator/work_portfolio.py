@@ -120,7 +120,9 @@ def render_work_portfolio(wo, now=None) -> str:
             blk = f" BLOCKED({len(unmet)} dep)" if unmet else ""
             flag = " ⚠FAILED" if n.status == "failed" else ""
             term = (n.payload or {}).get("terminal")
-            why = f"  — why: {str(term.get('reason'))[:100]}" if isinstance(term, dict) else ""
+            # The epitaph is NEVER truncated — it is decision input (owner ruling,
+            # repeated: cut-off reasons in prompts caused recreate/replan churn).
+            why = f"  — why: {term.get('reason')}" if isinstance(term, dict) else ""
             L.append(f"  - [{n.status}]{roll}{blk}{flag} {_t(n)}{why}")
 
     waiting = [n for n in wo.nodes.values()

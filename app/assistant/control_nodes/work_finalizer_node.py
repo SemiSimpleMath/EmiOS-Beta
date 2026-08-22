@@ -29,7 +29,6 @@ from app.assistant.utils.pydantic_classes import Message
 logger = get_logger(__name__)
 
 _MAX_FINALIZE_PER_TICK = 5
-_BODY_CHARS = 4000        # the node's FULL result — un-truncated vs render_work_portfolio's 400-char body
 _TERMINAL_WO = {"done", "abandoned"}
 
 
@@ -95,7 +94,7 @@ class WorkFinalizerNode(ControlNode):
         # The node's RESULT is the evidence it produced — `content` is its (immutable) directive.
         result_text = node_result(wo, node) or "(no result recorded)"
         info = (f"JUST-COMPLETED NODE — id: {node.id} | title: {node.title}\n"
-                f"ITS FULL RESULT:\n{result_text[:_BODY_CHARS]}")
+                f"ITS FULL RESULT:\n{result_text}")
         agent = DI.agent_factory.create_agent("dayflow_orchestrator::work_finalizer")
         res = agent.action_handler(Message(task=projection, information=info, scope_context=scope))
         return getattr(res, "data", {}) or {}
@@ -107,7 +106,7 @@ class WorkFinalizerNode(ControlNode):
             disp = str(data.get("resolve_disposition") or "close").strip().lower()
             if disp == "abandon":
                 store.apply("set_work_status", {"work_id": wo.id,
-                                        "reason": f"finalizer resolve: {str(data.get('reasoning') or '')[:300]}",
+                                        "reason": f"finalizer resolve: {str(data.get('reasoning') or '')}",
                                         "status": "abandoned"}, actor="finalizer")
                 propagate_work_outcome(store, wo.id, "abandoned")
                 return {"note": "resolve -> WO abandoned"}
@@ -116,7 +115,7 @@ class WorkFinalizerNode(ControlNode):
                                    "reason": str(data.get("reasoning") or "finalizer accepted the result")},
                     actor="finalizer")
             store.apply("set_work_status", {"work_id": wo.id,
-                                        "reason": f"finalizer resolve: {str(data.get('reasoning') or '')[:300]}",
+                                        "reason": f"finalizer resolve: {str(data.get('reasoning') or '')}",
                                         "status": "done"}, actor="finalizer")
             propagate_work_outcome(store, wo.id, "done")
             return {"note": "resolve -> WO done"}

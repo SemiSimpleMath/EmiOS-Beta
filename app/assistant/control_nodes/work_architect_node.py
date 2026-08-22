@@ -33,7 +33,9 @@ def _render_existing_graph(wo) -> str:
             continue
         wake = f" wake={n.wake_kind}" if getattr(n, "wake_kind", None) else ""
         term = (n.payload or {}).get("terminal") if hasattr(n, "payload") else None
-        why = f" | why: {str(term.get('reason'))[:100]}" if isinstance(term, dict) else ""
+        # Epitaphs render FULL — a cut-off "user declined ... DO NOT RE" is how dead
+        # chains get re-laid (owner ruling: never truncate decision input in prompts).
+        why = f" | why: {term.get('reason')}" if isinstance(term, dict) else ""
         lines.append(f"- {n.id} | {n.title} | status={n.status}{wake}{why}")
     return "\n".join(lines) or "(no subtask nodes yet)"
 
