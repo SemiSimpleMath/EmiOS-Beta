@@ -20,10 +20,10 @@ _BODY_CHARS = 400
 # unambiguously (esp. `dispatched`, which means in-flight, NOT "open/available").
 STATUS_LEGEND = (
     "NODE STATUS KEY — proposed: planned, sitting in the architect's inbox (not yet approved to run). "
-    "actionable: the state_mover approved it; it is queued for the action_selector to dispatch. "
-    "dispatched: IN-FLIGHT — a worker is on it, or an ask is out (do not re-dispatch). "
-    "waiting: parked on a time / event / dependency gate. done: finished. "
-    "failed: the step broke and is awaiting work_repair. abandoned: dropped."
+    "actionable: approved and QUEUED — one node dispatches per tick, so it is waiting its turn; queued "
+    "is NOT stalled. dispatched: IN-FLIGHT — a worker is on it, or an ask is out (do not re-dispatch). "
+    "waiting: held ON PURPOSE on a time / event / dependency gate until its wake; held is NOT stalled. "
+    "done: finished. failed: the step broke and is awaiting work_repair. abandoned: dropped."
 )
 
 
@@ -80,7 +80,8 @@ def render_work_portfolio(wo, now=None) -> str:
     unrun = [n for n in top
              if n.status not in ("done", "closed", "verified", "passed", "abandoned", "failed")]
     if unrun:
-        L.append(f"STILL UNRUN ({len(unrun)}) — completing this work object now would DISCARD these:")
+        L.append(f"STILL UNRUN ({len(unrun)}) — queued/held; the runtime will run them (not stalled). "
+                 "Completing this work object now would DISCARD these:")
         for n in unrun:
             L.append(f"  - [{n.status}] {_t(n)}")
 

@@ -24,6 +24,7 @@ import json
 import logging
 import sqlite3
 import threading
+from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
 from work_objects.model import (
@@ -32,6 +33,23 @@ from work_objects.model import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _held_by_future_wake(node) -> bool:
+    """True when the node's wake_at lies in the FUTURE — it is held on purpose until its
+    time (the churn fence's second protected state). Tolerates the in-memory str form a
+    just-deferred node can carry before reload; an unparseable wake reads as not held."""
+    wa = node.wake_at
+    if wa is None:
+        return False
+    if isinstance(wa, str):
+        try:
+            wa = datetime.fromisoformat(wa)
+        except ValueError:
+            return False
+    if wa.tzinfo is None:
+        wa = wa.replace(tzinfo=timezone.utc)
+    return wa > utcnow()
 
 
 def _cascade_abandon_startable(wo: WorkObject, now: str, reason: str) -> int:
@@ -366,6 +384,23 @@ class WorkStore:
             # ticket times it out (sweeper -> failed, work_repair decides),
             # or the whole object closes (the cascade clears it without
             # passing through here).
+            # CHURN FENCE (2026-08-22, owner design): queued/held work is the
+            # runtime's. `actionable` = approved and QUEUED for dispatch (one node
+            # per tick); `waiting` with a FUTURE wake = held on purpose until its
+            # time. Neither is stalled — and silence cannot kill them: 33
+            # generations of a delivery node died to replan churn because "hasn't
+            # run yet" read as "will never run". Abandoning such a node requires a
+            # LICENSED replan — evidence (a finalizer amend) or a user directive
+            # (steward-classed) — carried as data["licensed"] by the replan
+            # applier. The closure cascade clears these without passing through
+            # here; repair adjudicates `failed` nodes, which are never in this set.
+            if (target == "abandoned" and not data.get("licensed")
+                    and (node.status == "actionable"
+                         or (node.status == "waiting" and _held_by_future_wake(node)))):
+                raise ValueError(
+                    f"set_status: node {node.id!r} is {node.status!r} — queued/held work is the "
+                    f"runtime's and WILL run (queued is not stalled). Abandoning it requires a "
+                    f"licensed replan (finalizer amend or user directive). Depend on it or leave it.")
             if node.status == "dispatched" and node.wake_kind == "user_reply":
                 raise ValueError(
                     f"set_status: node {node.id!r} is an in-flight ask (question out to "

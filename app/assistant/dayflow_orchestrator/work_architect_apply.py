@@ -50,11 +50,17 @@ def _work_ns(work_id: str) -> str:
 
 def apply_architect_dag(store, work_id: str, nodes: List[Dict[str, Any]],
                         abandon_node_ids: List[str] | None = None,
-                        abandon_reason: str = "") -> Dict[str, Any]:
+                        abandon_reason: str = "",
+                        licensed: bool = False) -> Dict[str, Any]:
     """Apply an architect DELTA onto a work object's graph. On a fresh decompose it just adds nodes; on a
     RE-PLAN it can also PRUNE: abandon each `abandon_node_ids` node + its un-finished ownership subtree
     (the store does not cascade — dependent-pruning #54 — so we recurse children here, leaving done/closed
     nodes as a record). Then add new nodes, wire depends_on, set wake-gates. Idempotent on node_id.
+
+    `licensed` marks a replan backed by EVIDENCE — a finalizer amend or a user directive, computed
+    deterministically by the CALLER from typed flags, never from wording. Only a licensed replan may
+    abandon queued (`actionable`) or held (future-wake `waiting`) nodes; the store's churn fence
+    refuses those prunes otherwise (the refusal is logged per node and the replan continues).
     Returns {added, edges, waits, abandoned}."""
     wo = store.load(work_id)
     goal_id = wo.goal_node_id
@@ -73,7 +79,7 @@ def apply_architect_dag(store, work_id: str, nodes: List[Dict[str, Any]],
             continue   # finished/already-gone — preserve the record, don't recurse a done branch
         try:
             store.apply("set_status", {"work_id": work_id, "node_id": nid, "status": "abandoned",
-                                       "verdict": "pruned_by_replan",
+                                       "verdict": "pruned_by_replan", "licensed": licensed,
                                        "reason": abandon_reason or "architect re-plan pruned this branch (no stated reason)"},
                         actor="architect")
             abandoned.append(nid)

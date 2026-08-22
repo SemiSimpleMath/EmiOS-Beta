@@ -83,6 +83,13 @@ class WorkArchitectNode(ControlNode):
                           if str(w or "").strip()]
             # the finalizer's revised intent per WO (AMEND verdicts) — the authoritative "why re-plan".
             amend_intents = self.blackboard.get_state_value("finalizer_amend_intents", {}) or {}
+            # Steward-classed user directives: replans that carry out something the USER said. Together
+            # with a finalizer amend these LICENSE the replan to prune queued/held nodes; an unlicensed
+            # replan (the steward's own read of progress) may add but not kill — the store's churn
+            # fence refuses those prunes. The judgment is the model's; only its transport is typed.
+            user_directed = {str(w).strip()
+                             for w in (self.blackboard.get_state_value("user_directed_replan_ids", []) or [])
+                             if str(w or "").strip()}
 
             if created or replan_ids:
                 scope = self._scope(message)
@@ -123,11 +130,14 @@ class WorkArchitectNode(ControlNode):
                         amend = str(amend_intents.get(work_id) or "").strip()
                         amend_block = (f"A just-completed step changed the plan. Revised intent: {amend}\n\n"
                                        if amend else "")
+                        licensed = bool(amend) or (work_id in user_directed)
                         task = (
-                            f"{objective}\n\n{amend_block}This goal ALREADY has a partial work graph (below) that no "
-                            f"longer fits. RE-PLAN it as a DELTA: ADD the steps still missing, and ABANDON "
-                            f"(list their node_ids in abandon_node_ids) any existing node the situation now "
-                            f"makes moot/wrong — its un-finished sub-steps go with it. Do NOT recreate "
+                            f"{objective}\n\n{amend_block}This goal ALREADY has a work graph (below). Revise it "
+                            f"as a DELTA per the intent above and the CONTEXT: ADD the steps still missing, and "
+                            f"ABANDON (list their node_ids in abandon_node_ids) only nodes the EVIDENCE — "
+                            f"epitaphs, recorded results, user directives — makes moot or wrong; un-finished "
+                            f"sub-steps go with them. Queued (actionable) and held (future-wake) nodes are the "
+                            f"runtime's: they WILL run — never prune one for slowness. Do NOT recreate "
                             f"existing nodes (reference their node_ids in depends_on). Output the delta only. "
                             f"Existing nodes:\n{_render_existing_graph(wo)}"
                         )
@@ -135,7 +145,8 @@ class WorkArchitectNode(ControlNode):
                         data = getattr(result, "data", {}) or {}
                         res = apply_architect_dag(store, work_id, data.get("nodes", []) or [],
                                                   abandon_reason=str(data.get("abandon_reason") or "").strip(),
-                                                  abandon_node_ids=data.get("abandon_node_ids", []) or [])
+                                                  abandon_node_ids=data.get("abandon_node_ids", []) or [],
+                                                  licensed=licensed)
                         replanned.append({"work_id": work_id, "added": len(res.get("added", [])),
                                           "abandoned": len(res.get("abandoned", []))})
                         logger.info("[%s] re-planned %s: +%d node(s), -%d abandoned",

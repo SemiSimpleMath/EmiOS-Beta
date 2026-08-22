@@ -47,9 +47,17 @@ class AgentForm(BaseModel):
         "objective/criteria you are CHANGING. Do not echo back unchanged work objects.")
     replan_work_ids: List[str] = Field(
         default_factory=list,
-        description="Existing work-object ids whose current graph no longer fits (off-track, situation "
-        "changed, stalled) — ask the architect to RE-PLAN them. You do not write the new steps. Do NOT "
-        "list ids that are simply progressing normally; those re-plan on their own as work completes.")
+        description="Existing work-object ids whose graph the EVIDENCE says no longer fits — a failed "
+        "step, a result that contradicts the plan, a changed situation, a user directive. You do not "
+        "write the new steps. A node that is queued (actionable) or held for a future wake is NOT "
+        "stalled — the runtime will run it; never flag for that. Do NOT list ids that are simply "
+        "progressing; those re-plan on their own as work completes.")
+    user_directed_replan_ids: List[str] = Field(
+        default_factory=list,
+        description="The subset of replan_work_ids where the re-plan carries out something the USER "
+        "actually said (a ticket reply, a chat comment, a dismissal with a note). List an id here ONLY "
+        "when you are acting on the user's words — these re-plans are licensed to prune queued/held "
+        "nodes, which your own read of progress is not.")
     complete_work_ids: List[str] = Field(
         default_factory=list,
         description="Work-object ids whose objective is fully met or obsolete — close them.")

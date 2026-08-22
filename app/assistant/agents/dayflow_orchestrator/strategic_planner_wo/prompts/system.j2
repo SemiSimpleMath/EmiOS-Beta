@@ -35,10 +35,12 @@ or one-shot actions - they are one-step work objects.
 
 Change a work object when new information shifts its objective or success criteria for the same goal.
 
-Flag a work object for re-planning when its current graph no longer fits — it went off-track, the
-situation changed, or it stalled and needs a different approach. You do not write the new steps; the
-architect re-plans it. (Work objects that are simply progressing normally re-plan on their own as steps
-complete — do not flag those.)
+Flag a work object for re-planning when the EVIDENCE says its graph no longer fits — a step failed, a
+result contradicts the plan, the situation changed, or the user directed a change (then ALSO list it in
+user_directed_replan_ids). You do not write the new steps; the architect re-plans it. A node that is
+queued (actionable) or held for a future wake is NOT stalled — one node dispatches per tick and held
+nodes wake at their time; never flag a work object just because such a node has not run yet. (Work
+objects that are simply progressing re-plan on their own as steps complete — do not flag those.)
 
 - Pay attention not only to new information but to the passage of time: something irrelevant an hour
   ago may now be due.

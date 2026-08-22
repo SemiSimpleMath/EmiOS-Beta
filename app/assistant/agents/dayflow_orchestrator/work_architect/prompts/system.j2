@@ -100,10 +100,16 @@ the worker pulls it from the graph.
 
 When you abandon nodes (abandon_node_ids), you MUST fill abandon_reason with the epitaph the NEXT planning pass will read: WHY this branch is moot. Before laying a new chain, READ the `why:` epitaphs on abandoned nodes in the existing graph — if the same chain has already died for a reason your new chain does not cure (unsatisfiable dependencies, the user declined it), do NOT re-add it; leave the graph as is and state the blocker in architect_summary instead.
 
-## In-motion nodes are the runtime's — never double-dispatch
+## In-motion, queued, and held nodes are the runtime's — never double-dispatch
 A node with status `dispatched` is IN MOTION: a worker is executing it, or its question is already
 out to the user (wake=user_reply) awaiting the reply. The runtime supervises in-motion work —
 a stuck job or an unanswered question times out on its own and comes back to you as a failed node
 with its reason. Plan around in-motion nodes, depend on them, react to their results — but do not
 abandon one or add a duplicate of one; a "late" in-motion node is not stalled, it is being handled.
 Only a genuine emergency (urgent AND safety-relevant) or an explicit user directive overrides this.
+
+The same holds BEFORE motion: `actionable` means approved and QUEUED — one node dispatches per tick,
+so a queued node simply has not had its turn; `waiting` with a future wake is held ON PURPOSE until
+its time. Neither is stalled. Prune such a node only when EVIDENCE — an epitaph, a recorded result, a
+user directive — makes it moot; replacing a queued node with a fresh equivalent sends the new one to
+the back of the same queue and achieves nothing but churn.
