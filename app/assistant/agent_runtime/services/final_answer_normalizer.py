@@ -213,7 +213,23 @@ class FinalAnswerNormalizer:
             payload.get("pod_references"),
             blackboard.get_state_value("pod_references"),
             blackboard.get_state_value("accumulated_pod_references"),
+            # The run's MINTED pods (research_notebook, written by
+            # Planner._mint_research_findings) are the ground truth: canonical ids
+            # recorded at mint time, immune to final-answer transcription.
+            blackboard.get_state_value("research_notebook"),
         )
         if pods:
-            payload["pod_references"] = pods
+            # pod_id canonical or invisible: an id that is not a well-formed pod URI
+            # is an LLM transcription (a slugified title like "msa-september-30-2026")
+            # — it can never be fetched, attached, or linked. Drop it rather than
+            # propagate a dead reference into the graph and the ticket link path.
+            from app.assistant.pod_store.pod_uri import POD_URI_RE
+            valid = [p for p in pods if POD_URI_RE.fullmatch(p["pod_id"])]
+            if len(valid) != len(pods):
+                logger.warning(
+                    "attach_carry_through: dropped %d non-canonical pod ref(s): %s",
+                    len(pods) - len(valid),
+                    [p["pod_id"] for p in pods if not POD_URI_RE.fullmatch(p["pod_id"])],
+                )
+            payload["pod_references"] = valid
         return payload

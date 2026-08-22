@@ -142,17 +142,24 @@ def _surface_ticket(store, work_id: str, node_id: str, node) -> None:
     # "planner + pencil + instrument on Aug 21" reached the user as "check on
     # the supplies needed for music class".
     want = str(node.content or "").strip() or str(getattr(node, "wake_ref", "") or "").strip()
+    report_pods = _research_pod_ids(store.load(work_id), node_id)
     brief = (f"Communicate with the user so a task can proceed. Task: {node.title}. "
              f"What I need from them: {want}. "
              f"Phrase it as a warm, direct message addressed to them; "
              f"keep every concrete detail (who, what, when) — do not generalize them away.")
+    if report_pods:
+        # The composer writes SHORT when a page carries the body (owner ask,
+        # 2026-08-22: "short question and link to the analysis").
+        brief += (" A full-report page link will be attached below your message "
+                  "automatically — keep the message brief: the decision or question "
+                  "and the few points the user needs at a glance; the linked page "
+                  "carries the full analysis.")
     formatted = CreateDayflowTicketTool._format_brief(brief, work_node_ref=f"{work_id}::{node_id}")
     title = (str(formatted.get("title") or node.title or "I need your input").strip())[:80]
     message = str(formatted.get("message") or want or title).strip()
     # Full-report page links ride DETERMINISTICALLY after the composed message — a pod id
     # must reach the user exactly or not at all, never via LLM transcription. The popup
     # linkifies /research/... paths into anchors.
-    report_pods = _research_pod_ids(store.load(work_id), node_id)
     if report_pods:
         links = "\n".join(f"Full report: /research/{p}" for p in report_pods)
         message = f"{message}\n\n{links}"
