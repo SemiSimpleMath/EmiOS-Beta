@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import os
+import sys
 from pathlib import Path
 from typing import Iterable
 
@@ -33,6 +34,15 @@ def _load_agent_form_model(path: Path) -> type[BaseModel] | None:
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Failed to create import spec for {path}")
     module = importlib.util.module_from_spec(spec)
+    # Register BEFORE exec, exactly as the production loader does
+    # (agent_registry._load_agent_form). A form written with
+    # `from __future__ import annotations` has string annotations that Pydantic
+    # resolves by looking its module up in sys.modules; without this the schema
+    # build dies with "AgentForm is not fully defined; you should define `List`"
+    # BEFORE the contract assertion below ever runs. That hid six forms
+    # (belief_engine ×3, daily_summary, task_compile ×2) from validation and
+    # left this test permanently red for a reason it does not test.
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
 
     candidate = getattr(module, "AgentForm", None)
