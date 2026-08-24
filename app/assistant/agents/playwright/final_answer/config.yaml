@@ -1,4 +1,4 @@
-name: shared::final_answer
+name: playwright::final_answer
 class_name: Agent
 action_required: false
 llm_params:

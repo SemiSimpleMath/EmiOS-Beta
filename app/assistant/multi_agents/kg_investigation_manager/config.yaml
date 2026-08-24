@@ -11,7 +11,7 @@ agents:
     class: Delegator
   - name: kg_investigation::planner
     class: Planner
-  - name: emi_team::summary
+  - name: kg_investigation::summary
     class: Agent
   - name: kg_investigation::final_answer
     class: Agent
@@ -23,7 +23,7 @@ control_nodes:
     class: SummaryPreNode
     config:
       enabled: true
-      summary_agent: "emi_team::summary"
+      summary_agent: "kg_investigation::summary"
       resume_agent: "kg_investigation::planner"
       planner_agent: "kg_investigation::planner"
       cadence_every_actions: 4
@@ -34,7 +34,7 @@ control_nodes:
   - name: summary_post_node
     class: SummaryPostNode
     config:
-      summary_agent: "emi_team::summary"
+      summary_agent: "kg_investigation::summary"
       resume_agent: "kg_investigation::planner"
   - name: tool_caller
     class: ToolCaller
@@ -88,7 +88,7 @@ flow_config:
   summary:
     enabled: true
     source_agent: "tool_return_router"
-    summary_agent: "emi_team::summary"
+    summary_agent: "kg_investigation::summary"
     resume_agent: "kg_investigation::planner"
     planner_agent: "kg_investigation::planner"
     cadence_every_actions: 4
@@ -105,7 +105,7 @@ flow_config:
     "tool_result_handler": "tool_return_router"
     "tool_return_router": "summary_pre_node"
     "summary_pre_node": "kg_investigation::planner"
-    "emi_team::summary": "summary_post_node"
+    "kg_investigation::summary": "summary_post_node"
     "summary_post_node": "kg_investigation::planner"
     "kg_investigation::planner_return_control": "kg_investigation::final_answer"
     "kg_investigation::final_answer": "manager_exit_node"

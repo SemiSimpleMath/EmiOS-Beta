@@ -34,7 +34,7 @@ agents:
     class: WorkPlanner
   - name: emi_team::critic
     class: PlaywrightAgent
-  - name: emi_team::summary
+  - name: work_emi_team::summary
     class: Agent
   - name: emi_team::final_answer
     class: Agent
@@ -58,12 +58,12 @@ control_nodes:
     class: SummaryPreNode
     config:
       enabled: true
-      summary_agent: "emi_team::summary"
+      summary_agent: "work_emi_team::summary"
       resume_agent: "work_emi_team::planner"
   - name: summary_post_node
     class: SummaryPostNode
     config:
-      summary_agent: "emi_team::summary"
+      summary_agent: "work_emi_team::summary"
       resume_agent: "work_emi_team::planner"
   - name: tool_caller
     class: ToolCaller
@@ -88,7 +88,7 @@ flow_config:
   summary:
     enabled: true
     source_agent: "tool_return_router"
-    summary_agent: "emi_team::summary"
+    summary_agent: "work_emi_team::summary"
     resume_agent: "work_emi_team::planner"
     planner_agent: "work_emi_team::planner"
     cadence_every_actions: 4
@@ -107,7 +107,7 @@ flow_config:
     "tool_result_handler": "tool_return_router"
     "tool_return_router": "summary_pre_node"
     "summary_pre_node": "workobject_render_node"
-    "emi_team::summary": "summary_post_node"
+    "work_emi_team::summary": "summary_post_node"
     "summary_post_node": "workobject_render_node"
     "work_emi_team::planner_return_control": "emi_team::final_answer"
     "emi_team::final_answer": "manager_exit_node"

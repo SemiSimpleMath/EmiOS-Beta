@@ -1,4 +1,4 @@
-name: playwright_manager
+﻿name: playwright_manager
 class_name: MultiAgentManager
 description: "A manager that drives a real browser via Playwright MCP (npm/playwright-mcp)."
 display_name: "Quimby"
@@ -26,7 +26,7 @@ agents:
     class: PlaywrightCritic
   - name: playwright::summary
     class: SummaryAgent
-  - name: shared::final_answer
+  - name: playwright::final_answer
     class: Agent
 
 control_nodes:
@@ -159,8 +159,8 @@ flow_config:
     "summary_pre_node": "spec_step_feeder"
     "playwright::summary": "summary_post_node"
     "summary_post_node": "spec_step_feeder"
-    "playwright::planner_return_control": "shared::final_answer"
-    "shared::final_answer": "manager_exit_node"
+    "playwright::planner_return_control": "playwright::final_answer"
+    "playwright::final_answer": "manager_exit_node"
     "graceful_exit": "graceful_exit_control_node"
-    "graceful_exit_control_node": "shared::final_answer"
+    "graceful_exit_control_node": "playwright::final_answer"
 

@@ -11,7 +11,7 @@ agents:
     class: Delegator
   - name: ticket_builder::planner
     class: Planner
-  - name: emi_team::summary
+  - name: ticket_builder::summary
     class: Agent
   - name: ticket_builder::composer
     class: Agent
@@ -23,7 +23,7 @@ control_nodes:
     class: SummaryPreNode
     config:
       enabled: true
-      summary_agent: "emi_team::summary"
+      summary_agent: "ticket_builder::summary"
       resume_agent: "ticket_builder::planner"
       planner_agent: "ticket_builder::planner"
       cadence_every_actions: 4
@@ -34,7 +34,7 @@ control_nodes:
   - name: summary_post_node
     class: SummaryPostNode
     config:
-      summary_agent: "emi_team::summary"
+      summary_agent: "ticket_builder::summary"
       resume_agent: "ticket_builder::planner"
   - name: tool_caller
     class: ToolCaller
@@ -95,7 +95,7 @@ flow_config:
   summary:
     enabled: true
     source_agent: "tool_return_router"
-    summary_agent: "emi_team::summary"
+    summary_agent: "ticket_builder::summary"
     resume_agent: "ticket_builder::planner"
     planner_agent: "ticket_builder::planner"
     cadence_every_actions: 4
@@ -112,7 +112,7 @@ flow_config:
     "tool_result_handler": "tool_return_router"
     "tool_return_router": "summary_pre_node"
     "summary_pre_node": "ticket_builder::planner"
-    "emi_team::summary": "summary_post_node"
+    "ticket_builder::summary": "summary_post_node"
     "summary_post_node": "ticket_builder::planner"
     "ticket_builder::planner_return_control": "ticket_builder::composer"
     "ticket_builder::composer": "manager_exit_node"

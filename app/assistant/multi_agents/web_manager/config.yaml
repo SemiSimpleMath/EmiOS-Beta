@@ -41,6 +41,16 @@ control_nodes:
       enabled: true
       summary_agent: "web::web_summary"
       resume_agent: "web::planner"
+      planner_agent: "web::planner"
+      # Tuned for research loops: scrapes are legitimately large, so the
+      # large-result trigger sits above a normal page rather than at the
+      # 1000-char default (which would summarize after every scrape), and
+      # the three freshest results stay verbatim for citation.
+      cadence_every_actions: 4
+      min_messages: 30
+      trigger_on_large_result_chars: 6000
+      allow_summarize_latest_tool_result: false
+      protect_last_n_results: 3
   - name: summary_post_node
     class: SummaryPostNode
     config:
@@ -92,7 +102,13 @@ flow_config:
     "web::planner": "critic_pre_node"
     "web::critic": "critic_post_node"
     "tool_result_handler": "tool_return_router"
-    "tool_return_router": "web::planner"
+    # The summary path was declared but unreachable until 2026-08-23: the
+    # router jumped straight to the planner, so this manager's long research
+    # loops ran with no compression at all.
+    "tool_return_router": "summary_pre_node"
+    "summary_pre_node": "web::planner"
+    "web::web_summary": "summary_post_node"
+    "summary_post_node": "web::planner"
     "web::planner_return_control": "shared::final_answer_lite"
     "shared::final_answer_lite": "manager_exit_node"
     "graceful_exit": "graceful_exit_control_node"

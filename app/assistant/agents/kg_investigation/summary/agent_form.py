@@ -1,3 +1,10 @@
+"""Output contract for a summary agent — the shape summary_post_node applies.
+
+Mirrors the contract every summary agent shares (agents/<ns>/summary/agent_form.py):
+history_id-keyed compressions plus visibility/lifecycle lists. Forms are loaded
+per-directory by path, so each summary agent carries its own copy; the DOMAIN
+rules live in prompts/system.j2, not here.
+"""
 from typing import List
 
 from pydantic import BaseModel, Field

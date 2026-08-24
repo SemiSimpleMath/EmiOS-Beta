@@ -58,6 +58,17 @@ control_nodes:
       enabled: true
       summary_agent: "web::web_summary"
       resume_agent: "work_web_manager::planner"
+      planner_agent: "work_web_manager::planner"
+      # Same tuning as web_manager (see its config): the large-result trigger
+      # sits above a normal page so a scrape doesn't summarize every turn, and
+      # the three freshest results stay verbatim. Resuming straight to the
+      # planner is safe — WorkPlanner.construct_prompt re-renders the node
+      # projection itself, independent of routing.
+      cadence_every_actions: 4
+      min_messages: 30
+      trigger_on_large_result_chars: 6000
+      allow_summarize_latest_tool_result: false
+      protect_last_n_results: 3
   - name: summary_post_node
     class: SummaryPostNode
     config:
@@ -115,7 +126,13 @@ flow_config:
     "work_web_manager::planner": "critic_pre_node"
     "web::critic": "critic_post_node"
     "tool_result_handler": "tool_return_router"
-    "tool_return_router": "workobject_render_node"
+    # The summary path was declared but unreachable until 2026-08-23 (the
+    # router jumped straight to the render node). Compression now runs; the
+    # planner re-renders its own projection, so freshness is unaffected.
+    "tool_return_router": "summary_pre_node"
+    "summary_pre_node": "work_web_manager::planner"
+    "web::web_summary": "summary_post_node"
+    "summary_post_node": "work_web_manager::planner"
     "work_web_manager::planner_return_control": "shared::final_answer_lite"
     "shared::final_answer_lite": "manager_exit_node"
     "graceful_exit": "graceful_exit_control_node"

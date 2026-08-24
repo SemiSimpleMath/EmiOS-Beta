@@ -8,10 +8,6 @@ Information:
 {{ information }}
 {% endif %}
 
-{% if web_summary_trigger_reason %}
-Summary trigger reason: {{ web_summary_trigger_reason }}
-{% endif %}
-
 {% if summary_payload %}
 Summary payload:
 {{ summary_payload }}
@@ -23,5 +19,4 @@ Use hide/unhide/pin/delete lists for visibility/lifecycle controls.
 Prefer summarizing older ids first.
 Prefer ids in `unsummarized_ids` before touching `already_summarized_ids`.
 Do not prioritize summarizing summaries; only re-summarize when a prior summary is clearly missing key evidence.
-If an item is especially useful evidence, keep it visible (pin/unhide) rather than hiding it.
-For each summary, carry over important evidence links (URLs) and key numbers.
+Before you compress a query result, list its identifiers to yourself — node/edge/finding ids, exact labels, validity dates, row counts — and carry every one into your summary verbatim. An empty result set is a finding: say so, do not drop it.

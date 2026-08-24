@@ -1,10 +1,14 @@
-name: web_summary
-class_name: SummaryAgent
+name: work_emi_team::summary
+class_name: Agent
 llm_params:
   llm_provider: "openai"
   engine: "gpt-5-mini"
   model_tier: "mini"
-  openai_pydantic_mode: "direct_parse"
+
+prompt_debug:
+  system: true
+  user: true
+  results: true
 
 allowed_tools: []
 except_tools: []
@@ -14,7 +18,5 @@ user_context_items:
   - task
   - information
   - summary_payload
-  - web_summary_trigger_reason
 
-system_context_items:
-  []
+system_context_items: []

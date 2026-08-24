@@ -1,0 +1,22 @@
+Today is {{ date_time }}.
+
+Task:
+{{ task }}
+
+{% if information %}
+Information:
+{{ information }}
+{% endif %}
+
+{% if summary_payload %}
+Summary payload:
+{{ summary_payload }}
+{% endif %}
+
+Create action lists over history ids.
+Use summary_pairs for entries to compress (objects with "history_id" and "summary").
+Use hide/unhide/pin/delete lists for visibility/lifecycle controls.
+Prefer summarizing older ids first.
+Prefer ids in `unsummarized_ids` before touching `already_summarized_ids`.
+Do not prioritize summarizing summaries; only re-summarize when a prior summary is clearly missing key evidence.
+For each entry, first decide: is this the SUBSTANCE the ticket will deliver, or the mechanics of finding it? Compress mechanics freely. Leave substance verbatim and pin it.
