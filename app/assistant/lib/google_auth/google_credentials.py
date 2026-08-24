@@ -30,7 +30,12 @@ logger = get_logger(__name__)
 
 _oauth_browser_last_opened: dict[str, float] = {}
 _oauth_browser_lock = threading.Lock()
-_OAUTH_BROWSER_COOLDOWN_S = 120
+# One tab per account per hour. This MUST exceed the routine auto-recovery probe
+# spacing: at 120s it never suppressed anything, because the thing that fails and
+# re-opens is a routine probe minutes apart — so every probe spawned another consent
+# tab regardless of what the user did in the previous one (2026-08-23: tabs at 21:32
+# and 22:02 for the same account, which read as "it keeps asking and never takes").
+_OAUTH_BROWSER_COOLDOWN_S = 3600
 
 
 def _open_oauth_browser(account_id: str) -> None:

@@ -36,6 +36,48 @@ def _requested_account_id() -> str:
     return account_id or DEFAULT_GOOGLE_ACCOUNT_ID
 
 
+def _expected_identity(account_id: str) -> str:
+    """The email an account_id is SUPPOSED to consent as (env-registry handle), or "".
+
+    This is what makes a consent window self-identifying: the assistant's account and
+    the owner's account are different Google identities, and Google's chooser cannot
+    know which one we mean. Passed to Google as `login_hint` so the right account is
+    pre-selected, and re-checked in the callback so a wrong-identity consent is
+    REFUSED instead of stored (2026-08-24: emi_google_primary sat consented as the
+    owner's Gmail for months because nothing told the human which account was being
+    asked for, and nothing validated the answer).
+    """
+    from app.assistant.ServiceLocator.service_locator import DI
+
+    return str(DI.env_registry.expected_email_for_account_id(account_id) or "").strip()
+
+
+def _identity_mismatch(expected: str, actual: str | None) -> bool:
+    """True only for a DEFINITE wrong-identity consent. An unclaimed account
+    (expected == "") or an unfetchable principal (nest has no gmail scope) is not a
+    mismatch — we never invent an expectation we don't have."""
+    e = str(expected or "").strip().lower()
+    a = str(actual or "").strip().lower()
+    return bool(e) and bool(a) and e != a
+
+
+def _google_auth_kwargs(account_id: str) -> dict:
+    kwargs = {
+        "access_type": "offline",
+        "include_granted_scopes": "false",
+        # select_account forces Google's account chooser so a multi-account
+        # setup (e.g. emi_google_primary ≠ the user's Gmail) can pick the
+        # RIGHT identity instead of silently re-consenting the logged-in one.
+        "prompt": "select_account consent",
+    }
+    expected = _expected_identity(account_id)
+    if expected:
+        # Pre-select the intended identity in the chooser — the human no longer has
+        # to guess which account a background re-auth prompt means.
+        kwargs["login_hint"] = expected
+    return kwargs
+
+
 def _resolve_for_account(account_id: str, scope_set_hint: str | None = None):
     """Return (credentials_path, scopes, scope_set) for *account_id*.
 
@@ -195,14 +237,7 @@ def start_oauth():
                 scopes=scopes,
                 redirect_uri=redirect_uri
             )
-            authorization_url, state = flow.authorization_url(
-                access_type='offline',
-                include_granted_scopes='false',
-                # select_account forces Google's account chooser so a multi-account
-                # setup (e.g. emi_google_primary ≠ the user's Gmail) can pick the
-                # RIGHT identity instead of silently re-consenting the logged-in one.
-                prompt='select_account consent',
-            )
+            authorization_url, state = flow.authorization_url(**_google_auth_kwargs(account_id))
 
         session['oauth_state'] = state
         session['oauth_account_id'] = account_id
@@ -211,15 +246,18 @@ def start_oauth():
         redirect_after = request.args.get('redirect_to', 'features_settings')
         session['oauth_redirect_after'] = redirect_after
 
+        expected_identity = _expected_identity(account_id)
         logger.info(
-            "OAuth flow started: account_id=%s scope_set=%s cred_file=%s",
-            account_id, scope_set, credentials_path.name,
+            "OAuth flow started: account_id=%s scope_set=%s cred_file=%s expected_identity=%s",
+            account_id, scope_set, credentials_path.name, expected_identity or "(unclaimed)",
         )
 
         return jsonify({
             'success': True,
             'authorization_url': authorization_url,
             'account_id': account_id,
+            # So the caller can TELL the human which identity to sign in as.
+            'expected_identity': expected_identity,
         })
 
     except FileNotFoundError as e:
@@ -280,14 +318,7 @@ def start_oauth_redirect():
                 scopes=scopes,
                 redirect_uri=redirect_uri,
             )
-            authorization_url, state = flow.authorization_url(
-                access_type='offline',
-                include_granted_scopes='false',
-                # select_account forces Google's account chooser so a multi-account
-                # setup (e.g. emi_google_primary ≠ the user's Gmail) can pick the
-                # RIGHT identity instead of silently re-consenting the logged-in one.
-                prompt='select_account consent',
-            )
+            authorization_url, state = flow.authorization_url(**_google_auth_kwargs(account_id))
 
         session['oauth_state'] = state
         session['oauth_account_id'] = account_id
@@ -296,8 +327,9 @@ def start_oauth_redirect():
         session['oauth_redirect_after'] = redirect_after
 
         logger.info(
-            "OAuth browser flow started: account_id=%s scope_set=%s cred_file=%s",
+            "OAuth browser flow started: account_id=%s scope_set=%s cred_file=%s expected_identity=%s",
             account_id, scope_set, credentials_path.name,
+            _expected_identity(account_id) or "(unclaimed)",
         )
 
         return redirect(authorization_url)
@@ -353,6 +385,34 @@ def oauth_callback():
 
         creds_json = credentials.to_json()
         principal_email = fetch_principal_email(credentials)
+
+        # IDENTITY GATE (2026-08-24): refuse to store a consent for the wrong Google
+        # identity. Without this, signing in as the owner's Gmail when the assistant's
+        # account was requested stored a working-but-wrong token: reads kept succeeding
+        # (fetch paths don't assert identity), so the mis-consent stayed invisible until
+        # the token expired and prompted again — "it asks and never takes". Only a
+        # DEFINITE mismatch blocks; an unclaimed account or an unfetchable principal
+        # (e.g. nest, no gmail scope) is stored as before.
+        expected_identity = _expected_identity(account_id)
+        if _identity_mismatch(expected_identity, principal_email):
+            logger.error(
+                "OAuth consent REFUSED — identity mismatch. account_id=%s consented_as=%s expected=%s",
+                account_id, principal_email, expected_identity,
+            )
+            session.pop('oauth_state', None)
+            session.pop('oauth_account_id', None)
+            session.pop('oauth_scope_set', None)
+            session.pop('oauth_redirect_after', None)
+            params = urlencode({
+                'oauth_error': 'identity_mismatch',
+                'account_id': account_id,
+                'detail': (
+                    f"You signed in as {principal_email}, but this account must be "
+                    f"{expected_identity}. Nothing was saved — retry and pick that account."
+                ),
+            })
+            return redirect(url_for('preferences.features_page') + '?' + params)
+
         store = get_google_oauth_account_store()
         store.upsert_credentials(
             account_id=account_id,
