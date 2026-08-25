@@ -198,6 +198,21 @@ def setup_logger(name, level=None, log_file="project.log"):
     return logger
 
 
+def get_main_log_path() -> str | None:
+    """Absolute path of the process's main log file, or None before logging is set up.
+
+    Read this instead of scanning a logger's handlers: every named logger holds only
+    a QueueHandler (no baseFilename) because records are fanned out by the
+    QueueListener, and the real RotatingFileHandler is owned by this module. Anything
+    that walked `logging.getLogger().handlers` looking for `emi_logs` therefore found
+    nothing — which is why audit dossiers recorded `path=None` and reasoned with no
+    logs at all.
+    """
+    handler = _file_handler
+    base = getattr(handler, "baseFilename", None) if handler is not None else None
+    return str(base) if base else None
+
+
 def get_logger(name: str, level=None, log_file="emi_logs.log"):
     """
     Returns a module-specific logger that adheres to the global configuration.

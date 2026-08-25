@@ -12,6 +12,7 @@ time. Wording similarity is never consulted.
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
 from app.assistant.database.system_audit_case import SystemAuditCase
@@ -22,6 +23,9 @@ from app.models.base import get_session
 logger = get_logger(__name__)
 
 _TERMINAL = {"resolved", "dismissed"}
+# How recently a subsystem's fix must have shipped for a new case in that subsystem
+# to count as "the fix did not hold" (see mark_investigated).
+_REGRESSION_WINDOW_DAYS = 14
 ALLOWED_TRANSITIONS: Dict[str, set] = {
     "open": {"assembled", "dismissed"},
     "assembled": {"investigated", "dismissed"},
@@ -119,13 +123,23 @@ def transition(case_id: str, target: str, **fields) -> None:
 def mark_investigated(case_id: str, *, preliminary_read: str, implicated_subsystem: str,
                       repair_suggestions: List[Dict[str, Any]], confidence: float) -> str:
     """Record the investigator's read. Returns the resulting status — 'regressed' when
-    the implicated subsystem matches an already-RESOLVED case (the fix didn't hold),
-    else 'investigated'."""
+    the implicated subsystem matches a RECENTLY-resolved case (the fix didn't hold),
+    else 'investigated'.
+
+    The recency window is what keeps the flag meaningful. Subsystems are coarse
+    ('scheduler', 'dayflow'), so an unbounded match meant a single resolved case
+    marked EVERY later case in that subsystem as a regression, forever — 16 of 20
+    cases in one 2026-08-25 batch carried the tag and it told the reader nothing.
+    A fix that "did not hold" fails soon after it ships; months later is simply new
+    work in the same broad area, which is normal and not a regression.
+    """
+    cutoff = utc_now() - timedelta(days=_REGRESSION_WINDOW_DAYS)
     session = get_session()
     try:
         prior = (session.query(SystemAuditCase)
                  .filter(SystemAuditCase.status == "resolved",
                          SystemAuditCase.implicated_subsystem == implicated_subsystem,
+                         SystemAuditCase.updated_at >= cutoff,
                          SystemAuditCase.id != case_id)
                  .order_by(SystemAuditCase.updated_at.desc())
                  .first())

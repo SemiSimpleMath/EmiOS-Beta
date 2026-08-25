@@ -19,9 +19,11 @@ Your job is to look across ALL of these data sources and find things that don't 
 - Duplicate or redundant tasks covering the same objective
 
 **Stale or stuck items:**
-- Tasks stuck in dispatched/waiting state for too long
+- A task still `proposed` or `actionable` well past the time it was supposed to run — the runtime should have promoted and dispatched it by now
 - Plans with no remaining work but not closed
 - Calendar events that already passed but are still driving decisions
+
+**`dispatched` is NEVER stuck — do not flag it.** A `dispatched` task is IN FLIGHT and supervised by the runtime. If its wake is `user_reply`, the question is already sitting in the user's UI: it stays dispatched, correctly, until they answer or the ticket times out — an hour of that is normal, and the user simply hasn't replied yet. Otherwise a worker is running the job. Either way the runtime already watches it and fails it on its own if it breaks, so "dispatched for N minutes past its scheduled time" is not a finding. The same goes for a `waiting` task whose wake time is still in the future: it is parked on purpose.
 
 **Schedule collisions ahead** — only when both items compete for the user's own attention or presence.
 

@@ -185,11 +185,17 @@ def _work_section(work: List[str]) -> str:
 
 
 def _live_log_path() -> Optional[str]:
-    for h in logging.getLogger().handlers:
-        base = getattr(h, "baseFilename", None)
-        if base and "emi_logs" in str(base) and "agents" not in str(base):
-            return str(base)
-    return None
+    """The running process's main log file, from the module that OWNS the handler.
+
+    This used to scan `logging.getLogger().handlers` for a `baseFilename`, which can
+    never match: records reach the file through a QueueHandler → QueueListener, so no
+    logger holds the RotatingFileHandler. Every dossier was therefore written with
+    `path=None` and the investigator reasoned about each case with zero log evidence.
+    None here means logging genuinely is not set up yet, and the dossier says so.
+    """
+    from app.assistant.utils.logging_config import get_main_log_path
+
+    return get_main_log_path()
 
 
 def _log_section(case: Dict[str, Any], log_path: Optional[str]) -> str:
