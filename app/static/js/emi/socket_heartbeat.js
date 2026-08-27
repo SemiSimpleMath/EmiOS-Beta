@@ -30,6 +30,9 @@
     const HEARTBEAT_TIMEOUT_MS = 3000;    // 3s — wait for ack before declaring dead
 
     let lastMessageTs = null;       // ISO string of newest message the UI has rendered
+    let activeSocket = null;        // the installed socket, for getSocketId()
+    let activeGetRoomId = null;     // the installed room resolver
+    let activeResume = null;        // re-arm this window after it went passive
 
     function _toIso(raw) {
         if (!raw) return null;
@@ -65,6 +68,8 @@
         }
         const intervalMs = opts.heartbeatIntervalMs || HEARTBEAT_INTERVAL_MS;
         const timeoutMs = opts.heartbeatTimeoutMs || HEARTBEAT_TIMEOUT_MS;
+        activeSocket = socket;
+        activeGetRoomId = getRoomId;
 
         let pending = false;         // heartbeat in flight waiting for ack
         let pendingTimer = null;     // ack-timeout timer
@@ -99,38 +104,93 @@
 
         socket.on("heartbeat_ack", () => { cancelPending(); });
 
-        // Server tells us our room binding was taken over by another tab.
-        // Stop auto-reconnecting and surface a banner so the user isn't
-        // silently wondering why messages stop arriving. They can refresh
-        // (which re-registers and hijacks the new tab back) or close this
-        // tab if they want to keep using the newer one.
+        // Human-readable cause, so the banner explains itself instead of
+        // implying the app is broken. Keys come from SocketManager.RELEASE_*.
+        function explainReason(reason) {
+            switch (reason) {
+                case "idle_timeout":
+                    return "This window went idle, so it stopped receiving replies.";
+                case "displaced_by_new_window":
+                    return "A newer window took over the conversation.";
+                default:
+                    return "This window is no longer receiving replies.";
+            }
+        }
+
+        function showPassiveBanner(reason) {
+            let banner = document.getElementById("emi-socket-hijack-banner");
+            const text = explainReason(reason) +
+                " <a href=\"javascript:location.reload()\" style=\"color:#fff;text-decoration:underline\">Reload</a>" +
+                " to use this window again, or just type here to take it back.";
+            if (!banner) {
+                banner = document.createElement("div");
+                banner.id = "emi-socket-hijack-banner";
+                banner.style.cssText = (
+                    "position:fixed;top:0;left:0;right:0;z-index:10000;" +
+                    "background:#a33;color:#fff;padding:10px 14px;" +
+                    "font:500 13px/1.4 system-ui,sans-serif;text-align:center;"
+                );
+                document.body.appendChild(banner);
+            }
+            banner.innerHTML = text;
+        }
+
+        function goPassive(reason) {
+            if (typeof socket.io === "object" && typeof socket.io.reconnection === "function") {
+                socket.io.reconnection(false);
+            }
+            cancelPending();
+            if (intervalHandle) { clearInterval(intervalHandle); intervalHandle = null; }
+            showPassiveBanner(reason);
+        }
+
+        // Talking reclaims the conversation: the send carries this socket id and
+        // the server rebinds the room to it, so bring the window fully back to
+        // life (banner off, liveness probes running) instead of leaving it
+        // looking passive while it is in fact the owner again.
+        activeResume = function resume() {
+            if (typeof socket.io === "object" && typeof socket.io.reconnection === "function") {
+                socket.io.reconnection(true);
+            }
+            const banner = document.getElementById("emi-socket-hijack-banner");
+            if (banner) banner.remove();
+            if (!intervalHandle) intervalHandle = setInterval(sendHeartbeat, intervalMs);
+        };
+
+        // A newer window owns the room. Go quiet — do NOT grab it back from a
+        // keepalive; ownership follows whoever TALKS most recently, so typing
+        // here reclaims it (the send carries this socket id).
         socket.on("socket_hijacked", (info) => {
             try {
                 console.warn("[EmiSocketHeartbeat] socket_hijacked:", info);
-                if (typeof socket.io === "object" && typeof socket.io.reconnection === "function") {
-                    socket.io.reconnection(false);
-                }
-                cancelPending();
-                if (intervalHandle) { clearInterval(intervalHandle); intervalHandle = null; }
-
-                let banner = document.getElementById("emi-socket-hijack-banner");
-                if (!banner) {
-                    banner = document.createElement("div");
-                    banner.id = "emi-socket-hijack-banner";
-                    banner.style.cssText = (
-                        "position:fixed;top:0;left:0;right:0;z-index:10000;" +
-                        "background:#a33;color:#fff;padding:10px 14px;" +
-                        "font:500 13px/1.4 system-ui,sans-serif;text-align:center;"
-                    );
-                    banner.innerHTML = (
-                        "This tab's connection was taken over by a newer tab. " +
-                        "<a href=\"javascript:location.reload()\" style=\"color:#fff;text-decoration:underline\">Reload</a> " +
-                        "to use this tab again, or close it."
-                    );
-                    document.body.appendChild(banner);
-                }
+                goPassive((info && info.reason) || "displaced_by_new_window");
             } catch (e) {
                 console.error("[EmiSocketHeartbeat] socket_hijacked handler error:", e);
+            }
+        });
+
+        socket.on("socket_passive", (info) => {
+            try {
+                console.warn("[EmiSocketHeartbeat] socket_passive:", info);
+                goPassive((info && info.reason) || "displaced_by_new_window");
+            } catch (e) {
+                console.error("[EmiSocketHeartbeat] socket_passive handler error:", e);
+            }
+        });
+
+        // Nobody owns the room (we were swept while idle). Claim it back and
+        // ask the server to replay whatever arrived while we were unbound.
+        socket.on("rebind_required", (info) => {
+            try {
+                console.warn("[EmiSocketHeartbeat] rebind_required:", info);
+                cancelPending();
+                const payload = { room_id: getRoomId() };
+                if (lastMessageTs) payload.since_ts = lastMessageTs;
+                socket.emit(opts.registerEventName || "register_chat_client", payload);
+                const banner = document.getElementById("emi-socket-hijack-banner");
+                if (banner) banner.remove();
+            } catch (e) {
+                console.error("[EmiSocketHeartbeat] rebind_required handler error:", e);
             }
         });
 
@@ -141,7 +201,10 @@
             if (pending) return;            // one in flight already
             pending = true;
             try {
-                socket.emit("heartbeat", {});
+                // Send the room so the server can report whether we still OWN it.
+                // Without this it can only confirm the pipe is open, which is not
+                // the thing that breaks.
+                socket.emit("heartbeat", { room_id: getRoomId() });
             } catch (e) {
                 console.warn("[EmiSocketHeartbeat] heartbeat emit failed:", e);
                 pending = false;
@@ -161,9 +224,37 @@
         socket.on("disconnect", () => { cancelPending(); });
     }
 
+    // The id of this window's live socket, or null. Senders attach it to their
+    // POST so the server can bind the room to whoever just TALKED — that is what
+    // makes "the most recent window that talked owns the conversation" true.
+    function getSocketId() {
+        return (activeSocket && activeSocket.connected && activeSocket.id) ? activeSocket.id : null;
+    }
+
+    function getRoomId() {
+        try {
+            return activeGetRoomId ? activeGetRoomId() : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    // Call right after this window sends a message. The POST carries our socket
+    // id, so the server has just made us the owner again — re-arm the window.
+    function noteTalked() {
+        try {
+            if (activeResume) activeResume();
+        } catch (e) {
+            console.error("[EmiSocketHeartbeat] noteTalked error:", e);
+        }
+    }
+
     window.EmiSocketHeartbeat = {
         install,
         noteIncoming,
         getLastMessageTs,
+        getSocketId,
+        getRoomId,
+        noteTalked,
     };
 })();

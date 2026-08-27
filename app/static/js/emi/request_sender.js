@@ -232,6 +232,22 @@
         formData.append("elapsed_time", elapsedSeconds);
         formData.append("speaking_mode", fns.getSpeakingMode());
 
+        // Claim the conversation for THIS window. The server binds room -> socket
+        // for whoever just talked, so the reply comes back here even if this
+        // window had gone passive (swept while idle, or displaced by another
+        // window). Without this the send and the reply travel on unrelated
+        // channels: the POST succeeds while the reply is dropped as RoomNotBound.
+        const hb = window.EmiSocketHeartbeat;
+        if (hb) {
+            const socketId = hb.getSocketId();
+            const roomId = hb.getRoomId();
+            if (socketId) formData.append("socket_id", socketId);
+            if (roomId) formData.append("room_id", roomId);
+            // We are now the most recent window to talk, so we own the room —
+            // clear any passive banner and resume liveness probes.
+            hb.noteTalked();
+        }
+
         const route = audioBlob ? "/process_audio" : "/process_request";
         fetch(route, {
             method: "POST",

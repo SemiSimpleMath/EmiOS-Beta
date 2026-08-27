@@ -34,6 +34,14 @@ class SocketManager:
     # quiet but a flapping tunnel (10+ rebinds/min) is loud.
     _BIND_CHURN_WARN_THRESHOLD: int = 5
 
+    # Why a socket stopped owning its room. Reported back to the client on its
+    # next heartbeat so the UI can say what happened instead of going quiet.
+    RELEASE_IDLE_TIMEOUT = "idle_timeout"
+    RELEASE_DISPLACED = "displaced_by_new_window"
+    # Cap on remembered release reasons (bounded so a long-lived server cannot
+    # grow this map without limit).
+    _RELEASE_REASON_MAX = 256
+
     def __init__(self):
         self._rooms: dict[str, str] = {}
         self._sockets: dict[str, str] = {}
@@ -43,6 +51,57 @@ class SocketManager:
         self._sweeper_stop = threading.Event()
         # Rolling list of bind timestamps per room_id for churn detection.
         self._bind_history: dict[str, list[float]] = {}
+        # socket_id -> (reason, released_at_ts). Consumed once by the client.
+        self._release_reasons: dict[str, tuple[str, float]] = {}
+
+    # ------------------------------------------------------------------
+    # Ownership
+    # ------------------------------------------------------------------
+
+    OWNER = "owner"
+    OTHER = "other"
+    UNBOUND = "unbound"
+
+    def binding_state(self, room_id: str, socket_id: str) -> str:
+        """Who owns *room_id* from *socket_id*'s point of view.
+
+        OWNER   — this socket holds the room (the normal case).
+        OTHER   — a different window owns it; this socket is passive and must
+                  NOT take it back on its own. Ownership transfers when a
+                  window TALKS (a message POST) or registers, never from a
+                  keepalive — otherwise a stale background tab could steal the
+                  room back from the window the user is actually typing in.
+        UNBOUND — nobody owns it; this socket may claim it by re-registering.
+        """
+        if not isinstance(room_id, str) or not room_id.strip():
+            return self.UNBOUND
+        if not isinstance(socket_id, str) or not socket_id.strip():
+            return self.UNBOUND
+        room_id = room_id.strip()
+        socket_id = socket_id.strip()
+        with self._lock:
+            current = self._rooms.get(room_id)
+        if current is None:
+            return self.UNBOUND
+        return self.OWNER if current == socket_id else self.OTHER
+
+    def _note_release(self, socket_id: str, reason: str) -> None:
+        """Remember why *socket_id* lost its room, for the next heartbeat to report."""
+        with self._lock:
+            if len(self._release_reasons) >= self._RELEASE_REASON_MAX:
+                oldest = sorted(self._release_reasons.items(), key=lambda kv: kv[1][1])
+                for sid, _ in oldest[: len(oldest) // 2 or 1]:
+                    self._release_reasons.pop(sid, None)
+            self._release_reasons[socket_id] = (reason, time.time())
+
+    def take_release_reason(self, socket_id: str) -> str | None:
+        """Pop the reason *socket_id* lost its room, or None. Read-once: the
+        client is told exactly once, then the record is discarded."""
+        if not isinstance(socket_id, str) or not socket_id.strip():
+            return None
+        with self._lock:
+            entry = self._release_reasons.pop(socket_id.strip(), None)
+        return entry[0] if entry else None
 
     @staticmethod
     def _now_utc() -> datetime:
@@ -78,6 +137,7 @@ class SocketManager:
             self._sockets[socket_id] = room_id
             self._last_seen[socket_id] = self._now_utc()
         if displaced_socket_id:
+            self._note_release(displaced_socket_id, self.RELEASE_DISPLACED)
             logger.warning(
                 "🔌 bind room_id=%r socket_id=%s... displaced prior socket=%s... "
                 "(likely a second tab opened; old tab will be notified).",
@@ -223,6 +283,7 @@ class SocketManager:
                     self._rooms.pop(rid, None)
                     evicted.append((sid, rid))
         for sid, rid in evicted:
+            self._note_release(sid, self.RELEASE_IDLE_TIMEOUT)
             logger.warning(
                 "🔌 sweep: evicting stale socket_id=%s... room_id=%r (no heartbeat > %.0fs)",
                 sid[:8], rid, max_age_seconds,

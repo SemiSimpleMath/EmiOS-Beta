@@ -180,20 +180,67 @@ def register_socket_handlers(socketio):
     @socketio.on('heartbeat')
     def handle_heartbeat(data):
         """
-        Client-initiated liveness ping. Updates last_seen for the socket and
-        echoes an ack back. Clients that don't receive an ack within their
-        timeout force a reconnect on their end.
+        Client-initiated liveness ping. Payload: {room_id: <emi_room_id>}.
+
+        The answer reports the BINDING, not merely the pipe. A plain ack used to
+        go out unconditionally, so a socket the sweeper had evicted kept hearing
+        "healthy" forever while every reply to it was dropped as RoomNotBound —
+        the liveness check validated the transport, which was never the thing
+        that broke. Three outcomes now:
+
+          owner   -> refresh liveness + heartbeat_ack (the normal case)
+          other   -> socket_passive: a newer window owns the room. This socket
+                     must NOT reclaim it from a keepalive; ownership moves when
+                     a window TALKS or registers.
+          unbound -> rebind_required: nobody owns the room, so this client may
+                     claim it by re-registering (which replays what it missed).
         """
         try:
             socket_id = request.sid
             if not socket_id:
                 return
             DI = current_app.DI
-            DI.socket_manager.record_heartbeat(socket_id)
-            # Ack with the server's wall clock (useful for clock-skew debugging).
+            room_id = _extract_room_id(data, default_room_id="")
+            now_iso = datetime.now(timezone.utc).isoformat()
+
+            if not room_id:
+                # A client that does not say which room it is heartbeating for
+                # cannot be told whether it still owns one.
+                logger.warning(
+                    "heartbeat from socket=%s... carried no room_id — cannot report binding state; "
+                    "update the client to send {room_id: ...}", socket_id[:8],
+                )
+                DI.socket_manager.record_heartbeat(socket_id)
+                socketio.emit("heartbeat_ack", {"server_ts": now_iso}, room=socket_id)
+                return
+
+            state = DI.socket_manager.binding_state(room_id, socket_id)
+            if state == DI.socket_manager.OWNER:
+                DI.socket_manager.record_heartbeat(socket_id)
+                socketio.emit("heartbeat_ack", {"server_ts": now_iso}, room=socket_id)
+                return
+
+            reason = DI.socket_manager.take_release_reason(socket_id)
+            if state == DI.socket_manager.OTHER:
+                logger.info(
+                    "heartbeat: socket=%s... is passive for room_id=%r (a newer window owns it)",
+                    socket_id[:8], room_id,
+                )
+                socketio.emit(
+                    "socket_passive",
+                    {"room_id": room_id, "reason": reason or DI.socket_manager.RELEASE_DISPLACED,
+                     "server_ts": now_iso},
+                    room=socket_id,
+                )
+                return
+
+            logger.info(
+                "heartbeat: socket=%s... is unbound for room_id=%r (reason=%s) — asking it to re-register",
+                socket_id[:8], room_id, reason or "unknown",
+            )
             socketio.emit(
-                "heartbeat_ack",
-                {"server_ts": datetime.now(timezone.utc).isoformat()},
+                "rebind_required",
+                {"room_id": room_id, "reason": reason or "unknown", "server_ts": now_iso},
                 room=socket_id,
             )
         except Exception as e:
