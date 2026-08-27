@@ -33,7 +33,7 @@ from pathlib import Path
 
 from app.assistant.utils.atomic_write import write_json_atomic
 from app.assistant.utils.monitor_utils import vertical_monitor
-from app.assistant.utils.path_utils import get_repo_root
+from app.assistant.utils.path_utils import get_data_dir
 
 CONFIG_REL_PATH = "data/playwright_window_config.json"
 
@@ -59,6 +59,11 @@ def ensure_playwright_window_config() -> Path:
             "contextOptions": {"viewport": None},
         }
     }
-    path = get_repo_root() / CONFIG_REL_PATH
+    # get_data_dir(), NOT get_repo_root(): this file is WRITTEN on every boot, and the
+    # code tree is read-only in a packaged install (the Linux AppImage is a read-only
+    # squashfs), where the write raised OSError(30) and took down startup. In dev
+    # EMI_DATA_DIR is unset, so get_data_dir() IS the repo root and the path is
+    # byte-for-byte unchanged.
+    path = get_data_dir() / CONFIG_REL_PATH
     write_json_atomic(path, config)
     return path
