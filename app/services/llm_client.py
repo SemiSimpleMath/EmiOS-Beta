@@ -10,6 +10,7 @@ from openai import OpenAI, RateLimitError as OpenAIRateLimitError
 
 import os
 import threading
+import time
 
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.performance.performance_monitor import performance_monitor
@@ -1667,9 +1668,72 @@ class QuotaExhaustedError(Exception):
         super().__init__(message or f"LLM quota exhausted for provider '{provider}'. Check billing.")
 
 
-# Global circuit breaker state: provider -> True means tripped (quota exhausted).
-_quota_tripped: dict[str, bool] = {}
+# Global circuit breaker state: provider -> _BreakerState. Absent means closed.
+_quota_tripped: dict[str, "_BreakerState"] = {}
 _quota_tripped_lock = threading.Lock()
+
+# How long an armed breaker refuses everything before it lets ONE call through
+# to find out whether billing recovered. Short enough that a mid-day top-up is
+# picked up without anyone watching; long enough that a genuinely empty account
+# is not hammered (at most 4 wasted calls an hour).
+QUOTA_PROBE_AFTER_S = 15 * 60
+
+
+class _BreakerState:
+    """Bookkeeping for one armed provider.
+
+    ``armed_at`` is monotonic, so a system clock change cannot strand the
+    breaker. ``probe_in_flight`` makes the half-open trial single-flight: a
+    hundred blocked threads elect exactly ONE prober, not a hundred.
+    """
+
+    __slots__ = ("armed_at", "probe_in_flight")
+
+    def __init__(self) -> None:
+        self.armed_at = time.monotonic()
+        self.probe_in_flight = False
+
+
+def _quota_refuses_call(provider: str) -> bool:
+    """Whether to refuse this call without touching the network.
+
+    Closed breaker -> False. Armed breaker -> True, except that once the
+    cooldown has elapsed one caller is elected as the half-open probe and let
+    through. Its outcome decides the breaker: success closes it (see
+    _note_quota_success), a billing failure re-arms it with a fresh cooldown.
+    """
+    with _quota_tripped_lock:
+        state = _quota_tripped.get(provider)
+        if state is None:
+            return False
+        if state.probe_in_flight:
+            return True
+        if (time.monotonic() - state.armed_at) < QUOTA_PROBE_AFTER_S:
+            return True
+        state.probe_in_flight = True
+    logger.warning(
+        "[quota] cooldown elapsed for provider '%s' — letting ONE trial call through "
+        "to test whether billing recovered.", provider,
+    )
+    return False
+
+
+def _note_quota_success(provider: str) -> None:
+    """Close the breaker after a call succeeds.
+
+    While armed, the elected probe is the only caller that can reach the
+    provider at all, so a success here is proof it is serving again. On the hot
+    path (breaker closed) this is one unlocked dict membership test.
+    """
+    if provider not in _quota_tripped:
+        return
+    with _quota_tripped_lock:
+        state = _quota_tripped.pop(provider, None)
+    if state is not None:
+        logger.warning(
+            "[quota] RECOVERED for provider '%s' — trial call succeeded, circuit breaker "
+            "closed. Normal LLM traffic resumes.", provider,
+        )
 
 
 def _check_and_trip_quota(provider: str, exc: Exception) -> bool:
@@ -1699,21 +1763,35 @@ def _check_and_trip_quota(provider: str, exc: Exception) -> bool:
     mention still stops the world (conservative by policy).
     """
     if classify_quota(exc) != "billing":
+        # A half-open probe can fail for reasons that say nothing about billing
+        # (network blip, bad request). Release the single-flight slot and restart
+        # the cooldown, otherwise no probe is ever elected again and the breaker
+        # refuses forever — the exact stall this recovery path exists to avoid.
+        with _quota_tripped_lock:
+            state = _quota_tripped.get(provider)
+            if state is not None and state.probe_in_flight:
+                state.probe_in_flight = False
+                state.armed_at = time.monotonic()
         return False
 
     with _quota_tripped_lock:
-        already = _quota_tripped.get(provider, False)
-        _quota_tripped[provider] = True
+        already = provider in _quota_tripped
+        # (Re)arm with a fresh cooldown. Constructing a new state also clears
+        # probe_in_flight, so a probe that found billing still empty releases
+        # its slot here.
+        _quota_tripped[provider] = _BreakerState()
 
     if already:
-        # Another thread already handling shutdown — just raise so this thread stops.
+        # Either another thread armed it first, or our probe confirmed billing is
+        # still empty. Either way the cooldown just restarted — raise and wait.
         return True
 
     logger.error(
         "🚨 QUOTA EXHAUSTED for provider '%s'. Circuit breaker tripped — further "
-        "LLM calls will raise QuotaExhaustedError until billing is restored and "
-        "reset_quota_breaker() is called. The app stays up.",
-        provider,
+        "LLM calls raise QuotaExhaustedError without touching the network. The app "
+        "stays up, and in %d min one trial call goes out to test whether billing "
+        "recovered; it closes the breaker by itself if so.",
+        provider, QUOTA_PROBE_AFTER_S // 60,
     )
 
     # Best-effort UI notification via EventHub + SocketIO
@@ -1740,8 +1818,9 @@ def _check_and_trip_quota(provider: str, exc: Exception) -> bool:
         logger.debug("Could not publish quota alert to UI", exc_info=True)
 
     # Return True so the caller raises QuotaExhaustedError. The breaker stays
-    # tripped, so every later call short-circuits in _guard_quota() without
-    # touching the network. Recover with reset_quota_breaker(provider).
+    # armed, so every later call short-circuits in _guard_quota() without
+    # touching the network — until the cooldown elects a probe, which recovers
+    # on its own. reset_quota_breaker(provider) forces it open immediately.
     return True
 
 
@@ -1765,9 +1844,7 @@ class LLMInterface:
 
     def _guard_quota(self) -> None:
         name = self._provider_name
-        with _quota_tripped_lock:
-            tripped = _quota_tripped.get(name, False)
-        if tripped:
+        if _quota_refuses_call(name):
             raise QuotaExhaustedError(name)
 
     def structured_output(self, message, use_json=False, **params):
@@ -1777,25 +1854,29 @@ class LLMInterface:
                 response = self.llm_provider.structured_output(message, **params)
             else:
                 response = self.llm_provider.structured_output_json(message, **params)
-            return response
         except QuotaExhaustedError:
             raise
         except Exception as exc:
             if _check_and_trip_quota(self._provider_name, exc):
                 raise QuotaExhaustedError(self._provider_name, str(exc)) from exc
             raise
+        # Reached the provider and got an answer: if this was the half-open
+        # probe, that is proof billing recovered — close the breaker.
+        _note_quota_success(self._provider_name)
+        return response
 
     def structured_output_json(self, message, **params):
         self._guard_quota()
         try:
             response = self.llm_provider.structured_output_json(message, **params)
-            return response
         except QuotaExhaustedError:
             raise
         except Exception as exc:
             if _check_and_trip_quota(self._provider_name, exc):
                 raise QuotaExhaustedError(self._provider_name, str(exc)) from exc
             raise
+        _note_quota_success(self._provider_name)
+        return response
 
 
 

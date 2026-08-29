@@ -14,6 +14,7 @@ only for unstructured shapes and is conservative: ambiguous quota → stop.
 """
 from __future__ import annotations
 
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -284,7 +285,7 @@ class TestCircuitBreaker:
         monkeypatch.setattr(lc.os, "_exit", lambda code: exits.append(code))
         out = lc._check_and_trip_quota("openai", BillingQuotaExhausted(provider="openai"))
         assert out is True
-        assert lc._quota_tripped.get("openai") is True
+        assert "openai" in lc._quota_tripped
         assert exits == [], "billing exhaustion must not terminate the process"
 
     def test_rate_window_never_trips_the_breaker(self, monkeypatch, _breaker_reset):
@@ -331,9 +332,97 @@ class TestCircuitBreaker:
         assert len(calls) == 1, "breaker did not short-circuit the second call"
 
     def test_reset_breaker_allows_calls_again(self, _breaker_reset):
-        lc._quota_tripped["openai"] = True
+        lc._quota_tripped["openai"] = lc._BreakerState()
         lc.reset_quota_breaker("openai")
         assert not lc._quota_tripped.get("openai")
+
+
+class TestHalfOpenRecovery:
+    """An armed breaker must heal itself. Billing exhaustion is temporary — a
+    top-up restores service — but nothing in the process re-checks, so the
+    breaker used to refuse a WORKING provider until someone restarted. Worse,
+    routine auto-recovery probes call through _guard_quota(), so they failed
+    against the latch instead of the network and re-disabled their routines on
+    every cycle. After the cooldown one trial call goes out; its result decides."""
+
+    def _armed(self, provider="openai", age_s=0.0):
+        """Arm the breaker as if it tripped `age_s` seconds ago."""
+        state = lc._BreakerState()
+        state.armed_at = time.monotonic() - age_s
+        lc._quota_tripped[provider] = state
+        return state
+
+    def test_inside_cooldown_still_refuses(self, _breaker_reset):
+        self._armed(age_s=lc.QUOTA_PROBE_AFTER_S - 5)
+        assert lc._quota_refuses_call("openai") is True
+
+    def test_after_cooldown_one_call_is_let_through(self, _breaker_reset):
+        self._armed(age_s=lc.QUOTA_PROBE_AFTER_S + 1)
+        assert lc._quota_refuses_call("openai") is False, "probe was not elected"
+        # Single-flight: everyone else keeps being refused while it is in flight.
+        assert lc._quota_refuses_call("openai") is True
+        assert lc._quota_refuses_call("openai") is True
+
+    def test_successful_probe_closes_the_breaker(self, _breaker_reset):
+        calls = []
+
+        class _Provider:
+            provider_name = "openai"
+
+            def structured_output(self, message, **params):
+                calls.append(message)
+                return "ok"
+
+        self._armed(age_s=lc.QUOTA_PROBE_AFTER_S + 1)
+        iface = lc.LLMInterface(_Provider())
+        assert iface.structured_output("probe") == "ok"
+        assert calls == ["probe"], "the probe must actually reach the provider"
+        assert "openai" not in lc._quota_tripped, "success must close the breaker"
+        # And normal traffic flows again immediately.
+        assert iface.structured_output("next") == "ok"
+        assert len(calls) == 2
+
+    def test_failed_probe_rearms_and_restarts_the_cooldown(self, _breaker_reset):
+        class _Provider:
+            provider_name = "openai"
+
+            def structured_output(self, message, **params):
+                raise BillingQuotaExhausted(provider="openai")
+
+        self._armed(age_s=lc.QUOTA_PROBE_AFTER_S + 1)
+        iface = lc.LLMInterface(_Provider())
+        with pytest.raises(lc.QuotaExhaustedError):
+            iface.structured_output("probe")
+        state = lc._quota_tripped.get("openai")
+        assert state is not None, "still-empty billing must leave the breaker armed"
+        assert state.probe_in_flight is False, "probe slot must be released"
+        assert lc._quota_refuses_call("openai") is True, "cooldown must restart"
+
+    def test_non_billing_probe_failure_does_not_strand_the_breaker(self, _breaker_reset):
+        """A probe that dies on a network blip proves nothing about billing. It
+        must release its slot, or no probe is ever elected again and the breaker
+        refuses forever."""
+        class _Provider:
+            provider_name = "openai"
+
+            def structured_output(self, message, **params):
+                raise RuntimeError("connection reset")
+
+        state = self._armed(age_s=lc.QUOTA_PROBE_AFTER_S + 1)
+        iface = lc.LLMInterface(_Provider())
+        # structured_output elects the probe itself via _guard_quota().
+        with pytest.raises(RuntimeError):
+            iface.structured_output("probe")
+        assert state.probe_in_flight is False, "slot leaked — breaker is stranded"
+        # A later cooldown elects a fresh probe rather than refusing forever.
+        state.armed_at = time.monotonic() - (lc.QUOTA_PROBE_AFTER_S + 1)
+        assert lc._quota_refuses_call("openai") is False
+
+    def test_closed_breaker_success_is_cheap_and_harmless(self, _breaker_reset):
+        """_note_quota_success runs after every successful call; with no breaker
+        armed it must be a no-op and must not create state."""
+        lc._note_quota_success("openai")
+        assert not lc._quota_tripped
 
 
 # ── talking about quotas is not a quota error (audit L2) ─────────
