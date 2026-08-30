@@ -10,6 +10,8 @@ import app.assistant.tests.test_setup  # noqa: F401
 
 import pytest
 
+from sqlalchemy import text
+
 from app.assistant.system_audit import case_store as cs
 
 
@@ -109,3 +111,94 @@ class TestRegression:
         cs.transition(a, "assembled")
         assert cs.mark_investigated(a, preliminary_read="x", implicated_subsystem="scope",
                                     repair_suggestions=[], confidence=0.9) == "investigated"
+
+
+def _seed_work_objects(*ids: str) -> None:
+    """Give the id-join something real to canonicalize against.
+
+    work_objects is created by the work-object substrate's own DDL, not by
+    Base.metadata, so a test DB may not carry it.
+    """
+    from app.models.base import get_session
+    s = get_session()
+    try:
+        s.execute(text(
+            "CREATE TABLE IF NOT EXISTS work_objects ("
+            "id TEXT PRIMARY KEY, title TEXT, goal_node_id TEXT, status TEXT, "
+            "mission_id TEXT, constraints TEXT, created_at TEXT, updated_at TEXT)"))
+        for wid in ids:
+            s.execute(text("INSERT OR IGNORE INTO work_objects (id, title, status) "
+                           "VALUES (:i, 'seed', 'active')"), {"i": wid})
+        s.commit()
+    finally:
+        s.close()
+
+
+class TestTranscribedWorkIds:
+    """The dedup join is only as good as the ids it joins on. Findings arrive with
+    ids an LLM copied out of a dossier, and a single dropped or added character
+    silently mints a twin case for a work object that already has a live one — both
+    observed in the awaiting_claude backlog."""
+
+    def test_truncated_id_still_attaches_to_the_live_case(self):
+        _seed_work_objects("work_64a1db7f9fc9")
+        a = cs.open_case(trigger_kind="auditor_finding", room_id="r",
+                         bound_ids={"work_ids": ["work_64a1db7f9fc9"]}, summary="first")
+        b = cs.open_case(trigger_kind="auditor_finding", room_id="r",
+                         bound_ids={"work_ids": ["work_64a1db7f9fc"]}, summary="one char short")
+        assert b == a, "a truncated id must be repaired and attach, not mint a twin"
+
+    def test_overlong_id_still_attaches_to_the_live_case(self):
+        _seed_work_objects("work_1acedfc7ab4e")
+        a = cs.open_case(trigger_kind="auditor_finding", room_id="r",
+                         bound_ids={"work_ids": ["work_1acedfc7ab4e"]}, summary="first")
+        b = cs.open_case(trigger_kind="auditor_finding", room_id="r",
+                         bound_ids={"work_ids": ["work_1acedfc7ab4e4"]}, summary="one char long")
+        assert b == a
+
+    def test_unresolvable_id_is_kept_not_dropped(self):
+        """Garbage stays bound and loud. Dropping it would destroy the case's only
+        anchor, leaving a case that can never be joined to anything."""
+        _seed_work_objects("work_aaaaaaaaaaaa")
+        cid = cs.open_case(trigger_kind="auditor_finding", room_id="r",
+                           bound_ids={"work_ids": ["work_repeat01"]}, summary="placeholder id")
+        row = [c for c in cs.list_cases() if c["id"] == cid][0]
+        assert row["bound_ids"]["work_ids"] == ["work_repeat01"]
+
+    def test_ambiguous_prefix_is_not_guessed(self):
+        """Two candidates is not a transcription slip — never pick one."""
+        _seed_work_objects("work_dupe1111", "work_dupe2222")
+        cid = cs.open_case(trigger_kind="auditor_finding", room_id="r",
+                           bound_ids={"work_ids": ["work_dupe"]}, summary="ambiguous")
+        row = [c for c in cs.list_cases() if c["id"] == cid][0]
+        assert row["bound_ids"]["work_ids"] == ["work_dupe"]
+
+
+class TestSubsystemIsOptional:
+    """Requiring a subsystem forced a guess on every case, and a confident wrong
+    layer buries the component that actually produced the bad input."""
+
+    def test_investigation_without_a_subsystem_is_recorded(self):
+        a = cs.open_case(trigger_kind="auditor_finding", room_id="r",
+                         bound_ids={"message_ids": ["mx"]}, summary="a")
+        cs.transition(a, "assembled")
+        assert cs.mark_investigated(a, preliminary_read="chain", implicated_subsystem=None,
+                                    repair_suggestions=[], confidence=0.4) == "investigated"
+        row = [c for c in cs.list_cases() if c["id"] == a][0]
+        assert row["implicated_subsystem"] is None
+
+    def test_no_subsystem_cannot_claim_a_regression(self):
+        """A regression claim needs a named layer to be about."""
+        a = cs.open_case(trigger_kind="auditor_finding", room_id="r",
+                         bound_ids={"message_ids": ["m1"]}, summary="a")
+        cs.transition(a, "assembled")
+        cs.mark_investigated(a, preliminary_read="x", implicated_subsystem="dispatch",
+                             repair_suggestions=[], confidence=0.8)
+        cs.transition(a, "awaiting_claude")
+        cs.transition(a, "resolved", resolution={"commits": ["c1"]})
+
+        b = cs.open_case(trigger_kind="auditor_finding", room_id="r",
+                         bound_ids={"message_ids": ["m2"]}, summary="b")
+        cs.transition(b, "assembled")
+        assert cs.mark_investigated(b, preliminary_read="y", implicated_subsystem=None,
+                                    repair_suggestions=[], confidence=0.5) == "investigated"

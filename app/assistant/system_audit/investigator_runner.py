@@ -58,15 +58,23 @@ def _investigate_one(case: dict) -> None:
         raise RuntimeError("system_audit::investigator agent not found")
     result = agent.action_handler(Message(agent_input={"task": dossier}, scope_context=scope))
     data = getattr(result, "data", None)
-    if not isinstance(data, dict) or not data.get("implicated_subsystem"):
+    # The causal chain is the read. The subsystem is OPTIONAL: requiring it forced a
+    # guess on every case, and a confident wrong layer is worse than none — it sends
+    # the repair to the component that merely acted on bad input.
+    if not isinstance(data, dict) or not str(data.get("causal_chain") or "").strip():
         raise ValueError(f"case {case['id']}: investigator returned no usable read")
+
+    subsystem = str(data.get("implicated_subsystem") or "").strip().lower() or None
+    if subsystem is None:
+        logger.info("[investigator] case %s: no subsystem named — evidence did not "
+                    "identify a layer", case["id"])
 
     repair_options = [r if isinstance(r, dict) else dict(r)
                       for r in (data.get("repair_options") or [])]
     status = case_store.mark_investigated(
         case["id"],
         preliminary_read=str(data.get("causal_chain") or ""),
-        implicated_subsystem=str(data.get("implicated_subsystem")).strip().lower(),
+        implicated_subsystem=subsystem,
         repair_suggestions=repair_options,
         confidence=float(data.get("confidence") or 0.0),
     )
@@ -78,10 +86,14 @@ def _investigate_one(case: dict) -> None:
 
 
 def _append_read(path: Path, case_id: str, data: dict, status: str) -> None:
+    conf = float(data.get("confidence") or 0.0)
+    subsystem = str(data.get("implicated_subsystem") or "").strip()
     lines = ["\n\n## Investigator read\n",
              f"**Summary:** {data.get('summary', '')}",
-             f"**Implicated subsystem:** `{data.get('implicated_subsystem', '')}` "
-             f"(confidence {float(data.get('confidence') or 0.0):.2f})"]
+             (f"**Implicated subsystem:** `{subsystem}` (confidence {conf:.2f})"
+              if subsystem else
+              f"**Implicated subsystem:** not identified — the evidence shows what "
+              f"went wrong but not which component is responsible (confidence {conf:.2f})")]
     if status == "regressed":
         lines.append("\n**REGRESSION:** this subsystem was already resolved in an earlier "
                      "case — the fix did not hold. Treat with priority.")
