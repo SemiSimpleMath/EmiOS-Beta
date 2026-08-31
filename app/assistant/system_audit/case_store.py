@@ -48,6 +48,21 @@ def _new_id() -> str:
     return f"sac_{uuid.uuid4().hex[:12]}"
 
 
+def _known_work_ids() -> set:
+    """The real work-object ids, for canonicalizing transcribed ones.
+
+    A separate function so tests can substitute the id set instead of writing
+    fixture rows into the application database — which is exactly how three
+    malformed `seed` rows once reached a live store and blinded the dayflow
+    planner on every tick.
+    """
+    session = get_session()
+    try:
+        return {row[0] for row in session.execute(text("SELECT id FROM work_objects")).all()}
+    finally:
+        session.close()
+
+
 def _canonicalize_work_ids(bound_ids: Dict[str, Any]) -> Dict[str, Any]:
     """Repair transcribed work ids so the ID JOIN can actually join.
 
@@ -68,12 +83,7 @@ def _canonicalize_work_ids(bound_ids: Dict[str, Any]) -> Dict[str, Any]:
         return bound_ids
     raw = [str(x) for x in (ids if isinstance(ids, list) else [ids]) if x]
 
-    session = get_session()
-    try:
-        known = {row[0] for row in session.execute(text("SELECT id FROM work_objects")).all()}
-    finally:
-        session.close()
-
+    known = _known_work_ids()
     repaired: List[str] = []
     changed = False
     for wid in raw:
