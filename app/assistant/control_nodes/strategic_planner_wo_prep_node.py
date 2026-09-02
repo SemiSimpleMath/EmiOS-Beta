@@ -197,22 +197,48 @@ class StrategicPlannerWoPrepNode(ControlNode):
         # 1) The portfolio (active work objects) + the DONE-LOG (recently completed/abandoned) — the
         #    evaluator's primary inputs. The done-log is its memory so it does NOT recreate work it just
         #    finished (especially recurring routine automations that re-appear in the routine each tick).
-        portfolio = "(no active work objects)"
-        recent_completed, recent_abandoned = "(none)", ""
-        n_active = 0
-        try:
-            from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
-            from app.assistant.dayflow_orchestrator.work_portfolio import render_portfolio
-            store = get_dayflow_work_store()
-            summaries = store.list_work_objects()   # newest-updated first
-            active = [store.load(s["id"]) for s in summaries
-                      if str(s.get("status") or "").lower() not in _TERMINAL_WO_STATES]
-            n_active = len(active)
-            portfolio = render_portfolio(active)
-            recent_completed, recent_abandoned = self._render_recent_completed(summaries, store)
-        except Exception as e:
-            logger.error("[%s] portfolio build failed: %s", self.name, e)
-            logger.debug("[%s] portfolio build exception", self.name, exc_info=True)
+        # The portfolio is the ONLY thing between the evaluator and recreating work that is
+        # already in flight, so it must never LIE about being empty. "(no active work
+        # objects)" is true of an empty store and false of a broken one, and the two read
+        # identically to the planner — which then does exactly what its prompt tells it to
+        # do with an empty portfolio: create the work. This swallow cost four hours on
+        # 2026-08-30: three rows with NULL timestamps failed WorkObject validation, the
+        # list comprehension raised, the except left the default in place, and the planner
+        # minted 34 duplicate work objects and 28 notifications before anyone noticed.
+        #
+        # So the two failures are now told apart. A store that cannot be listed at all
+        # RAISES (fail loud — a tick planned blind is worse than a tick not taken).
+        # Individual objects that will not load are SKIPPED, logged, and NAMED at the top
+        # of the rendered portfolio, so the planner is told its view is partial rather than
+        # told the store is empty.
+        from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+        from app.assistant.dayflow_orchestrator.work_portfolio import render_portfolio
+
+        store = get_dayflow_work_store()
+        summaries = store.list_work_objects()   # newest-updated first; raises if unreadable
+
+        active, unreadable = [], []
+        for s in summaries:
+            if str(s.get("status") or "").lower() in _TERMINAL_WO_STATES:
+                continue
+            try:
+                active.append(store.load(s["id"]))
+            except Exception as e:
+                unreadable.append(str(s.get("id")))
+                logger.error("[%s] active work object %s could not be loaded — it will be "
+                             "MISSING from the planner's portfolio: %s", self.name, s.get("id"), e)
+                logger.debug("[%s] work object load exception", self.name, exc_info=True)
+        n_active = len(active)
+
+        portfolio = render_portfolio(active)
+        if unreadable:
+            portfolio = (
+                f"!! INCOMPLETE VIEW — {len(unreadable)} active work object(s) could not be "
+                f"read ({', '.join(unreadable)}). Work exists that is NOT listed below. Do "
+                f"NOT conclude that an objective is uncovered; prefer changing or re-planning "
+                f"existing work over creating any new work this cycle.\n\n" + portfolio
+            )
+        recent_completed, recent_abandoned = self._render_recent_completed(summaries, store)
         self.blackboard.update_state_value("work_portfolio", portfolio)
         self.blackboard.update_state_value("recent_completed_work", recent_completed)
         self.blackboard.update_state_value("recent_abandoned_work", recent_abandoned)
@@ -224,7 +250,12 @@ class StrategicPlannerWoPrepNode(ControlNode):
             logger.error("[%s] situational context build failed: %s", self.name, e)
             logger.debug("[%s] situational context exception", self.name, exc_info=True)
 
-        logger.info("[%s] prepared: %d active work object(s)", self.name, n_active)
+        if unreadable:
+            logger.error("[%s] prepared with an INCOMPLETE portfolio: %d active work "
+                         "object(s) rendered, %d unreadable (%s)",
+                         self.name, n_active, len(unreadable), ", ".join(unreadable))
+        else:
+            logger.info("[%s] prepared: %d active work object(s)", self.name, n_active)
         self.blackboard.update_state_value("last_agent", self.name)
 
     def _render_recent_completed(self, summaries, store, window_hours=18):
