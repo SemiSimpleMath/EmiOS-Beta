@@ -184,6 +184,51 @@ class PodStoreTool(BaseTool):
             )
         )
 
+    @staticmethod
+    def _canonicalize_pod_ids(raw_ids: List[str], store: "PodStore"):
+        """Repair transcribed pod ids before the exact-match loop.
+
+        Ids reach this tool copied by a model out of an earlier result or a node's
+        task text, and the observed slip is a dropped ``datapod:<kind>:`` prefix —
+        ``6f7f901e...`` instead of ``datapod:email:6f7f901e...``. ``store.get()`` is
+        exact-match, so the bare id read as "missing" for a pod the store held, and
+        the worker walked away from reachable information (the 2026-09-01 SLMS
+        syllabus episode).
+
+        Rule (ids only, never wording): an id that misses exactly is matched against
+        the real pod ids by final ``:``-segment equality or by prefix in either
+        direction. EXACTLY one candidate is an unambiguous transcription slip —
+        repaired and logged. Several candidates are returned as suggestions for the
+        caller to disambiguate ("did you mean"), never guessed. Zero stays a plain
+        miss. Runs BEFORE the scope/authority gates, so a repaired id passes through
+        the same walls as an exact one.
+
+        Returns (ids_to_fetch, repaired {raw->canonical}, suggestions {raw->[candidates]}).
+        """
+        if all(store.get(str(r)) is not None for r in raw_ids):
+            return [str(r) for r in raw_ids], {}, {}
+
+        known = store.all_pod_ids()
+        seg = lambda s: s.rsplit(":", 1)[-1]
+        out: List[str] = []
+        repaired: Dict[str, str] = {}
+        suggestions: Dict[str, List[str]] = {}
+        for raw in (str(r) for r in raw_ids):
+            if store.get(raw) is not None:
+                out.append(raw)
+                continue
+            cands = sorted({k for k in known
+                            if seg(k) == seg(raw) or k.startswith(raw) or raw.startswith(k)})
+            if len(cands) == 1:
+                logger.warning("[pod_fetch] repaired transcribed pod id %r -> %r", raw, cands[0])
+                repaired[raw] = cands[0]
+                out.append(cands[0])
+            else:
+                if cands:
+                    suggestions[raw] = cands[:8]
+                out.append(raw)   # stays a miss; suggestions surface below
+        return out, repaired, suggestions
+
     def handle_pod_fetch(self, arguments: Dict[str, Any], tool_message: ToolMessage) -> ToolResult:
         raw_ids = arguments.get("pod_ids")
         if isinstance(raw_ids, str):
@@ -207,10 +252,12 @@ class PodStoreTool(BaseTool):
         scope_obj = pod_utils.as_scope_object(getattr(tool_message, "scope_context", None))
 
         store = self._ensure_store()
+        fetch_ids, repaired, suggestions = self._canonicalize_pod_ids(
+            [str(r) for r in raw_ids], store)
         fetched: List[Dict[str, Any]] = []
         missing: List[str] = []
         denied: List[str] = []
-        for pid in raw_ids:
+        for pid in fetch_ids:
             pod = store.get(str(pid))
             if pod is None:
                 missing.append(str(pid))
@@ -231,10 +278,22 @@ class PodStoreTool(BaseTool):
             fetched.append(_pod_to_full(pod))
 
         data: Dict[str, Any] = {"pods": fetched, "missing": missing, "denied": denied}
+        if repaired:
+            data["repaired_ids"] = repaired
+        if suggestions:
+            data["did_you_mean"] = suggestions
         content_parts = [
             f"Fetched {len(fetched)} pod(s); {len(missing)} missing; "
             f"{len(denied)} denied (insufficient authority)."
         ]
+        for raw, canon in repaired.items():
+            content_parts.append(
+                f"\nNOTE: '{raw}' is not a canonical pod id — repaired to '{canon}' "
+                f"(use the full 'datapod:<kind>:<hash>' form in future calls).")
+        for raw, cands in suggestions.items():
+            content_parts.append(
+                f"\n'{raw}' matched no pod exactly. Did you mean one of: "
+                + ", ".join(cands) + "?")
         for p in fetched:
             content_parts.append(
                 f"\n--- {p['pod_id']} "

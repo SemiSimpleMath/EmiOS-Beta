@@ -208,6 +208,20 @@ class PodStore:
         finally:
             session.close()
 
+    def all_pod_ids(self) -> List[str]:
+        """Every canonical pod_id in the store (one column, cheap at current scale).
+
+        Exists for id CANONICALIZATION: agents transcribe pod ids between prompts
+        and tool calls, and a dropped ``datapod:<kind>:`` prefix turns an exact-match
+        ``get()`` into a false "missing". The fetch tool repairs unambiguous slips
+        against this list before giving up.
+        """
+        session = get_session()
+        try:
+            return [r[0] for r in session.query(PodRow.pod_id).all()]
+        finally:
+            session.close()
+
     def update_curation(self, pod_id: str, *, importance=_UNSET, min_authority=_UNSET) -> None:
         """Update the owner-editable curation fields on an existing pod.
 
