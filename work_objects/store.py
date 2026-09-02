@@ -268,13 +268,13 @@ class WorkStore:
         now = utcnow().isoformat()
         with self._lock, self._conn:  # serialize writers; atomic event + projection
             if op == "create_work_object":
-                wo = handler(self, None, data, now)
+                wo = handler(self, None, data, now, actor)
             else:
                 wid = work_id or data.get("work_id")
                 if not wid:
                     raise ValueError(f"op {op!r} requires work_id")
                 wo = self._load(wid)
-                handler(self, wo, data, now)
+                handler(self, wo, data, now, actor)
             self._rollup(wo, now)               # derived WorkObject.status (auto-close cascades)
             wo.validate()                       # invariants — after rollup so they see the final state
             self._conn.execute(
@@ -286,7 +286,7 @@ class WorkStore:
 
     # ----------------------------- op handlers ----------------------------- #
     # Each mutates the in-memory wo (validation inline); persistence is shared.
-    def _op_create_work_object(self, _wo, data, now) -> WorkObject:
+    def _op_create_work_object(self, _wo, data, now, actor=None) -> WorkObject:
         wo = WorkObject(title=data.get("title", ""), constraints=data.get("constraints", {}),
                         created_at=now, updated_at=now)
         goal = WorkNode(
@@ -299,7 +299,7 @@ class WorkStore:
         wo.goal_node_id = goal.id
         return wo
 
-    def _op_add_node(self, wo, data, now) -> None:
+    def _op_add_node(self, wo, data, now, actor=None) -> None:
         # nodes.id is the table's GLOBAL primary key. A caller-supplied id that
         # already lives in ANOTHER work object would INSERT OR REPLACE at persist
         # and silently re-home the row — stealing it from the earlier graph and
@@ -337,14 +337,14 @@ class WorkStore:
                 node.payload["session_id"] = parent_sid
         wo.add_node(node)
 
-    def _op_add_edge(self, wo, data, now) -> None:
+    def _op_add_edge(self, wo, data, now, actor=None) -> None:
         if data["src"] not in wo.nodes or data["dst"] not in wo.nodes:
             raise ValueError(f"add_edge: endpoints {data['src']!r}->{data['dst']!r} must exist")
         wo.edges.append(Edge(work_id=wo.id, src=data["src"], dst=data["dst"],
                              relation=data["relation"], payload=data.get("payload", {}),
                              created_at=now))
 
-    def _op_set_status(self, wo, data, now) -> None:
+    def _op_set_status(self, wo, data, now, actor=None) -> None:
         node = wo.nodes.get(data["node_id"])
         if node is None:
             raise KeyError(f"set_status: node {data['node_id']!r} not found")
@@ -363,6 +363,21 @@ class WorkStore:
                 raise ValueError(
                     f"set_status: stale dispatch epoch {expected} (current {current}) "
                     f"for node {node.id!r} — a newer incarnation owns this node")
+        # FAILED NODES ARE WORK_REPAIR'S (2026-09-02 spend-alert loop). The design
+        # (ask redesign 2026-08-18) makes an expired ask a timed-out tool call: the
+        # sweeper fails the node and REPAIR adjudicates — escalate / retry / abandon
+        # is a repair decision. But the architect runs BEFORE repair in the tick and
+        # its prompt claimed failed nodes "come back to you", so it consumed each
+        # failure as a planning problem: abandon + mint a fresh identical ask,
+        # hourly, nine times — repair never saw one. The prompt now says failed
+        # nodes are repair's; this fence is the wall behind the words. A licensed
+        # replan (finalizer amend / user directive) still may prune a failed node.
+        if node.status == "failed" and actor == "architect" and not data.get("licensed"):
+            raise ValueError(
+                f"set_status: node {node.id!r} is 'failed' — failed nodes are "
+                f"work_repair's to adjudicate (retry / escalate / abandon). Plan "
+                f"around it and read repair's verdict; only a licensed replan may "
+                f"prune it.")
         if target != node.status:
             family = FAMILY_BY_TYPE.get(node.type, "spine")
             allowed = TRANSITIONS.get(family, {}).get(node.status, set())
@@ -437,7 +452,7 @@ class WorkStore:
                 {"note": str(data["note"]), "at": now})
         node.updated_at = now
 
-    def _op_edit_node(self, wo, data, now) -> None:
+    def _op_edit_node(self, wo, data, now, actor=None) -> None:
         """Manual UI edit of a node's title and/or content — no status change, no transition check. For the
         /work editor; only mutates the fields explicitly provided (a missing key leaves that field alone)."""
         node = wo.nodes.get(data["node_id"])
@@ -449,14 +464,14 @@ class WorkStore:
             node.content = str(data["content"])
         node.updated_at = now
 
-    def _op_attach_pod(self, wo, data, now) -> None:
+    def _op_attach_pod(self, wo, data, now, actor=None) -> None:
         node = wo.nodes.get(data["node_id"])
         if node is None:
             raise KeyError(f"attach_pod: node {data['node_id']!r} not found")
         node.pod_ref = data["pod_ref"]
         node.updated_at = now
 
-    def _op_defer_node(self, wo, data, now) -> None:
+    def _op_defer_node(self, wo, data, now, actor=None) -> None:
         node = wo.nodes.get(data["node_id"])
         if node is None:
             raise KeyError(f"defer_node: node {data['node_id']!r} not found")
@@ -473,7 +488,7 @@ class WorkStore:
             node.status = "waiting"
         node.updated_at = now
 
-    def _op_set_work_status(self, wo, data, now) -> None:
+    def _op_set_work_status(self, wo, data, now, actor=None) -> None:
         """Force the WorkObject's overall status — the steward's authoritative complete/abandon, distinct
         from the rollup's automatic 'all children done' completion. The forward-only rollup will not reset
         it. Entering a terminal status is a transition with obligations, not a label write: the goal node

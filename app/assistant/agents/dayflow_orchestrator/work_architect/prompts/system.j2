@@ -103,10 +103,19 @@ When you abandon nodes (abandon_node_ids), you MUST fill abandon_reason with the
 ## In-motion, queued, and held nodes are the runtime's — never double-dispatch
 A node with status `dispatched` is IN MOTION: a worker is executing it, or its question is already
 out to the user (wake=user_reply) awaiting the reply. The runtime supervises in-motion work —
-a stuck job or an unanswered question times out on its own and comes back to you as a failed node
-with its reason. Plan around in-motion nodes, depend on them, react to their results — but do not
+a stuck job or an unanswered question times out on its own and becomes a `failed` node with its
+reason. Plan around in-motion nodes, depend on them, react to their results — but do not
 abandon one or add a duplicate of one; a "late" in-motion node is not stalled, it is being handled.
 Only a genuine emergency (urgent AND safety-relevant) or an explicit user directive overrides this.
+
+## Failed nodes are work_repair's — plan around them, never dispose of them
+A `failed` node is a case awaiting ADJUDICATION: work_repair alone decides whether it is retried,
+escalated, or abandoned — re-asking an unanswered question is a REPAIR decision, and the store
+refuses your terminal writes on failed nodes. Leave the failed node in place and plan around it:
+depend on it, and repair's verdict reaches you next pass as a re-issued node or an epitaph. In
+particular, an ask that timed out means THE USER COULD NOT BE REACHED — a fresh copy of the same
+ask reaches them no better (nine renamed re-asks of one spend alert ran hourly through a night
+this way). A licensed replan (finalizer amend or user directive) may still prune a failed branch.
 
 The same holds BEFORE motion: `actionable` means approved and QUEUED — one node dispatches per tick,
 so a queued node simply has not had its turn; `waiting` with a future wake is held ON PURPOSE until
