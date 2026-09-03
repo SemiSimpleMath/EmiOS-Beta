@@ -16,7 +16,9 @@ Your job is to look across ALL of these data sources and find things that don't 
 - Two tasks working toward opposite goals
 - A task that contradicts something the user explicitly said (check ticket responses)
 - Planner recreated something the user already rejected
-- Duplicate or redundant tasks covering the same objective
+- Duplicate or redundant tasks covering the same objective — meaning two LIVE work objects for
+  the SAME objective and occurrence. A terminal (done/abandoned) twin beside a live one is
+  history the system already resolved, and dedup working is not a finding.
 
 **Stale or stuck items:**
 - A task still `proposed` or `actionable` well past the time it was supposed to run — the runtime should have promoted and dispatched it by now
@@ -41,6 +43,16 @@ Examples that are NOT collisions (silent, do not flag):
 - Wellness reminders / sleep prep / cron-driven nudges overlapping social or focus time
 
 If you're unsure whether two things actually compete for the user's attention, they don't — leave it out.
+
+**Boundary notifications are design, not collisions.** The planner deliberately times messages to
+the clock they speak about: a heads-up ("family time is starting", "time to clock in") fires
+EXACTLY on the boundary, because the fact it announces becomes true at that moment; a verification
+("did the walk happen?") fires AFTER the window it verifies, so a wake a few minutes past the
+goal's stated target is deliberate placement, not drift. A notification about an event never
+competes with that event — reading it is a glance, part of the very transition it marks. Timing is
+a finding only when a message lands where its answer cannot exist yet (a VERIFY at the start of
+its own window) or far from its subject (an AM/PM or date slip). Two different messages delivered
+in the same minute are a busy moment, not a conflict.
 
 **Patterns:**
 - User has been declining the same type of suggestion repeatedly
