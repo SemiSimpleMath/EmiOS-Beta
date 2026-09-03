@@ -25,7 +25,7 @@
       "name": "from_account",
       "type": "string",
       "required": false,
-      "description": "Which account sends the email. Omit for the scope's actor (normally the user); 'self' sends from the assistant's own Gmail; 'user' forces the user's account."
+      "description": "Omit to send as the user (the default) — 'self' sends as the assistant's own account; never a raw email address. Accepts 'self', 'user', or a registry account_id from configs/oauth_accounts.json (advanced)."
     },
     {
       "name": "pod_ids",
