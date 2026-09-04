@@ -760,7 +760,22 @@ async function initMusicKit() {
             if (ok) {
                 onAuthorized();
             } else {
-                console.warn('🎵 Persisted authorization was invalid - reauth required');
+                // MusicKit restored a cached authorization but Apple rejected it
+                // (me/storefront 403 — the Music-User-Token expired during a long
+                // idle, e.g. months dormant). isAuthorized is stale-true, so the
+                // plain "not authorized" branch below never runs and the Authorize
+                // button stayed disabled forever. Clear the dead token and drop into
+                // the click-to-authorize state so the user can actually re-sign-in.
+                console.warn('🎵 Persisted authorization was invalid - clearing and requiring re-auth');
+                try {
+                    if (typeof musicKit.unauthorize === 'function') {
+                        await musicKit.unauthorize();
+                    }
+                } catch (e) {
+                    console.warn('unauthorize() failed (continuing):', e);
+                }
+                updateStatus('connected', 'Session expired — click Authorize to sign in again');
+                if (authorizeBtn) authorizeBtn.disabled = false;
             }
         } else {
             updateStatus('connected', 'Ready - Click Authorize');
