@@ -475,7 +475,19 @@ def _fire_chat_alert(
         category = data.get("category") or "?"
         caption = (data.get("caption") or "").strip()
         importance = data.get("importance")
-        text_parts = [f"[{camera_name}] {category}: {caption}"]
+        # The capture time, shown LOCAL (storage is UTC, user surfaces are local).
+        # An undated alert reads as "now" — misleading whenever analysis lags the
+        # capture or the user reads the chat later.
+        when = ""
+        try:
+            from app.assistant.utils.time_utils import utc_to_local
+            when = utc_to_local(captured_at_utc).strftime("%-I:%M %p") if captured_at_utc else ""
+        except Exception:
+            try:  # Windows strftime has no %-I
+                when = utc_to_local(captured_at_utc).strftime("%I:%M %p").lstrip("0")
+            except Exception:
+                logger.warning("[camera_dispatcher] could not render capture time %r", captured_at_utc)
+        text_parts = [f"[{camera_name}{' ' + when if when else ''}] {category}: {caption}"]
         if importance is not None:
             text_parts.append(f"(importance {importance})")
         if pod_id:
