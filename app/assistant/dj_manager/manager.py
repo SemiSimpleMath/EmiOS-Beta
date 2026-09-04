@@ -705,12 +705,23 @@ class DJManager:
                     except Exception:
                         acoustic = 40.0
 
-                    if energy <= 40.0 or acoustic >= 65.0:
-                        boost_genres = ["acoustic", "singer-songwriter", "songwriter", "jazz", "ambient", "classical"]
-                    elif energy >= 70.0:
-                        boost_genres = ["rock", "hard-rock", "metal", "alt-rock", "alternative", "grunge", "psych-rock", "indie"]
-                    else:
-                        boost_genres = ["alt-rock", "alternative", "grunge", "hard-rock", "psych-rock", "rock", "metal", "jazz", "indie", "acoustic", "singer-songwriter", "songwriter"]
+                    # The user's recorded taste, loaded once per pick. This is what makes
+                    # the boost/ban buttons (and implicit playback signals) actually steer
+                    # selection. A load failure is logged LOUD and the pick proceeds
+                    # taste-neutral — degraded, never silently wrong.
+                    learned = None
+                    try:
+                        from app.assistant.dj_manager.learned_weights import load_learned_weights
+                        learned = load_learned_weights()
+                    except Exception as e:
+                        logger.error("[dj_pick] learned weights unavailable — picking "
+                                     "taste-neutral this round: %s", e, exc_info=True)
+
+                    # Genre boosting comes from the LEARNED genre weights (the user's own
+                    # taste table), not hardcoded genre-family lists. Vibe alignment is
+                    # already the distance term's job; taste is the boost's job. With no
+                    # learned genres yet, sampling is distance+prob_factor driven.
+                    boost_genres = sorted(learned.preferred_genres()) if learned else []
 
                     # "Random 20": we still bias toward the current vibe by sampling from a
                     # close-match pool with weights + recency filters.
@@ -721,10 +732,13 @@ class DJManager:
                         base_pool_size=10000,
                         prompt_pick_count=20,
                         boost_genres=boost_genres,
-                        boost_factor=4.0,
+                        # Mild flat lift only: the exact per-genre factor already rides in
+                        # via `learned` (taste_w), so a large boost here would double-count.
+                        boost_factor=2.0,
                         max_energy_delta=7.5,
                         max_valence_delta=12.5,
                         seed=seed,
+                        learned=learned,
                     )
 
                     candidates_20 = [

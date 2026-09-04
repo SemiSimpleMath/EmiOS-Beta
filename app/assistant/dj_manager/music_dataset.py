@@ -220,6 +220,7 @@ class MusicDataset:
         max_energy_delta: float = 5.0,
         max_valence_delta: float = 10.0,
         seed: Optional[int] = None,
+        learned=None,
     ) -> Tuple[List[DatasetSong], List[DatasetSong]]:
         """
         Returns (pool_100, prompt_10).
@@ -447,7 +448,18 @@ class MusicDataset:
 
             # Probability factor (from dataset). Default is 1.0.
             pf = float(getattr(song, "prob_factor", 1.0) or 0.0)
-            return max(0.0, pf) * genre_w * dist_w
+
+            # The user's RECORDED taste (boost/ban buttons + implicit playback
+            # signals). For seven months these tables were consulted only for UI
+            # display — a banned artist sampled like a loved one. A 0.0 zeroes
+            # the weight (Ban means ban); boosts scale proportionally.
+            taste_w = 1.0
+            if learned is not None:
+                taste_w = float(learned.factor_for(
+                    track_id=getattr(song, "track_id", "") or "",
+                    title=song.track_name, artist=song.artist, genre=song.genre))
+
+            return max(0.0, pf) * genre_w * dist_w * taste_w
 
         # Weighted sampling without replacement (Efraimidis–Spirakis / A-ExpJ style).
         # Produces a size-k sample in one pass over the pool.
