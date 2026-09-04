@@ -49,9 +49,15 @@ class PlayedSong(db.Model):
     last_liveness_slider = Column(Integer, nullable=True)  # 0-100
     last_tempo_slider = Column(Integer, nullable=True)  # 0-100
     
+    # Implicit-preference signal (2026-09-04): how the user reacted to plays.
+    # completed = listened through (or near enough); skipped_early = killed
+    # quickly. The richest taste signal a player emits — previously discarded.
+    completed_count = Column(Integer, nullable=False, default=0)
+    skipped_early_count = Column(Integer, nullable=False, default=0)
+
     # For count reset tracking
     last_count_reset_date = Column(String(10), nullable=True)  # YYYY-MM-DD
-    
+
     __table_args__ = (
         Index('idx_played_songs_title_artist', 'title', 'artist', unique=True),
         Index('idx_played_songs_last_played', 'last_played_utc'),

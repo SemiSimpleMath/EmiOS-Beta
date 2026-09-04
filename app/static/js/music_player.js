@@ -782,6 +782,43 @@ async function initMusicKit() {
 /**
  * Set up MusicKit event listeners
  */
+// Position/duration of the current item, sampled by updateProgress(); read at
+// item-change to score the play that just ended. The item being scored is
+// tracked separately so a mid-song metadata refresh can't misattribute it.
+let _lastPlaybackTick = { time: 0, duration: 0 };
+let _reactionTrackedItem = null;
+
+function reportPlaybackReaction() {
+    try {
+        const prev = _reactionTrackedItem;
+        const played = _lastPlaybackTick.time || 0;
+        const duration = _lastPlaybackTick.duration || 0;
+        // Advance the tracked item to whatever is now playing, for next time.
+        const np = musicKit && musicKit.nowPlayingItem;
+        _reactionTrackedItem = np ? {
+            title: np.title,
+            artist: np.artistName,
+            track_id: np.id || '',
+        } : null;
+        _lastPlaybackTick = { time: 0, duration: 0 };
+
+        if (!prev || !prev.title || played <= 0) return;   // nothing meaningful to report
+        fetch('/api/music/reaction', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                title: prev.title,
+                artist: prev.artist,
+                track_id: prev.track_id || '',
+                played_seconds: played,
+                duration_seconds: duration,
+            }),
+        }).catch(err => console.warn('reaction report failed:', err));
+    } catch (e) {
+        console.warn('reportPlaybackReaction error:', e);
+    }
+}
+
 function setupMusicKitListeners() {
     if (!musicKit) return;
     
@@ -796,9 +833,13 @@ function setupMusicKitListeners() {
     
     // Now playing item changes
     musicKit.addEventListener('nowPlayingItemDidChange', () => {
+        // The item that WAS playing has just ended — report how the user reacted
+        // (finished vs. skipped early) so the backend can learn implicit taste.
+        reportPlaybackReaction();
+
         updateNowPlaying();
         emitPlaybackState();
-        
+
         // Check if a DJ-queued song started playing, remove from tracking
         const nowPlaying = musicKit.nowPlayingItem;
         let fetchedMeta = false;
@@ -1095,10 +1136,17 @@ function updateNowPlaying() {
  */
 function updateProgress() {
     if (!musicKit) return;
-    
+
     const current = musicKit.currentPlaybackTime;
     const duration = musicKit.currentPlaybackDuration;
-    
+
+    // Remember the last observed position/duration of the CURRENT item so that
+    // when the item changes we can report how far the just-ended play got.
+    // (currentPlaybackTime reads ~0 the instant the next item loads.)
+    if (current > 0) {
+        _lastPlaybackTick = { time: current, duration: duration || 0 };
+    }
+
     if (timeCurrent) {
         timeCurrent.textContent = formatTime(current);
     }

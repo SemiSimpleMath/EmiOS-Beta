@@ -549,6 +549,34 @@ def get_song_meta():
     )
 
 
+@music_bp.route('/api/music/reaction', methods=['POST'])
+def record_playback_reaction():
+    """The player reports how a finished play went; we learn from it.
+
+    Body: {title, artist, track_id?, played_seconds, duration_seconds}
+    A completion nudges the song's taste weight up, an early skip nudges it
+    down — bounded, floored, and never lifting an explicit ban. Returns the
+    classification so the client can log it.
+    """
+    data = request.get_json() or {}
+    title = (data.get("title") or "").strip()
+    artist = (data.get("artist") or "").strip()
+    if not title:
+        return jsonify({"error": "missing_title"}), 400
+    try:
+        played = float(data.get("played_seconds") or 0.0)
+        duration = float(data.get("duration_seconds") or 0.0)
+    except (TypeError, ValueError):
+        return jsonify({"error": "invalid_seconds"}), 400
+
+    from app.assistant.dj_manager.playback_feedback import record_reaction
+    reaction = record_reaction(
+        title=title, artist=artist, track_id=(data.get("track_id") or "").strip(),
+        played_seconds=played, duration_seconds=duration,
+    )
+    return jsonify({"status": "recorded", "reaction": reaction})
+
+
 @music_bp.route('/api/music/weights/adjust', methods=['POST'])
 def adjust_music_weight():
     """
