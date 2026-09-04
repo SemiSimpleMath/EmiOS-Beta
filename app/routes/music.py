@@ -549,6 +549,54 @@ def get_song_meta():
     )
 
 
+@music_bp.route('/api/music/chat', methods=['POST'])
+def dj_chat():
+    """Free-text instruction to the DJ ("no vocals until 5pm", "more upbeat").
+
+    Persisted as a chat message tagged `music` on the master room. The vibe
+    planner already reads music-tagged chat (include_tags=['music']) on its
+    30-min recheck AND rechecks immediately on new music chat, so a fresh
+    instruction reshapes the next pick — no new agent, no parsing here.
+    """
+    from datetime import datetime, timezone
+    from app.assistant.utils.pydantic_classes import Message
+
+    data = request.get_json() or {}
+    text_in = (data.get("text") or "").strip()
+    if not text_in:
+        return jsonify({"error": "empty"}), 400
+    if len(text_in) > 500:
+        text_in = text_in[:500]
+
+    msg = Message(
+        data_type="user_msg",
+        sub_data_type=["chat", "music"],   # 'music' is what the vibe planner filters on
+        sender="User",
+        role="user",
+        content=text_in,
+        is_chat=True,
+        timestamp=datetime.now(timezone.utc),
+        room_id="master_room",
+        room_surface="ui",
+        room_context_id="main",
+        room_message_direction="inbound",
+        room_initiated_by="user",
+    )
+    from app.assistant.ServiceLocator.service_locator import DI
+    DI.global_blackboard.add_msg(msg)
+
+    # Nudge the DJ so the vibe re-plans now rather than at the next 30-min tick.
+    try:
+        dj_manager = get_dj_manager()
+        if dj_manager.is_enabled():
+            dj_manager.request_pick_and_queue(reason="dj_chat_instruction")
+    except Exception as e:
+        logger.debug("dj_chat: could not poke DJ for immediate recheck: %s", e)
+
+    logger.info("[dj_chat] music instruction recorded: %s", text_in[:120])
+    return jsonify({"status": "ok"})
+
+
 @music_bp.route('/api/music/reaction', methods=['POST'])
 def record_playback_reaction():
     """The player reports how a finished play went; we learn from it.

@@ -1739,7 +1739,42 @@ function setupUIHandlers() {
     if (btnBanTrack) btnBanTrack.addEventListener('click', () => banWeight('track'));
     if (btnBanArtist) btnBanArtist.addEventListener('click', () => banWeight('artist'));
     if (btnBanGenre) btnBanGenre.addEventListener('click', () => banWeight('genre'));
-    
+
+    // Talk to the DJ (free-text music instruction)
+    const djChatInput = document.getElementById('dj-chat-input');
+    const djChatSend = document.getElementById('dj-chat-send');
+    const djChatAck = document.getElementById('dj-chat-ack');
+    async function sendDjChat() {
+        if (!djChatInput) return;
+        const text = (djChatInput.value || '').trim();
+        if (!text) return;
+        if (djChatSend) djChatSend.disabled = true;
+        try {
+            const resp = await fetch('/api/music/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text }),
+            });
+            if (resp.ok) {
+                djChatInput.value = '';
+                if (djChatAck) {
+                    djChatAck.textContent = 'Got it — the DJ will factor that in.';
+                    setTimeout(() => { if (djChatAck) djChatAck.textContent = ''; }, 6000);
+                }
+            } else if (djChatAck) {
+                djChatAck.textContent = "Couldn't send that — try again.";
+            }
+        } catch (e) {
+            if (djChatAck) djChatAck.textContent = "Couldn't send that — try again.";
+        } finally {
+            if (djChatSend) djChatSend.disabled = false;
+        }
+    }
+    if (djChatSend) djChatSend.addEventListener('click', sendDjChat);
+    if (djChatInput) djChatInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); sendDjChat(); }
+    });
+
     // Fetch Taste button
     const fetchTasteBtn = document.getElementById('fetch-taste-btn');
     if (fetchTasteBtn) {
