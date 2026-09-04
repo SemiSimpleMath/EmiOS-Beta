@@ -57,16 +57,25 @@
             <span class="time-total" id="time-total">0:00</span>
         </div>
 
-        <!-- Controls -->
+        <!-- Controls. Inline SVG (not Font Awesome): these are core transport
+             buttons and must render even if the icon CDN is blocked/offline —
+             the buttons have no visual body of their own, so a missing glyph
+             makes them vanish entirely. -->
         <div class="controls">
             <button class="control-btn" id="btn-previous" title="Previous">
-                <i class="fas fa-step-backward"></i>
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true">
+                    <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
+                </svg>
             </button>
             <button class="control-btn control-btn-main" id="btn-play-pause" title="Play/Pause">
-                <i class="fas fa-play" id="play-pause-icon"></i>
+                <svg id="play-pause-icon" data-state="play" viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true">
+                    <path d="M8 5v14l11-7z"/>
+                </svg>
             </button>
             <button class="control-btn" id="btn-next" title="Next">
-                <i class="fas fa-step-forward"></i>
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true">
+                    <path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/>
+                </svg>
             </button>
         </div>
 

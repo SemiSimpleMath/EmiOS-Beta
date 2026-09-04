@@ -1096,14 +1096,18 @@ function onAuthorized() {
 /**
  * Update player UI based on playback state
  */
+// SVG path data for the play/pause glyph (inline so it never depends on the
+// icon CDN). Swapped by state instead of toggling Font Awesome classes.
+const PLAY_PATH = 'M8 5v14l11-7z';
+const PAUSE_PATH = 'M6 5h4v14H6zm8 0h4v14h-4z';
+
 function updatePlayerUI() {
     if (!musicKit || !playPauseIcon) return;
-    
-    if (musicKit.isPlaying) {
-        playPauseIcon.className = 'fas fa-pause';
-    } else {
-        playPauseIcon.className = 'fas fa-play';
-    }
+
+    const path = playPauseIcon.querySelector('path');
+    const playing = !!musicKit.isPlaying;
+    if (path) path.setAttribute('d', playing ? PAUSE_PATH : PLAY_PATH);
+    playPauseIcon.setAttribute('data-state', playing ? 'pause' : 'play');
 }
 
 /**
