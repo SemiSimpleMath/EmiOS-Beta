@@ -60,8 +60,16 @@ class DJManager:
         self._vibe = vibe or VibePlanner()
         self._selector = selector or CandidateSelector()
 
-        self._enabled = False
-        self._continuous_mode = False
+        # Restore the persisted toggle so a restart doesn't silently turn the DJ
+        # off (it did, for ~3 months). If restored ON, start() below is called by
+        # bootstrap; the loop then resumes continuous picking on its own.
+        try:
+            from app.assistant.dj_manager.dj_state_store import load_dj_state
+            _st = load_dj_state()
+        except Exception:
+            _st = {"enabled": False, "continuous_mode": False}
+        self._enabled = bool(_st.get("enabled", False))
+        self._continuous_mode = bool(_st.get("continuous_mode", False))
 
         # Legacy fields kept for status compatibility only.
         # AFK pause/resume policy is now handled by the frontend (music_afk_state).
@@ -319,12 +327,22 @@ class DJManager:
 
     # Event handling
 
+    def _persist_state(self) -> None:
+        """Save enabled/continuous so a restart resumes where the user left off.
+        Called only from the DJ thread (the sole mutator of these flags)."""
+        try:
+            from app.assistant.dj_manager.dj_state_store import save_dj_state
+            save_dj_state(enabled=self._enabled, continuous_mode=self._continuous_mode)
+        except Exception as e:
+            logger.error("Failed to persist DJ state: %s", e)
+
     def _handle_event(self, event: DJEvent) -> None:
         if isinstance(event, Enable):
             self._enabled = True
             self._continuous_mode = bool(event.continuous_mode)
             self._next_song_queued = False
             self._selector.clear_backups()
+            self._persist_state()
             logger.info(f"DJ enabled (continuous_mode={self._continuous_mode})")
 
         elif isinstance(event, Disable):
@@ -335,12 +353,14 @@ class DJManager:
             self._paused_by_dj = False
             self._vibe.clear()
             self._selector.clear_backups()
+            self._persist_state()
             logger.info("DJ disabled")
 
         elif isinstance(event, SetContinuousMode):
             self._continuous_mode = event.enabled
             if not event.enabled:
                 self._next_song_queued = False
+            self._persist_state()
             logger.info(f"Continuous mode set to {self._continuous_mode}")
 
         elif isinstance(event, SetPauseOnAfk):
