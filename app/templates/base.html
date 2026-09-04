@@ -9,9 +9,10 @@
     {% block optional_css %}{% endblock %}
     <!-- Proxy mount path for JS. "" at the domain root, "/emi" (or whatever
          EMI_PROXY_SUBPATH names) behind a prefix-stripping reverse proxy.
-         tojson quotes and escapes it — a bare "{{ ... }}" would break the
-         script on any value containing a quote. Must precede every script
-         that reads it. -->
+         tojson quotes and escapes it — a bare print expression would break
+         the script on any value containing a quote. Must precede every
+         script that reads it. (NOTE: Jinja parses inside HTML comments too —
+         never write literal double-brace examples in a template comment.) -->
     <script>window.SCRIPT_NAME = {{ request.script_root | tojson }};</script>
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
 
