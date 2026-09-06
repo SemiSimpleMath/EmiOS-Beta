@@ -48,12 +48,15 @@ def _extract_page_meta(snapshot_text: str) -> tuple[str | None, str | None]:
     title: str | None = None
     for line in (snapshot_text or "").splitlines():
         s = line.strip()
+        # Slice by the known prefix, NOT split(":") — the URL value itself
+        # contains a colon ("https://"), and splitting stripped the scheme+host
+        # ("https://example.com/x" -> "//example.com/x") in every https URL.
         if s.startswith("- Page URL:"):
-            v = s.split(":", 2)[-1].strip()
+            v = s[len("- Page URL:"):].strip()
             if v:
                 url = v
         elif s.startswith("- Page Title:"):
-            v = s.split(":", 2)[-1].strip()
+            v = s[len("- Page Title:"):].strip()
             if v:
                 title = v
     return (url, title)

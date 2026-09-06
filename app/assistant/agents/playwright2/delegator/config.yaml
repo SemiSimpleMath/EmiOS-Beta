@@ -1,0 +1,11 @@
+name: playwright2::delegator
+class_name: Delegator
+llm_params: {}
+
+user_context_items:
+  - last_agent
+  - pending_tool_name
+  - next_agent
+
+system_context_items: []
+

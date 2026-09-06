@@ -1,0 +1,45 @@
+Today is {{ date_time }}.
+
+Task:
+{{ task }}
+
+{% if information %}
+Additional information:
+{{ information }}
+{% endif %}
+
+{% if playwright2_observation %}
+=== CURRENT OBSERVATION (fresh this turn — act on these [ref]s) ===
+{{ playwright2_observation }}
+{% endif %}
+
+{% if playwright_modal_form_state %}
+{{ playwright_modal_form_state }}
+{% endif %}
+
+{% if progress_report %}
+Accumulated progress_report (append-only; do NOT repeat items already listed here):
+{{ progress_report }}
+{% endif %}
+
+{% if accumulated_notes %}
+Previous notes (extracted data from earlier turns — do not re-extract):
+{% for note in accumulated_notes %}
+--- Note {{ loop.index }} ---
+{{ note }}
+{% endfor %}
+{% endif %}
+
+{% if checklist %}
+Current checklist:
+{{ checklist }}
+{% endif %}
+
+{% if recent_history %}
+Recent history (chronological, oldest to newest). Each entry is one action or agent response.
+{{ recent_history }}
+{% endif %}
+
+{% if action_count %}
+Action Count: {{ action_count }}/100
+{% endif %}

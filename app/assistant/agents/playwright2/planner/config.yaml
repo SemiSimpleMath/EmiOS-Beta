@@ -1,0 +1,39 @@
+name: playwright2::planner
+class_name: Planner
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.6-luna"
+  model_tier: "smart"
+
+# Manager controls what tools are actually available via ToolRegistry filtering.
+allowed_tools: "all"
+except_tools: []
+
+allowed_nodes: [return_control]
+
+append_fields: []
+
+# Skills are auto-injected by SkillInjector when the task contains a
+# matching keyword (each skill's auto_inject_when.task_keywords). Triggers
+# now live on the skills themselves (skills/*/SKILL.md), not here.
+accept_auto_skills: true
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - playwright2_observation      # v2: the fresh compact actionable observation + signals
+  - recent_history
+  - checklist
+  - action_count
+  - accumulated_notes
+  - playwright_modal_form_state
+  - progress_report
+
+system_context_items:
+  - has_spec_steps
+  - tool_descriptions
+
+skills:
+  - critic-handling
+
