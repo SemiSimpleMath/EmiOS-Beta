@@ -50,6 +50,16 @@ class Playwright2ObservationNode(ControlNode):
 
     def action_handler(self, message):  # noqa: ARG002
         self.blackboard.update_state_value("next_agent", None)
+        cfg = self._cfg()
+        source_agent = self._required_str(cfg, "source_agent")
+        next_agent = self._required_str(cfg, "next_agent")
+
+        last_agent = self.blackboard.get_state_value("last_agent", None)
+        if not isinstance(last_agent, str) or last_agent != source_agent:
+            raise ValueError(
+                f"[{self.name}] expected last_agent={source_agent} before observation route, "
+                f"got: {last_agent!r}")
+
         try:
             self._observe()
         except Exception as e:
@@ -61,7 +71,18 @@ class Playwright2ObservationNode(ControlNode):
                 "OBSERVATION UNAVAILABLE this step (the page could not be read). "
                 "Take a snapshot action or navigate, then look again.")
             self.blackboard.update_state_value("playwright2_signals", "observation error")
-        self.blackboard.update_state_value("last_agent", self.name)
+
+        # Route explicitly and PRESERVE the upstream breadcrumb (source_agent =
+        # tool_return_router). This node sits between playwright_page_state_node
+        # and summary_pre_node, and summary_pre_node asserts last_agent ==
+        # tool_return_router — so, exactly like PlaywrightPageStateNode, we must
+        # NOT clobber last_agent to our own name. Routing is via the explicit
+        # next_agent, not state_map[last_agent].
+        self.blackboard.update_state_value("next_agent", next_agent)
+        self.blackboard.update_state_value("last_agent", source_agent)
+
+    def _cfg(self) -> dict[str, Any]:
+        return self._flow_section_cfg("playwright2_observation")
 
     # ------------------------------------------------------------------ #
 
@@ -148,6 +169,7 @@ class Playwright2ObservationNode(ControlNode):
             ref = str(el.get("ref") or "").strip()
             label_part = f' "{label}"' if label else ""
             lines.append(f"  [{ref}] {role}{label_part}")
+
         lines.append("Click/type by [ref]. For page TEXT (articles, prices, body copy) "
                      "the snapshot won't have it — use web_get_content.")
         return "\n".join(lines)

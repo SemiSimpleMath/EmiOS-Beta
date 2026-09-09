@@ -117,6 +117,13 @@ flow_config:
       max_attempts: 8
       sleep_ms: 300
       require_complete: true
+  playwright2_observation:
+    # This node sits between playwright_page_state_node and summary_pre_node.
+    # page_state preserves last_agent=tool_return_router, so that is the source
+    # here too; we preserve it (not our own name) so summary_pre_node's
+    # last_agent==tool_return_router contract still holds, and route explicitly.
+    source_agent: "tool_return_router"
+    next_agent: "summary_pre_node"
   critic:
     enabled: true
     subject_agent: "playwright2::planner"

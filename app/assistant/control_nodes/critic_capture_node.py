@@ -28,13 +28,18 @@ class CriticCaptureNode(ControlNode):
 
     - Calls `browser_take_screenshot` via the Playwright MCP server
     - Stores the persisted image path on the blackboard under `playwright_critic_image`
-    - Routes control to `playwright::critic`
+    - Routes control to the configured critic agent (flow_config.critic.critic_agent)
     """
 
     SERVER_ID = "npm/playwright-mcp"
     MCP_TOOL = "browser_take_screenshot"
 
-    CRITIC_AGENT = "playwright::critic"
+    def _critic_agent(self) -> str:
+        # The critic agent is manager-specific (playwright::critic vs
+        # playwright2::critic), so resolve it from flow_config.critic.critic_agent.
+        # Required — a missing value must fail loud, not route to a guessed name.
+        cfg = self._flow_section_cfg("critic")
+        return self._required_str(cfg, "critic_agent")
 
     def action_handler(self, message):
         # Always clear next_agent at start of control nodes
@@ -83,7 +88,7 @@ class CriticCaptureNode(ControlNode):
                 self.blackboard.update_state_value("critic_capture_error", msg)
                 self.blackboard.update_state_value("last_agent", self.name)
                 # Do not hard-error the whole manager; let planner attempt recovery.
-                self.blackboard.update_state_value("next_agent", self.CRITIC_AGENT)
+                self.blackboard.update_state_value("next_agent", self._critic_agent())
             except Exception as e:
                 logger.debug("[%s] Failed to write screenshot-error state to blackboard: %s", self.name, e, exc_info=True)
             return
@@ -103,7 +108,7 @@ class CriticCaptureNode(ControlNode):
 
         # Route to critic next
         try:
-            self.blackboard.update_state_value("next_agent", self.CRITIC_AGENT)
+            self.blackboard.update_state_value("next_agent", self._critic_agent())
             self.blackboard.update_state_value("last_agent", self.name)
         except Exception as e:
             logger.debug("[%s] Failed to write routing state to blackboard: %s", self.name, e, exc_info=True)
