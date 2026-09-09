@@ -20,6 +20,11 @@ body {
     color: var(--music-text);
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     min-height: 100vh;
+    /* base.css hides body overflow for the chat layout; this page is a
+       plain scrolling document and grew past one viewport (DJ chat, meta
+       card, quick play), so without this the lower controls are unreachable
+       at 100% zoom. */
+    overflow-y: auto;
 }
 
 .music-container {

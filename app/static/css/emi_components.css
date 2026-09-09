@@ -168,6 +168,18 @@
 .bot-bubble strong { color: var(--heading-color); }
 .bot-bubble blockquote { border-left: 3px solid var(--accent-color); padding-left: 0.5em; margin: 0.3em 0; color: var(--text-muted); }
 
+/* Every image in a chat bubble fits the chat column — image pods (camera
+   alerts), attachment thumbs, and raw markdown images alike. Never wider
+   than the bubble, and small enough that a landscape camera frame reads as
+   a thumbnail rather than taking over the conversation. This is the single
+   size rule for chat images; per-class rules only add decoration. */
+.bot-bubble img, .user-bubble img {
+  max-width: min(100%, 280px);
+  max-height: 200px;
+  width: auto;
+  height: auto;
+}
+
 /* ---- Connection Status ---- */
 .connection-banner {
   text-align: center;
