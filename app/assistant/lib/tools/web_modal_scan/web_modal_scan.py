@@ -28,10 +28,13 @@ _JS_MODAL_ELEMENTS = """
       return v.length > n ? v.slice(0, n) : v;
     };
 
+    // A label is "generic" only when it IS a bare quantity control, never when
+    // it merely CONTAINS one of these strings — a priced option like
+    // "Medium Iced Coffee 200 cal +$1.30" contains "+" and is not generic.
     const GENERIC_LABELS = ["increase quantity", "decrease quantity", "+", "-", "add", "remove"];
     const isGenericLabel = (t) => {
-      const tl = t.toLowerCase();
-      return GENERIC_LABELS.some(g => tl.includes(g));
+      const tl = t.toLowerCase().trim();
+      return GENERIC_LABELS.includes(tl) || /^(increase|decrease) quantity\b/.test(tl);
     };
 
     // Find the item name associated with a generic control (e.g. "Increase quantity by 1").
@@ -108,9 +111,11 @@ _JS_MODAL_ELEMENTS = """
       return "unknown";
     };
 
-    // Find the modal container
-    let modal = document.querySelector('[role="dialog"]');
-    if (!modal) modal = document.querySelector('[aria-modal="true"]');
+    // Find the modal container. Dialogs can be STACKED (a cart drawer with an
+    // item-customization modal on top); the topmost is the LAST in DOM order,
+    // so take the last one, never the first.
+    const dialogs = document.querySelectorAll('[role="dialog"], [aria-modal="true"]');
+    const modal = dialogs.length ? dialogs[dialogs.length - 1] : null;
     if (!modal) return { error: "no_modal_found", elements: [] };
 
     const SELECTOR = [
@@ -132,6 +137,9 @@ _JS_MODAL_ELEMENTS = """
 
         const role = roleFor(el);
         let text = labelFor(el);
+        // The raw label is what the accessibility snapshot carries; ref
+        // matching must use it, not the display text with context appended.
+        const matchText = text;
         const checked = el.checked || el.getAttribute("aria-checked") === "true";
 
         // For generic-labeled controls, find the associated item name
@@ -140,7 +148,7 @@ _JS_MODAL_ELEMENTS = """
           if (ctx) text = text + " (" + ctx + ")";
         }
 
-        out.push({ role, text: text || "(no label)", checked: checked || false });
+        out.push({ role, text: text || "(no label)", match_text: matchText, checked: checked || false });
       }
       return out;
     };
@@ -204,7 +212,9 @@ def _match_refs_by_proximity(elements: list[dict], snapshot_text: str) -> None:
     used_refs: set[str] = set()
 
     for el in elements:
-        label = (el.get("text") or "").strip()
+        # Match on the raw label (match_text); the display text may carry an
+        # appended "(context)" suffix that never appears in the snapshot.
+        label = (el.get("match_text") or el.get("text") or "").strip()
         if not label or label == "(no label)":
             continue
         label_lower = label.lower()

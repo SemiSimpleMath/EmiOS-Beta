@@ -71,6 +71,11 @@ def _extract_dialog_subtree(snapshot_text: str) -> str | None:
         - radio "Option A" [ref=eZZZ]
         ...
 
+    When dialogs are STACKED (a cart drawer with an item-customization modal
+    opened on top of it), the topmost one is the LAST dialog in tree order:
+    later siblings paint over earlier ones, and a nested dialog is both later
+    and deeper. So the last dialog wins, never the first.
+
     Returns the subtree text (with indentation preserved), or None if no dialog found.
     """
     lines = (snapshot_text or "").splitlines()
@@ -81,12 +86,11 @@ def _extract_dialog_subtree(snapshot_text: str) -> str | None:
         stripped = line.lstrip()
         if not stripped.startswith("- "):
             continue
-        # Match dialog role in the accessibility tree
+        # Match dialog role in the accessibility tree; the LAST match wins.
         role_match = re.match(r'^-\s+(dialog|alertdialog)\b', stripped, re.IGNORECASE)
         if role_match:
             dialog_idx = i
             dialog_indent = len(line) - len(stripped)
-            break
 
     if dialog_idx is None:
         return None
@@ -181,16 +185,25 @@ def summarize_actionable_snapshot(snapshot_text: str, *, max_elements: int = 50)
     form_items = [it for it in items if it[2].get("role") in form_roles]
     other_items = [it for it in items if it[2].get("role") not in form_roles]
 
+    # Form controls come first, but never ALL of the budget: a large modal
+    # (a 100-radio drink list) must still show its buttons, or the planner
+    # can never see "Add to cart" / "Update item" and falls back to vision.
+    # Reserve a quarter of the budget for non-form rows (buttons rank above
+    # links there), then let form rows take the rest.
+    reserve = min(len(other_items), max(1, max_elements // 4))
     selected_rows: list[dict[str, str]] = []
-    for it in form_items:
-        selected_rows.append(it[2])
+    form_taken = 0
+    while form_taken < len(form_items) and form_taken < max_elements - reserve:
+        selected_rows.append(form_items[form_taken][2])
+        form_taken += 1
+    for it in other_items:
         if len(selected_rows) >= max_elements:
             break
-    if len(selected_rows) < max_elements:
-        for it in other_items:
-            selected_rows.append(it[2])
-            if len(selected_rows) >= max_elements:
-                break
+        selected_rows.append(it[2])
+    # Budget the reserve did not use goes back to the remaining form rows.
+    while form_taken < len(form_items) and len(selected_rows) < max_elements:
+        selected_rows.append(form_items[form_taken][2])
+        form_taken += 1
 
     selected = selected_rows
     total = len(items)
