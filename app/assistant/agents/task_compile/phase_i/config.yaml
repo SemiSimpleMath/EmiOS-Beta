@@ -2,7 +2,7 @@ name: task_compile::phase_i
 class_name: Agent
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5.2"
+  engine: "gpt-5.6-luna"
   model_tier: "strong"
 
 allowed_tools: []

@@ -9,7 +9,7 @@ explicit opt-in keeps every new manager from leaking into chat.
 
 The actual translation from planner-internal ``what_i_am_thinking`` into
 chat-readable narration is done by a tiny LLM agent
-(``chat_narrator::translator``, on gpt-5.4-nano). The agent's system
+(``chat_narrator::translator``, on gpt-5.6-luna). The agent's system
 prompt handles voice, brevity, and noise filtering — when the input is
 pure scaffolding ("updating my checklist", "per the critic, ...") it
 returns an empty string and we suppress the emit.

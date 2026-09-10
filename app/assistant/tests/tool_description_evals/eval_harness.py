@@ -145,7 +145,7 @@ def run_test_case(
     *,
     task: str,
     catalog: str,
-    model: str = "gpt-5.1",
+    model: str = "gpt-5.6-luna",
 ) -> TestPlannerOutput:
     """One LLM call. Returns the planner's chosen action + args."""
     user_prompt = (
@@ -248,7 +248,7 @@ def run_suite(
     *,
     tool_name: str,
     description_override: Optional[Path] = None,
-    model: str = "gpt-5.1",
+    model: str = "gpt-5.6-luna",
 ) -> List[CaseResult]:
     spec = load_cases(tool_name)
     distractors = list(spec.get("distractors") or [])

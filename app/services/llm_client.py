@@ -730,7 +730,7 @@ class OpenAILLM(BaseLLMProvider):
         """Public entrypoint — progressive-timeout ladder around
         _structured_output_once. See BaseLLMProvider for the mechanics.
 
-        Fact_extractor on gpt-5.4 is the typical caller that budgets a large
+        Fact_extractor on gpt-5.6-luna is the typical caller that budgets a large
         timeout up front and therefore skips the ladder entirely.
         """
         return self._structured_output_with_timeout_ladder(messages, **send_params)

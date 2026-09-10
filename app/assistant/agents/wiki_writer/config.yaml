@@ -1,7 +1,7 @@
 name: wiki_writer
 class_name: Agent
 llm_params:
-  engine: gpt-5.4
+  engine: gpt-5.6-luna
   model_tier: "powerful"
   timeout: 240
   llm_provider: "openai"

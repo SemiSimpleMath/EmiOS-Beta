@@ -1,6 +1,6 @@
 """system_audit.investigator_runner — the deep pass + the Claude handoff.
 
-Runs system_audit::investigator (gpt-5.4) over each ASSEMBLED case's dossier,
+Runs system_audit::investigator (gpt-5.6-luna) over each ASSEMBLED case's dossier,
 records the read in the register (which arms regression detection), appends
 the investigator sections to the dossier file, and moves the case to
 awaiting_claude. A daily digest ticket tells the owner cases are waiting.

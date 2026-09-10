@@ -301,7 +301,7 @@ class LLMClient:
 
             if image_paths:
                 params["llm_provider"] = "openai"
-                params["engine"] = "gpt-5.2"
+                params["engine"] = "gpt-5.6-luna"
                 llm_interface = LLMFactory.get_llm_interface(llm_provider="openai")
             elif provider_overridden:
                 # Provider changed at runtime — build a fresh interface, do not use the cached one.

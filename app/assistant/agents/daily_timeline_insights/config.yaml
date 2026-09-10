@@ -2,7 +2,7 @@ name: daily_timeline_insights
 class_name: Agent
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5.1"
+  engine: "gpt-5.6-luna"
   model_tier: "smart"
 
 allowed_tools: []

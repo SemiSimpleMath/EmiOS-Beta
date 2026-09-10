@@ -2,7 +2,7 @@ name: knowledge_graph_add::fact_canonicalizer
 class_name: Agent
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5.4-nano"
+  engine: "gpt-5.6-luna"
   model_tier: "nano"
 allowed_tools: []
 except_tools: []

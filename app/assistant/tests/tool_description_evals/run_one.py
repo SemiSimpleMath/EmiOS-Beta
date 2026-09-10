@@ -11,7 +11,7 @@ Usage:
 
     # Use a different model (default smart-tier matches emi_team::planner):
     .venv/Scripts/python.exe -m app.assistant.tests.tool_description_evals.run_one \\
-        --tool http_request --model gpt-5.1-mini
+        --tool http_request --model gpt-5.6-luna
 
 The harness makes real LLM calls. Cost ~$0.01-0.05 per run for ~10 cases.
 """
@@ -39,8 +39,8 @@ def main() -> int:
     )
     p.add_argument(
         "--model",
-        default="gpt-5.1",
-        help="LLM engine for the test planner (default: gpt-5.1).",
+        default="gpt-5.6-luna",
+        help="LLM engine for the test planner (default: gpt-5.6-luna).",
     )
     args = p.parse_args()
 

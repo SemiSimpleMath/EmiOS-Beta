@@ -662,7 +662,7 @@ class LocationManager:
         2. Send to agent to infer locations based on event names + guidelines
         3. Agent returns complete timeline
 
-        Cost gate: the LLM inference (~12K output tokens/call on gpt-5.4-mini)
+        Cost gate: the LLM inference (~12K output tokens/call on gpt-5.6-luna)
         only runs when the calendar actually changed, or once/day as a floor.
         Previously this fired on every location_refresh poll (~every 15 min),
         re-deriving an unchanged 7-day timeline and burning ~$3/day. Current
