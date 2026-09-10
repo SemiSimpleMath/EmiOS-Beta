@@ -6,7 +6,7 @@ from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
 from app.assistant.lib.core_tools.event_node_cleanup import cascade_delete_children, cleanup_event_node
 from app.assistant.lib.core_tools.tool_error_protocol import make_tool_error
 from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult, Message
-from app.assistant.utils.time_utils import local_to_utc
+from app.assistant.utils.time_utils import local_to_utc, utc_to_local
 from app.assistant.scheduler.pydantic_types.base_event_data import BaseEventData
 
 # Import the repository manager
@@ -19,6 +19,51 @@ import uuid
 
 from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
+
+
+def _local_iso(value: Any) -> str:
+    """Render a stored UTC time for a prompt: local, minute precision."""
+    if not value:
+        return ""
+    try:
+        return utc_to_local(value).strftime("%Y-%m-%d %H:%M %Z")
+    except Exception as e:
+        logger.error("scheduler_tool: could not render time %r for the listing: %s", value, e)
+        return str(value)
+
+
+def format_scheduler_events(events: list, start_date_str: str, end_date_str: str) -> str:
+    """Human-readable listing of scheduler events — the ONLY view an agent gets.
+
+    One line per event: title, local fire time, id, type (and interval for
+    repeating events), importance, and the reminder message. Ids are included
+    because the follow-up actions (delete / reschedule) take an event_id.
+    """
+    count = len(events)
+    lines = [f"Found {count} scheduler event{'s' if count != 1 else ''} "
+             f"from {start_date_str} to {end_date_str}."]
+    for ev in events:
+        payload = ev.event_payload if isinstance(ev.event_payload, dict) else {}
+        title = str(payload.get("title") or "").strip() or "(no title)"
+        line = f"- {title}"
+        when = _local_iso(payload.get("occurrence") or ev.start_date)
+        if when:
+            line += f" @ {when}"
+        line += f"  id={ev.event_id}  type={ev.event_type}"
+        if ev.event_type == "interval" and ev.interval:
+            line += f" every {ev.interval}s"
+        if ev.end_date:
+            line += f"  until={_local_iso(ev.end_date)}"
+        task_type = str(payload.get("task_type") or "").strip()
+        if task_type:
+            line += f"  task_type={task_type}"
+        if payload.get("importance") is not None:
+            line += f"  importance={payload.get('importance')}"
+        message = str(payload.get("payload_message") or "").replace("\n", " ").strip()
+        if message:
+            line += f"  message={message}"
+        lines.append(line)
+    return "\n".join(lines)
 
 
 class SchedulerTool(BaseTool):
@@ -333,9 +378,14 @@ class SchedulerTool(BaseTool):
                 )
             self.repo_manager.sync_events_with_server(event_sync_list, "scheduler")
 
+        # Agents only see `content`, never `data_list`. A fixed "success"
+        # sentence here left the planner blind to what was found — it re-ran
+        # this fetch 22 times in one run hunting for a reminder it could
+        # never see (2026-09-09, trash night). List every event, as the
+        # calendar tool does.
         fetch_events_result = ToolResult(
             result_type="scheduler_events",
-            content="Successfully retrieved scheduler events.",
+            content=format_scheduler_events(fetched_events, start_date_str, end_date_str),
             data_list=[e.model_dump() for e in fetched_events]
         )
         return self.publish_result(fetch_events_result)
