@@ -54,9 +54,14 @@ def _get_chroma_client():
     if _chroma_client is None:
         import chromadb
         from chromadb.config import Settings
-        from app.assistant.utils.path_utils import get_repo_root
+        from app.assistant.utils.path_utils import get_data_dir
 
-        db_path = str(get_repo_root() / "data" / "chroma_chat_memory")
+        # get_data_dir(), NOT get_repo_root(): under EMI_DATA_DIR (Docker) the
+        # repo root is the IMAGE, so the chat-memory vectors were written into
+        # the container layer and destroyed by every rebuild. get_data_dir()
+        # falls back to the repo root when EMI_DATA_DIR is unset, so the dev
+        # path is byte-for-byte unchanged.
+        db_path = str(get_data_dir() / "data" / "chroma_chat_memory")
         _chroma_client = chromadb.PersistentClient(
             path=db_path,
             settings=Settings(anonymized_telemetry=False, allow_reset=True),
@@ -65,16 +70,25 @@ def _get_chroma_client():
 
 
 def _get_embedding_function():
-    """Local sentence-transformers embedder (all-MiniLM-L6-v2).
+    """Local ONNX embedder (all-MiniLM-L6-v2) via chroma's bundled default.
 
-    First call downloads the model (~80MB) to the HF cache; subsequent
-    calls are CPU-only and free."""
+    Chroma's DefaultEmbeddingFunction IS all-MiniLM-L6-v2 (_EMBEDDING_MODEL),
+    run through onnxruntime — the same model and the same 384-dim space the
+    sentence-transformers path produced, so stored vectors stay comparable.
+
+    It is used instead of SentenceTransformerEmbeddingFunction because that
+    one imports `sentence_transformers`, which is not in requirements.txt and
+    pulls ~2.5 GB of torch to obtain a model chroma already ships. Without it
+    installed EVERY call raised, which auto-disabled the chat_memory_index
+    routine and made chat_memory_rag recall fail silently on live chat turns.
+
+    onnxruntime is already a dependency (chroma pulls it), and the model is
+    already downloaded at import time by chroma's own cache, so this adds
+    nothing to the image."""
     global _embedding_function
     if _embedding_function is None:
         from chromadb.utils import embedding_functions
-        _embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name=_EMBEDDING_MODEL,
-        )
+        _embedding_function = embedding_functions.DefaultEmbeddingFunction()
     return _embedding_function
 
 
