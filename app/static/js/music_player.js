@@ -1440,11 +1440,17 @@ async function queueNextSong(query, datasetMeta = null) {
         });
         console.log(`🎵 DJ queue tracking: ${djQueuedSongs.length} songs pending`);
         
-        // Notify backend that song was queued (single source of truth for recording)
+        // Notify backend that song was queued (single source of truth for recording).
+        // Carry the dataset's canonical title/artist too: that is the name the no-repeat
+        // filter looks up, and Apple Music's display names can differ ("(feat. …)").
+        const dsMeta = (datasetMeta && typeof datasetMeta === 'object') ? datasetMeta : null;
         console.log(`🎵 Emitting music_song_queued: "${song.attributes.name}" by ${song.attributes.artistName}`);
         socket.emit('music_song_queued', {
             title: song.attributes.name,
             artist: song.attributes.artistName,
+            dataset_title: dsMeta?.title || null,
+            dataset_artist: dsMeta?.artist || null,
+            track_id: dsMeta?.track_id || null,
             query: query,
         });
         

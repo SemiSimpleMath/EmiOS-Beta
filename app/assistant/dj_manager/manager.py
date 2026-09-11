@@ -32,6 +32,10 @@ logger = get_logger(__name__)
 
 PICK_DEBOUNCE_SECONDS = 5
 QUEUE_RETRY_COOLDOWN_SECONDS = 20
+# A song the user heard this week is not offered again. The dataset holds ~925k tracks;
+# there is no reason to repeat inside a week, and a next-day repeat is what the 24h
+# default allowed (2026-09-10, "Sparkling Adventure" twice in two days).
+NO_REPEAT_WINDOW_HOURS = 7 * 24.0
 
 PICK_SONG_TIMEOUT_SECONDS = 90
 BACKUP_SONG_TIMEOUT_SECONDS = 30
@@ -82,6 +86,11 @@ class DJManager:
         self._queue_retry_after_utc: Optional[datetime] = None
 
         self._current_track_id: Optional[str] = None
+
+        # The vibe targets of the most recent pick round. Recording happens when the
+        # FRONTEND confirms what it queued (it may substitute a later candidate when Apple
+        # Music has no match for the first), so the targets are kept here until then.
+        self._last_pick_targets: Dict[str, Any] = {}
 
         self._stats = {
             "started_at": None,
@@ -302,7 +311,7 @@ class DJManager:
                 search_query=q or None,
                 audio_targets=audio_targets,
             )
-            logger.info(f"Recorded at pick: {t} by {a}")
+            logger.info(f"Recorded queued song: {t} by {a}")
         except Exception as e:
             logger.error("Failed to record pick: %s", e)
             logger.debug("failed to record pick exception details", exc_info=True)
@@ -404,9 +413,20 @@ class DJManager:
                 logger.warning(f"Could not reply to RequestBackupSong: {e}", exc_info=True)
 
         elif isinstance(event, FrontendQueued):
-            title = event.data.get("title", "")
-            artist = event.data.get("artist", "")
-            logger.debug(f"Frontend confirmed queue: {title} by {artist}")
+            # The single source of truth for "this song is going to play": the frontend
+            # may have substituted a later candidate when Apple Music had no match for the
+            # first, so the pick itself is never recorded — this confirmation is. Prefer the
+            # dataset's canonical title/artist (what the no-repeat filter looks up) over
+            # Apple Music's display names.
+            data = event.data if isinstance(event.data, dict) else {}
+            title = str(data.get("dataset_title") or data.get("title") or "").strip()
+            artist = str(data.get("dataset_artist") or data.get("artist") or "").strip()
+            logger.info(f"Frontend confirmed queue: {title} by {artist}")
+            self.record_pick(
+                title=title, artist=artist or "Unknown",
+                targets=self._last_pick_targets or {},
+                search_query=str(data.get("query") or "").strip() or None,
+            )
 
     # NOTE: AFK pause/resume is handled in the frontend now (music_afk_state socket event).
 
@@ -461,7 +481,10 @@ class DJManager:
                 return
 
             targets = picked.get("targets", {}) if isinstance(picked.get("targets"), dict) else {}
-            self.record_pick(title=title, artist=artist or "Unknown", targets=targets)
+            # Not recorded here: the frontend walks the candidate list and queues the first
+            # one Apple Music can find, then confirms via `music_song_queued` — that
+            # confirmation is what gets recorded (see FrontendQueued below). Recording the
+            # pick here wrote the wrong song whenever the frontend substituted.
 
             # Attach current weight factors to each candidate in the batch so UI can show
             # track/artist/genre weights without any reads.
@@ -759,6 +782,7 @@ class DJManager:
                         max_valence_delta=12.5,
                         seed=seed,
                         learned=learned,
+                        exclude_played_within_hours=NO_REPEAT_WINDOW_HOURS,
                     )
 
                     candidates_20 = [
@@ -919,6 +943,9 @@ class DJManager:
             except Exception:
                 candidates_batch = [chosen]
 
+            # Kept for the frontend's queue confirmation, which is where the play is recorded.
+            self._last_pick_targets = dict(targets) if isinstance(targets, dict) else {}
+
             return {
                 "title": chosen.get("title", ""),
                 "artist": chosen.get("artist", ""),
@@ -958,7 +985,8 @@ class DJManager:
             return None
 
         targets = self._vibe.get_targets()
-        self.record_pick(title=backup.title, artist=backup.artist, targets=targets, search_query=backup.search_query)
+        # Recorded when the frontend confirms it queued this backup (FrontendQueued).
+        self._last_pick_targets = dict(targets) if isinstance(targets, dict) else {}
 
         logger.info(f"Using backup: '{backup.title}' by {backup.artist} (score={backup.score:.3f})")
         return {

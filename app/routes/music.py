@@ -244,15 +244,14 @@ def dj_pick_song():
 
     title = (picked.get("title") or "").strip()
     artist = (picked.get("artist") or "").strip()
-    targets = picked.get("targets", {}) if isinstance(picked.get("targets"), dict) else {}
 
     if not title:
         return jsonify({"status": "skipped", "reason": "empty_query"})
 
-    # Keep explicit sequencing: pick -> record -> play
+    # pick -> play; the play is recorded when the frontend confirms what it queued
+    # (music_song_queued), since it may substitute a later candidate.
     from app.assistant.dj_manager.query_utils import build_search_query
     q = build_search_query(title, artist)
-    dj_manager.record_pick(title=title, artist=artist or "Unknown", targets=targets, search_query=q)
     success = dj_manager.play_song(
         q,
         mode="queue_next",
@@ -290,7 +289,6 @@ def dj_pick_song_once():
 
     title = (picked.get("title") or "").strip()
     artist = (picked.get("artist") or "").strip()
-    targets = picked.get("targets", {}) if isinstance(picked.get("targets"), dict) else {}
 
     if not title:
         return jsonify({"status": "skipped", "reason": "empty_query"})
@@ -298,7 +296,7 @@ def dj_pick_song_once():
     from app.assistant.dj_manager.query_utils import build_search_query
 
     q = build_search_query(title, artist)
-    dj_manager.record_pick(title=title, artist=artist or "Unknown", targets=targets, search_query=q)
+    # Recorded on the frontend's queue confirmation (music_song_queued), not here.
     success = dj_manager.play_song(
         q,
         mode="queue_next",
