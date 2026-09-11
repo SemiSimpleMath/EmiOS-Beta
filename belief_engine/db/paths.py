@@ -7,11 +7,11 @@ belief-engine module that opens a raw sqlite3 connection resolves through here.
 """
 from __future__ import annotations
 
-import logging
+from app.assistant.utils.logging_config import get_logger
 
 from app.assistant.utils.path_utils import get_repo_root
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def belief_db_path() -> str:

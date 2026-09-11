@@ -16,10 +16,12 @@ beliefs only against each other, so a new duplicate of an OLD belief leaked unti
 full sweep. Pairwise + whole-set NN fixes both: a focused per-pair decision, and (in
 new_only mode) each new belief is compared against the ENTIRE active set.
 
-Two modes (decided PER DOMAIN by belief_engine.state.sweep_tracker.decide_mode):
-  - "full" (weekly): propose pairs across ALL active beliefs in the domain.
-  - "new_only" (nightly): propose only pairs that involve a belief created since the domain's
-    last full sweep — but against the whole active set — so a new dup of an old belief is caught.
+Cadence (belief_engine.state.sweep_tracker.decide_mode, stamped under "global"):
+  - "full" (weekly): propose pairs across ALL active beliefs, every domain together.
+  - "new_only" (the other nights): SKIPPED here — a new belief is verified against its nearest
+    neighbours the moment it is written (UpdateBeliefsStep.dedup_candidate), so the nightly
+    incremental pass has nothing left to ask. `focus_keys` remains for callers/tests that want
+    a focused pass.
 
 Durability (2026-07-07): every "not the same" verdict is recorded in belief_distinct_pairs,
 bound to the statements it judged, and skipped on later passes while both statements are
@@ -29,7 +31,7 @@ off (paying only new pairs) instead of re-paying every prior verdict from scratc
 """
 from __future__ import annotations
 
-import logging
+from app.assistant.utils.logging_config import get_logger
 import re
 from typing import Any, Dict, List, Optional, Set
 
@@ -39,7 +41,6 @@ from app.assistant.utils.pydantic_classes import Message
 from belief_engine.state.sweep_tracker import (
     decide_mode,
     mark_full_sweep_completed,
-    read_last_full_sweep_at,
 )
 from belief_engine.store import distinct_pairs as verdicts
 from belief_engine.store.belief_store import BeliefRecord, BeliefStore
@@ -49,7 +50,7 @@ try:
 except Exception:  # pragma: no cover
     np = None  # type: ignore
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _AGENT_NAME = "belief_engine::merge_verifier"
 
@@ -127,10 +128,13 @@ def _keyword_pairs(items) -> Set:
 
 
 def _embeddings_for(store: BeliefStore, beliefs: List[BeliefRecord]):
-    """(items, normalized matrix) for the beliefs that have an embedding + a statement."""
+    """(items, normalized matrix) for the beliefs that have an embedding + a statement.
+    The global pass spans every domain the beliefs come from."""
     if np is None:
         raise RuntimeError("canonicalize requires numpy")
-    id_to_vec = dict(store._chroma.get_all_for_domain(beliefs[0].domain)) if beliefs else {}
+    id_to_vec: Dict[str, Any] = {}
+    for dom in sorted({b.domain for b in beliefs}):
+        id_to_vec.update(dict(store._chroma.get_all_for_domain(dom)))
     # Exclude owner-locked beliefs: a manual correction must never be merged away (as loser)
     # or have its statement rewritten to a canonical (as survivor).
     items = [b for b in beliefs
@@ -308,7 +312,9 @@ def _run_verifier_dedup_pass(
                     surviving_confidence=survivor.confidence,
                     surviving_scope=survivor.scope,
                     deprecated_keys=[loser.belief_key],
-                    domain=domain,
+                    # The survivor keeps its own area — in the global pass the two sides
+                    # may come from different domains, and "global" is not a domain.
+                    domain=survivor.domain,
                     merge_reasoning=(verdict.get("reason") or "")[:300],
                 )
                 merged_into[loser.belief_key] = survivor.belief_key
@@ -324,85 +330,70 @@ def _run_verifier_dedup_pass(
     return result
 
 
-def _filter_new_beliefs_since(
-    beliefs: List[BeliefRecord],
-    cutoff_utc,
-) -> List[BeliefRecord]:
-    """Return beliefs whose `created_at` is strictly after the cutoff.
-
-    cutoff_utc=None (no prior sweep recorded) → returns everything, so the first run after
-    bootstrap canonicalizes the full set. Defensive on parse failure: treats unparseable
-    timestamps as "new" (better to include than silently skip).
-    """
-    if cutoff_utc is None:
-        return list(beliefs)
-    out: List[BeliefRecord] = []
-    cutoff_iso = cutoff_utc.isoformat()
-    for b in beliefs:
-        created_at = getattr(b, "created_at", None)
-        if not created_at:
-            out.append(b)
-            continue
-        s = str(created_at).strip()
-        if s.endswith("Z"):
-            s = s[:-1] + "+00:00"
-        if s > cutoff_iso:
-            out.append(b)
-    return out
-
-
 class CanonicalizeBeliefSetStep:
-    """Step 4 of BeliefEnginePipeline — pairwise-verifier dedup (see module docstring)."""
+    """Step 5 of BeliefEnginePipeline — pairwise-verifier dedup (see module docstring).
+
+    Global by default (domain=None): the pass spans every active belief, so a duplicate filed
+    under another area is a candidate. New beliefs are deduplicated at WRITE time by
+    UpdateBeliefsStep, so the incremental "new_only" night is skipped here; this step runs
+    the weekly full sweep only (drift, reevaluation rewrites, anything write-time dedup
+    could not see).
+    """
 
     name = "canonicalize_belief_set"
 
-    def __init__(self, domain: str) -> None:
+    def __init__(self, domain: Optional[str] = None) -> None:
         self.domain = domain
 
+    @property
+    def _label(self) -> str:
+        return self.domain or "global"
+
+    def _active(self, store: BeliefStore) -> List[BeliefRecord]:
+        return store.list_all(status="active") if self.domain is None else store.list_by_domain(self.domain)
+
     def inputs(self, ctx: Any) -> List[str]:
-        return ["db: user_beliefs (active, domain-filtered)"]
+        return ["db: user_beliefs (active)"]
 
     def outputs(self, ctx: Any) -> List[str]:
         return []
 
     def run(self, ctx: Any, *, dry_run: bool = False) -> Dict[str, Any]:
         store = BeliefStore()
-        initial = store.list_by_domain(self.domain)
+        initial = self._active(store)
         initial_count = len(initial)
+        label = self._label
 
-        mode = getattr(ctx, "canonicalization_mode", None) or decide_mode(domain=self.domain)
-        last_sweep = read_last_full_sweep_at(self.domain)
+        mode = getattr(ctx, "canonicalization_mode", None) or decide_mode(domain=label)
 
         if initial_count < 2:
-            # A domain too small to pair is a trivially-complete full sweep — stamp it so it
+            # A set too small to pair is a trivially-complete full sweep — stamp it so it
             # doesn't stay in weekly-full mode forever.
             if mode == "full" and not dry_run:
-                mark_full_sweep_completed(self.domain)
+                mark_full_sweep_completed(label)
             ctx.canonicalization_result = {
                 "status": "skipped", "reason": "too_few_beliefs", "mode": mode,
-                "domain": self.domain,
+                "domain": label,
                 "initial_belief_count": initial_count, "final_belief_count": initial_count,
                 "total_merges": 0, "passes": 0,
             }
             return ctx.canonicalization_result
 
-        focus_keys: Optional[Set[str]] = None
         if mode == "new_only":
-            new_beliefs = _filter_new_beliefs_since(initial, last_sweep)
-            if not new_beliefs:
-                ctx.canonicalization_result = {
-                    "status": "skipped", "reason": "new_only_no_new", "mode": "new_only",
-                    "domain": self.domain, "initial_belief_count": initial_count,
-                    "final_belief_count": initial_count, "new_belief_count": 0,
-                    "total_merges": 0, "passes": 0,
-                }
-                return ctx.canonicalization_result
-            focus_keys = {b.belief_key for b in new_beliefs}
+            # New beliefs were verified against their nearest neighbours when they were
+            # written (UpdateBeliefsStep); re-proposing every pair they touch would pay for
+            # the same question again. The weekly full sweep catches the rest.
+            ctx.canonicalization_result = {
+                "status": "skipped", "reason": "new_only_handled_at_write_time", "mode": "new_only",
+                "domain": label, "initial_belief_count": initial_count,
+                "final_belief_count": initial_count, "total_merges": 0, "passes": 0,
+            }
+            return ctx.canonicalization_result
 
         if dry_run:
-            clusters = _find_duplicate_clusters(store, self.domain)
+            clusters = _find_duplicate_clusters(store, self.domain) if self.domain else []
             ctx.canonicalization_result = {
-                "status": "dry_run", "mode": mode, "domain": self.domain,
+                "status": "dry_run", "mode": mode, "domain": label,
                 "belief_count": initial_count,
                 "candidate_clusters": [[b.belief_key for b in c] for c in clusters],
             }
@@ -412,30 +403,27 @@ class CanonicalizeBeliefSetStep:
         if agent_factory is None:
             raise RuntimeError("agent_factory not available in DI")
 
-        logger.info("[CanonicalizeBeliefSet] domain=%s mode=%s beliefs=%d focus=%s",
-                    self.domain, mode, initial_count,
-                    len(focus_keys) if focus_keys is not None else "all")
+        logger.info("[CanonicalizeBeliefSet] %s mode=%s beliefs=%d", label, mode, initial_count)
 
         pass_result = _run_verifier_dedup_pass(
-            initial, self.domain, store, agent_factory,
-            scope_context=ctx.scope_context, focus_keys=focus_keys,
+            initial, label, store, agent_factory,
+            scope_context=ctx.scope_context, focus_keys=None,
         )
 
-        # The domain's full-sweep stamp is written HERE, by an un-truncated full pass — so a
-        # multi-domain run interrupted mid-way keeps its completed domains, and a capped pass
+        # The full-sweep stamp is written HERE, by an un-truncated full pass — a capped pass
         # stays "full" next run and resumes from the recorded verdicts.
-        if mode == "full" and not pass_result["truncated"]:
-            mark_full_sweep_completed(self.domain)
+        if not pass_result["truncated"]:
+            mark_full_sweep_completed(label)
 
-        final_count = len(store.list_by_domain(self.domain))
+        final_count = len(self._active(store))
         logger.info(
-            "[CanonicalizeBeliefSet] domain=%s done: %d -> %d (merges=%d calls=%d "
+            "[CanonicalizeBeliefSet] %s done: %d -> %d (merges=%d calls=%d "
             "skipped_distinct=%d truncated=%s mode=%s)",
-            self.domain, initial_count, final_count, pass_result["merges"],
+            label, initial_count, final_count, pass_result["merges"],
             pass_result["verifier_calls"], pass_result["skipped_distinct"],
             pass_result["truncated"], mode)
         ctx.canonicalization_result = {
-            "status": "ok", "mode": mode, "domain": self.domain,
+            "status": "ok", "mode": mode, "domain": label,
             "initial_belief_count": initial_count, "final_belief_count": final_count,
             "total_merges": pass_result["merges"], "passes": 1,
             "verifier_calls": pass_result["verifier_calls"],

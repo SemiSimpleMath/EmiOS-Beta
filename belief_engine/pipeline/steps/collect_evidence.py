@@ -1,5 +1,5 @@
 """
-Step 1: Collect evidence from available sources for a given domain.
+Step 1: Collect evidence from available sources.
 
 Sources:
   1. daily_insights   — actionable items from resource_daily_insights.json (last N days)
@@ -7,12 +7,15 @@ Sources:
                         timeline_merged.json. Per-event ticket signal is owned by daily_insights
                         (extracted from the same timeline); only the across-days pattern is added.
 
-Writes a structured evidence bundle to the run context.
+The default run is GLOBAL (domain=None): one bundle over the union of every enabled domain's
+tags and ticket types, each item carrying its own insight tags so the updater can file the
+belief under a primary area. A per-domain slice (domain="routine") is still available for
+scripts and inspection. Writes a structured evidence bundle to the run context.
 """
 from __future__ import annotations
 
+from app.assistant.utils.logging_config import get_logger
 import json
-import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -21,7 +24,7 @@ from typing import Any, Dict, List, Optional
 from app.assistant.utils.time_utils import get_local_timezone
 from belief_engine.config import get_domain_config
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # How many days back to look in daily insights / timelines.
 _LOOKBACK_DAYS = 14
@@ -41,11 +44,29 @@ def _require_domain_config(domain: str):
     return cfg
 
 
-def _domain_tags(domain: str) -> List[str]:
+def _domain_tags(domain: Optional[str]) -> List[str]:
+    """Tags admitted for this run: one domain's, or (domain=None) the union over every
+    enabled domain — the global pass sees every insight any domain would have seen."""
+    if domain is None:
+        from belief_engine.config import list_enabled_domains
+        seen: List[str] = []
+        for cfg in list_enabled_domains():
+            for t in cfg.tags:
+                if t not in seen:
+                    seen.append(t)
+        return seen
     return list(_require_domain_config(domain).tags)
 
 
-def _domain_ticket_types(domain: str) -> List[str]:
+def _domain_ticket_types(domain: Optional[str]) -> List[str]:
+    if domain is None:
+        from belief_engine.config import list_enabled_domains
+        seen: List[str] = []
+        for cfg in list_enabled_domains():
+            for t in cfg.ticket_types:
+                if t not in seen:
+                    seen.append(t)
+        return seen
     return list(_require_domain_config(domain).ticket_types)
 
 
@@ -58,11 +79,14 @@ class EvidenceItem:
     summary: str
     raw_text: Optional[str]
     weight: float             # 0.0–5.0
+    # The insight's own tags (a subset of the domain vocab). Rendered to the updater so it
+    # can file each belief under a primary area; empty for ticket aggregates.
+    tags: List[str] = field(default_factory=list)
 
 
 @dataclass
 class EvidenceBundle:
-    domain: str
+    domain: str               # a domain id, or "all" for the global pass
     date_range_start: str
     date_range_end: str
     items: List[EvidenceItem] = field(default_factory=list)
@@ -74,10 +98,12 @@ class EvidenceBundle:
         """Format for LLM consumption."""
         if self.is_empty():
             return "(no evidence found)"
-        lines = [f"Evidence for domain '{self.domain}' ({self.date_range_start} → {self.date_range_end}):\n"]
+        where = "all areas" if self.domain == "all" else f"domain '{self.domain}'"
+        lines = [f"Evidence for {where} ({self.date_range_start} → {self.date_range_end}):\n"]
         for i, item in enumerate(self.items, 1):
+            tags = f" | tags={','.join(item.tags)}" if item.tags else ""
             lines.append(
-                f"{i}. [{item.source_type} | {item.source_date} | {item.signal_type} | weight={item.weight:.1f}]"
+                f"{i}. [{item.source_type} | {item.source_date} | {item.signal_type} | weight={item.weight:.1f}{tags}]"
             )
             lines.append(f"   {item.summary}")
         return "\n".join(lines)
@@ -96,7 +122,7 @@ def _date_range(lookback_days: int):
         yield str(today - timedelta(days=i))
 
 
-def _collect_daily_insights(domain: str, lookback_days: int) -> List[EvidenceItem]:
+def _collect_daily_insights(domain: Optional[str], lookback_days: int) -> List[EvidenceItem]:
     tags = _domain_tags(domain)
     items: List[EvidenceItem] = []
     root = _day_context_root()
@@ -135,11 +161,12 @@ def _collect_daily_insights(domain: str, lookback_days: int) -> List[EvidenceIte
                 summary=summary,
                 raw_text=raw,
                 weight=3.0 if scope == "chronic" else 1.5,
+                tags=[t for t in action_tags if t in tags],
             ))
     return items
 
 
-def _collect_ticket_signals(domain: str, lookback_days: int) -> List[EvidenceItem]:
+def _collect_ticket_signals(domain: Optional[str], lookback_days: int) -> List[EvidenceItem]:
     """
     Collect CROSS-DAY behavioral patterns from ticket events.
 
@@ -240,7 +267,8 @@ def _collect_ticket_signals(domain: str, lookback_days: int) -> List[EvidenceIte
 class CollectEvidenceStep:
     name = "collect_evidence"
 
-    def __init__(self, domain: str, lookback_days: int = _LOOKBACK_DAYS) -> None:
+    def __init__(self, domain: Optional[str] = None, lookback_days: int = _LOOKBACK_DAYS) -> None:
+        # domain=None is the global pass (every enabled domain's tags/ticket types).
         self.domain = domain
         self.lookback_days = lookback_days
 
@@ -257,7 +285,7 @@ class CollectEvidenceStep:
         start = str(today - timedelta(days=self.lookback_days - 1))
 
         bundle = EvidenceBundle(
-            domain=self.domain,
+            domain=self.domain or "all",
             date_range_start=start,
             date_range_end=str(today),
         )

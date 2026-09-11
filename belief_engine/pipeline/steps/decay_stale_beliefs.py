@@ -23,13 +23,13 @@ so ReevaluateBeliefsStep picks them up.
 """
 from __future__ import annotations
 
-import logging
+from app.assistant.utils.logging_config import get_logger
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 from belief_engine.store.belief_store import BeliefStore
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 DEFAULT_TEMPORARY_TTL_DAYS = 30
 DEFAULT_CHRONIC_REVIEW_TTL_DAYS = 180

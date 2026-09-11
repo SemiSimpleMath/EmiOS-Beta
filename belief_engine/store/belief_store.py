@@ -17,8 +17,8 @@ Usage:
 """
 from __future__ import annotations
 
+from app.assistant.utils.logging_config import get_logger
 import json
-import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -28,7 +28,7 @@ from app.models.base import get_session
 from belief_engine.chroma.belief_chroma import get_belief_chroma
 from belief_engine.db.models import BeliefEvidence, UserBelief
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _now_iso() -> str:

@@ -8,16 +8,15 @@ The belief engine lives in a top-level `belief_engine/` package (not under `app/
 
 > Cross-refs: pipeline + routine plumbing is documented in [06_PIPELINES_AND_ROUTINES.md](06_PIPELINES_AND_ROUTINES.md). The primary evidence source — daily insights — is described in [05_DAYFLOW.md](05_DAYFLOW.md).
 
-## 1. Why beliefs are domain-scoped
+## 1. One global pass; domains are areas, not lanes
 
-Beliefs are partitioned by **domain** (`routine`, `health`, `food`, `meal`, `communication`, `sleep`, `work`, `general`) and the engine runs one pipeline pass per domain over a focused evidence slice. Two reasons:
+Since 2026-09-10 the engine runs **one pass per night over every enabled domain together**. `BeliefEngineAdapter` (`belief_engine/pipeline/routine_adapter.py`) builds a single `BeliefEnginePipeline(domain=None)`; `CollectEvidenceStep` admits every daily-insight item whose tags match *any* enabled domain (each item carries its own tags into the prompt), `UpdateBeliefsStep` queries similar beliefs across the whole store and asks the `belief_updater` to file each belief under a primary `domain` (one of the ids in `configs/belief_domains.yaml`), and `CanonicalizeBeliefSetStep` sweeps the whole active set.
 
-- **Domain-scoped LLM context**: the update / reevaluate steps are told the current domain and stay within it. This keeps prompts focused and fits within model context.
-- **Domain-filtered tag routing on intake**: each domain has a `tags` list and a `ticket_types` list (in `configs/belief_domains.yaml`); `CollectEvidenceStep` only emits evidence items whose tags / ticket types match the current domain. Daily insights are tagged at write-time; the engine fans out by tag.
+Why: the previous per-domain loop ran the updater once per domain over a tag-filtered slice, so an insight tagged `food` and `health` produced one belief in each lane, and per-lane canonicalization could never see the copies. The live store carried the same preference three or four times under different domains.
 
-A single `BeliefEnginePipeline` class (`belief_engine/pipeline/pipeline.py`) is parameterised by a `domain` string. `BeliefEngineAdapter` (`belief_engine/pipeline/routine_adapter.py`) loops over every domain marked `enabled: true` in the YAML and runs the per-domain pipeline in sequence. A failure in one domain is collected; the adapter raises once at the end if any domain failed, so the routine records the run as failed (but the other domains still ran).
+A named domain (`BeliefEnginePipeline(domain="routine")`) still runs a per-domain slice for scripts and inspection; `resolve_domain` files everything under that domain in that mode.
 
-> **`domain` vs `tags`.** `domain` is the **derivation lane** — which evidence the engine fans out to which pipeline pass. `belief_tags` (§7) is a separate **additive retrieval layer** over the standardized vocab in `configs/belief_tags.yaml`. They are not the same axis: a belief filed under `domain=food` can carry the `dietary` tag and be pulled by the health consumer.
+> **`domain` vs `tags`.** `domain` is now the belief's **primary area**, chosen by the updater at write time (an existing belief keeps its area). `belief_tags` (§7) is the additive **retrieval layer** over the standardized vocab in `configs/belief_tags.yaml`; the domain is unioned into the tags. Neither is a boundary the engine runs inside.
 
 ## 2. Where insight tags come from (the upstream that feeds the filter)
 
@@ -38,9 +37,9 @@ Each row is a `DomainConfig(id, enabled, tags, ticket_types, decay_enabled)`. Ei
 
 `id` becomes the `domain` column on belief rows, so renaming a domain breaks existing rows — prefer adding a new id and retiring the old.
 
-## 4. Pipeline structure (per domain)
+## 4. Pipeline structure (one global pass)
 
-Five steps, defined in `belief_engine/pipeline/pipeline.py`. They share a `_RunContext` dataclass and run sequentially; if any step raises, the pipeline aborts and returns `status='error'` with the failing step.
+Five steps, defined in `belief_engine/pipeline/pipeline.py`, run once over the whole store. They share a `_RunContext` dataclass and run sequentially; if any step raises, the pipeline aborts and returns `status='error'` with the failing step.
 
 ```
 CollectEvidenceStep ─> UpdateBeliefsStep ─> RecomputeBeliefSnapshotStep ─> ReevaluateBeliefsStep ─> CanonicalizeBeliefSetStep
@@ -73,6 +72,8 @@ Per-belief decisions (`agent_form.py`): `create | update | deprecate | no_change
 - **Contestation**: a belief is queued in `contested_keys` (and `mark_contested`'d) for Step 4 when the agent returns `status=contested` (on create or update), or when an `update` lowers confidence vs the stored value.
 - The agent must populate `evidence_refs` (1-based indices into the bundle) so the right evidence rows attach to the right belief; out-of-range/empty refs attach nothing.
 - A `kind` field from the agent (§6) is passed through to the upsert; absent, the store heuristic-classifies it.
+- **Write-time dedup (2026-09-10)**: before a `create` lands, `dedup_candidate` compares the statement with its nearest active beliefs (global, cosine ≥ `MERGE_THRESHOLD`) and asks `belief_engine::merge_verifier` once per candidate, nearest first. A `same` verdict turns the create into an update of the existing key (statement = the verifier's `canonical_statement`); `not the same` verdicts are recorded in `belief_distinct_pairs` once the new belief has an id. One verifier call per new belief, instead of one per candidate pair in a nightly sweep.
+- The agent's `domain` field files a NEW belief under its primary area (validated against the enabled ids, else the key's dot-prefix, else the write is refused loudly). An existing belief keeps its area.
 
 ### Step 3 — `RecomputeBeliefSnapshotStep`
 
@@ -101,7 +102,7 @@ Pairs are sorted strongest-first and capped at `MAX_PAIRS=4000`. The verifier is
 **Two modes** (`belief_engine/state/sweep_tracker.py`, `decide_mode()`):
 
 - **`full`** — propose pairs across *all* active beliefs in the domain. Runs on the first bootstrap run and every `FULL_SWEEP_INTERVAL_DAYS=7`.
-- **`new_only`** — the other ~6 nights. Propose only pairs where at least one side was created since the last full sweep — but compared against the *whole* active set, so a new dup of an old belief is still caught.
+- **`new_only`** — the other ~6 nights: **skipped**. New beliefs are verified against their nearest neighbours when written (Step 2), so the incremental pass has nothing left to ask. The sweep stamp is kept under the key `global`.
 
 The mode is decided **once per parent run** in `BeliefEngineAdapter` (so a midnight rollover can't split domains across modes) and threaded via `ctx.canonicalization_mode`. After a successful `full` run the adapter calls `mark_full_sweep_completed()` (atomic temp-file write to `data/belief_engine_state.json`, gitignored). `dry_run=True` returns embedding-only candidate clusters without LLM calls (used by `scripts/dry_run_canonicalize.py`); the routine adapter never passes it.
 
@@ -239,7 +240,7 @@ The v2 satellites were deleted on 2026-07-07 (`subconscious/belief_tagging.py`, 
 final removal. Two legacy pairs remain on disk — edit only the live one:
 
 1. **Decay**: live = `belief_engine/decay/` + `RecomputeBeliefSnapshotStep` (universal, evidence-weighted). Dead = `belief_engine/pipeline/steps/decay_stale_beliefs.py` (`DecayStaleBeliefsStep`) + `BeliefStore.decay_temporary_beliefs` / `flag_stale_chronic_beliefs` — the old time-threshold path, no longer wired into `pipeline.py` (the `decay_enabled` YAML key that gated it is now inert). Sandbox-only.
-2. **Canonicalization**: live = `belief_engine::merge_verifier` + the pairwise dedup in `canonicalize_belief_set.py` (durable `belief_distinct_pairs` verdicts, per-domain sweep stamps, per-run call cap). Dead = the `belief_engine::belief_canonicalizer` agent (chunk-based; on disk, referenced only by `scripts/backup_beliefs.py`, never by the pipeline).
+2. **Canonicalization**: live = `belief_engine::merge_verifier` + the pairwise dedup in `canonicalize_belief_set.py` (durable `belief_distinct_pairs` verdicts, a global weekly sweep stamp, per-run call cap). Dead = the `belief_engine::belief_canonicalizer` agent (chunk-based; on disk, referenced only by `scripts/backup_beliefs.py`, never by the pipeline).
 
 ## 12. Scheduling
 
@@ -247,7 +248,7 @@ Routines now live in **`configs/routines/public/*.json`** (one file per routine)
 
 | Routine file | Time | Runner | What it does |
 | --- | --- | --- | --- |
-| `belief_engine.json` | 00:30 | pipeline (`belief_engine`) | `BeliefEngineAdapter` — loop enabled domains, 5-step pipeline each, export inline on success |
+| `belief_engine.json` | 00:30 | pipeline (`belief_engine`) | `BeliefEngineAdapter` — ONE global 5-step pass over every enabled domain, export inline on success |
 | `belief_archive.json` | 05:30 | function (`belief_archive`) | Evict deprecated beliefs (+ evidence) to the `*_archive` tables (§9) |
 | `belief_tag_v1.json` | 05:35 | function (`belief_tag_v1`) | Tag untagged/stale active beliefs (`mode="needs"`, `max_per_run=60`) (§7) |
 | `belief_engine_export.json` | (disabled) | pipeline | Manual re-export only; export is now inline. `/run-routine belief_engine_export` for a manual run |
@@ -258,9 +259,9 @@ Routine functions are registered as `@routine_handler`-decorated handlers in `ap
 
 | Agent | Tier / engine | Role |
 | --- | --- | --- |
-| `belief_engine::belief_updater` | strong (`gpt-5.2`) | Step 2 — `create/update/deprecate/no_change` per belief |
-| `belief_engine::belief_reevaluator` | strong (`gpt-5.2`) | Step 4 — authoritative rewrite of contested beliefs from full trail |
-| `belief_engine::merge_verifier` | strong (`gpt-5.2`) | Step 5 — per-pair same/not-same decision + reconciled `canonical_statement` |
+| `belief_engine::belief_updater` | strong (`gpt-5.6-luna`) | Step 2 — `create/update/deprecate/no_change` per belief |
+| `belief_engine::belief_reevaluator` | strong (`gpt-5.6-luna`) | Step 4 — authoritative rewrite of contested beliefs from full trail |
+| `belief_engine::merge_verifier` | strong (`gpt-5.6-luna`) | Step 5 — per-pair same/not-same decision + reconciled `canonical_statement` |
 | `belief_engine::belief_tagger` | mini (`gpt-5.6-luna`) | §7 — cross-cutting tags from the standardized vocab |
 | `belief_engine::belief_canonicalizer` | mini | **DEAD** (§11 trap 3) — old chunk-based canonicalizer |
 

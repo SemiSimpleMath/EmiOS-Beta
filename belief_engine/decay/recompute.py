@@ -15,7 +15,7 @@ Pure-Python aggregation. No LLM calls. Order is deterministic.
 """
 from __future__ import annotations
 
-import logging
+from app.assistant.utils.logging_config import get_logger
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
@@ -31,7 +31,7 @@ from belief_engine.decay.model import (
     DEFAULT_BASE_WEIGHT,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _parse_iso(s: Optional[str]) -> Optional[datetime]:

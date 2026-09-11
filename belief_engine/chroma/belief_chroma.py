@@ -13,14 +13,14 @@ Usage:
 """
 from __future__ import annotations
 
-import logging
+from app.assistant.utils.logging_config import get_logger
 from typing import List, Optional, Tuple
 
 from app.assistant.embeddings.config import EMBEDDING_MODEL_NAME, EMBEDDING_SCHEMA_ID
 from app.assistant.embeddings.embedder import embed_text
 from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _COLLECTION_NAME = "belief_engine_beliefs"
 _instance: Optional["BeliefChroma"] = None

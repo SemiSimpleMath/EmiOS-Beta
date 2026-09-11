@@ -9,6 +9,7 @@ Or call export_beliefs() directly.
 """
 from __future__ import annotations
 
+from app.assistant.utils.logging_config import get_logger
 import json
 import logging
 from datetime import datetime, timezone
@@ -19,7 +20,7 @@ from app.assistant.utils.path_utils import get_repo_root
 from app.assistant.kg_core.user_identity import get_primary_user_name
 from belief_engine.store.belief_store import BeliefStore
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _OUTPUT_DIR = get_repo_root() / "resources" / "kg_derived"
 _OUTPUT_FILE = "resource_user_beliefs.json"

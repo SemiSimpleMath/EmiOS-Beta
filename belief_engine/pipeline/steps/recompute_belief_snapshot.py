@@ -13,13 +13,13 @@ Pure-Python aggregation. No LLM calls. Idempotent.
 """
 from __future__ import annotations
 
-import logging
+from app.assistant.utils.logging_config import get_logger
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 from belief_engine.decay.recompute import recompute_belief_snapshots
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class RecomputeBeliefSnapshotStep:
@@ -36,10 +36,11 @@ class RecomputeBeliefSnapshotStep:
 
     def __init__(
         self,
-        domain: str,
+        domain: Optional[str] = None,
         *,
         now_utc: Optional[datetime] = None,
     ) -> None:
+        # domain=None recomputes every active belief (the global pass).
         self.domain = domain
         if now_utc is not None and now_utc.tzinfo is None:
             raise ValueError("now_utc must be timezone-aware")
@@ -64,13 +65,14 @@ class RecomputeBeliefSnapshotStep:
             from app.models.base import get_session
             session = get_session()
             try:
+                domain_clause = "domain = :d AND " if self.domain else ""
                 rows = session.execute(
                     text(
                         "SELECT belief_key FROM user_beliefs "
-                        "WHERE domain = :d AND status = 'contested' "
+                        f"WHERE {domain_clause}status = 'contested' "
                         "AND current_confidence_band IN ('contested', 'deprecated_by_contradiction')"
                     ),
-                    {"d": self.domain},
+                    {"d": self.domain} if self.domain else {},
                 ).fetchall()
                 contested_keys = [r[0] for r in rows]
             finally:

@@ -8,7 +8,7 @@ Only runs when update_beliefs produced contested_keys. For each contested belief
 """
 from __future__ import annotations
 
-import logging
+from app.assistant.utils.logging_config import get_logger
 from datetime import datetime, timezone
 from typing import Any, List, Optional
 
@@ -18,7 +18,7 @@ from app.assistant.utils.time_utils import get_local_time_str
 
 from belief_engine.store.belief_store import BeliefStore, BeliefRecord, BeliefUpsertRequest
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _AGENT_NAME = "belief_engine::belief_reevaluator"
 # Max evidence items to send — most beliefs won't have more than this
@@ -117,7 +117,7 @@ class ReevaluateBeliefsStep:
                         "task": f"Re-evaluate belief '{belief_key}' using its complete evidence trail.",
                         "belief_block": belief_block,
                         "evidence_trail_block": evidence_trail_block,
-                        "domain": ctx.domain,
+                        "domain": belief.domain,
                         "date_today": get_local_time_str(),
                     },
                     scope_context=ctx.scope_context,
@@ -157,7 +157,7 @@ class ReevaluateBeliefsStep:
                         # the agent supplied a revised statement, use it;
                         # otherwise keep the existing one.
                         req = BeliefUpsertRequest(
-                            domain=ctx.domain,
+                            domain=belief.domain,
                             belief_key=revised_key,
                             statement=revised_statement or belief.statement,
                             confidence=rb.get("confidence", belief.confidence),
@@ -185,7 +185,7 @@ class ReevaluateBeliefsStep:
                         conditions_val = {"text": raw_conditions}
 
                     req = BeliefUpsertRequest(
-                        domain=ctx.domain,
+                        domain=belief.domain,
                         belief_key=revised_key,
                         statement=revised_statement,
                         confidence=rb.get("confidence", belief.confidence),

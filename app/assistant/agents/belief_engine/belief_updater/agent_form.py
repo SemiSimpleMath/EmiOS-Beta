@@ -13,6 +13,13 @@ class BeliefOutput(BaseModel):
             "Must be stable across runs — if updating an existing belief, use its existing key."
         )
     )
+    domain: str = Field(
+        description=(
+            "The belief's primary area — exactly one id from the `domains` list in the prompt "
+            "(it becomes a retrieval tag). For an existing belief this is ignored: a belief keeps "
+            "its area. Prefer the specific area over 'general'."
+        )
+    )
     statement: str = Field(
         description=(
             "Full prose statement of the belief as an agent would read it. "

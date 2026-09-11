@@ -109,8 +109,9 @@ of the evidence items that directly informed that belief.
 - This is used to attach the right evidence to the right belief in the store. Accuracy here
   directly affects the quality of the belief's history.
 
-## Domain focus
+## Areas
 
-Current domain: **{{ domain }}**
-
-Stay within this domain. If evidence clearly belongs to another domain, note it in reasoning but do not emit a belief for it.
+You see evidence from every area at once. File each belief under its primary area by setting
+`domain` to exactly one of: **{{ domains }}**. The area is a retrieval tag, not a boundary -
+one belief per rule, never one copy per area. A belief that already exists keeps its area.
+Prefer the specific area over `general`.

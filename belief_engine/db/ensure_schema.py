@@ -6,13 +6,14 @@ Run standalone:
 """
 from __future__ import annotations
 
+from app.assistant.utils.logging_config import get_logger
 import sqlite3
 import logging
 
 from .paths import belief_db_path as _belief_db_path
 from .schema import SCHEMA_SQL
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def ensure_schema() -> None:

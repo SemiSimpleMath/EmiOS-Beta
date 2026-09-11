@@ -1,13 +1,17 @@
 """
-BeliefEnginePipeline — runs for one domain per invocation.
+BeliefEnginePipeline — one GLOBAL pass over every enabled domain's evidence and the whole
+active belief set (domain=None, the nightly default). Domains are areas a belief is filed
+under, chosen per belief by the updater; they are not lanes the engine runs in. A named
+domain still runs a per-domain slice for scripts and inspection.
 
 Usage:
-    pipeline = BeliefEnginePipeline(domain="routine")
+    pipeline = BeliefEnginePipeline()                 # global
+    pipeline = BeliefEnginePipeline(domain="routine") # one-domain slice
     result = pipeline.run()
 """
 from __future__ import annotations
 
-import logging
+from app.assistant.utils.logging_config import get_logger
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -20,7 +24,7 @@ from belief_engine.pipeline.steps.recompute_belief_snapshot import RecomputeBeli
 from belief_engine.pipeline.steps.reevaluate_beliefs import ReevaluateBeliefsStep
 from belief_engine.pipeline.steps.canonicalize_belief_set import CanonicalizeBeliefSetStep
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -47,7 +51,7 @@ class BeliefEnginePipeline:
 
     def __init__(
         self,
-        domain: str = "routine",
+        domain: Optional[str] = None,
         lookback_days: int = 14,
         canonicalization_mode: Optional[str] = None,
     ) -> None:
@@ -55,21 +59,25 @@ class BeliefEnginePipeline:
         self.lookback_days = lookback_days
         self.canonicalization_mode = canonicalization_mode
 
+    @property
+    def label(self) -> str:
+        return self.domain or "global"
+
     def run(self, *, run_id: Optional[str] = None) -> Dict:
         run_id = run_id or uuid.uuid4().hex[:8]
         from app.assistant.scope.loader import load_scope_for_source
         scope_context = load_scope_for_source(
             kind="subsystem",
             source_id="belief_engine",
-            actor_id=f"belief_engine_{self.domain}",
+            actor_id=f"belief_engine_{self.label}",
             identity_overrides={
                 "owner_id": "belief_engine",
                 "surface": "pipeline",
-                "scope_id": f"scope::belief_engine::{self.domain}::{run_id}",
+                "scope_id": f"scope::belief_engine::{self.label}::{run_id}",
             },
         )
         ctx = _RunContext(
-            domain=self.domain,
+            domain=self.label,
             run_id=run_id,
             scope_context=scope_context,
             canonicalization_mode=self.canonicalization_mode,
@@ -117,7 +125,7 @@ class BeliefEnginePipeline:
         return {
             "pipeline_id": self.pipeline_id,
             "run_id": run_id,
-            "domain": self.domain,
+            "domain": self.label,
             "status": overall_status,
             "started_at_utc": started,
             "finished_at_utc": finished,

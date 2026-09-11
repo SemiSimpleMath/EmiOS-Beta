@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import logging
+from app.assistant.utils.logging_config import get_logger
 import uuid
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class BeliefEngineExportAdapter:
@@ -52,15 +52,13 @@ class BeliefEngineAdapter:
     """
     Unified belief-engine pipeline adapter.
 
-    Loops over every domain marked enabled=true in configs/belief_domains.yaml
-    and runs BeliefEnginePipeline once per domain.
+    Runs BeliefEnginePipeline ONCE, globally: the evidence of every domain marked
+    enabled=true in configs/belief_domains.yaml goes into one bundle, the updater files
+    each belief under its primary area, and dedup sees the whole active set. A failing
+    step raises so routine_manager records the run as failed.
 
-    A single domain failure does not abort the remaining domains. Each result is
-    collected, and the adapter raises once at the end if any domain failed so
-    routine_manager records the overall run as failed.
-
-    On full success, the adapter exports beliefs inline so the exported JSON
-    stays synchronized with the DB and does not race against a slow upstream run.
+    On success, the adapter exports beliefs inline so the exported JSON stays
+    synchronized with the DB and does not race against a slow upstream run.
     """
 
     pipeline_id = "belief_engine"
@@ -89,11 +87,6 @@ class BeliefEngineAdapter:
 
         parent_run_id = run_id or uuid.uuid4().hex[:12]
 
-        # Canonicalization mode is decided (and the full-sweep stamp written) PER DOMAIN inside
-        # CanonicalizeBeliefSetStep — that's what makes an interrupted multi-domain run resumable:
-        # domains that completed their full sweep stay completed.
-        canonicalization_mode = None
-
         domains = list_enabled_domains()
         if not domains:
             logger.warning(
@@ -109,85 +102,25 @@ class BeliefEngineAdapter:
                 "results": [],
             }
 
-        results: List[Dict[str, Any]] = []
-        successes = 0
-        failed_domains: List[str] = []
+        # ONE global pass: every enabled domain's evidence in one bundle, one updater call
+        # that files each belief under its primary area, and dedup that can see across
+        # areas. The per-domain loop this replaced minted one copy of the same belief per
+        # domain that matched an insight's tags (the "Panda Express x4" bloat).
+        logger.info(
+            "[BeliefEngineAdapter:%s] starting global pass over %d domains: %s",
+            parent_run_id, len(domains), ", ".join(cfg.id for cfg in domains),
+        )
+        pipeline = BeliefEnginePipeline(domain=None, lookback_days=self.lookback_days)
+        result = pipeline.run(run_id=parent_run_id)
+        results: List[Dict[str, Any]] = [{"domain": "global", "status": result.get("status"), "result": result}]
 
-        for cfg in domains:
-            domain_id = cfg.id
-            domain_run_id = f"{parent_run_id}:{domain_id}"
-
-            try:
-                logger.info(
-                    "[BeliefEngineAdapter:%s] starting domain=%s",
-                    parent_run_id,
-                    domain_id,
-                )
-
-                pipeline = BeliefEnginePipeline(
-                    domain=domain_id,
-                    lookback_days=self.lookback_days,
-                    canonicalization_mode=canonicalization_mode,
-                )
-
-                result = pipeline.run(run_id=domain_run_id)
-                result_status = result.get("status")
-
-                if result_status != "success":
-                    logger.error(
-                        "[BeliefEngineAdapter:%s] domain=%s returned status=%s",
-                        parent_run_id,
-                        domain_id,
-                        result_status,
-                    )
-                    results.append(
-                        {
-                            "domain": domain_id,
-                            "status": "error",
-                            "result": result,
-                        }
-                    )
-                    failed_domains.append(domain_id)
-                    continue
-
-                results.append(
-                    {
-                        "domain": domain_id,
-                        "status": "success",
-                        "result": result,
-                    }
-                )
-                successes += 1
-
-                logger.info(
-                    "[BeliefEngineAdapter:%s] domain=%s done",
-                    parent_run_id,
-                    domain_id,
-                )
-
-            except Exception as exc:
-                logger.exception(
-                    "[BeliefEngineAdapter:%s] domain=%s failed: %s",
-                    parent_run_id,
-                    domain_id,
-                    exc,
-                )
-                results.append(
-                    {
-                        "domain": domain_id,
-                        "status": "error",
-                        "error": str(exc),
-                    }
-                )
-                failed_domains.append(domain_id)
-
-        failures = len(failed_domains)
-
-        if failed_domains:
+        if result.get("status") != "success":
+            failed_step = next((s for s in result.get("steps", []) if s.get("status") == "error"), {})
             raise RuntimeError(
-                f"belief_engine: {failures}/{len(domains)} domains failed: "
-                f"{', '.join(failed_domains)} (successes={successes})"
+                f"belief_engine: global pass failed at step {failed_step.get('step', '?')!r}: "
+                f"{failed_step.get('error', '')}"
             )
+        successes, failures = 1, 0
 
         out_path = export_beliefs()
         logger.info(
