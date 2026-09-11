@@ -623,7 +623,13 @@ def _camera_snapshot_dirs() -> list:
     walking it the UI would silently lose every frame the dispatcher
     has processed.
     """
-    repo_root = Path(__file__).resolve().parents[2]
+    # get_data_dir(), NOT parents[2]: under EMI_DATA_DIR (Docker) the repo
+    # root is the IMAGE, so this scanned /app/data/... and would never see
+    # snapshots written to the volume — and anything written there would be
+    # destroyed by the next rebuild. get_data_dir() falls back to the repo
+    # root when EMI_DATA_DIR is unset, so the dev path is unchanged.
+    from app.assistant.utils.path_utils import get_data_dir
+    repo_root = get_data_dir()
     dirs = [
         repo_root / "data" / "ring_snapshots",
         repo_root / "data" / "local_camera_snapshots",
