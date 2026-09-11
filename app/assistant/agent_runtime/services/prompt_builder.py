@@ -146,7 +146,7 @@ class PromptBuilder:
     def construct_prompt(self, agent, message=None, entity_injection_keys: set[str] | None = None) -> List[Dict[str, str]]:
         system_prompt = self.get_system_prompt(agent, message, entity_injection_keys)
         user_prompt = self.get_user_prompt(agent, message, entity_injection_keys)
-        user_prompt = self._append_runtime_injections(agent, user_prompt, message)
+        user_prompt = self._append_runtime_injections(agent, user_prompt)
 
         if not system_prompt:
             logger.error("[%s] Error forming the system prompt.", agent.name)
@@ -272,7 +272,7 @@ class PromptBuilder:
             logger.debug("[%s] system prompt render exception details", agent.name, exc_info=True)
             raise
 
-    def _append_runtime_injections(self, agent, user_prompt: str, message=None) -> str:
+    def _append_runtime_injections(self, agent, user_prompt: str) -> str:
         """Append mid-task @-messages (delivered via the manager mailbox) to the
         rendered user prompt as a time-ordered, attributed block with explicit
         precedence: a later message SUPERSEDES/amends/adds to anything before it
@@ -317,8 +317,16 @@ class PromptBuilder:
             return user_prompt or ""
 
         # Baseline the messages below supersede: when this task was dispatched.
+        # That is the manager INVOCATION's start, stamped on the blackboard by
+        # ManagerInvoker. The activating Message's timestamp is this cycle, not
+        # the dispatch, and using it dated the baseline AFTER the steering it
+        # was meant to predate — so every mid-task instruction read as stale
+        # exactly when the user was trying to redirect the work.
         dispatched = ""
-        ts0 = getattr(message, "timestamp", None) if message is not None else None
+        try:
+            ts0 = agent.blackboard.get_state_value("_invocation_started_utc")
+        except Exception:
+            ts0 = None
         if ts0:
             try:
                 dispatched = format_history_local(ts0)

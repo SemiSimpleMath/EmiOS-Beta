@@ -87,10 +87,19 @@ class ManagerInvoker:
         # Stash invocation_id on the manager's blackboard so control nodes
         # within the manager (mailbox dispatcher, etc.) can identify
         # themselves to cross-invocation services.
+        #
+        # _invocation_started_utc rides along because the prompt builder needs
+        # the moment THIS task was dispatched to date the out-of-band steering
+        # block. The activating Message's own timestamp is the CURRENT cycle,
+        # not the dispatch, so using it dated the baseline later than the
+        # steering it was supposed to predate.
         try:
             blackboard = getattr(manager_instance, "blackboard", None)
             if blackboard is not None:
                 blackboard.update_state_value("_invocation_id", record.invocation_id)
+                blackboard.update_state_value(
+                    "_invocation_started_utc", record.started_at_utc.isoformat()
+                )
         except Exception:
             logger.debug("Failed to stash invocation_id on blackboard", exc_info=True)
 

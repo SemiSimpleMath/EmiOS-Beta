@@ -4,3 +4,9 @@ NOT for:
 - Browser-rendered pages or interactive logins → playwright_manager
 - General web search / page scraping → web_manager
 - Local file work → bash_manager
+- The user's own Google Workspace — Gmail, Calendar, Tasks, Docs, Drive →
+  personal_admin_manager. Those have dedicated tools that already act as the
+  user's authorized Google account. Google is an HTTP API, so this manager
+  looks like the fit and is not: it holds none of those tools and no Google
+  credentials, so the work dead-ends here hunting for a token that was never
+  needed.

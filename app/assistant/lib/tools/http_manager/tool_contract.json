@@ -67,6 +67,6 @@
     "front_door": true,
     "room_visibility_default": "show",
     "approval_min_authority": 70,
-    "planner_description": "HTTP/REST API specialist: social posts (Bluesky/Mastodon/Reddit), platform APIs (GitHub/Spotify/WHOOP), webhooks, OAuth. NOT browser pages or web search."
+    "planner_description": "HTTP/REST API specialist: social posts (Bluesky/Mastodon/Reddit), platform APIs (GitHub/Spotify/WHOOP), webhooks, OAuth. NOT browser pages, web search, or Google Workspace (-> personal_admin_manager)."
   }
 }

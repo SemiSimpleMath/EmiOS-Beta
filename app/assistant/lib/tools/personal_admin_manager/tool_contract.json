@@ -47,6 +47,6 @@
     "front_door": false,
     "room_visibility_default": "conditional",
     "approval_required": false,
-    "planner_description": "Email, calendar, todo, and reminders — multi-step personal-admin work, especially when it mixes those categories."
+    "planner_description": "Email, calendar, todo, reminders, and Google Docs/Drive (create/read/edit). Owns the user's Google Workspace and is already authorized - no credentials or auth pods needed."
   }
 }
