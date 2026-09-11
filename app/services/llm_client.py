@@ -11,6 +11,7 @@ from openai import OpenAI, RateLimitError as OpenAIRateLimitError
 import os
 import threading
 import time
+import uuid
 
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.performance.performance_monitor import performance_monitor
@@ -923,7 +924,27 @@ class OpenCodeLLM(BaseLLMProvider):
         self.engine = engine
         self.temperature = temperature
         self.last_usage = None
-        self.client = OpenAI(api_key=self.api_key, base_url=base_url)
+
+        # OpenCode Zen requires an x-opencode-session header on
+        # /chat/completions. Without it EVERY call fails:
+        #   400 {"type":"MissingSessionID","message":"Request is missing
+        #        x-opencode-session and cannot be routed efficiently"}
+        # GET /models is unaffected, so a reachability check passes while all
+        # real traffic fails -- which is exactly how this presented.
+        # The value only has to be a stable opaque id; the provider uses it to
+        # route related requests to the same backend. One id per process is
+        # the right granularity: stable enough to route, and it does not leak
+        # anything about the user. Override with OPENCODE_SESSION_ID if a
+        # deployment wants to pin it across restarts.
+        session_id = os.environ.get('OPENCODE_SESSION_ID')
+        if not session_id:
+            session_id = f"emios-{uuid.uuid4().hex[:16]}"
+        self.session_id = session_id
+        self.client = OpenAI(
+            api_key=self.api_key,
+            base_url=base_url,
+            default_headers={"x-opencode-session": session_id},
+        )
 
         for key, value in kwargs.items():
             setattr(self, key, value)
