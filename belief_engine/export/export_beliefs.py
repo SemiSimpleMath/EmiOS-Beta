@@ -16,13 +16,23 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from app.assistant.utils.path_utils import get_repo_root
+from app.assistant.utils.path_utils import get_repo_root, get_resources_dir
 from app.assistant.kg_core.user_identity import get_primary_user_name
 from belief_engine.store.belief_store import BeliefStore
 
 logger = get_logger(__name__)
 
-_OUTPUT_DIR = get_repo_root() / "resources" / "kg_derived"
+# get_resources_dir(), NOT get_repo_root()/"resources": the CONSUMER reads
+# via get_resources_dir(), which honours EMI_DATA_DIR. get_repo_root() does
+# not, so under Docker this wrote the export into the IMAGE
+# (/app/resources/kg_derived) while every reader looked on the volume
+# (/data/resources/kg_derived) -- they could never meet. Observed as a
+# permanent "Beliefs file not found at /data/resources/kg_derived/
+# resource_user_beliefs.json" on every dayflow routine run, so routines
+# silently ran with no belief context. get_resources_dir() falls back to
+# get_repo_root()/"resources" when EMI_DATA_DIR is unset, so dev is
+# unchanged.
+_OUTPUT_DIR = get_resources_dir() / "kg_derived"
 _OUTPUT_FILE = "resource_user_beliefs.json"
 
 
