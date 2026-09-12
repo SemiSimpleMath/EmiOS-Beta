@@ -88,6 +88,9 @@ Health: {{ health_status_summary }}
 {%- if meta.get("enrichment") %}
   context: {{ meta.get("enrichment") }}
 {%- endif %}
+{%- if meta.get("triage_uncovered") %}
+  PARTLY COVERED ALREADY — act on the uncovered part only: {{ meta.get("triage_uncovered") }}
+{%- endif %}
 {% endfor %}
 {% else %}
 ## NEW INTAKE

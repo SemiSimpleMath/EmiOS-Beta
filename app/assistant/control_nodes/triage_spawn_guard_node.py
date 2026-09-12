@@ -110,6 +110,19 @@ class TriageSpawnGuardNode(ControlNode):
                 if isinstance(meta, dict):
                     meta["state"] = "artifact"
                     meta["state_reason"] = "triage_admit"
+                    # Partial coverage: triage admitted this because SOME part of it
+                    # is not yet handled. Carry that note to the evaluator, which
+                    # otherwise sees the whole artifact with no hint of which part is
+                    # new — and would either redo the covered part or drop the
+                    # uncovered one (2026-09-11: a relay request died inside an
+                    # artifact whose facts were already tracked).
+                    uncovered = str(dec.get("uncovered") or "").strip()
+                    if uncovered:
+                        meta["triage_uncovered"] = uncovered
+                        logger.info(
+                            "[%s] %s admitted as PARTIALLY covered — uncovered: %s",
+                            self.name, artifact_id, uncovered[:200],
+                        )
                 admitted_artifacts.append(eligible_by_id[artifact_id])
             elif decision.startswith("REJECT"):
                 # Mutate in-memory; triage_persist_node persists the suppression
