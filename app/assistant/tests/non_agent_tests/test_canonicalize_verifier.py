@@ -5,9 +5,14 @@ the load-bearing logic of `_run_verifier_dedup_pass`:
   - embedding-NN proposes pairs >= MERGE_THRESHOLD; the verifier decides each,
   - a verified merge keeps the higher-observation survivor and rewrites its statement to the
     verifier's canonical_statement (superset-safe), deprecating the loser,
-  - the verifier's "not same" verdict keeps look-alikes apart (hydration != finger-stretch),
+  - the verifier's "different" verdict keeps look-alikes apart (hydration != finger-stretch),
   - union-find collapses a 3-way cluster in ONE pass (2 merges, not 3),
-  - focus_keys (new_only mode) restricts proposals to pairs touching a new belief.
+  - focus_keys (new_only mode) restricts proposals to pairs touching a new belief,
+  - and (2026-09-11) the relations that replaced the same/not-same boolean: `supersedes`
+    deprecates the side the dated evidence calls outdated, `contradicts` contests both for
+    the reevaluator, `specialises` leaves both standing, and an unusable relation changes
+    nothing. Each side reaches the verifier with its dated evidence, which is the only thing
+    that separates a preference that changed from a live conflict.
 """
 from __future__ import annotations
 
@@ -33,7 +38,13 @@ def _belief(key, stmt, obs):
     return SimpleNamespace(
         id=key, belief_key=key, statement=stmt, confidence="high",
         scope="chronic", status="active", observation_count=obs, domain="test", kind=None,
+        first_observed="2026-01-04", last_confirmed="2026-08-30",
     )
+
+
+def _evidence(date, summary, signal="observed"):
+    return SimpleNamespace(source_date=date, created_at=f"{date}T09:00:00Z",
+                           signal_type=signal, summary=summary)
 
 
 def _make_beliefs():
@@ -66,11 +77,26 @@ class _FakeChroma:
 
 
 class _FakeStore:
-    """Minimal BeliefStore stand-in: serves embeddings, looks up by key, applies merges."""
-    def __init__(self, beliefs, vecs):
+    """Minimal BeliefStore stand-in: serves embeddings, looks up by key, applies merges,
+    deprecations, contest marks and evidence lookups."""
+    def __init__(self, beliefs, vecs, evidence=None):
         self._chroma = _FakeChroma(vecs)
         self.by_key = {b.belief_key: b for b in beliefs}
         self.merges = []
+        self._evidence = evidence or {}     # belief.id -> [evidence]
+        self.deprecated = []
+        self.contested = []
+
+    def get_evidence(self, belief_id):
+        return list(self._evidence.get(belief_id, []))
+
+    def deprecate(self, belief_key, *, reason=""):
+        self.by_key[belief_key].status = "deprecated"
+        self.deprecated.append((belief_key, reason))
+
+    def mark_contested(self, belief_key):
+        self.by_key[belief_key].status = "contested"
+        self.contested.append(belief_key)
 
     def list_by_domain(self, domain, *, status="active"):
         return [b for b in self.by_key.values() if b.status == status]
@@ -87,38 +113,47 @@ class _FakeStore:
 
 
 class _FakeAgent:
-    def __init__(self):
+    """relation='same' when both statements share a topic word, else 'different' — unless a
+    fixed verdict is scripted for the whole run."""
+    def __init__(self, verdict=None):
         self.calls = 0
+        self.inputs = []
+        self._verdict = verdict
 
     def action_handler(self, msg):
         self.calls += 1
         ai = msg.agent_input
+        self.inputs.append(ai)
+        if self._verdict is not None:
+            return SimpleNamespace(data=dict(self._verdict))
         a, b = ai["phrase_a"], ai["phrase_b"]
         same = _topic(a) == _topic(b)
         canon = a if len(a) >= len(b) else b   # fuller statement wins
         return SimpleNamespace(data={
-            "same": same,
+            "relation": "same" if same else "different",
             "reason": f"{_topic(a)} vs {_topic(b)}",
             "canonical_statement": canon if same else "",
+            "current_side": "",
         })
 
 
 class _FakeFactory:
     """Holds ONE agent instance so verifier-call counts persist across passes."""
-    def __init__(self):
-        self.agent = _FakeAgent()
+    def __init__(self, agent=None):
+        self.agent = agent or _FakeAgent()
 
     def create_agent(self, name):
         return self.agent
 
 
-def _run(beliefs, vecs=_VECS, focus_keys=None, *, monkeypatch, tmp_path, factory=None):
+def _run(beliefs, vecs=_VECS, focus_keys=None, *, monkeypatch, tmp_path, factory=None,
+         evidence=None):
     """Run one dedup pass with the verdict store pointed at an isolated tmp sqlite file
     (never the real emi.db). Returns (store, pass_result, factory)."""
     verdict_db = str(tmp_path / "verdicts.db")
     monkeypatch.setattr(C.verdicts, "belief_db_path", lambda: verdict_db)
     factory = factory or _FakeFactory()
-    store = _FakeStore(beliefs, vecs)
+    store = _FakeStore(beliefs, vecs, evidence)
     pass_result = C._run_verifier_dedup_pass(
         beliefs, "test", store, factory, scope_context=None, focus_keys=focus_keys,
     )
@@ -224,3 +259,130 @@ def test_call_cap_truncates_pass(monkeypatch, tmp_path):
     assert res["truncated"] is True
     assert res["verifier_calls"] == 1
     assert factory.agent.calls == 1
+
+
+# --- Relations beyond same/different (2026-09-11) --------------------------------------
+
+_HONEY_VECS = {
+    "food.honey.like":    [1.0, 0.0, 0.0],
+    "food.honey.dislike": [0.97, 0.24, 0.0],   # ~0.97 — proposed, and irreconcilable
+    "home.dishX":         [0.0, 0.0, 1.0],
+}
+
+
+def _honey_beliefs():
+    # Index order matters: side 'a' is the lower-index belief the sweep pairs first.
+    return [
+        _belief("food.honey.like", "The user likes honey in tea.", 4),
+        _belief("food.honey.dislike", "The user dislikes honey and avoids it in tea.", 2),
+        _belief("home.dishX", "Run the dishwasher at night.", 2),
+    ]
+
+
+def test_supersedes_deprecates_the_outdated_side_and_keeps_the_current_one(monkeypatch, tmp_path):
+    factory = _FakeFactory(_FakeAgent({
+        "relation": "supersedes", "reason": "the 2026-08 evidence is the later state",
+        "canonical_statement": "", "current_side": "b",
+    }))
+    store, res, _ = _run(_honey_beliefs(), _HONEY_VECS, monkeypatch=monkeypatch,
+                         tmp_path=tmp_path, factory=factory)
+
+    assert res["superseded"] == 1 and res["merges"] == 0
+    assert store.by_key["food.honey.like"].status == "deprecated"      # side 'a', the old state
+    assert store.by_key["food.honey.dislike"].status == "active"       # side 'b', current
+    assert "superseded by food.honey.dislike" in store.deprecated[0][1]
+    assert store.contested == []
+
+
+def test_supersedes_without_a_usable_current_side_leaves_both_active(monkeypatch, tmp_path):
+    factory = _FakeFactory(_FakeAgent({
+        "relation": "supersedes", "reason": "one replaced the other",
+        "canonical_statement": "", "current_side": "",
+    }))
+    store, res, _ = _run(_honey_beliefs(), _HONEY_VECS, monkeypatch=monkeypatch,
+                         tmp_path=tmp_path, factory=factory)
+
+    assert res["superseded_unresolved"] == 1 and res.get("superseded", 0) == 0
+    assert store.deprecated == []
+    assert store.by_key["food.honey.like"].status == "active"
+    assert store.by_key["food.honey.dislike"].status == "active"
+
+
+def test_contradicts_contests_both_sides_and_is_not_recorded_as_settled(monkeypatch, tmp_path):
+    factory = _FakeFactory(_FakeAgent({
+        "relation": "contradicts", "reason": "both supported in the same weeks",
+        "canonical_statement": "", "current_side": "",
+    }))
+    store, res, factory = _run(_honey_beliefs(), _HONEY_VECS, monkeypatch=monkeypatch,
+                               tmp_path=tmp_path, factory=factory)
+
+    assert res["contradictions"] == 1 and res["merges"] == 0
+    assert sorted(store.contested) == ["food.honey.dislike", "food.honey.like"]
+    assert store.deprecated == []
+
+    # An unresolved conflict must be re-asked next pass, not skipped as a settled verdict.
+    # Re-run over the same (now contested) beliefs: get_by_key still serves them, and the pair
+    # is proposed again rather than short-circuited by the verdict memory.
+    for b in store.by_key.values():
+        b.status = "active"
+    _, res2, _ = _run(list(store.by_key.values()), _HONEY_VECS, monkeypatch=monkeypatch,
+                      tmp_path=tmp_path, factory=factory)
+    assert res2["skipped_distinct"] == 0
+    assert res2["verifier_calls"] == 1
+
+
+def test_specialises_leaves_both_standing_and_is_remembered(monkeypatch, tmp_path):
+    factory = _FakeFactory(_FakeAgent({
+        "relation": "specialises", "reason": "the second adds a travel condition",
+        "canonical_statement": "", "current_side": "",
+    }))
+    store, res, factory = _run(_honey_beliefs(), _HONEY_VECS, monkeypatch=monkeypatch,
+                               tmp_path=tmp_path, factory=factory)
+
+    assert res["specialises"] == 1 and res["merges"] == 0
+    assert store.deprecated == [] and store.contested == []
+
+    # Inert verdicts are recorded, so the same pair costs no LLM call on the next pass.
+    _, res2, _ = _run(_honey_beliefs(), _HONEY_VECS, monkeypatch=monkeypatch,
+                      tmp_path=tmp_path, factory=factory)
+    assert res2["skipped_distinct"] == 1 and res2["verifier_calls"] == 0
+
+
+def test_unusable_relation_changes_no_belief(monkeypatch, tmp_path):
+    factory = _FakeFactory(_FakeAgent({
+        "relation": "probably the same?", "reason": "unsure",
+        "canonical_statement": "The user has opinions about honey.", "current_side": "a",
+    }))
+    store, res, _ = _run(_honey_beliefs(), _HONEY_VECS, monkeypatch=monkeypatch,
+                         tmp_path=tmp_path, factory=factory)
+
+    # Falls back to the one inert relation — never guessed into a merge or a deprecation.
+    assert res["merges"] == 0 and res.get("superseded", 0) == 0 and res["contradictions"] == 0
+    assert res["different"] == 1
+    assert all(b.status == "active" for b in store.by_key.values())
+
+
+def test_each_side_reaches_the_verifier_with_its_dated_evidence(monkeypatch, tmp_path):
+    beliefs = _honey_beliefs()
+    factory = _FakeFactory(_FakeAgent({
+        "relation": "different", "reason": "x", "canonical_statement": "", "current_side": "",
+    }))
+    _run(beliefs, _HONEY_VECS, monkeypatch=monkeypatch, tmp_path=tmp_path, factory=factory,
+         evidence={
+             "food.honey.like": [_evidence("2026-02-11", "asked for honey with the evening tea")],
+             "food.honey.dislike": [_evidence("2026-08-30", "said honey has become too sweet")],
+         })
+
+    ai = factory.agent.inputs[0]
+    assert "2026-02-11" in ai["context_a"] and "evening tea" in ai["context_a"]
+    assert "2026-08-30" in ai["context_b"] and "too sweet" in ai["context_b"]
+    assert "observed 4x" in ai["context_a"] and "observed 2x" in ai["context_b"]
+
+
+def test_a_side_with_no_evidence_says_so(monkeypatch, tmp_path):
+    beliefs = _honey_beliefs()
+    factory = _FakeFactory(_FakeAgent({
+        "relation": "different", "reason": "x", "canonical_statement": "", "current_side": "",
+    }))
+    _run(beliefs, _HONEY_VECS, monkeypatch=monkeypatch, tmp_path=tmp_path, factory=factory)
+    assert "evidence: (none recorded)" in factory.agent.inputs[0]["context_a"]

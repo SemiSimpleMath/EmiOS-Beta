@@ -1,6 +1,15 @@
 Concept type: {{ ctype }} ({{ ctype_noun }}).
 
-Phrase A: {{ phrase_a }}
-Phrase B: {{ phrase_b }}
+## Belief A
+{{ phrase_a }}
+{% if context_a %}
+{{ context_a }}
+{%- endif %}
 
-Do A and B refer to the same canonical concept for this person?
+## Belief B
+{{ phrase_b }}
+{% if context_b %}
+{{ context_b }}
+{%- endif %}
+
+What is the relation between A and B for this person?

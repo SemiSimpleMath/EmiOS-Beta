@@ -15,6 +15,11 @@ entity_card_level: 0
 user_context_items:
   - phrase_a
   - phrase_b
+  # Each side's area, kind, observation count, first/last dates and recent dated
+  # evidence. Load-bearing, not decoration: supersedes and contradicts are the same
+  # two sentences and only the dates separate them.
+  - context_a
+  - context_b
   - ctype
   - ctype_noun
 

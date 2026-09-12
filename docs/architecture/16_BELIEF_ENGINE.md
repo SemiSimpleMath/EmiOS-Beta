@@ -72,7 +72,7 @@ Per-belief decisions (`agent_form.py`): `create | update | deprecate | no_change
 - **Contestation**: a belief is queued in `contested_keys` (and `mark_contested`'d) for Step 4 when the agent returns `status=contested` (on create or update), or when an `update` lowers confidence vs the stored value.
 - The agent must populate `evidence_refs` (1-based indices into the bundle) so the right evidence rows attach to the right belief; out-of-range/empty refs attach nothing.
 - A `kind` field from the agent (§6) is passed through to the upsert; absent, the store heuristic-classifies it.
-- **Write-time dedup (2026-09-10)**: before a `create` lands, `dedup_candidate` compares the statement with its nearest active beliefs (global, cosine ≥ `MERGE_THRESHOLD`) and asks `belief_engine::merge_verifier` once per candidate, nearest first. A `same` verdict turns the create into an update of the existing key (statement = the verifier's `canonical_statement`); `not the same` verdicts are recorded in `belief_distinct_pairs` once the new belief has an id. One verifier call per new belief, instead of one per candidate pair in a nightly sweep.
+- **Write-time dedup (2026-09-10)**: before a `create` lands, `dedup_candidate` compares the statement with its nearest active beliefs (global, cosine ≥ `MERGE_THRESHOLD`) and asks `belief_engine::merge_verifier` once per candidate, nearest first — each side carried with its dated evidence. A `same` verdict turns the create into an update of the existing key (statement = the verifier's `canonical_statement`); `supersedes` deprecates whichever side the evidence dates as outdated (when the STORED one reads as current the new belief is still written, and the weekly sweep resolves the pair with both trails in hand); `contradicts` marks the stored belief `contested` for Step 4; `different` and `specialises` are recorded in `belief_distinct_pairs` once the new belief has an id. One verifier call per candidate, instead of one per candidate pair in a nightly sweep.
 - The agent's `domain` field files a NEW belief under its primary area (validated against the enabled ids, else the key's dot-prefix, else the write is refused loudly). An existing belief keeps its area.
 
 ### Step 3 — `RecomputeBeliefSnapshotStep`
@@ -98,6 +98,18 @@ For each active belief in the domain it aggregates the belief's `belief_evidence
 - **Channel 2 — shared distinctive keyword**: pairs sharing a lightly-stemmed token whose document frequency across the set is in `[KEYWORD_DF_MIN=2, KEYWORD_DF_MAX=12]` **and** cosine `>= KEYWORD_MIN_COSINE (0.50)`. This catches divergent-phrasing dups that embed just below 0.80 ("standing-break nudges" vs "standing break reminders"). The DF band excludes unique words (nothing to pair) and corpus-common/topical words (embedding's job). `_STOP` only pre-drops universal glue.
 
 Pairs are sorted strongest-first and capped at `MAX_PAIRS=4000`. The verifier is **asymmetric** — default not-same; a wrong merge silently destroys a distinct belief — and returns a reconciled `canonical_statement`. On a `same` verdict the better-supported belief (higher `observation_count`) survives, its statement is **rewritten to the canonical statement** (so a superset collapses without dropping the extra clause), and the loser is deprecated via `store.merge_belief`. A local union-find prevents re-merging a belief already folded in this pass. **Owner-locked beliefs are excluded** from both sides.
+
+**Relations, not a boolean (2026-09-11)**. The verifier used to answer same / not-same, so the only thing it could say about two beliefs that cannot both be true ("likes honey" / "dislikes honey") was `different` — which was then *recorded as a settled verdict* and never asked again. It now returns one of five relations, and each side reaches it with `belief_context_block`: area, kind, observation count, first/last dates, and the six most recent dated evidence lines. That context is load-bearing, because `supersedes` and `contradicts` are the same two sentences and only the dates separate them.
+
+| Relation | What the store does |
+| --- | --- |
+| `same` | Merge, as above. |
+| `different` | Both stand. Recorded in `belief_distinct_pairs` — free skip next pass. |
+| `specialises` | Both stand, the narrower qualifying the broader. Recorded the same way. |
+| `supersedes` | The dated evidence shows one is a later state of the other. The outdated side (`current_side` names the other) is deprecated. Without a usable `current_side` nothing is touched and the pair is logged at ERROR. |
+| `contradicts` | Same subject, opposing claims, dates inconclusive. **Both** are marked `contested` for Step 4, which rules on their full trails. Deliberately NOT recorded as settled — an unresolved conflict must be re-asked. |
+
+An unreadable relation falls back to `different` at ERROR level: no belief is ever changed on a verdict the engine could not parse.
 
 **Two modes** (`belief_engine/state/sweep_tracker.py`, `decide_mode()`):
 
@@ -261,7 +273,7 @@ Routine functions are registered as `@routine_handler`-decorated handlers in `ap
 | --- | --- | --- |
 | `belief_engine::belief_updater` | strong (`gpt-5.6-luna`) | Step 2 — `create/update/deprecate/no_change` per belief |
 | `belief_engine::belief_reevaluator` | strong (`gpt-5.6-luna`) | Step 4 — authoritative rewrite of contested beliefs from full trail |
-| `belief_engine::merge_verifier` | strong (`gpt-5.6-luna`) | Step 5 — per-pair same/not-same decision + reconciled `canonical_statement` |
+| `belief_engine::merge_verifier` | strong (`gpt-5.6-luna`) | Steps 2 & 5 — per-pair relation (`same` / `different` / `specialises` / `supersedes` / `contradicts`) + reconciled `canonical_statement` |
 | `belief_engine::belief_tagger` | mini (`gpt-5.6-luna`) | §7 — cross-cutting tags from the standardized vocab |
 | `belief_engine::belief_canonicalizer` | mini | **DEAD** (§11 trap 3) — old chunk-based canonicalizer |
 

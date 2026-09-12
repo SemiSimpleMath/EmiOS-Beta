@@ -733,6 +733,31 @@ class BeliefStore:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _evidence_already_attached(belief_id: str, ev: EvidenceInput) -> bool:
+        """Is this exact observation already on this belief?
+
+        Identity is (belief_id, source_type, source_date, summary) — what the
+        observation IS, not when it was ingested. `created_at` is deliberately
+        excluded: the whole point is that re-reading the same source on a later
+        night must not count twice. NULL-safe via IS, since source_date can be
+        absent on manual rows.
+        """
+        from sqlalchemy import text as _sa_text
+
+        session = get_session()
+        try:
+            row = session.execute(
+                _sa_text(
+                    "SELECT 1 FROM belief_evidence WHERE belief_id = :bid "
+                    "AND source_type IS :st AND source_date IS :sd AND summary IS :sm LIMIT 1"
+                ),
+                {"bid": belief_id, "st": ev.source_type, "sd": ev.source_date, "sm": ev.summary},
+            ).fetchone()
+            return row is not None
+        finally:
+            session.close()
+
     def _insert_evidence(self, belief_id: str, ev: EvidenceInput, now: str) -> None:
         """Insert a belief_evidence row with valence + half_life_snapshot derived.
 
@@ -740,11 +765,35 @@ class BeliefStore:
           signal_type via belief_engine.decay.valence_from_signal_type.
         - half_life_days_snapshot: looked up from the owning belief's `kind`,
           so historical half-life changes don't retroactively reshape decay.
+
+        IDEMPOTENT on the observation itself (2026-09-11). One observation is
+        (belief, source_type, source_date, summary); re-presenting it attaches
+        nothing new. Collection deliberately re-reads its sources — the nightly
+        pass re-reads a window of finished daily-insight files, and the ticket
+        path re-tallies the same events — so without this guard the SAME
+        observation was inserted again on every run. Measured: 343 redundant
+        rows, one insight attached ten times, contributing 30 weight where it
+        earns 3. Confidence is the sum of decayed evidence weights against
+        ABSOLUTE bands (high is net > 4.0), so a re-read was silently
+        manufacturing the reconfirmation the decay model exists to require.
+
+        This preserves growth and discards only repetition: a tally's summary
+        carries its count, day-span and date range, so a fifth snooze reads as
+        different text and lands as new evidence, while an unchanged restatement
+        is recognised as the observation already held. A finished day's insight
+        text never changes, so it attaches once however often it is re-read.
         """
         from sqlalchemy import text as _sa_text
         from belief_engine.decay import valence_from_signal_type, half_life_for_kind
 
         resolved_valence = ev.valence or valence_from_signal_type(ev.signal_type)
+
+        if self._evidence_already_attached(belief_id, ev):
+            logger.debug(
+                "[BeliefStore] evidence already attached to %s (%s %s) — not re-inserting",
+                belief_id, ev.source_type, ev.source_date,
+            )
+            return
 
         # Pull owning belief's kind for the half-life snapshot.
         kind: Optional[str] = None

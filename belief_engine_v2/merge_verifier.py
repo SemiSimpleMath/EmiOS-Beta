@@ -53,7 +53,10 @@ class LLMMergeVerifier:
             "ctype_noun": _CTYPE_NOUN.get(ctype, "concept"),
         }))
         data = getattr(result, "data", None) or {}
-        same = data.get("same") if isinstance(data, dict) else getattr(data, "same", None)
-        if same is None:
-            raise RuntimeError(f"{_AGENT}: cannot read 'same' from agent output: {data!r}")
-        return bool(same)
+        relation = data.get("relation") if isinstance(data, dict) else getattr(data, "relation", None)
+        if not relation:
+            raise RuntimeError(f"{_AGENT}: cannot read 'relation' from agent output: {data!r}")
+        # The agent classifies the relation (same | different | specialises | supersedes |
+        # contradicts). This vocabulary merger only ever asked "is it the same label", so
+        # only `same` merges; every other relation leaves the two labels distinct.
+        return str(relation).strip().lower() == "same"

@@ -54,6 +54,19 @@ logger = get_logger(__name__)
 
 _AGENT_NAME = "belief_engine::merge_verifier"
 
+# The relations the verifier may return. Two beliefs that are not duplicates can still
+# stand in a relation the store must act on; a boolean could only ever say "different",
+# which is where conflicts used to disappear.
+#   same        -> merge
+#   different   -> record the verdict, both stand
+#   specialises -> record the verdict, both stand (one qualifies the other)
+#   supersedes  -> deprecate the outdated side
+#   contradicts -> mark both contested, for the reevaluator's full-trail ruling
+_RELATIONS = ("same", "different", "specialises", "supersedes", "contradicts")
+# Relations that leave both beliefs in place; the verdict is remembered so the pair is
+# not re-paid for while nothing about either side has changed.
+_INERT_RELATIONS = ("different", "specialises")
+
 # Embedding cosine at/above which a PAIR is proposed to the verifier. Recall-biased on
 # purpose — the verifier is the precision gate, so propose generously and let it reject.
 MERGE_THRESHOLD = 0.80
@@ -177,26 +190,92 @@ def _find_duplicate_clusters(store: BeliefStore, domain: str) -> List[List[Belie
     return [g for g in groups.values() if len(g) >= 2]
 
 
-def _verify_same(agent, a: BeliefRecord, b: BeliefRecord, *, scope_context) -> Dict[str, Any]:
-    """Ask the merge_verifier whether two beliefs are the same; return its structured output
-    ({same, reason, canonical_statement}) as a dict."""
+# Recent evidence lines shown per side. Enough to date the claim and show what supported
+# it; not the whole trail, which the reevaluator reads when a pair turns out to conflict.
+_CONTEXT_EVIDENCE_LINES = 6
+
+
+def belief_context_block(store, belief: BeliefRecord) -> str:
+    """The dated history the verifier needs to tell supersedes from contradicts.
+
+    Those two relations are the SAME two sentences — only the evidence dates separate a
+    preference that changed from a genuine conflict. Judged on statements alone the
+    distinction is unavailable, so the verifier could never make it and every conflict was
+    filed as 'different' and never revisited.
+    """
+    lines = [
+        f"  area: {belief.domain} | kind: {belief.kind or 'unclassified'}",
+        f"  observed {belief.observation_count}x | first {belief.first_observed or '?'} "
+        f"| last confirmed {belief.last_confirmed or '?'}",
+    ]
+    try:
+        evidence = store.get_evidence(belief.id) or []
+    except Exception as e:
+        logger.warning("[CanonicalizeBeliefSet] evidence unavailable for %s: %s", belief.id, e)
+        evidence = []
+    if evidence:
+        evidence = sorted(evidence, key=lambda e: (e.source_date or e.created_at or ""))
+        recent = evidence[-_CONTEXT_EVIDENCE_LINES:]
+        lines.append(f"  evidence ({len(evidence)} total, most recent {len(recent)}):")
+        for ev in recent:
+            when = ev.source_date or (ev.created_at or "")[:10]
+            lines.append(f"    [{when}][{ev.signal_type}] {(ev.summary or '')[:160]}")
+    else:
+        lines.append("  evidence: (none recorded)")
+    return "\n".join(lines)
+
+
+_NEW_STATEMENT_CONTEXT = (
+    "  area: (not yet filed) | kind: (not yet classified)\n"
+    "  brand-new statement, proposed now — no stored history; treat its date as now"
+)
+
+
+def verify_relation(
+    agent,
+    a: BeliefRecord,
+    b: BeliefRecord,
+    *,
+    scope_context,
+    context_a: Optional[str] = None,
+    context_b: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Ask the merge_verifier how two beliefs relate.
+
+    Returns its structured output: {relation, reason, canonical_statement, current_side}
+    where relation is one of same | different | specialises | supersedes | contradicts.
+    """
     resp = agent.action_handler(Message(
         agent_input={
             "phrase_a": a.statement,
             "phrase_b": b.statement,
+            "context_a": context_a or "",
+            "context_b": context_b or "",
             "ctype": "belief",
             "ctype_noun": "concept",
         },
         scope_context=scope_context,
     ))
     data = resp.data if resp and hasattr(resp, "data") else {}
-    if isinstance(data, dict):
-        return data
-    return {
-        "same": getattr(data, "same", None),
-        "reason": getattr(data, "reason", ""),
-        "canonical_statement": getattr(data, "canonical_statement", ""),
-    }
+    if not isinstance(data, dict):
+        data = {
+            "relation": getattr(data, "relation", None),
+            "reason": getattr(data, "reason", ""),
+            "canonical_statement": getattr(data, "canonical_statement", ""),
+            "current_side": getattr(data, "current_side", ""),
+        }
+    relation = str(data.get("relation") or "").strip().lower()
+    if relation not in _RELATIONS:
+        # An unreadable verdict must not be guessed into a merge or a deprecation.
+        # "different" is the only inert outcome, so an unusable answer lands there loudly.
+        logger.error(
+            "[CanonicalizeBeliefSet] verifier returned unusable relation=%r for %s / %s "
+            "— treating as 'different' (no belief is changed)",
+            data.get("relation"), a.belief_key, b.belief_key,
+        )
+        relation = "different"
+    data["relation"] = relation
+    return data
 
 
 def _run_verifier_dedup_pass(
@@ -219,7 +298,8 @@ def _run_verifier_dedup_pass(
     settled by a recorded verdict (no LLM), and `truncated` means the per-run verifier-call cap
     stopped the pass early (the caller must NOT stamp the sweep complete).
     """
-    result = {"merges": 0, "verifier_calls": 0, "skipped_distinct": 0, "truncated": False}
+    result = {"merges": 0, "verifier_calls": 0, "skipped_distinct": 0, "truncated": False,
+              "different": 0, "specialises": 0, "superseded": 0, "contradictions": 0}
     items, mat = _embeddings_for(store, beliefs)
     if not items:
         return result
@@ -293,14 +373,65 @@ def _run_verifier_dedup_pass(
                     domain, MAX_VERIFIER_CALLS_PER_RUN)
                 break
 
-            verdict = _verify_same(agent, ra, rb, scope_context=scope_context)
+            verdict = verify_relation(
+                agent, ra, rb, scope_context=scope_context,
+                context_a=belief_context_block(store, ra),
+                context_b=belief_context_block(store, rb),
+            )
             result["verifier_calls"] += 1
-            if not verdict.get("same"):
+            relation = verdict["relation"]
+            reason = str(verdict.get("reason") or "")
+
+            if relation in _INERT_RELATIONS:
+                # Both stand. Remember it so the pair costs nothing while neither side moves.
                 verdicts.record_distinct(verdict_conn, ra.id, ra.statement, rb.id, rb.statement,
-                                         reason=str(verdict.get("reason") or ""))
+                                         reason=f"{relation}: {reason}")
+                result[relation] = result.get(relation, 0) + 1
                 continue
 
-            # Survivor = the better-supported belief (keeps the more-observed key + its history).
+            if relation == "supersedes":
+                # One is a later state of the other: the old claim WAS true and no longer is.
+                # Deprecating the outdated side is what the updater already does for a flip it
+                # sees in evidence; the sweep could not express it before, so a changed
+                # preference sat in the store forever beside its own replacement.
+                side = str(verdict.get("current_side") or "").strip().lower()
+                if side not in ("a", "b"):
+                    logger.error(
+                        "[CanonicalizeBeliefSet] %s: supersedes without a usable current_side "
+                        "(%r) for %s / %s — leaving both active",
+                        domain, verdict.get("current_side"), ra.belief_key, rb.belief_key)
+                    result["superseded_unresolved"] = result.get("superseded_unresolved", 0) + 1
+                    continue
+                current, outdated = (ra, rb) if side == "a" else (rb, ra)
+                try:
+                    store.deprecate(outdated.belief_key,
+                                    reason=f"superseded by {current.belief_key}: {reason[:200]}")
+                    result["superseded"] = result.get("superseded", 0) + 1
+                    logger.info("[CanonicalizeBeliefSet] %s: %s superseded by %s",
+                                domain, outdated.belief_key, current.belief_key)
+                except Exception:
+                    logger.exception("[CanonicalizeBeliefSet] %s: deprecate failed for %s",
+                                     domain, outdated.belief_key)
+                continue
+
+            if relation == "contradicts":
+                # Same subject, opposing claims, and the evidence does not say which is current.
+                # Neither is trustworthy, and neither should be silently dropped — hand BOTH to
+                # the reevaluator, which reads each full trail and rules. Not recorded as a
+                # settled verdict: this pair is unresolved, not decided.
+                for side in (ra, rb):
+                    try:
+                        store.mark_contested(side.belief_key)
+                    except Exception:
+                        logger.exception("[CanonicalizeBeliefSet] %s: mark_contested failed for %s",
+                                         domain, side.belief_key)
+                result["contradictions"] = result.get("contradictions", 0) + 1
+                logger.warning(
+                    "[CanonicalizeBeliefSet] %s: CONTRADICTION between %s and %s — both contested. %s",
+                    domain, ra.belief_key, rb.belief_key, reason[:200])
+                continue
+
+            # relation == "same" — Survivor = the better-supported belief (keeps the more-observed key + its history).
             # Its statement is REWRITTEN to the verifier's reconciled canonical_statement, so the
             # surviving key is just identity/provenance — content comes from the verifier.
             survivor, loser = (ra, rb) if ra.observation_count >= rb.observation_count else (rb, ra)
@@ -417,15 +548,22 @@ class CanonicalizeBeliefSetStep:
 
         final_count = len(self._active(store))
         logger.info(
-            "[CanonicalizeBeliefSet] %s done: %d -> %d (merges=%d calls=%d "
-            "skipped_distinct=%d truncated=%s mode=%s)",
+            "[CanonicalizeBeliefSet] %s done: %d -> %d (merges=%d superseded=%d "
+            "contradictions=%d specialises=%d different=%d calls=%d skipped_distinct=%d "
+            "truncated=%s mode=%s)",
             label, initial_count, final_count, pass_result["merges"],
+            pass_result.get("superseded", 0), pass_result.get("contradictions", 0),
+            pass_result.get("specialises", 0), pass_result.get("different", 0),
             pass_result["verifier_calls"], pass_result["skipped_distinct"],
             pass_result["truncated"], mode)
         ctx.canonicalization_result = {
             "status": "ok", "mode": mode, "domain": label,
             "initial_belief_count": initial_count, "final_belief_count": final_count,
             "total_merges": pass_result["merges"], "passes": 1,
+            "superseded": pass_result.get("superseded", 0),
+            "contradictions": pass_result.get("contradictions", 0),
+            "specialises": pass_result.get("specialises", 0),
+            "different": pass_result.get("different", 0),
             "verifier_calls": pass_result["verifier_calls"],
             "skipped_distinct": pass_result["skipped_distinct"],
             "truncated": pass_result["truncated"],

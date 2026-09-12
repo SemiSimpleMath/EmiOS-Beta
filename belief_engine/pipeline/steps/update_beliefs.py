@@ -27,7 +27,9 @@ from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message
 from app.assistant.utils.time_utils import get_local_time_str
 
-from belief_engine.pipeline.steps.canonicalize_belief_set import MERGE_THRESHOLD, _verify_same
+from belief_engine.pipeline.steps.canonicalize_belief_set import (
+    MERGE_THRESHOLD, _NEW_STATEMENT_CONTEXT, belief_context_block, verify_relation,
+)
 from belief_engine.pipeline.steps.collect_evidence import EvidenceBundle, EvidenceItem
 from belief_engine.store import distinct_pairs as verdicts
 from belief_engine.store.belief_store import BeliefRecord, BeliefStore, BeliefUpsertRequest, EvidenceInput
@@ -132,7 +134,10 @@ def dedup_candidate(
       - canonical_statement is the verifier's reconciled text for that merge (may be empty);
       - distinct_verdicts lists (candidate, reason) pairs the verifier judged NOT the same, for
         the caller to record once the new belief has an id.
-    One verifier call per candidate, nearest first, stopping at the first "same".
+    One verifier call per candidate, nearest first, stopping at the first "same". A
+    `supersedes` verdict deprecates whichever side the evidence dates as outdated, and a
+    `contradicts` verdict contests the stored belief so the reevaluator rules on its full
+    trail; both let the new belief proceed.
     """
     hits = store.find_similar(statement, k=_DEDUP_K, threshold=MERGE_THRESHOLD)
     distinct: List[Tuple[BeliefRecord, str]] = []
@@ -140,22 +145,64 @@ def dedup_candidate(
         if cand.belief_key == belief_key or getattr(cand, "locked", 0):
             continue
         # A locked belief must never be rewritten by a merge; a same-key hit is an update, not a dup.
-        verdict = _verify_same(
+        verdict = verify_relation(
             verifier_agent,
             _AsBelief(statement, belief_key), cand, scope_context=scope_context,
+            context_a=_NEW_STATEMENT_CONTEXT,
+            context_b=belief_context_block(store, cand),
         )
-        if verdict.get("same"):
+        relation = verdict["relation"]
+        reason = str(verdict.get("reason") or "")
+
+        if relation == "same":
             logger.info(
                 "[UpdateBeliefsStep] write-time dedup: %s folds into %s (sim=%.2f): %s",
-                belief_key, cand.belief_key, score, str(verdict.get("reason") or "")[:160],
+                belief_key, cand.belief_key, score, reason[:160],
             )
             return cand, (verdict.get("canonical_statement") or "").strip(), distinct
-        distinct.append((cand, str(verdict.get("reason") or "")))
+
+        if relation == "supersedes":
+            # The incoming statement is side 'a'. If the evidence says the STORED belief is
+            # the outdated one, this new belief replaces it — deprecate the old rather than
+            # letting a preference and its own replacement both sit active. If the stored one
+            # is current instead, the "new" belief is stale news; let it be written anyway
+            # (its own evidence dates it) rather than silently discarding what was observed.
+            if str(verdict.get("current_side") or "").strip().lower() == "a":
+                try:
+                    store.deprecate(cand.belief_key,
+                                    reason=f"superseded by new belief {belief_key}: {reason[:200]}")
+                    logger.info("[UpdateBeliefsStep] %s supersedes %s — old one deprecated",
+                                belief_key, cand.belief_key)
+                except Exception:
+                    logger.exception("[UpdateBeliefsStep] deprecate failed for %s", cand.belief_key)
+            else:
+                logger.warning(
+                    "[UpdateBeliefsStep] %s conflicts with %s but the STORED belief reads as "
+                    "current; writing the new one anyway for its own evidence. %s",
+                    belief_key, cand.belief_key, reason[:160])
+            continue
+
+        if relation == "contradicts":
+            # Same subject, opposing claims, nothing dates them apart. Contest the stored side
+            # so the reevaluator rules on its full trail; the new belief is still written, and
+            # its evidence is what the reevaluator will weigh against.
+            try:
+                store.mark_contested(cand.belief_key)
+            except Exception:
+                logger.exception("[UpdateBeliefsStep] mark_contested failed for %s", cand.belief_key)
+            logger.warning(
+                "[UpdateBeliefsStep] CONTRADICTION: new %s vs stored %s — stored one contested. %s",
+                belief_key, cand.belief_key, reason[:200])
+            continue
+
+        # different | specialises — both stand; remember the verdict once the new belief has an id.
+        distinct.append((cand, f"{relation}: {reason}"))
     return None, None, distinct
 
 
 class _AsBelief:
-    """The minimal shape _verify_same reads from a belief (statement only) for the new side."""
+    """The minimal shape verify_relation reads for the new side: statement + key. Its context
+    block is _NEW_STATEMENT_CONTEXT (nothing stored yet), so no evidence lookup is attempted."""
     def __init__(self, statement: str, belief_key: str) -> None:
         self.statement = statement
         self.belief_key = belief_key
