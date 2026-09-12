@@ -45,7 +45,7 @@ allowed_tools:
   - pod_search
   - pod_fetch
 except_tools: []
-allowed_nodes: [personal_admin::final_answer]
+allowed_nodes: [return_control]
 entity_scan_keys: [incoming_message, task, information, recent_history]
 # personal_admin's job is email/calendar/todo/reminders. For each entity it
 # only needs the name (level_0) + how to reach them (contact). The L3
