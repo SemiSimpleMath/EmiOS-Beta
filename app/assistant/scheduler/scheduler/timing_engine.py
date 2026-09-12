@@ -111,6 +111,52 @@ class TimingEngine:
             "One-time event %s fired %.0fs late — marked overdue.", event.event_id, overdue,
         )
 
+    # Intervals that are whole days mean "this time every day / every week" in WALL-CLOCK
+    # terms. An interval trigger cannot express that: it fires at a fixed absolute spacing
+    # from a UTC anchor, so every daylight-saving change slides the local time by an hour
+    # and it never comes back. Measured 2026-09-12: a Friday Night Meats reminder ladder
+    # authored at 6:00 / 7:00 / 7:30 / 7:50 / 8:00 PM PST for an 8 PM event was firing at
+    # 7:00 through 9:00 PM PDT, so every rung landed after the thing had started. The same
+    # had happened to a weekly video-call ladder. The historical response was to add a new
+    # reminder at the corrected time and leave the drifted one running, which is why there
+    # were five of each.
+    _SECONDS_PER_DAY = 86400
+
+    def _wall_clock_cron(self, interval_seconds, utc_anchor):
+        """A cron trigger holding the anchor's LOCAL wall time, or None if not day-aligned.
+
+        The anchor is converted with a date-aware zone, so it yields the wall time the
+        event was AUTHORED at (a November anchor reads as PST) rather than that instant
+        re-read under today's offset. That intent is then pinned to the local zone, and
+        the tz database moves it with the clocks from here on.
+
+        Sub-daily intervals (a 5-minute poll, an hourly monitor) are genuinely periodic:
+        DST does not apply to them and they stay interval triggers.
+        """
+        if not interval_seconds or interval_seconds % self._SECONDS_PER_DAY:
+            return None
+        days = interval_seconds // self._SECONDS_PER_DAY
+        if days not in (1, 7):
+            # e.g. every 3 days has no plain cron expression; leave it periodic.
+            return None
+        try:
+            from apscheduler.triggers.cron import CronTrigger
+
+            from app.assistant.utils.time_utils import get_local_timezone
+            local_tz = get_local_timezone()
+            local = utc_anchor.astimezone(local_tz)
+            fields = {"hour": local.hour, "minute": local.minute, "second": local.second,
+                      "timezone": local_tz}
+            if days == 7:
+                fields["day_of_week"] = local.weekday()   # cron: 0 = Monday, as datetime
+            return CronTrigger(**fields)
+        except Exception as e:
+            # Never lose the job over this: fall through to the interval trigger, loudly.
+            self.logger.error(
+                "wall-clock cron build failed for interval=%s anchor=%s: %s — keeping the "
+                "drift-prone interval trigger", interval_seconds, utc_anchor, e, exc_info=True)
+            return None
+
     def schedule_event(self, event):
         """
         Schedule a new event with APScheduler.
@@ -145,20 +191,36 @@ class TimingEngine:
                 if end_date:
                     end_date = end_date.replace(tzinfo=timezone.utc) if end_date.tzinfo is None else end_date
 
-                self.scheduler.add_job(
-                    func=self._handle_trigger,
-                    trigger="interval",
-                    args=[event.event_id],
-                    id=event.event_id,
-                    seconds=event.interval,
-                    start_date=start_date,
-                    end_date=end_date,
-                    jitter=event.jitter,
-                    misfire_grace_time=300,
-                )
-                self.logger.debug(
-                    f"Scheduled interval event {event.event_id} every {event.interval} seconds starting at {start_date}"
-                )
+                cron = self._wall_clock_cron(event.interval, start_date)
+                if cron is not None:
+                    self.scheduler.add_job(
+                        func=self._handle_trigger,
+                        trigger=cron,
+                        args=[event.event_id],
+                        id=event.event_id,
+                        end_date=end_date,
+                        jitter=event.jitter,
+                        misfire_grace_time=300,
+                    )
+                    self.logger.debug(
+                        "Scheduled wall-clock event %s: %s (anchor %s)",
+                        event.event_id, cron, start_date,
+                    )
+                else:
+                    self.scheduler.add_job(
+                        func=self._handle_trigger,
+                        trigger="interval",
+                        args=[event.event_id],
+                        id=event.event_id,
+                        seconds=event.interval,
+                        start_date=start_date,
+                        end_date=end_date,
+                        jitter=event.jitter,
+                        misfire_grace_time=300,
+                    )
+                    self.logger.debug(
+                        f"Scheduled interval event {event.event_id} every {event.interval} seconds starting at {start_date}"
+                    )
 
             else:
                 self.logger.error(f"Unsupported event type: {event.event_type}")
