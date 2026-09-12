@@ -10,7 +10,9 @@ allowed_tools: []
 except_tools: []
 allowed_nodes: []
 entity_scan_keys: [task, information, recent_history]
-entity_card_level: 0
+# L1: plan mode converses with the user. Its master_room sibling already renders
+# entity_summary (L1 semantics); this one was a level behind for no stated reason.
+entity_card_level: 1
 
 user_context_items:
   - date_time

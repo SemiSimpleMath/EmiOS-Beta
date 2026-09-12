@@ -10,7 +10,10 @@ allowed_tools: all
 except_tools: [emi_team_manager]
 allowed_nodes: [return_control]
 entity_scan_keys: [incoming_message, task, information, recent_history]
-entity_card_level: 0
+# L1: when a task's goal is to give the user an answer, this planner PRODUCES that
+# content itself (see system.j2) rather than delegating it, so it writes prose about
+# entities and a one-line tagline is not enough to write it from.
+entity_card_level: 1
 
 user_context_items:
   - date_time

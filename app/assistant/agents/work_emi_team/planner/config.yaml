@@ -22,7 +22,9 @@ allowed_tools: all
 except_tools: [work_emi_team_manager]
 allowed_nodes: [return_control]
 entity_scan_keys: [work_projection, recent_history]
-entity_card_level: 0
+# L1: the work-graph twin of emi_team::planner, whose `findings` are durable
+# user-visible results. system.j2 says to keep the two in sync; that includes this.
+entity_card_level: 1
 
 user_context_items:
   - work_projection      # the render node injects the owned node + checklist (with [id]s) here

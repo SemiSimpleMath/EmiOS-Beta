@@ -13,7 +13,9 @@ allowed_tools: []
 except_tools: []
 allowed_nodes: []
 entity_scan_keys: [task, recent_history]
-entity_card_level: 0
+# L1: this agent writes the final user-facing ticket text. A one-line tagline is
+# not enough to write prose about an entity without inventing the rest.
+entity_card_level: 1
 
 user_context_items:
   - date_time

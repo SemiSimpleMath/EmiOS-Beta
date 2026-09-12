@@ -12,7 +12,12 @@ allowed_tools: []
 except_tools: []
 allowed_nodes: []
 entity_scan_keys: [incoming_message, task, recent_history]
-entity_card_level: 0
+# L1 = the card's summary, not just its one-line tagline. L0 gave this agent one
+# sentence per entity and it filled the rest in from the name: it read the Friday
+# Night Meats one-liner and told the user it was about food, when the summary says
+# it is an intentionally misspelled Bob's Burgers reference. This agent SPEAKS to
+# the user, so it must not have to guess what an entity is.
+entity_card_level: 1
 
 enable_keyword_resource_injection: true
 
