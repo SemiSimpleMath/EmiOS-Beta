@@ -146,6 +146,32 @@ class WorkNode(BaseModel):
         return self.status in _TERMINAL_STATUSES
 
 
+class ActionRecord(BaseModel):
+    """One OUTWARD-FACING act this work object performed, in the past tense.
+
+    Nodes record what is planned and what state it is in. Nothing recorded what was
+    actually DONE to the outside world, so no planning pass could see it. On 2026-09-12 a
+    stuck goal emailed one recipient eleven times in fifty-two minutes: every guard in the
+    system counted timeouts, prunes or minutes, and none counted sends, because there was
+    nothing to count. The record lives on the WORK OBJECT, not the node, so it survives the
+    replanning that resets every node-keyed counter.
+
+    Written at the moment of the side effect by the tool that causes it, never by an agent
+    afterwards — an agent that forgets to log is exactly the failure this closes.
+    """
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(default_factory=lambda: new_id("act"))
+    work_id: str
+    node_id: Optional[str] = None                # the node that was running, when known
+    ts: datetime = Field(default_factory=utcnow)
+    channel: str                                 # email | ticket | sms | chat | post | call
+    target: str = ""                             # recipient address / surface / handle
+    summary: str = ""                            # one line of what was actually said
+    outcome: str = "sent"                        # sent | expired | answered | dismissed | failed
+    actor: Optional[str] = None                  # tool or agent that performed it
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
 class Edge(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(default_factory=lambda: new_id("edge"))
@@ -176,6 +202,9 @@ class WorkObject(BaseModel):
     # the in-memory projection (store.py loads/persists these)
     nodes: dict[str, WorkNode] = Field(default_factory=dict)
     edges: list[Edge] = Field(default_factory=list)
+    # Append-only ledger of what this goal DID to the outside world. Read by every
+    # planning projection so a pass can see its own past tense (see ActionRecord).
+    actions: list[ActionRecord] = Field(default_factory=list)
 
     # ---- structural construction (the validated writer wraps these with events) ----
     def add_node(self, node: WorkNode) -> WorkNode:
@@ -326,6 +355,23 @@ CREATE TABLE IF NOT EXISTS nodes (
 CREATE INDEX IF NOT EXISTS ix_nodes_work_status ON nodes(work_id, status);
 CREATE INDEX IF NOT EXISTS ix_nodes_wake        ON nodes(wake_kind, wake_at);
 CREATE INDEX IF NOT EXISTS ix_nodes_parent      ON nodes(work_id, parent_id);
+
+-- append-only ledger of outward-facing acts (see ActionRecord). Keyed on work_id,
+-- NOT node_id, so it survives the replanning that resets every node-keyed counter.
+CREATE TABLE IF NOT EXISTS actions (
+    id       TEXT PRIMARY KEY,
+    work_id  TEXT NOT NULL,
+    node_id  TEXT,
+    ts       TEXT NOT NULL,
+    channel  TEXT NOT NULL,      -- email | ticket | sms | chat | post | call
+    target   TEXT,               -- recipient address / surface / handle
+    summary  TEXT,               -- one line of what was actually said
+    outcome  TEXT,               -- sent | expired | answered | dismissed | failed
+    actor    TEXT,
+    payload  TEXT                -- json
+);
+CREATE INDEX IF NOT EXISTS ix_actions_work ON actions(work_id, ts);
+CREATE INDEX IF NOT EXISTS ix_actions_target ON actions(work_id, channel, target, ts);
 
 CREATE TABLE IF NOT EXISTS edges (
     id         TEXT PRIMARY KEY,

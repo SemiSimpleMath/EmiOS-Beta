@@ -321,6 +321,20 @@ class SendEmail(BaseTool):
                 logger.info("Email sent successfully to %s (attachments=%d)",
                             to, len(attachment_paths))
 
+                # ACTION LEDGER (2026-09-12): record the send on the owning work object
+                # the instant it lands. Written here, by the tool, because an agent asked
+                # to log its own actions forgets exactly when it matters — a stuck goal
+                # emailed one recipient eleven times in fifty-two minutes and no planning
+                # pass could see a single one of them. No-op off a work session.
+                from app.assistant.dayflow_orchestrator.action_ledger import record_outbound
+                record_outbound(
+                    channel="email", target=str(to),
+                    summary=str(subject or "")[:200],
+                    outcome="sent", actor="send_email",
+                    payload={"message_id": str(sent.get("id") or ""),
+                             "attachments": len(attachment_paths)},
+                )
+
                 summary = f"Email successfully sent to {to}"
                 if attachment_paths:
                     summary += f" with {len(attachment_paths)} attachment(s)"

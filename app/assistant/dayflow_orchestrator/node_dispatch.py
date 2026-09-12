@@ -174,3 +174,15 @@ def _surface_ticket(store, work_id: str, node_id: str, node) -> None:
     payload["button_layout"] = "decision"
     payload["plan_mode_available"] = True
     DI.event_hub.publish(Message(event_topic="proactive_suggestion", data=payload))
+
+    # ACTION LEDGER (2026-09-12): a surfaced ask is an outward-facing act. Recorded here
+    # with the work context passed explicitly — the ticket path returns immediately and
+    # does NOT run on a work-session thread, so the thread-name lookup would find nothing.
+    # An expired ask drops out of "ACTIVE TICKETS (awaiting the user)", which is how a
+    # planning pass could ask a fourth time believing it had never asked at all.
+    from app.assistant.dayflow_orchestrator.action_ledger import record_outbound
+    record_outbound(
+        channel="ticket", target="user", summary=title, outcome="sent",
+        actor="dayflow_ticket", work_id=work_id, node_id=node_id,
+        payload={"ticket_id": getattr(ticket, "ticket_id", "")},
+    )

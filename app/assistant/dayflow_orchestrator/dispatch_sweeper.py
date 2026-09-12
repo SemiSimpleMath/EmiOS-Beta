@@ -399,6 +399,17 @@ def sweep_stuck_work_nodes(now_utc: Optional[datetime] = None) -> int:
                     store.apply("set_status", {"work_id": wo.id, "node_id": node.id,
                                                "status": "failed", "note": reason},
                                 actor="dispatch_sweeper")
+                    # ACTION LEDGER: close the loop on the ask we surfaced. Without this the
+                    # ledger would show asks going out and never coming back, and a planning
+                    # pass would still not know the user has been asked four times and has
+                    # answered none of them.
+                    from app.assistant.dayflow_orchestrator.action_ledger import record_outbound
+                    record_outbound(
+                        channel="ticket", target="user",
+                        summary=(node.title or "")[:200], outcome="expired",
+                        actor="dispatch_sweeper", work_id=wo.id, node_id=node.id,
+                        payload={"reason": reason},
+                    )
                     failed += 1
                     logger.warning(
                         "dispatch_sweeper: ask %s timed out — %s; work_repair adjudicates. (%r)",

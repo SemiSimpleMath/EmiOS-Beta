@@ -67,7 +67,15 @@ def render_work_portfolio(wo, now=None) -> str:
     gid = goal.id if goal else None
     fresh = _ago(getattr(wo, "updated_at", None), now)
     L = [f"=== WORK OBJECT {wo.id} ===" + (f"   [updated {fresh}]" if fresh else "")]
-    L.append(f"goal   : {_t(goal) if goal else '(none)'}")
+    # The goal renders from CONTENT, not title. `title` is `objective[:80]` (work_persist),
+    # and on 2026-09-12 that slice ate the deadline off a flea-medication goal: the stored
+    # title ended "...around September" while the content named both September 25 and the
+    # September 18 decision date. An hour of replanning then argued over dates that were
+    # sitting unread one field away. Same rule as the epitaph below — decision input is
+    # never truncated.
+    goal_text = ((getattr(goal, "content", "") or "").strip()
+                 or (getattr(goal, "title", "") or "").strip()) if goal else ""
+    L.append(f"goal   : {' '.join(goal_text.split()) if goal_text else '(none)'}")
     L.append(f"status : {wo.status}    success-when: {getattr(goal, 'satisfied_when_kind', None)}")
 
     top = [n for n in wo.nodes.values() if n.parent_id == gid and n.type == "subtask"]
@@ -138,6 +146,26 @@ def render_work_portfolio(wo, now=None) -> str:
         L.append("\nOPEN QUESTIONS:")
         for n in questions:
             L.append(f"  - {_t(n)}")
+
+    # ACTIONS TAKEN — this goal's past tense, newest last so it reads as a timeline.
+    # The single most load-bearing block here: everything else describes what is PLANNED,
+    # and a pass that cannot see what it already DID will do it again. Never truncated,
+    # never filtered by outcome — an expired ask is exactly the one you must not repeat
+    # silently. Repeats to one target are called out, because eleven near-identical emails
+    # to one person in an hour read as eleven ordinary rows otherwise.
+    if getattr(wo, "actions", None):
+        acts = sorted(wo.actions, key=lambda a: getattr(a, "ts", now) or now)
+        repeats = Counter((a.channel, (a.target or "").lower()) for a in acts)
+        L.append(f"\nACTIONS TAKEN ({len(acts)}) — what this goal has already DONE to the "
+                 "outside world. Do not repeat one of these without a reason that names it:")
+        for a in acts:
+            ts = getattr(a, "ts", None)
+            when = ts.strftime("%m-%d %H:%M") if hasattr(ts, "strftime") else str(ts)[:16]
+            L.append(f"  {when}  {a.channel} -> {a.target or '?'}  [{a.outcome}]  {a.summary}")
+        hot = [(c, t, n) for (c, t), n in repeats.items() if n >= 3]
+        for channel, target, n in sorted(hot, key=lambda x: -x[2]):
+            L.append(f"  ⚠ {n} separate {channel} messages to {target} on this goal alone. "
+                     "Asking again is very unlikely to be the missing step.")
 
     census = Counter(f"{n.type}/{n.status}" for n in wo.nodes.values())
     L.append("\ncensus: " + ", ".join(f"{k}={v}" for k, v in sorted(census.items())))

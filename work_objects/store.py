@@ -28,8 +28,8 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
 from work_objects.model import (
-    WAKE_KINDS, Edge, SCHEMA_SQL, WorkNode, WorkObject, _STARTABLE_STATUSES,
-    _TERMINAL_STATUSES, utcnow,
+    WAKE_KINDS, ActionRecord, Edge, SCHEMA_SQL, WorkNode, WorkObject,
+    _STARTABLE_STATUSES, _TERMINAL_STATUSES, utcnow,
 )
 
 logger = logging.getLogger(__name__)
@@ -192,6 +192,14 @@ class WorkStore:
         # by contract, not by rowid accident (verification finding F10).
         for nrow in self._conn.execute("SELECT * FROM nodes WHERE work_id=? ORDER BY rowid", (work_id,)):
             wo.nodes[nrow["id"]] = self._row_to_node(nrow)
+        for arow in self._conn.execute(
+                "SELECT * FROM actions WHERE work_id=? ORDER BY ts", (work_id,)):
+            wo.actions.append(ActionRecord(
+                id=arow["id"], work_id=arow["work_id"], node_id=arow["node_id"],
+                ts=arow["ts"], channel=arow["channel"], target=arow["target"] or "",
+                summary=arow["summary"] or "", outcome=arow["outcome"] or "sent",
+                actor=arow["actor"], payload=json.loads(arow["payload"] or "{}"),
+            ))
         for erow in self._conn.execute("SELECT * FROM edges WHERE work_id=?", (work_id,)):
             wo.edges.append(Edge(
                 id=erow["id"], work_id=erow["work_id"], src=erow["src"], dst=erow["dst"],
@@ -488,6 +496,29 @@ class WorkStore:
             node.status = "waiting"
         node.updated_at = now
 
+    def _op_record_action(self, wo, data, now, actor=None) -> None:
+        """Append one outward-facing act to this work object's ledger.
+
+        Called by the TOOL that performs the side effect, at the moment it happens.
+        Deliberately unvalidated against node state: an act that reached the outside
+        world is a fact, and a ledger that can refuse a fact is worse than none.
+        `outcome` may be revised later by appending a new row, never by editing this one.
+        """
+        channel = str(data.get("channel") or "").strip()
+        if not channel:
+            raise ValueError("record_action: 'channel' is required (email | ticket | sms | ...)")
+        wo.actions.append(ActionRecord(
+            work_id=wo.id,
+            node_id=(str(data["node_id"]) if data.get("node_id") else None),
+            ts=now,
+            channel=channel,
+            target=str(data.get("target") or ""),
+            summary=" ".join(str(data.get("summary") or "").split()),
+            outcome=str(data.get("outcome") or "sent"),
+            actor=actor or str(data.get("actor") or "") or None,
+            payload=data.get("payload") or {},
+        ))
+
     def _op_set_work_status(self, wo, data, now, actor=None) -> None:
         """Force the WorkObject's overall status — the steward's authoritative complete/abandon, distinct
         from the rollup's automatic 'all children done' completion. The forward-only rollup will not reset
@@ -528,6 +559,14 @@ class WorkStore:
             self._conn.execute(
                 f"INSERT OR REPLACE INTO nodes({','.join(_NODE_COLUMNS)}) VALUES({placeholders})",
                 self._node_params(n),
+            )
+        for a in wo.actions:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO actions"
+                "(id,work_id,node_id,ts,channel,target,summary,outcome,actor,payload)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (a.id, a.work_id, a.node_id, _iso(a.ts), a.channel, a.target,
+                 a.summary, a.outcome, a.actor, json.dumps(a.payload, default=str)),
             )
         for e in wo.edges:
             self._conn.execute(
@@ -578,4 +617,5 @@ WorkStore._HANDLERS = {
     "set_work_status": WorkStore._op_set_work_status,
     "attach_pod": WorkStore._op_attach_pod,
     "defer_node": WorkStore._op_defer_node,
+    "record_action": WorkStore._op_record_action,
 }
