@@ -74,6 +74,55 @@ def _cascade_abandon_startable(wo: WorkObject, now: str, reason: str) -> int:
             count += 1
     return count
 
+def _descendants(wo: WorkObject, node_id: str) -> list:
+    """Every node owned below `node_id` on the parent_id tree. Cycle-safe."""
+    out, frontier, seen = [], [node_id], {node_id}
+    while frontier:
+        parent = frontier.pop()
+        for n in wo.nodes.values():
+            if n.parent_id == parent and n.id not in seen:
+                seen.add(n.id)
+                out.append(n)
+                frontier.append(n.id)
+    return out
+
+
+def _cascade_abandon_subtree(wo: WorkObject, node_id: str, now: str, reason: str) -> int:
+    """A finished node's unstarted descendants stop with it.
+
+    2026-09-13: a research node was judged complete by the finalizer and CLOSED, with a
+    correct epitaph naming the answer it had found. Eight of its descendants kept running
+    anyway, spawning further children, ten levels down, because nothing connected a
+    parent's outcome to its subtree. The goal reached 117 nodes while every supervising
+    agent saw "progress: 1/2". A node that has declared its outcome cannot have that
+    outcome changed by children that have not started, so they are abandoned.
+
+    Same shape as `_cascade_abandon_startable` but scoped to one subtree, and with the same
+    exemption: an in-flight ``dispatched`` WORKER node is left to land its result rather
+    than being orphaned mid-call. A dispatched ASK (wake_kind=user_reply) has no thread and
+    no result to land, so the parent's completion moots it and it cascades.
+    """
+    count = 0
+    for node in _descendants(wo, node_id):
+        if node.status in _STARTABLE_STATUSES or (
+                node.status == "dispatched" and node.wake_kind == "user_reply"):
+            node.status = "abandoned"
+            node.wake_kind = None
+            node.wake_at = None
+            node.wake_ref = None
+            node.payload["terminal"] = {"status": "abandoned", "verdict": "parent_finished",
+                                        "reason": reason, "at": now}
+            node.updated_at = now
+            count += 1
+    return count
+
+
+# Reaching one of these means the node has declared its outcome; its unstarted subtree is
+# moot. `done` is included deliberately: it is the worker's own verdict on its own node, and
+# the runaway leaked through exactly there — descendants of `done` ancestors were still
+# minting children an hour later.
+_SUBTREE_CASCADE_STATUSES = {"done", "closed", "abandoned", "superseded"}
+
 # --------------------------------------------------------------------------- #
 # Status state machine, keyed by node FAMILY (inferred from type). A new node
 # type defaults to the "spine" lifecycle until it's mapped here.
@@ -450,6 +499,16 @@ class WorkStore:
             node.payload["session_id"] = str(data["session_id"])
         if data.get("content") is not None:   # optional closing note / evidence written on transition
             node.content = data["content"]
+        if target in _SUBTREE_CASCADE_STATUSES and prev != target:
+            # The node has declared its outcome. Anything below it that has not started
+            # cannot change that outcome, so it stops here rather than growing a new
+            # branch under a finished parent (see _cascade_abandon_subtree).
+            stopped = _cascade_abandon_subtree(
+                wo, node.id, now,
+                reason=f"parent {node.id} reached {target}: unstarted work below it is moot")
+            if stopped:
+                logger.info("[WorkStore] %s -> %s cascaded %d unstarted descendant(s)",
+                            node.id, target, stopped)
         if data.get("note") is not None:
             # Append-only lifecycle note (e.g. the sweeper's timeout reason).
             # Lives in the payload so the node's `content` — its immutable

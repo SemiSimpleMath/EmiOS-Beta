@@ -12,6 +12,7 @@ work_objects is imported lazily so this module loads even when the substrate is 
 from __future__ import annotations
 
 from collections import Counter
+from typing import Optional
 
 _TITLE_CHARS = 90
 _BODY_CHARS = 400
@@ -57,6 +58,88 @@ def _ago(dt, now) -> str:
         return ""
     m = int(secs // 60)
     return f"{m}m ago" if m < 90 else f"{m // 60}h ago"
+
+
+# --------------------------------------------------------------------------- #
+# WORK SIGNAL — is this goal converging, or eating itself?
+#
+# 2026-09-13: a goal reading "record the October 9 Reflections deadline" answered itself at
+# 16:27 with a source URL, delivered that to the user at 16:58, and then grew to 117 nodes
+# and ten levels of recursion by 17:40, burning ~$4/hour against a $9.54/day average. Every
+# agent that could have stopped it saw a healthy object: the projection lists only
+# top-level tasks, so the view was two lines and "progress: 1/2".
+#
+# Nothing anywhere measured the goal's own behaviour. The finalizer judges ONE node's
+# result. The steward judges FIT. Repair only sees FAILED nodes, and nothing had failed —
+# every individual step succeeded. So these are structural facts about the graph, not
+# judgements: age, size, growth rate, depth, and how much is live. No wording is compared,
+# because a churn signal keyed on phrasing would be another wording-based identity.
+_SIGNAL_RECENT_MINUTES = 60
+_SIGNAL_BURST_MINUTES = 10
+# A goal legitimately decomposes a couple of levels. Ten is a worker re-asking its own
+# question down a chain. Three is the point where it stops looking like decomposition.
+_SIGNAL_DEPTH_WARN = 3
+_SIGNAL_RECENT_WARN = 20        # nodes minted in the last hour
+_SIGNAL_TOTAL_WARN = 25         # total nodes for one goal
+_LIVE_STATUSES = ("proposed", "actionable", "dispatched")
+
+
+def _depth_below_goal(wo, node, gid) -> int:
+    """How many ownership hops from the goal. Direct children are 1. Cycle-safe."""
+    depth, seen, cur = 0, set(), node
+    while cur is not None and cur.id not in seen:
+        seen.add(cur.id)
+        if cur.parent_id is None or cur.parent_id == gid:
+            return depth + 1
+        cur = wo.nodes.get(cur.parent_id)
+        depth += 1
+    return depth
+
+
+def _minutes_since(dt, now) -> Optional[float]:
+    if dt is None:
+        return None
+    try:
+        return (now - dt).total_seconds() / 60.0
+    except Exception:
+        return None
+
+
+def work_signal(wo, now) -> list:
+    """Lines describing whether this goal is converging. Empty for a small, quiet graph."""
+    gid = wo.goal_node_id
+    spine = [n for n in wo.nodes.values() if n.id != gid and getattr(n, "type", "") == "subtask"]
+    if not spine:
+        return []
+
+    ages = [_minutes_since(getattr(n, "created_at", None), now) for n in spine]
+    recent = sum(1 for a in ages if a is not None and a <= _SIGNAL_RECENT_MINUTES)
+    burst = sum(1 for a in ages if a is not None and a <= _SIGNAL_BURST_MINUTES)
+    live = [n for n in spine if n.status in _LIVE_STATUSES]
+    deepest = max((_depth_below_goal(wo, n, gid) for n in spine), default=0)
+    abandoned = sum(1 for n in spine if n.status == "abandoned")
+    goal_age = _minutes_since(getattr(wo, "created_at", None), now)
+    age_txt = ("%dh %dm" % (int(goal_age // 60), int(goal_age % 60))) if goal_age else "?"
+
+    out = [f"\nWORK SIGNAL: age {age_txt} | {len(spine)} subtasks "
+           f"({abandoned} abandoned) | {recent} created in the last hour | "
+           f"depth {deepest} | {len(live)} live"]
+
+    # Warnings name the number that tripped them, so the reader can judge rather than obey.
+    if deepest > _SIGNAL_DEPTH_WARN:
+        out.append(f"  ⚠ work is {deepest} levels below the goal. Past about "
+                   f"{_SIGNAL_DEPTH_WARN} that is a worker re-asking its own question, not "
+                   f"decomposition. Read the OUTCOMES above: the answer may already be there.")
+    if burst >= _SIGNAL_BURST_MINUTES:
+        out.append(f"  ⚠ {burst} subtasks minted in the last {_SIGNAL_BURST_MINUTES} minutes. "
+                   f"This goal is growing faster than it is finishing.")
+    if recent > _SIGNAL_RECENT_WARN:
+        out.append(f"  ⚠ {recent} subtasks in the last hour. A goal that needs this many "
+                   f"steps has either changed shape or is not converging.")
+    if len(spine) > _SIGNAL_TOTAL_WARN:
+        out.append(f"  ⚠ {len(spine)} subtasks for one goal. Consider whether it is done "
+                   f"already, or genuinely too big and should be split or abandoned.")
+    return out
 
 
 def render_work_portfolio(wo, now=None) -> str:
@@ -166,6 +249,8 @@ def render_work_portfolio(wo, now=None) -> str:
         for channel, target, n in sorted(hot, key=lambda x: -x[2]):
             L.append(f"  ⚠ {n} separate {channel} messages to {target} on this goal alone. "
                      "Asking again is very unlikely to be the missing step.")
+
+    L.extend(work_signal(wo, now))
 
     census = Counter(f"{n.type}/{n.status}" for n in wo.nodes.values())
     L.append("\ncensus: " + ", ".join(f"{k}={v}" for k, v in sorted(census.items())))
