@@ -208,6 +208,42 @@ class PodStore:
         finally:
             session.close()
 
+    def find_by_source_ref(self, ref_id: str, *, kind: Optional[str] = None) -> Optional[Pod]:
+        """The pod minted FROM a given upstream record, by its exact source-ref id.
+
+        A deterministic join on an id, never a phrase match: `source_refs` records where a
+        pod came from (an email is `repo_email::<account>::<uid>`), so the caller that
+        already holds the upstream id can find the pod holding its body.
+
+        Exists because dayflow items referenced their content by a `short_id` integer that
+        no tool accepts and that is not unique — on 2026-09-13, 7667 was assigned to both a
+        school newsletter and an unrelated June chat. A worker told the answer was in
+        "newsletter [7667]" had no way to open it, asked the user three times, and
+        reconstructed from the open web what was sitting in the pod store all along.
+        Returns the newest match, or None.
+        """
+        ref_id = (ref_id or "").strip()
+        if not ref_id:
+            return None
+        session = get_session()
+        try:
+            q = session.query(PodRow)
+            if kind:
+                q = q.filter(PodRow.kind == kind)
+            # source_refs is a JSON list of {kind, id}; the id is exact, so a LIKE on the
+            # quoted id cannot match a different record by accident.
+            rows = (q.filter(PodRow.source_refs_json.like(f'%"{ref_id}"%'))
+                     .order_by(PodRow.created_at.desc()).all())
+            if not rows:
+                return None
+            if len(rows) > 1:
+                logger.warning(
+                    "find_by_source_ref: %d pods share source ref %r (using newest %s)",
+                    len(rows), ref_id, rows[0].pod_id)
+            return self._row_to_pod(rows[0])
+        finally:
+            session.close()
+
     def all_pod_ids(self) -> List[str]:
         """Every canonical pod_id in the store (one column, cheap at current scale).
 

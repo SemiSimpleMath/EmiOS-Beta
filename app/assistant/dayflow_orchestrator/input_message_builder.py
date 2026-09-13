@@ -98,6 +98,36 @@ def _build_calendar_message_from_structured(*, event: Dict[str, Any], now_utc: d
     )
 
 
+def _email_pod_id(*, account_id: str, uid: str) -> str:
+    """The pod holding this email's full body, or "" when none has been minted yet.
+
+    2026-09-13: a worker was handed "the answer is in newsletter [7667]" and could not open
+    it. `short_id` is an integer that no tool accepts, and it is not even unique — 7667 was
+    assigned to both a school newsletter and an unrelated June chat about broken monitors.
+    The worker asked the user three times, watched those tickets expire, then spent 117
+    nodes and fifteen levels of recursion reconstructing from the open web what was sitting
+    in a 1,978-character pod the whole time.
+
+    The join is deterministic on the upstream id the pod records in its source_refs, so
+    there is no guessing. Empty string when the classifier has not minted the pod yet:
+    ordering is usually in our favour (the classifier ran two minutes before ingestion in
+    the observed case) but it is not guaranteed, and an absent handle is honest whereas a
+    wrong one is the bug we are fixing.
+    """
+    if not uid:
+        return ""
+    try:
+        from app.assistant.pod_store.pod_store import PodStore
+
+        ref = f"repo_email::{account_id}::{uid}" if account_id else f"repo_email::{uid}"
+        pod = PodStore().find_by_source_ref(ref, kind="email")
+        return str(getattr(pod, "pod_id", "") or "") if pod else ""
+    except Exception as e:
+        # Never block ingestion over a missing handle; the item is still worth having.
+        logger.error("[email_ingest] pod lookup failed for uid=%s: %s", uid, e, exc_info=True)
+        return ""
+
+
 def _build_email_message(*, email_data: Dict[str, Any], now_utc: datetime) -> Message:
     """
     Convert an event-repository email dict into a dayflow Message.
@@ -175,6 +205,10 @@ def _build_email_message(*, email_data: Dict[str, Any], now_utc: datetime) -> Me
         "cooldown_until": None,
         "linked_item_ids": [],
         "linked_email_unified_id": raw_email_unified_id,
+        # The pod holding the FULL body, so an agent has a handle it can actually open.
+        # Prompts used to reference an item only by `short_id`, an integer no tool accepts
+        # and which is not unique. See _email_pod_id below for what that cost.
+        "pod_id": _email_pod_id(account_id=account_id, uid=uid),
         "email_uid": uid,
         "email_account_id": account_id,
         "email_thread_id": str(email_data.get("thread_id") or "").strip(),

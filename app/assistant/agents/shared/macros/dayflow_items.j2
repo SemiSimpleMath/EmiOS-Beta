@@ -22,6 +22,15 @@
   {%- if meta.get("dispatched_at_local") or meta.get("dispatched_at") %} | dispatched: {{ meta.get("dispatched_at_local", meta.get("dispatched_at","")) }}{% endif %}
   {%- if meta.get("age_hours") %} | age: {{ meta.get("age_hours") }}{% endif %}
   {{ meta.get("summary", "") }}
+  {#- The pod holding the FULL content, when there is one. `task:` above is a short_id,
+      which is a prompt label: no tool accepts it and it is not unique (2026-09-13: 7667
+      named both a school newsletter and an unrelated June chat). A pod id is the canonical
+      handle and pod_fetch opens it, so an agent that needs the body has a door rather than
+      a number. Omitted entirely when absent — a handle that does not resolve is worse than
+      none, which is the whole lesson here. #}
+  {%- if meta.get("pod_id") %}
+  full content: {{ meta.get("pod_id") }}  (open with pod_fetch)
+  {%- endif %}
   {%- if meta.get("execution_result") %}
   result: {{ meta.get("execution_result") }}
   {%- endif %}

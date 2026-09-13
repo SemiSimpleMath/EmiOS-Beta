@@ -78,8 +78,18 @@ class StrategicPlannerWoPersistNode(ControlNode):
             short_id = str(meta.get("short_id") or "").strip()
             if short_id:
                 id_map[short_id] = item_id
-            summary_by_item[item_id] = str(
-                meta.get("summary") or it.get("summary") or meta.get("email_summary") or "").strip()
+            summ = str(meta.get("summary") or it.get("summary")
+                       or meta.get("email_summary") or "").strip()
+            # Carry the POD HANDLE, not just the summary. This line is the only thing the
+            # worker ever sees about where its goal came from, and a summary is a paraphrase
+            # — on 2026-09-13 a worker was told the answer was in "newsletter [7667]", could
+            # not open a short_id (no tool accepts one, and that one named two different
+            # items), asked the user three times, then spent 117 nodes reconstructing from
+            # the open web what sat in a 1,978-character pod. pod_fetch opens this.
+            pod_id = str(meta.get("pod_id") or "").strip()
+            if summ and pod_id:
+                summ = f"{summ}  [full content: {pod_id} — open with pod_fetch]"
+            summary_by_item[item_id] = summ
         if not id_map:
             return
 
