@@ -658,7 +658,17 @@ def _identity_similarity_pairs(descriptors: dict[str, dict]) -> list[tuple[str, 
     if len(ids) < 2:
         return []
     id_pos = {i: k for k, i in enumerate(str(x) for x in res.get("ids") or [])}
-    embs = np.array(res.get("embeddings") or [], dtype=np.float32)
+    # `x or []` calls bool(x), and chromadb >= 1.x returns embeddings as an ndarray, whose
+    # __bool__ raises on anything with more than one element. That killed this step on
+    # 2026-08-24 22:43:15 ("truth value of an array with more than one element is
+    # ambiguous"), three strikes auto-disabled the whole kg_maintenance_pipeline, and with
+    # it the ONLY producer of duplicate_node findings — so the duplicate merger had nothing
+    # to drain and the graph accumulated unmerged duplicates for 18 days. Size, never
+    # truthiness, on anything that may be an array. (`ids` above is genuinely a list.)
+    raw_embs = res.get("embeddings")
+    if raw_embs is None or len(raw_embs) == 0:
+        return []
+    embs = np.array(raw_embs, dtype=np.float32)
     norms = np.linalg.norm(embs, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
     unit = embs / norms

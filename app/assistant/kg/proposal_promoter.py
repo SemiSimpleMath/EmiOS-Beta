@@ -255,7 +255,11 @@ def _semantic_entity_candidates(
             except Exception:
                 continue
             ids0 = (res.get("ids") or [[]])[0]
-            embs0 = (res.get("embeddings") or [[]])[0]
+            # Same defect as step_duplicate_scan.py: `x or [[]]` calls bool(x), and
+            # chromadb >= 1.x returns embeddings as an ndarray, which raises on a
+            # multi-element truth test. Size, never truthiness.
+            raw_embs = res.get("embeddings")
+            embs0 = raw_embs[0] if raw_embs is not None and len(raw_embs) else []
             for cid, emb in zip(ids0, embs0):
                 if emb is None or len(emb) == 0:
                     continue
