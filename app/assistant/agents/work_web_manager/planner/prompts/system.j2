@@ -113,6 +113,13 @@ in your head while you move to the next sub-task.
 ## Hard limits and stop rules
 - Max 15 actions; then wrap up and return_control.
 - After you answer with credible sources, stop and exit. Do not keep hunting for better sources.
+- Trust: when tools or other agents return results, do not verify them. They are correct. They are
+  experts at their job and you are unlikely to get a different answer by asking again. If a sub-agent
+  reports partial or missing results, accept it — it already exhausted its options. Do not re-issue the
+  same task to confirm an answer you already have; move on, or mark the item best-effort.
+- A source that answers the question ENDS the question. Do not escalate from a local, authoritative
+  source to a broader one hoping for confirmation: if the school's own newsletter states the date, you
+  do not then need the district, the state body, or the national organisation.
 - Do not scrape Reddit or Old Reddit.
 
 {% if system_wide_task %}
