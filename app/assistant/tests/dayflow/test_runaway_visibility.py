@@ -187,7 +187,7 @@ def test_the_signal_survives_a_goal_with_no_subtasks(store):
 
 def _goal_fails(store, wo_id):
     wo = store.load(wo_id)
-    return int((wo.nodes[wo.goal_node_id].payload or {}).get("goal_failure_count") or 0)
+    return int((wo.nodes[wo.goal_node_id].payload or {}).get("goal_unmet_attempts") or 0)
 
 
 def test_the_goal_counts_failures_its_nodes_do_not_survive(store):
@@ -217,8 +217,8 @@ def test_the_architect_is_told_when_the_goal_keeps_failing(store):
         _set(store, wo.id, nid, "failed")
 
     rendered = _render_existing_graph(store.load(wo.id))
-    assert "THIS GOAL HAS FAILED 2 TIMES" in rendered
-    assert "ASKS THE USER" in rendered
+    assert "2 ATTEMPTS HAVE NOT ACHIEVED THIS GOAL" in rendered
+    assert "ask whether" in rendered
 
 
 def test_one_failure_is_not_worth_shouting_about(store):
@@ -227,7 +227,7 @@ def test_one_failure_is_not_worth_shouting_about(store):
     nid = _child(store, wo.id, wo.goal_node_id, "Contact the school")
     _set(store, wo.id, nid, "failed")
 
-    assert "THIS GOAL HAS FAILED" not in _render_existing_graph(store.load(wo.id))
+    assert "HAVE NOT ACHIEVED THIS GOAL" not in _render_existing_graph(store.load(wo.id))
 
 
 def test_a_goal_that_never_fails_carries_no_tally(store):
@@ -244,3 +244,51 @@ def test_re_entering_failed_does_not_double_count(store):
     _set(store, wo.id, nid, "failed")
     store.apply("set_status", {"work_id": wo.id, "node_id": nid, "status": "failed"}, actor="worker")
     assert _goal_fails(store, wo.id) == 1
+
+
+def test_an_amend_counts_as_an_attempt_that_did_not_land(store):
+    """The shape that got nowhere all day: the worker comes back having done PART of the job.
+
+    Nothing crashes. The finalizer judges `amend`, the node closes, and if only crashes were
+    counted the goal would look flawless while achieving nothing four times running.
+    """
+    wo = _goal(store, "Get the picture packet.")
+    for title in ("Find the packet", "Find the packet another way"):
+        nid = _child(store, wo.id, wo.goal_node_id, title)
+        _set(store, wo.id, nid, "done")
+        store.apply("set_status", {
+            "work_id": wo.id, "node_id": nid, "status": "closed",
+            "reason": "judged", "finalizer": {"verdict": "amend", "instruction": "get the packet",
+                                              "reasoning": "date confirmed, packet not found"},
+        }, actor="finalizer")
+
+    assert _goal_fails(store, wo.id) == 2, "two attempts, neither achieved the goal"
+    for n in store.load(wo.id).nodes.values():
+        assert int((n.payload or {}).get("failure_count") or 0) == 0, "nothing ever crashed"
+
+
+def test_proceed_is_not_an_unmet_attempt(store):
+    wo = _goal(store, "Get the picture packet.")
+    nid = _child(store, wo.id, wo.goal_node_id, "Find the packet")
+    _set(store, wo.id, nid, "done")
+    store.apply("set_status", {"work_id": wo.id, "node_id": nid, "status": "closed",
+                               "reason": "judged",
+                               "finalizer": {"verdict": "proceed", "instruction": "",
+                                             "reasoning": "found it"}}, actor="finalizer")
+    assert _goal_fails(store, wo.id) == 0
+
+
+def test_the_architect_is_told_to_stop_and_ask_after_two_amends(store):
+    from app.assistant.control_nodes.work_architect_node import _render_existing_graph
+    wo = _goal(store, "Get the picture packet.")
+    for title in ("Find the packet", "Find the packet another way"):
+        nid = _child(store, wo.id, wo.goal_node_id, title)
+        _set(store, wo.id, nid, "done")
+        store.apply("set_status", {"work_id": wo.id, "node_id": nid, "status": "closed",
+                                   "reason": "judged",
+                                   "finalizer": {"verdict": "amend", "instruction": "keep looking",
+                                                 "reasoning": "not found"}}, actor="finalizer")
+
+    rendered = _render_existing_graph(store.load(wo.id))
+    assert "2 ATTEMPTS HAVE NOT ACHIEVED THIS GOAL" in rendered
+    assert "Stop trying" in rendered

@@ -173,14 +173,15 @@ def _render_existing_graph(wo) -> str:
     # that failed has usually been abandoned and replaced, so the per-node lines below can all
     # read zero while the goal has been failing at the same thing all day.
     goal_node = wo.nodes.get(wo.goal_node_id or "")
-    goal_fails = int(((goal_node.payload or {}) if goal_node is not None else {})
-                     .get("goal_failure_count") or 0)
-    if goal_fails >= 2:
+    unmet = int(((goal_node.payload or {}) if goal_node is not None else {})
+                .get("goal_unmet_attempts") or 0)
+    if unmet >= 2:
         out.append(
-            f"THIS GOAL HAS FAILED {goal_fails} TIMES ACROSS ITS NODES — including attempts that "
-            f"were re-planned under new node_ids. A different wording of the same approach is not "
-            f"a different approach. Either write a node that ASKS THE USER to unblock this, or "
-            f"write no nodes and say in architect_summary what is blocking it.")
+            f"{unmet} ATTEMPTS HAVE NOT ACHIEVED THIS GOAL — counted across nodes, so re-planned "
+            f"and partly-successful attempts are in this number too. Stop trying. Write ONE node "
+            f"whose goal is to tell the user what was tried, what is blocking it, and ask whether "
+            f"to keep going — and write nothing else. A new wording of the same approach is not a "
+            f"new approach, and going further outside to get around the block is not either.")
 
     if live:
         out.append("LIVE — these WILL run. Reuse these node_ids; do not write a second node for "

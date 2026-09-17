@@ -123,6 +123,34 @@ def _cascade_abandon_subtree(wo: WorkObject, node_id: str, now: str, reason: str
 # minting children an hour later.
 _SUBTREE_CASCADE_STATUSES = {"done", "closed", "abandoned", "superseded"}
 
+
+def _count_unmet_attempt(wo: WorkObject, node, now: str) -> None:
+    """Record, ON THE GOAL, that one more attempt did not achieve it.
+
+    Counted on the goal node because the per-node `failure_count` measures a single
+    incarnation: the architect abandons a failing node and mints its replacement under a fresh
+    slug, and the replacement starts at zero — the act of continuing resets the counter meant
+    to stop the continuing. The goal node outlives every child, so it is the one anchor node
+    churn cannot launder.
+
+    What counts is "an attempt did not achieve the goal", NOT "something crashed". A worker
+    that comes back having done some of the job is the common shape of getting nowhere, and it
+    never touches `failed`: the finalizer judges it `amend` and the node goes to `closed`.
+    2026-09-17: a picture-day goal ran four times and was judged `amend` every time — the date
+    and the clothing confirmed, the packet never found. Four attempts, four closes, nothing in
+    `failed`, every counter reading zero, and the goal re-minted as a fresh work object each
+    time. Counting only crashes would have seen a flawless day.
+
+    So both roads in are counted, at the one chokepoint every status write passes through, and
+    by id — never by comparing result text. `replan` and `blocked` arrive via `failed`; `amend`
+    arrives here as a verdict on a close.
+    """
+    goal = wo.nodes.get(wo.goal_node_id or "")
+    if goal is None or goal.id == node.id:
+        return
+    goal.payload["goal_unmet_attempts"] = int(goal.payload.get("goal_unmet_attempts") or 0) + 1
+    goal.updated_at = now
+
 # --------------------------------------------------------------------------- #
 # Status state machine, keyed by node FAMILY (inferred from type). A new node
 # type defaults to the "spine" lifecycle until it's mapped here.
@@ -507,11 +535,7 @@ class WorkStore:
             # The goal node is the one anchor node churn cannot launder — it outlives every
             # child — so the tally of "how many times has THIS GOAL failed at something" lives
             # here. Still counted by id at the one chokepoint; never by comparing text.
-            goal = wo.nodes.get(wo.goal_node_id or "")
-            if goal is not None and goal.id != node.id:
-                goal.payload["goal_failure_count"] = int(
-                    goal.payload.get("goal_failure_count") or 0) + 1
-                goal.updated_at = now
+            _count_unmet_attempt(wo, node, now)
         if data.get("session_id") is not None:
             # Ownership is a graph fact (work-session rewrite): the discharging session
             # stamps itself on the node; the supervisor reads this, not a registry.
@@ -541,6 +565,11 @@ class WorkStore:
                 "reasoning": str(data["finalizer"].get("reasoning") or ""),
                 "at": now,
             }
+            # `amend` is the finalizer saying this attempt did not achieve the node's goal. It is
+            # the ONLY such verdict that never passes through `failed` (replan and blocked both
+            # do), so it is counted here or not at all.
+            if node.payload["finalizer"]["verdict"].strip().lower() == "amend":
+                _count_unmet_attempt(wo, node, now)
         if data.get("note") is not None:
             # Append-only lifecycle note (e.g. the sweeper's timeout reason).
             # Lives in the payload so the node's `content` — its immutable
