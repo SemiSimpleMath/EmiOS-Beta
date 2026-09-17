@@ -45,6 +45,19 @@ class WorkNode(BaseModel):
         return self
 
 
+class DuplicatePair(BaseModel):
+    """One redundant node and the node that survives it.
+
+    A pair, not a mapping: OpenAI structured output cannot express a free-form object (a dict
+    renders as `additionalProperties`, which strict mode rejects outright — the whole call 400s).
+    Every agent_form field has to be a fixed-shape model or a list of them.
+    """
+    duplicate_node_id: str = Field(description="The node_id being abandoned as redundant.")
+    keep_node_id: str = Field(
+        description="The node_id doing this same work that is KEPT and will run. Must be a different, "
+        "still-live node in this graph.")
+
+
 class AgentForm(BaseModel):
     architect_summary: str = Field(description="One line on the graph you designed.")
     nodes: List[WorkNode] = Field(
@@ -60,3 +73,30 @@ class AgentForm(BaseModel):
         "this to PRUNE a dead branch, not only to add. E.g. evidence showed the unit is under warranty, so "
         "abandon the 'find_contractor' branch and add a 'contact_manufacturer' path. Already-finished "
         "(done/closed) nodes are left as a record; only un-done moot work is pruned.")
+    duplicate_of: List[DuplicatePair] = Field(
+        default_factory=list,
+        description="RE-PLAN ONLY: pairs naming a node that DUPLICATES another node in this same graph, "
+        "and the node you are KEEPING. Use this when the graph carries two nodes for the same work "
+        "(usually because an earlier pass wrote the same step under a second slug). The duplicate is "
+        "abandoned and keeps its record; the kept node runs. Keep the one that is furthest along, or — if "
+        "neither has progressed — the older one. Never pair a node with itself, never list both halves of "
+        "a pair. If the two nodes do DIFFERENT work, they are not duplicates: leave them alone.")
+
+    @model_validator(mode="after")
+    def _validate_duplicates(self):
+        # A duplicate must name a DIFFERENT survivor, and the survivor must not itself be on the way
+        # out — otherwise 'deduplicating' silently drops the work instead of consolidating it.
+        dropping = {p.duplicate_node_id for p in (self.duplicate_of or [])}
+        for pair in (self.duplicate_of or []):
+            dup, keep = pair.duplicate_node_id, pair.keep_node_id
+            if dup == keep:
+                raise ValueError(f"duplicate_of pairs {dup!r} with itself")
+            if keep in dropping:
+                raise ValueError(
+                    f"duplicate_of keeps {keep!r} for {dup!r}, but {keep!r} is itself listed as a "
+                    f"duplicate — keep exactly one node of each set")
+            if keep in (self.abandon_node_ids or []):
+                raise ValueError(
+                    f"duplicate_of keeps {keep!r} for {dup!r}, which is also in abandon_node_ids — "
+                    f"that would abandon both copies")
+        return self

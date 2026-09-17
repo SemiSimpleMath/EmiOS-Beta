@@ -48,10 +48,47 @@ def _work_ns(work_id: str) -> str:
     return work_id.split("_")[-1][:6]
 
 
+def _dedupe_prunes(wo, duplicate_of: Dict[str, str] | None, goal_id: str) -> Dict[str, str]:
+    """The subset of `duplicate_of` that is safe to prune: {dup_id: kept_id}.
+
+    Abandoning a duplicate is not the same act as abandoning queued work, which is what the churn
+    fence exists to refuse — a duplicate's work is not lost, it is consolidated onto the twin that
+    survives. So these prunes are licensed, but ONLY once that twin is verified to exist here and
+    still be able to run. The check is id-based: the architect names which node it keeps, and this
+    confirms it, rather than deciding for itself that two nodes mean the same thing.
+
+    A duplicate parked on a future wake is exactly the case that matters — both copies of one
+    delivery, armed to fire — and is precisely what the unlicensed fence would refuse.
+    """
+    out: Dict[str, str] = {}
+    for dup, keep in (duplicate_of or {}).items():
+        dup, keep = str(dup or "").strip(), str(keep or "").strip()
+        if not dup or not keep or dup == keep:
+            continue
+        if dup == goal_id or keep == goal_id:
+            logger.warning("apply_architect_dag: refusing to deduplicate the goal node (%s->%s)", dup, keep)
+            continue
+        if dup not in wo.nodes:
+            logger.warning("apply_architect_dag: duplicate %s is not in this graph — ignored", dup)
+            continue
+        kept = wo.nodes.get(keep)
+        if kept is None:
+            logger.warning("apply_architect_dag: %s claims to duplicate %s, which is not in this "
+                           "graph — NOT pruned (the work would be lost)", dup, keep)
+            continue
+        if kept.status in _ABANDON_SKIP:
+            logger.warning("apply_architect_dag: %s claims to duplicate %s, which is already %s — "
+                           "NOT pruned (nothing would be left to run)", dup, keep, kept.status)
+            continue
+        out[dup] = keep
+    return out
+
+
 def apply_architect_dag(store, work_id: str, nodes: List[Dict[str, Any]],
                         abandon_node_ids: List[str] | None = None,
                         abandon_reason: str = "",
-                        licensed: bool = False) -> Dict[str, Any]:
+                        licensed: bool = False,
+                        duplicate_of: Dict[str, str] | None = None) -> Dict[str, Any]:
     """Apply an architect DELTA onto a work object's graph. On a fresh decompose it just adds nodes; on a
     RE-PLAN it can also PRUNE: abandon each `abandon_node_ids` node + its un-finished ownership subtree
     (the store does not cascade — dependent-pruning #54 — so we recurse children here, leaving done/closed
@@ -67,9 +104,14 @@ def apply_architect_dag(store, work_id: str, nodes: List[Dict[str, Any]],
     ns = _work_ns(work_id)
 
     # 0) PRUNE pass (re-plan) — abandon the named moot nodes + their un-finished subtrees.
+    #    Duplicates are pruned here too, but carry their OWN licence and their own epitaph: the
+    #    node is abandoned rather than deleted, so the graph keeps the record of the duplication.
+    dupes = _dedupe_prunes(wo, duplicate_of, goal_id)
     abandoned: List[str] = []
+    deduplicated: List[str] = []
     seen: set[str] = set()
     stack = [str(x).strip() for x in (abandon_node_ids or []) if str(x).strip()]
+    stack.extend(d for d in dupes if d not in stack)
     while stack:
         nid = stack.pop()
         if nid in seen or nid == goal_id or nid not in wo.nodes:
@@ -77,12 +119,21 @@ def apply_architect_dag(store, work_id: str, nodes: List[Dict[str, Any]],
         seen.add(nid)
         if wo.nodes[nid].status in _ABANDON_SKIP:
             continue   # finished/already-gone — preserve the record, don't recurse a done branch
+        kept = dupes.get(nid)
         try:
-            store.apply("set_status", {"work_id": work_id, "node_id": nid, "status": "abandoned",
-                                       "verdict": "pruned_by_replan", "licensed": licensed,
-                                       "reason": abandon_reason or "architect re-plan pruned this branch (no stated reason)"},
-                        actor="architect")
+            store.apply("set_status", {
+                "work_id": work_id, "node_id": nid, "status": "abandoned",
+                "verdict": "deduplicated" if kept else "pruned_by_replan",
+                # A verified duplicate licenses its own prune (see _dedupe_prunes); everything
+                # else still needs the caller's evidence-backed licence.
+                "licensed": True if kept else licensed,
+                "reason": (f"duplicate of {kept}, which is kept and will run — this copy was a "
+                           f"second node for the same work" if kept else
+                           (abandon_reason or "architect re-plan pruned this branch (no stated reason)")),
+            }, actor="architect")
             abandoned.append(nid)
+            if kept:
+                deduplicated.append(nid)
         except Exception as e:
             logger.warning("apply_architect_dag: abandon %s failed: %s", nid, e)
             continue
@@ -163,6 +214,8 @@ def apply_architect_dag(store, work_id: str, nodes: List[Dict[str, Any]],
                                        "wake_at": wake_at, "wake_ref": wake_ref}, actor="architect")
             waits += 1
 
-    logger.info("apply_architect_dag(%s): +%d nodes, +%d deps, +%d waits, -%d abandoned",
-                work_id, len(added), edges, waits, len(abandoned))
-    return {"added": added, "edges": edges, "waits": waits, "abandoned": abandoned}
+    logger.info("apply_architect_dag(%s): +%d nodes, +%d deps, +%d waits, -%d abandoned "
+                "(%d de-duplicated)", work_id, len(added), edges, waits, len(abandoned),
+                len(deduplicated))
+    return {"added": added, "edges": edges, "waits": waits, "abandoned": abandoned,
+            "deduplicated": deduplicated}

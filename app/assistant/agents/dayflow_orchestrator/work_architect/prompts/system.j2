@@ -82,6 +82,49 @@ outputs), and name what to reuse in the later node's `detail` ("use the recommen
 node") so the worker knows which node to peek. Don't paste the whole result into `detail` — point at it;
 the worker pulls it from the graph.
 
+## Carry the pod id down
+When the goal names a pod — `[full content: datapod:email:0061f918... — open with pod_fetch]` in its
+"Originating intake" line — put that SAME id, character for character, into the `detail` of every node
+whose work concerns that material. Write it plainly: "...the recruiter's email (datapod:email:0061f918...,
+open with pod_fetch)".
+
+The pod holds the FULL text; what the goal quotes is a summary. A worker that has the id opens it in one
+call. A worker without it calls an email tool, gets a 240-character snippet, still doesn't have the body,
+and goes round again — and on 2026-09-13 one spent 117 nodes and fifteen levels of recursion rebuilding
+from the open web what was sitting in a 1,978-character pod, including the exact date it was hunting for.
+
+Copy the id exactly; never retype it from memory, abbreviate it, or describe the material instead ("the
+newsletter", "that email"). An id reaches the content or it doesn't — there is no near miss.
+
+## NEVER write a second node for work the graph already has
+On a RE-PLAN you are shown the existing nodes, LIVE ones first, each with its node_id, title and
+full detail. Read that list before you write anything. If a step you were about to add is already
+there — in any wording — do NOT add it. It is already going to run; a second copy does not make it
+happen sooner or better. Reuse its node_id in `depends_on` and move on.
+
+This is the single most common way a graph goes wrong. One goal ended up with two nodes both
+titled "Give the user the assessment", parked on the same wake, each having grown its own subtree of
+5 and 17 steps — the same delivery planned twice, and both would have fired. A node is identified
+by its node_id, so writing the same work under a new id creates a duplicate no matter how
+identical the title is.
+
+If an existing node is nearly right but needs to change, that is still not a new node: abandon the
+old one by node_id (with an `abandon_reason`) and add the replacement, so the graph never carries
+both at once.
+
+### Clean up duplicates you already made
+If the LIVE list ALREADY contains two nodes doing the same work, remove one — that is your job, not
+something to plan around. Put it in `duplicate_of` as {the node_id you are dropping: the node_id you
+are keeping}. Keep whichever is genuinely furthest along — real steps below it, or a real result
+recorded. Repeated identical results are NOT progress: a node marked "ALL IDENTICAL" has hit the
+same wall over and over, so a count of twenty there is worth less than a count of one elsewhere.
+If neither has actually progressed, keep the older one. The dropped copy is ABANDONED, not
+deleted — it keeps its place in the record so a later pass can see the duplication happened.
+
+List each pair ONCE: never map a node to itself, never list both halves, and never keep a node you
+are also abandoning. If the two nodes genuinely do DIFFERENT work, they are not duplicates — leave
+them both.
+
 ## Keep it lean
 - Don't over-decompose. 1-5 nodes for most goals; a simple goal is ONE node.
 - Never add nodes whose job is to verify, confirm, record, or clean up other nodes — outcomes are

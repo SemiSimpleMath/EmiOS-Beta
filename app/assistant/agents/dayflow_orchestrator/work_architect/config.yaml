@@ -22,13 +22,31 @@ user_context_items:
   - location_summary
   - resource_weather
   - health_status_summary
-  - resource_expected_calendar
+  # The steward's schedule view, not the raw calendar resource: it marks each entry
+  # completed/upcoming against today. The architect chooses every wake_at in the system, so it
+  # needs the same picture of the day the steward had when it minted the goal.
+  - expected_schedule_view
   - resource_daily_context_generator_output
   - resource_dayflow_routine
   - admitted_artifacts
+  # Work objects DROPPED recently, with the user's own words where they settled it. Without this
+  # the architect can only see epitaphs on nodes inside the one graph it holds — a goal the user
+  # declined outright is invisible to it, so it can lay the same chain again.
+  - recent_abandoned_work
+  - recent_dispatch_results
   - entity_card
   - task
   - information
+
+# The node-authoring doctrine lives here. resource_orchestrator_user_prefs carries the
+# notification rule ("If both communication and action are needed, create separate tasks"), the
+# device-control rule, and the escalation policy — all of which are instructions about how to
+# shape NODES, and none of which reached the agent that shapes them. The prompt had a
+# hand-written paragraph re-deriving the notify/action split instead.
+system_context_items:
+  - resource_user_data
+  - resource_assistant_data
+  - resource_orchestrator_user_prefs
 
 # Log the rendered SYSTEM + USER prompts to the agents log on every architect call.
 # The architect is invoked directly via work_architect_node, and its prompts are otherwise
