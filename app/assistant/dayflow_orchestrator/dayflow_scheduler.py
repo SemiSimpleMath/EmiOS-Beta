@@ -66,6 +66,23 @@ class DayflowScheduler:
             return
         self._started = True
         self._subscribe_events()
+
+        # Reconnect asks whose session died with this process, BEFORE the first tick plans
+        # around them. A question outlives the process that asked it: the thread waiting on the
+        # user is gone after a restart, but the ticket is a durable row and may already carry
+        # the answer. Without this the node sits `dispatched` with a dead session until the
+        # orphan sweep fails it 80 minutes later — discarding a reply the user may have given
+        # minutes earlier, and putting the same question on screen again.
+        #
+        # re_arm_inflight_asks has said "Call once at boot" in its docstring, and carried six
+        # test assertions, since it was written; nothing ever called it. It swallows and logs
+        # its own failures, so a bad reconnect cannot stop the scheduler starting.
+        from app.assistant.dayflow_orchestrator.work_session import re_arm_inflight_asks
+        reconnected = re_arm_inflight_asks()
+        if reconnected:
+            logger.info("[DayflowScheduler] re-armed %d in-flight ask(s) from before the restart",
+                        reconnected)
+
         self._schedule_tick(delay_seconds=STARTUP_TICK_DELAY_SECONDS, reason="startup")
         logger.info("[DayflowScheduler] Started — initial tick in %ss", STARTUP_TICK_DELAY_SECONDS)
 

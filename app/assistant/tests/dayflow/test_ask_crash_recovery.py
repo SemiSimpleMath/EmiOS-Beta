@@ -154,3 +154,48 @@ class TestReArmInflightAsks:
         evidence = [n for n in store.load(wid).nodes.values()
                     if n.parent_id == "ask1" and n.type == "evidence"]
         assert "Yes, go ahead" in evidence[0].content
+
+
+class TestItIsActuallyCalled:
+    """Recovery that nothing invokes is the same as no recovery.
+
+    This file's six assertions all passed while `re_arm_inflight_asks` had NO production caller —
+    it was written, documented "Call once at boot", tested, and never wired. The consequence was
+    visible on 2026-09-17: a 9:00 AM ask was mid-question when the process restarted, and the node
+    sat `dispatched` with a dead session waiting to be failed by the 80-minute orphan sweep, with
+    the answer (if any) unread in the ticket store.
+    """
+
+    def test_the_scheduler_re_arms_asks_at_boot(self, monkeypatch):
+        from app.assistant.dayflow_orchestrator import dayflow_scheduler as ds
+
+        calls = []
+        monkeypatch.setattr(ws, "re_arm_inflight_asks", lambda: calls.append("armed") or 1)
+
+        sched = ds.DayflowScheduler.__new__(ds.DayflowScheduler)
+        sched._started = False
+        sched._subscribe_events = lambda: None
+        scheduled = []
+        sched._schedule_tick = lambda **kw: scheduled.append(kw.get("reason"))
+
+        sched.start()
+
+        assert calls == ["armed"], "boot did not reconnect in-flight asks"
+        assert scheduled == ["startup"], "the startup tick was not scheduled"
+
+    def test_recovery_runs_before_the_first_tick(self, monkeypatch):
+        """Order matters: a tick that plans before recovery sees a dead ask as merely stuck, and
+        can abandon or re-ask the question the user has already answered."""
+        from app.assistant.dayflow_orchestrator import dayflow_scheduler as ds
+
+        order = []
+        monkeypatch.setattr(ws, "re_arm_inflight_asks", lambda: order.append("re_arm") or 0)
+
+        sched = ds.DayflowScheduler.__new__(ds.DayflowScheduler)
+        sched._started = False
+        sched._subscribe_events = lambda: None
+        sched._schedule_tick = lambda **kw: order.append("tick")
+
+        sched.start()
+
+        assert order == ["re_arm", "tick"]
