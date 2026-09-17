@@ -348,6 +348,13 @@ ordinary completion needs nobody, since the store's rollup completes a goal once
 finalizer that thinks the goal is finished or moot says so in `reasoning`, and the steward rules on
 it next tick.
 
+**The rollup yields to a pending instruction.** `amend` and `replan` both close the node, and closing
+the last one would otherwise complete the goal — destroying the instruction they just wrote, since
+`_pending_finalizer_instructions` scans ACTIVE work objects only. So a satisfied goal holds while any
+node carries an unconsumed finalizer instruction, until the architect consumes it. Only the automatic
+rollup defers: the steward's explicit `set_work_status` stays authoritative, because a person
+deciding a goal is over outranks a pending note about how to continue it.
+
 **No re-planning, but always re-judge the moment.** A work node's precise time-wake fires a targeted
 pass that skips intake, the evaluator, the architect and repair — the architect's decision about what
 to do, and roughly when, is not reopened. It does NOT skip the state_mover: whether right now is a
@@ -382,13 +389,11 @@ node gets its own blackboard; what it needs arrives through the Message or as a 
 - **`ManagerInterface._run_on_child_node`** still puts a work-graph special case inside the generic
   manager-as-tool wrapper. Removing it requires retiring the `node_aware` sub-manager variants
   (`work_web_manager`) in favour of plain ones, which changes what every run records in the graph.
-- **`amend` completes work that did not happen.** It maps to `closed`; closing the last child rolls
-  the work object up to `done`. Observed 2026-09-17: a lights goal closed as done while its own
-  epitaph read "the result does not show that the lights were actually turned off". The verdict set
-  has no way to say *the call returned but the node's goal did not happen*.
-- **A verdict is orphaned when the rollup wins.** `_pending_finalizer_instructions` scans ACTIVE work
-  objects, so an `amend` on the last node of a goal is destroyed by the completion it triggers. The
-  same verdict on a goal with work left over reaches the architect normally.
+- **The verdict set cannot say "the call returned but the goal did not happen."** `amend` is the
+  closest fit and it maps to `closed`. Observed 2026-09-17: a lights goal whose own epitaph read
+  "the result does not show that the lights were actually turned off". The goal no longer completes
+  under an unconsumed instruction (below), so the architect now gets its say — but the node itself
+  is still recorded as satisfied work.
 - **The steward re-mints actions that already ran.** Its only defence against duplicate goals is a
   prompt telling it to check the portfolio. Routine actions that ran this morning were minted again
   as fresh work objects the same day.
