@@ -117,31 +117,38 @@ class TestRegistryOwnership:
 
 
 class TestClaimGuard:
+    """The dispatch GATE claims; open_session only runs what is already claimed.
+
+    Until 2026-09-16 this was inverted — open_session claimed an `actionable` node itself and
+    refused a `dispatched` one — which put the claim in a different place for each lane. The ticket
+    lane's version surfaced the question to the user BEFORE marking the node in flight. One claim
+    site now, before any tool is called, so a node reaching a tool is always already in flight.
+    """
 
     def _fake_store(self, status: str):
         applies = []
-        node = SimpleNamespace(status=status,
-                               payload={"dispatch_epoch": 1})
+        node = SimpleNamespace(status=status, payload={"dispatch_epoch": 1})
         wo = SimpleNamespace(nodes={"n1": node})
         return SimpleNamespace(load=lambda wid: wo,
                                apply=lambda *a, **k: applies.append((a, k))), applies
 
-    def test_already_dispatched_node_is_refused(self, monkeypatch):
-        from app.assistant.dayflow_orchestrator import work_session as ws
-
-        monkeypatch.setattr(ws, "_run_session", lambda *a: None)
-        store, applies = self._fake_store("dispatched")
-        ws.open_session(store, "work_x", "n1", "run_work_node")
-        assert applies == []                       # no claim written
-        with ws._sessions_lock:
-            assert ws.session_id_for("work_x", "n1") not in ws._live_sessions
-
-    def test_claimable_node_is_claimed_and_started(self, monkeypatch):
+    def test_unclaimed_node_is_refused(self, monkeypatch):
         from app.assistant.dayflow_orchestrator import work_session as ws
 
         monkeypatch.setattr(ws, "_run_session", lambda *a: None)
         store, applies = self._fake_store("actionable")
+        ws.open_session(store, "work_x", "n1", "run_work_node")
+        assert applies == []                       # nothing written — the gate should have claimed
+        with ws._sessions_lock:
+            assert ws.session_id_for("work_x", "n1") not in ws._live_sessions
+
+    def test_claimed_node_starts_a_session(self, monkeypatch):
+        from app.assistant.dayflow_orchestrator import work_session as ws
+
+        monkeypatch.setattr(ws, "_run_session", lambda *a: None)
+        store, applies = self._fake_store("dispatched")
         ws.open_session(store, "work_y", "n1", "run_work_node")
+        # The only write is the session stamp — ownership is a graph fact; the status is untouched.
         assert len(applies) == 1
         assert applies[0][0][1]["status"] == "dispatched"
         assert applies[0][0][1]["session_id"] == ws.session_id_for("work_y", "n1")
@@ -149,3 +156,18 @@ class TestClaimGuard:
             entry = ws._live_sessions.pop(ws.session_id_for("work_y", "n1"), None)
         assert entry is not None
         entry["thread"].join(timeout=5)
+
+    def test_an_ask_runs_the_ask_session(self, monkeypatch):
+        """Both branches are sessions; only the tool differs."""
+        from app.assistant.dayflow_orchestrator import work_session as ws
+
+        started = []
+        monkeypatch.setattr(ws, "_run_ask_session", lambda *a: started.append("ask"))
+        monkeypatch.setattr(ws, "_run_session", lambda *a: started.append("work"))
+        store, _ = self._fake_store("dispatched")
+        ws.open_session(store, "work_z", "n1", "create_dayflow_ticket")
+        with ws._sessions_lock:
+            entry = ws._live_sessions.pop(ws.session_id_for("work_z", "n1"), None)
+        if entry is not None:
+            entry["thread"].join(timeout=5)
+        assert started == ["ask"]

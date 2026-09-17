@@ -2,21 +2,13 @@
 
 The dayflow_orchestrator tracks in-flight manager dispatches as
 dayflow_items with ``source_type=action_dispatch`` and
-``dispatch_status=in_flight``. This module owns two concerns that used to
-live in ``blackboard_builder._load_active_dispatches``:
+``dispatch_status=in_flight``. ``sweep_stale_dispatches`` closes dispatches whose manager never reported back
+(no active invocation + soft timeout, or hard timeout regardless), reviving the
+acted_on source item only if it is still ``dispatched``. It runs as a side
+effect during the cadence tick.
 
-1. ``sweep_stale_dispatches`` — closes dispatches whose manager never
-   reported back (no active invocation + soft timeout, or hard timeout
-   regardless). Revives the acted_on source item only if it is still in
-   ``dispatched`` state. Runs as a side effect during the cadence tick.
-
-2. ``list_active_dispatches`` — read-only loader that returns a compact
-   list of in-flight dispatch rows for view_materializer to filter
-   actionable items already covered by an in-flight dispatch.
-
-Keeping the side-effect path separate from the read path removes the
-need to carry ``active_action_dispatches`` across the tick->manager
-boundary via ``_blackboard_extras``.
+(The companion read path, ``list_active_dispatches``, went with view_materializer
+when the item dispatch lane was retired on 2026-09-16.)
 """
 from __future__ import annotations
 
@@ -28,6 +20,7 @@ from app.assistant.dayflow_orchestrator.contracts import get_meta, long_to_short
 from app.assistant.dayflow_orchestrator.dayflow_item_writer import write_dayflow_item
 from app.assistant.dayflow_orchestrator.state_store import load_existing_dayflow_items
 from app.assistant.utils.logging_config import get_logger
+from app.assistant.control_nodes.dayflow_switchboard_arguments_node import ASK_WINDOW_HOURS
 from app.assistant.utils.time_utils import parse_iso_utc_strict
 
 logger = get_logger(__name__)
@@ -338,34 +331,38 @@ def sweep_zombie_waiting_items(now_utc: Optional[datetime] = None) -> int:
 
 # A dispatched work node's job is FROZEN when neither its subtree (a progressing worker writes
 # checklist/evidence via the reconcile hook every planner turn) nor the job itself has shown activity
-# for this long. Generous on purpose: one legitimately long tool call makes no writes.
-_WORK_NODE_FROZEN_TIMEOUT_S = 20 * 60
+# for this long.
+#
+# THE INVARIANT: this must exceed the longest tool call a dispatch can legitimately sit inside,
+# because a run blocked in one tool writes nothing meanwhile — silence is indistinguishable from a
+# crash. The longest is the ask: create_dayflow_ticket holds the question open for the window the
+# arguments node gives it. So the floor is derived from that window rather than guessed, and it
+# cannot drift when the window changes. Set it below the window and a question the user has not
+# answered yet is failed out from under them, which reads as EmiOS asking and then losing interest.
+_LONGEST_TOOL_CALL_S = ASK_WINDOW_HOURS * 3600
+_WORK_NODE_FROZEN_TIMEOUT_S = _LONGEST_TOOL_CALL_S + 20 * 60
 
 
 def sweep_stuck_work_nodes(now_utc: Optional[datetime] = None) -> int:
-    """Supervise in-flight work-node jobs (one thread per open task; see node_dispatch).
+    """Fail work nodes that have gone quiet, so work_repair can adjudicate them.
 
-    Two dead states, both -> mark the node ``failed`` so work_repair adjudicates it
-    (retry / escalate / abandon) on this same tick:
+    A dispatched node is owned by the orchestrator run that is blocking inside its tool
+    call. There is no liveness to consult — the run holds the call in its own thread and
+    writes nothing until it returns — so the only evidence available is the graph, and
+    the question is simply: has anything about this node or its subtree changed lately?
 
-    - ORPHANED: the node is ``dispatched`` with no live owning session. Ownership is
-      a GRAPH fact: the session stamps ``payload.session_id`` at claim and every node
-      grown under it inherits the stamp at creation, so the liveness join is one
-      lookup — no ancestor walk. A restart or crash strands the whole subtree; a
-      frozen-failed root lapses its subtree's coverage. Threads die with the
-      process; the graph doesn't.
-    - FROZEN: a job thread exists but neither the node's subtree nor the job has shown
-      activity for ``_WORK_NODE_FROZEN_TIMEOUT_S``. Checked only on nodes that own a
-      registered job (the dispatch root) — its idle walk already spans the subtree.
+    STUCK: nothing has been written for ``_WORK_NODE_FROZEN_TIMEOUT_S``. That covers both
+    ways a call can stop existing — the process died with it, or it wedged — and both
+    want the same remedy. The tolerance is derived from the longest window a call may
+    legitimately block so that a question still waiting on the user is never failed out
+    from under them.
 
-    The zombie thread (frozen case) is abandoned, not killed: its late ``done`` write is
-    rejected by the transition machine (``failed -> done`` is illegal), so no torn state.
-    Goal nodes are skipped — a goal sits ``dispatched`` by design while its work runs.
+    A late write from a call that was given up on is harmless: the transition machine
+    rejects ``failed -> done``, so no torn state. Goal nodes are skipped — a goal sits
+    ``dispatched`` by design while its work runs.
 
     Returns count failed.
     """
-    from app.assistant.dayflow_orchestrator.work_session import (
-        session_alive_by_id, session_id_for, session_started_at_by_id)
     from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
 
     now = now_utc or datetime.now(timezone.utc)
@@ -386,56 +383,20 @@ def sweep_stuck_work_nodes(now_utc: Optional[datetime] = None) -> int:
             if node.id == goal_id or node.status != "dispatched":
                 continue
             ref = f"{wo.id}::{node.id}"
-            if node.wake_kind == "user_reply":
-                # An in-flight ASK: a tool call whose result is the user's reply. No
-                # thread to supervise — its deadline is the ticket's validity window.
-                # Expired unanswered = a timed-out tool call -> failed (work_repair
-                # adjudicates); a responded ticket is left for the materializer's
-                # reply pre-step to land as the node's result.
-                try:
-                    reason = _ask_timed_out(ref, now)
-                    if reason is None:
-                        continue
-                    store.apply("set_status", {"work_id": wo.id, "node_id": node.id,
-                                               "status": "failed", "note": reason},
-                                actor="dispatch_sweeper")
-                    # ACTION LEDGER: close the loop on the ask we surfaced. Without this the
-                    # ledger would show asks going out and never coming back, and a planning
-                    # pass would still not know the user has been asked four times and has
-                    # answered none of them.
-                    from app.assistant.dayflow_orchestrator.action_ledger import record_outbound
-                    record_outbound(
-                        channel="ticket", target="user",
-                        summary=(node.title or "")[:200], outcome="expired",
-                        actor="dispatch_sweeper", work_id=wo.id, node_id=node.id,
-                        payload={"reason": reason},
-                    )
-                    failed += 1
-                    logger.warning(
-                        "dispatch_sweeper: ask %s timed out — %s; work_repair adjudicates. (%r)",
-                        ref, reason, (node.title or "")[:80])
-                except Exception:
-                    logger.error("dispatch_sweeper: ask supervision failed for %s", ref, exc_info=True)
-                continue
             try:
-                own_sid = session_id_for(wo.id, node.id)
-                owning_sid = str(node.payload.get("session_id") or "")
-                if session_alive_by_id(own_sid):
-                    # The dispatch root of a live session — frozen supervision happens here
-                    # (its idle walk spans the whole subtree the session grew).
-                    if _job_idle_seconds(wo, node, session_started_at_by_id(own_sid), now) > _WORK_NODE_FROZEN_TIMEOUT_S:
-                        reason = f"frozen (no activity for {_WORK_NODE_FROZEN_TIMEOUT_S // 60}+ min)"
-                    else:
-                        continue
-                elif (owning_sid and session_alive_by_id(owning_sid)
-                      and _session_root_dispatched(wo, owning_sid)):
-                    # Grown under a live session (the stamp inherited at creation) whose root
-                    # is still in flight — covered. Coverage lapses with the root's
-                    # `dispatched` status: a frozen-failed root's zombie thread must not
-                    # shield its abandoned subtree.
+                # ONE rule: has this node shown any sign of life recently? The call that owns it
+                # runs inside an orchestrator instance and blocks it, so there is no in-process
+                # liveness to consult — and none is needed. A crashed run and a wedged call look
+                # identical from the graph (nothing has been written), and the same remedy fits
+                # both: fail it and let work_repair adjudicate.
+                #
+                # The tolerance must exceed the longest a call may legitimately block, or a
+                # question the user has not answered yet would be failed out from under them.
+                idle = _job_idle_seconds(wo, node, None, now)
+                if idle <= _WORK_NODE_FROZEN_TIMEOUT_S:
                     continue
-                else:
-                    reason = "orphaned (no live owning session — restart, crash, or lapsed coverage)"
+                reason = (f"stuck (no activity for {int(idle) // 60} min; a call may block up to "
+                          f"{_WORK_NODE_FROZEN_TIMEOUT_S // 60} min)")
                 store.apply("set_status", {"work_id": wo.id, "node_id": node.id, "status": "failed"},
                             actor="dispatch_sweeper")
                 failed += 1
@@ -449,36 +410,6 @@ def sweep_stuck_work_nodes(now_utc: Optional[datetime] = None) -> int:
     if failed:
         logger.info("dispatch_sweeper: failed %d stuck work node(s).", failed)
     return failed
-
-
-def _ask_timed_out(ref: str, now: datetime) -> Optional[str]:
-    """The timeout judgment for an in-flight ask: join the ask's ticket by its
-    trigger_context.work_node tag (pure id join, no wording). Returns the failure
-    reason when the question is dead (ticket expired / validity lapsed / no ticket
-    found), or None while it is still live in the UI or has a response the
-    materializer will land as the node's result."""
-    from app.assistant.ticket_manager import get_ticket_manager
-    tm = get_ticket_manager()
-    latest = None
-    for t in tm.get_tickets(ticket_type="dayflow_orchestrator", suggestion_type="work_notify",
-                            since_utc=now - timedelta(hours=48), limit=200):
-        if ((getattr(t, "trigger_context", {}) or {}).get("work_node")) != ref:
-            continue
-        if latest is None or (t.created_at or now) > (latest.created_at or now):
-            latest = t
-    if latest is None:
-        return "ask timed out (no ticket found for this ask within 48h — the question is gone from the UI)"
-    state = str(getattr(latest, "state", "") or "").lower()
-    if state == "expired":
-        return "ask timed out (ticket expired unanswered)"
-    if state in ("pending", "proposed"):
-        valid_until = getattr(latest, "valid_until", None)
-        if valid_until is not None:
-            vu = valid_until if valid_until.tzinfo else valid_until.replace(tzinfo=timezone.utc)
-            if vu <= now:
-                return "ask timed out (ticket validity window passed unanswered)"
-        return None       # question still live in the UI
-    return None           # responded (accepted/dismissed/snoozed) — the materializer lands it
 
 
 def _session_root_dispatched(wo, sid: str) -> bool:
@@ -511,37 +442,3 @@ def _job_idle_seconds(wo, node, started_at, now: datetime) -> float:
     if latest is None:
         return float("inf")
     return (now - latest).total_seconds()
-
-
-def list_active_dispatches() -> List[Dict[str, Any]]:
-    """Return a compact list of in-flight dispatch rows.
-
-    Read-only. Caller (view_materializer_node) uses this to filter
-    out actionable items already covered by an in-flight dispatch.
-    The list is sorted oldest-first and capped at the most recent 40.
-    """
-    all_items = load_existing_dayflow_items(include_terminal=True)
-    in_flight = _iter_in_flight_dispatches(all_items)
-    if not in_flight:
-        return []
-
-    rows: List[Dict[str, Any]] = []
-    for item in in_flight:
-        meta = get_meta(item)
-        raw_task_id = str(meta.get("task_id") or "").strip()
-        raw_acted_id = str(meta.get("acted_on_item_id") or "").strip()
-        rows.append(
-            {
-                "dispatch_id": str(meta.get("dispatch_id") or "").strip(),
-                "action_type": str(meta.get("action_type") or "").strip(),
-                "task_id": long_to_short(raw_task_id, all_items),
-                "plan_id": str(meta.get("plan_id") or "").strip(),
-                "acted_on_item_id": long_to_short(raw_acted_id, all_items),
-                "task_summary": str(meta.get("task_summary") or meta.get("summary") or "").strip(),
-                "created_at": str(meta.get("created_at") or "").strip(),
-                "time_local": str(meta.get("created_at_local") or "").strip(),
-            }
-        )
-
-    rows.sort(key=lambda x: x.get("created_at", ""))
-    return rows[-_DISPATCH_LIST_CAP:]

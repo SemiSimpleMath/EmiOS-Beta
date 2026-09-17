@@ -1,17 +1,21 @@
-"""work_node_dispatch_node — carry out the switchboard's routing decision for THE ONE work node this
-tick dispatches.
+"""work_node_dispatch_node — CLAIM the one work node this tick dispatches.
 
-Reads `delegate_to` (the tool the switchboard picked for the node) plus the picked `work_id::node_id` and
-hands both to the shared dispatch (node_dispatch.dispatch_node): create_dayflow_ticket -> surface a ticket
-to the user (awaits their response); else -> the worker runs on its OWN job thread and this tick moves on.
-The SAME dispatch is used by the scheduler's precise time-wake (node_dispatch.route_and_dispatch), so a
-node routes identically whether it's picked in a tick or woken off-tick.
+The gate, and only the gate. It canonicalizes the selector's pick, marks that node
+`dispatched` so every other consumer sees it as taken, and publishes `work_node_ref`
+for the two stages that follow. It does not call anything.
 
-ONE dispatch per tick — the master_room model: each planning pass commits one job; concurrency comes from
-job threads overlapping ACROSS ticks, with every pass seeing the in-flight state (`dispatched` nodes are
-structurally excluded from the ready list). When more ready nodes remain, the work-progress signal brings
-the next tick in minutes. The tick then proceeds to finalize (the state_map routes onward); the work-lane
-keys are cleared here so post_room's item-lane bookkeeping never sees a work ref.
+The call is the state_map's next two nodes — dayflow_switchboard_arguments_node then
+dayflow_tool_caller — which is the same shape master_room and the chat rooms use
+(switchboard names a tool, an arguments node builds that tool's arguments, a tool
+caller executes it). The tool blocks this orchestrator run until it returns, exactly
+as `emi_team_manager` blocks master_room; each run already owns its own thread and the
+scheduler can open another instance alongside it.
+
+ONE dispatch per tick: each planning pass commits one call, and `dispatched` nodes are
+structurally excluded from the ready list so a later pass cannot pick the same one.
+When more ready nodes remain, the work-progress signal brings the next tick in minutes.
+The work-lane keys are cleared here so post_room's item-lane bookkeeping never sees a
+work ref.
 """
 from app.assistant.control_nodes.control_node import ControlNode
 from app.assistant.utils.logging_config import get_logger
@@ -26,32 +30,67 @@ class WorkNodeDispatchNode(ControlNode):
         acted = self.blackboard.get_state_value("acted_on_item_ids", []) or []
         work_id = node_id = None
         ref = self._canonicalize_ref(str(acted[0]) if acted else "")
+        # The claimed node, published for the stages after the claim: the arguments node builds
+        # that node's tool call and the tool caller records the result back onto it. The selector's
+        # echo is canonicalized above, so this is the id the graph knows, never the transcription.
+        self.blackboard.update_state_value("work_node_ref", ref)
         # The work lane consumes the pick; post_room's acted-on bookkeeping is item-lane only and would
         # otherwise try to close a nonexistent item row named like a work ref.
         self.blackboard.update_state_value("acted_on_item_ids", [])
+        # There is ONE path after the switchboard: claim, build the arguments, call the tool,
+        # judge the result. Neither of the states below can be reached by a working system —
+        # the selector offers ids off its own rendered list, and the switchboard's form makes
+        # delegate_to required — so they are bugs, and a bug gets an exception, not a bypass
+        # route. Routing around them would make the pipeline permanently two-shaped to
+        # accommodate something that should never happen, and it would not even cover the
+        # case that actually strands a node (a raise AFTER the claim).
         if "::" not in ref:
-            # A plain dayflow ITEM reached the work dispatch. The item lane has no dispatch tail anymore
-            # (unification step C pending — the evaluator is the sole intake->action path and should have
-            # converted this). Close it LOUDLY so it can't re-fire every pass; the evaluator re-mints from
-            # current context if the need is still alive.
-            self._close_legacy_item(ref)
-        else:
-            try:
-                work_id, node_id = ref.split("::", 1)
-                from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
-                from app.assistant.dayflow_orchestrator.node_dispatch import dispatch_node
-                store = get_dayflow_work_store()
-                dispatch_node(store, work_id, node_id, delegate_to)
-            except Exception as e:
-                # Fail LOUD and FAIL THE NODE — never swallow into a silent retry. A node left ready after
-                # a dispatch error re-dispatches every pass (the mechanism that turned the notify
-                # transition bug into duplicate-notification spam). Mark it failed so it leaves the ready
-                # set and work_repair adjudicates it next tick.
-                logger.error("[%s] node dispatch failed for %s::%s: %s",
-                             self.name, work_id, node_id, e, exc_info=True)
-                self._fail_node(work_id, node_id)
+            raise ValueError(
+                f"[{self.name}] dispatch was handed {ref!r}, which is not a work node. "
+                f"Everything this lane dispatches is work_id::node_id."
+            )
+        if not delegate_to:
+            work_id, node_id = ref.split("::", 1)
+            self._fail_node(work_id, node_id)
+            raise ValueError(
+                f"[{self.name}] the switchboard named no tool for {ref}. Its form requires "
+                f"delegate_to, so an empty one means the switchboard did not run or did not answer."
+            )
+        work_id, node_id = ref.split("::", 1)
+        try:
+            from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+            store = get_dayflow_work_store()
+            # THE CLAIM, and the whole job of this node. Every node that reaches this gate is
+            # marked in-flight BEFORE any tool is called, so every other consumer — the ready
+            # set, the portfolio, the next planning pass — sees it as taken from this moment on.
+            # It used to be claimed deeper and differently per lane: the worker lane claimed
+            # inside open_session, and the ticket lane surfaced the question to the user FIRST
+            # and marked the node afterwards, leaving a window where the user could answer a
+            # node that did not yet say it was asking.
+            #
+            # The CALL is not made here. The state_map runs the arguments node and the tool
+            # caller next, the same two stages every other room's switchboard dispatch runs.
+            self._claim(store, work_id, node_id)
+        except Exception:
+            # Fail the node before re-raising, so it leaves the ready set instead of being
+            # re-picked every pass (the mechanism that turned the notify transition bug into
+            # duplicate-notification spam). Then let it out: an unclaimable node the selector
+            # just offered means the ready set and the graph disagree, and that ends the run
+            # loudly rather than continuing into a call that has nothing to run.
+            logger.error("[%s] claim failed for %s::%s", self.name, work_id, node_id, exc_info=True)
+            self._fail_node(work_id, node_id)
+            raise
+
         self._signal_if_more_ready(ref)
         self.blackboard.update_state_value("last_agent", self.name)
+
+    def _claim(self, store, work_id, node_id):
+        """Mark the picked node `dispatched` (bumping its dispatch_epoch). Raises if the node is
+        not claimable — a node the selector offered that is already in flight or already finished
+        means the ready set and the graph disagree, which must be loud, not silently re-dispatched."""
+        store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "dispatched"},
+                    actor="dispatch_gate")
+        logger.info("[%s] claimed %s::%s -> dispatched", self.name, work_id, node_id)
 
     def _canonicalize_ref(self, ref):
         """The selector ECHOES an id from its rendered list, and echoes arrive decorated —
@@ -87,24 +126,6 @@ class WorkNodeDispatchNode(ControlNode):
                 signal_work_progress(f"more_ready:{len(remaining)}")
         except Exception as e:
             logger.warning("[%s] more-ready signal failed: %s", self.name, e)
-
-    def _close_legacy_item(self, ref):
-        """Close a legacy dayflow item that reached the work dispatch (the retired lane's tail). Loud by
-        design: this firing at all means the evaluator left an actionable item unconverted."""
-        logger.error(
-            "[%s] LEGACY ITEM LANE reached dispatch with item %r — closing it "
-            "(reason=legacy_item_lane_dispatch_retired); the evaluator did not convert this intake.",
-            self.name, ref)
-        if not ref:
-            return
-        try:
-            from app.assistant.dayflow_orchestrator.dayflow_item_writer import (
-                resolve_short_id, write_dayflow_item,
-            )
-            write_dayflow_item(resolve_short_id(ref), state="closed",
-                               reason="legacy_item_lane_dispatch_retired", caller=self.name)
-        except Exception as e:
-            logger.error("[%s] could not close legacy item %r: %s", self.name, ref, e)
 
     def _fail_node(self, work_id, node_id):
         """Best-effort: mark a node failed after a dispatch error so it leaves the ready set (work_repair

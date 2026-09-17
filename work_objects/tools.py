@@ -10,7 +10,7 @@ these like any other tool.
     graph_summary / graph_peek / graph_neighbors / graph_search
   WRITE (the mutation vocabulary):
     add_subtask / add_dependency / record_finding / produce_artifact /
-    ask_question / defer / mark_satisfied / mark_failed / abandon
+    ask_question / defer
 
 A real WorkAgent gets these as registered LLM tools in its allowed_tools; here
 they are plain methods so a scripted agent can drive them without an LLM. The
@@ -78,6 +78,18 @@ class WorkGraphTools:
     # ----------------------- WRITE (the mutation vocabulary) ----------------------- #
     def add_subtask(self, title: str, content: str = "", satisfied_when_kind: Optional[str] = None,
                     owner_agent: Optional[str] = None, depends_on: Optional[list[str]] = None) -> str:
+        """Add a checklist item under MY node, at `proposed`.
+
+        The planner does NOT drive these by hand. It declares a `checklist` in its form and
+        WorkPlanner._reconcile_to_graph mirrors that to the graph after every turn — creating
+        items here, then transitioning them (proposed -> dispatched -> done|abandoned, with
+        waiting as a pause). Exactly one item is `dispatched` at a time, which is what
+        active_attribution_node keys on to decide where findings and delegations belong.
+
+        So it opens at `proposed` on purpose: the reconcile promotes the ONE item the planner
+        declared in_progress. Opening in flight here would make every item active at once and
+        blind the attribution resolver.
+        """
         nid = new_id("node")
         self.store.apply("add_node", {
             "work_id": self.work_id, "id": nid, "type": "subtask", "title": title, "content": content,
@@ -129,16 +141,6 @@ class WorkGraphTools:
             "work_id": self.work_id, "node_id": self.node_id,
             "wake_kind": wake_kind, "wake_at": wake_at, "wake_ref": wake_ref, "reason": reason,
         }, actor=self.actor)
-
-    def mark_satisfied(self) -> None:
-        self.store.apply("set_status", {"work_id": self.work_id, "node_id": self.node_id, "status": "done"}, actor=self.actor)
-
-    def mark_failed(self, reason: str = "") -> None:
-        self.store.apply("set_status", {"work_id": self.work_id, "node_id": self.node_id, "status": "failed"}, actor=self.actor)
-
-    def abandon(self, reason: str = "") -> None:
-        self.store.apply("set_status", {"work_id": self.work_id, "node_id": self.node_id, "status": "abandoned",
-                                        "reason": f"worker abandoned: {reason or 'no stated reason'}"}, actor=self.actor)
 
     # ----------------------------- helpers ----------------------------- #
     @staticmethod

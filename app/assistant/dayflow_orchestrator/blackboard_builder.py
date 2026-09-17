@@ -2,10 +2,9 @@
 Dayflow blackboard context builder (minimal).
 
 Per-agent pre-LLM nodes now call ``get_dayflow_items()`` directly for
-context, and view_materializer_node reads active dispatches via
-``dispatch_sweeper.list_active_dispatches()`` at the point of use. This
-module emits ``day_of_week`` and provides ``enrich_items_with_local_times``
-for callers that need to decorate item metadata with local-time strings.
+context. This module emits ``day_of_week`` and provides
+``enrich_items_with_local_times`` for callers that need to decorate item
+metadata with local-time strings.
 """
 from __future__ import annotations
 
@@ -64,9 +63,8 @@ def enrich_items_with_local_times(items: List[Dict[str, Any]], now_utc: datetime
 def build_dayflow_blackboard_extras() -> Dict[str, Any]:
     """Build the minimal context dict for the dayflow orchestrator blackboard.
 
-    Most agent context is now prepared by per-agent pre-LLM nodes and by
-    dispatch_sweeper.list_active_dispatches(). This function emits only
-    day_of_week.
+    Most agent context is now prepared by per-agent pre-LLM nodes. This
+    function emits only day_of_week.
     """
     now_utc = datetime.now(timezone.utc)
     now_local = now_utc.astimezone(get_local_timezone())

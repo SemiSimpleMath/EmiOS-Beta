@@ -1,14 +1,25 @@
 """Top-of-pipeline router for the dayflow orchestrator manager.
 
-Reads the trigger Message's ``data.fast_tick`` flag and routes accordingly:
+Routes the trigger Message:
 
-- ``fast_tick=True`` + valid ``triggered_item_id`` → fast_tick_promoter_node
-  (deterministic single-item wake, skips intake_triage, planner, state_mover)
+- ``triggered_work_node`` set → a TARGETED pass for that one due node: the state_mover judges
+  whether now is actually a good moment, then work_node_wake_router_node dispatches it (or not)
 - otherwise → intake_triage_prep_node (normal full pipeline)
 
-The routing flag is typed (boolean) to avoid string-literal coupling between
-the scheduler and the manager. ``wake_reason`` stays in the message for
-logging but is not load-bearing for routing.
+THE CONTRACT for a targeted pass: **no re-planning, but always re-judge the moment.** The architect's
+decision about what to do and roughly when stands and is not reopened — intake, the evaluator, the
+architect and repair are all skipped. But whether RIGHT NOW is a good moment to act is a fresh
+judgment every time, because the world moved since the timer was set: the user may have gone to bed
+early, be in a meeting that ran long, or be away from the machine.
+
+Until 2026-09-16 this went straight to the switchboard, so a precisely-woken node never passed the
+state_mover — the only thing that can HOLD for quiet hours, a meeting, or the user being away. The
+protection existed but applied only to nodes that happened to arrive through a planning tick: a 10pm
+reminder fired regardless, purely because it came through the timed door.
+
+``wake_reason`` stays in the message for logging but is not load-bearing for routing. There used to
+be a third branch — a ``fast_tick`` carrying a dayflow ITEM id. The item dispatch lane is retired
+(2026-09-16); everything dispatched is a work node.
 """
 from __future__ import annotations
 
@@ -23,23 +34,10 @@ class TickRouterNode(ControlNode):
         self.blackboard.update_state_value("next_agent", None)
 
         data = getattr(message, "data", {}) or {}
-        fast_tick = bool(data.get("fast_tick"))
-        triggered_item_id = str(data.get("triggered_item_id") or "").strip()
         triggered_work_node = str(data.get("triggered_work_node") or "").strip()
 
         if triggered_work_node:
-            # Targeted dispatch pass (a work node's precise time-wake fired): route the ONE
-            # due node straight to the switchboard — the same routing + dispatch flow the
-            # planning pass uses, inside the same room. No planning re-judgment: the wake
-            # decision was made when the timer was set.
             self._route_work_node_wake(triggered_work_node, data)
-        elif fast_tick and triggered_item_id:
-            self.blackboard.update_state_value("triggered_item_id", triggered_item_id)
-            self.blackboard.update_state_value("next_agent", "fast_tick_promoter_node")
-            logger.info(
-                "[%s] fast-tick path for item %s (wake_reason=%s)",
-                self.name, triggered_item_id, data.get("wake_reason", ""),
-            )
         else:
             logger.info(
                 "[%s] normal-tick path (wake_reason=%s)",
@@ -49,9 +47,12 @@ class TickRouterNode(ControlNode):
         self.blackboard.update_state_value("last_agent", self.name)
 
     def _route_work_node_wake(self, ref: str, data) -> None:
-        """Stage the due node for the switchboard (task = the node's goal) and enter the
-        normal dispatch flow: switchboard -> work_node_dispatch -> finalize. A node that
-        vanished or is no longer ready exits cleanly through the finalize path."""
+        """Send the due node into the state_mover for a timing judgment.
+
+        The node is staged here so work_node_wake_router_node — which runs after the state_mover
+        has had its say — can dispatch it without re-deriving anything. A node that vanished or is
+        no longer ready exits cleanly through the finalize path.
+        """
         from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
         from work_objects.model import utcnow
 
@@ -72,8 +73,7 @@ class TickRouterNode(ControlNode):
         task = (f"{node.title}. {node.content}" if node.content else (node.title or "")).strip()
         self.blackboard.update_state_value("task", task)
         self.blackboard.update_state_value("information", "")
-        self.blackboard.update_state_value("acted_on_item_ids", [ref])
-        self.blackboard.update_state_value("actionable_items", [{"item_id": ref}])
-        self.blackboard.update_state_value("next_agent", "dayflow_orchestrator::switchboard")
-        logger.info("[%s] targeted dispatch pass for work node %s (wake_reason=%s)",
-                    self.name, ref, data.get("wake_reason", ""))
+        self.blackboard.update_state_value("triggered_work_node", ref)
+        self.blackboard.update_state_value("next_agent", "state_mover_prep_node")
+        logger.info("[%s] targeted pass for work node %s — state_mover judges the moment "
+                    "(wake_reason=%s)", self.name, ref, data.get("wake_reason", ""))

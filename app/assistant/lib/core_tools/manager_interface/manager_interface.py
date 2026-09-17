@@ -40,6 +40,65 @@ class ManagerInterface:
     def _should_trace_emi_ingress(self) -> bool:
         return str(self.manager_name or "").strip() == "emi_team_manager"
 
+    def _run_on_given_node(self, work_id, node_id, tool_message):
+        """Run this manager ON the node the caller handed it.
+
+        ONE entry, for callers of both kinds, because the manager's job is the same either way:
+
+          - The dayflow dispatch gives it a TOP-LEVEL node — the architect's unit, claimed by
+            the gate, judged by the finalizer, counting toward the goal.
+          - A manager already working gives it a SUB-NODE it just created for a piece of its own
+            work — scratch, run immediately, answering straight back to its caller.
+
+        It deliberately asserts NOTHING about the node's status. The gate's claim protects work
+        handed out across ticks so two runs cannot take the same node; a sub-node is created and
+        executed in one breath with nothing able to race for it, so there is no gap to protect.
+        Requiring `dispatched` here is what made delegation refuse the very node it had created.
+
+        Returns the manager's ToolResult verbatim. It does NOT record the result — the caller
+        records, the same as for every other tool. work_objects imports stay lazy and guarded:
+        the dependency is one-way, work_objects -> app.
+        """
+        from work_objects.runtime import reset_work_context, set_work_context
+        from work_objects.runtime_setup import ensure_manager_services
+        from work_objects.work_tools import register_work_tools
+        from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+
+        ensure_manager_services()
+        DI.manager_registry.preload_all()
+        register_work_tools(DI.tool_registry)
+
+        store = get_dayflow_work_store()
+        node = store.load(work_id).nodes[node_id]
+
+        # The manager's own `node_input` config decides how the node is handed over — no
+        # manager-name branching:
+        #   "task"   -> the node's content as the task (+ its dependencies' results as information)
+        #   "render" -> the manager's render node loads the graph projection; the message still
+        #               carries the node's real goal so a degraded projection cannot make the
+        #               worker invent a task (the 06-23 contamination).
+        config = DI.manager_registry.get(self.manager_name) or {}
+        node_input = config.get("node_input", "render")
+
+        token = set_work_context(store, work_id, node_id, actor=self.manager_name)
+        try:
+            if node_input == "task":
+                from work_objects.discharge import _render_dependencies
+                return self.invoke_on(
+                    task=(node.content or node.title),
+                    information=_render_dependencies(store.load(work_id), node_id),
+                    scope_context=getattr(tool_message, "scope_context", None),
+                )
+            goal_txt = (node.content or node.title or "").strip()
+            lead = "You have been given this node to work on. Try to complete the task in the node."
+            return self.invoke_on(
+                task=(f"{lead} {goal_txt}" if goal_txt else lead),
+                information="",
+                scope_context=getattr(tool_message, "scope_context", None),
+            )
+        finally:
+            reset_work_context(token)
+
     def _run_on_child_node(self, task, information, tool_message):
         """Node-handoff: a node-aware manager called inside a WorkObject context runs ON a fresh child
         node minted under the caller's current node — it gets the whole graph as context and writes its
@@ -50,7 +109,6 @@ class ManagerInterface:
         is one-way, work_objects -> app). Outside a work run this is dead weight that returns None."""
         try:
             from work_objects.runtime import get_work_context
-            from work_objects.discharge import discharge_node
             from work_objects.model import new_id
         except Exception:
             return None
@@ -74,16 +132,21 @@ class ManagerInterface:
             "title": task_text[:80], "content": task_text, "owner_agent": self.manager_name,
             "satisfied_when_kind": "tool_success",
         }, actor=ctx.actor)
-        # discharge_node sets the work context to the child, invokes the manager, persists its result
-        # onto the node, closes it, restores the caller's context, and RETURNS the manager's ToolResult
-        # verbatim — so calling a node-manager is identical to calling any manager. Scope is the calling
-        # message's (already ScopeAdapter-narrowed) scope: the delegation inherits the caller's
-        # authority, never a re-minted one. The owning session (if any) carries onto the child.
-        parent_node = ctx.store.load(ctx.work_id).nodes.get(ctx.node_id)
-        parent_session = (parent_node.payload.get("session_id") if parent_node else None)
-        result = discharge_node(ctx.store, ctx.work_id, child_id, manager_name=self.manager_name,
-                                scope_context=tool_message.scope_context,
-                                session_id=parent_session)
+        # The child is handed over through the SAME entry the dispatch uses — the manager's job is
+        # identical either way, and the only difference is who decided the node exists.
+        #
+        # It used to go through discharge_node, which refuses any node that is not already
+        # `dispatched`. Nothing claims a child: it is created and run in one breath with nothing
+        # able to race it. So every delegation raised on the node it had just created, from the day
+        # that assertion landed (2026-08-04) — one node-handoff has succeeded since, in June.
+        result = self._run_on_given_node(ctx.work_id, child_id, tool_message)
+
+        # The sub-node is the manager's scratch, but its outcome is PROVENANCE: recorded on the
+        # child so a later pass reads what was already tried instead of redoing it.
+        from work_objects.result_recorder import record_tool_result
+        record_tool_result(ctx.store, ctx.work_id, child_id, result,
+                           actor=self.manager_name,
+                           evidence_title=f"{self.manager_name} result")
         child = ctx.store.load(ctx.work_id).nodes.get(child_id)
         status = child.status if child else "unknown"
         logger.info("[node-handoff] %s ran on child node %s -> %s", self.manager_name, child_id, status)
@@ -98,16 +161,26 @@ class ManagerInterface:
         )
 
     def execute(self, tool_message: ToolMessage) -> ToolResult:
+        """The TOOL entry point: unpack the tool call, then make the manager call."""
         tool_data = tool_message.tool_data or {}
         args = tool_data.get('arguments', {}) if isinstance(tool_data.get('arguments'), dict) else {}
         task = args.get('task')
         information = args.get('information')
         data = tool_data.get('data') if isinstance(tool_data.get('data'), dict) else {}
 
-        # Node-handoff seam: a node-aware manager called inside an active WorkObject context runs ON a
-        # fresh child node (it edits the graph), not as an ephemeral sub-manager. Generic — keyed on the
-        # manager's `node_aware` config (no manager names here), inert outside a work context.
+        # Node seams, keyed on the manager's `node_aware` config (no manager names here) and
+        # inert for an ordinary manager:
+        #   - the caller named a node -> run ON it. The caller decided that node exists: the
+        #     dispatch gate for a top-level unit, a working manager for a sub-node of its own.
+        #   - inside an active work context with no node named -> the legacy path, which mints
+        #     a child for itself out of the caller's context. Dormant since 2026-06 and due to
+        #     go: creating the node is the CALLER's job, and `work_add_subtask` is how.
+        # Anything else is an ephemeral sub-manager call, unchanged.
         if (DI.manager_registry.get(self.manager_name) or {}).get("node_aware"):
+            work_id = str(args.get("work_id") or "").strip()
+            node_id = str(args.get("node_id") or "").strip()
+            if work_id and node_id:
+                return self._run_on_given_node(work_id, node_id, tool_message)
             handoff = self._run_on_child_node(task, information, tool_message)
             if handoff is not None:
                 return handoff
@@ -116,8 +189,35 @@ class ManagerInterface:
         if isinstance(task_file, str) and task_file.strip():
             data = dict(data)
             data["task_file"] = task_file.strip()
-        request_id = tool_message.request_id
-        parent_scope = getattr(tool_message, "scope_context", None)
+
+        return self.invoke_on(
+            task=task,
+            information=information,
+            scope_context=getattr(tool_message, "scope_context", None),
+            data=data,
+            content=(tool_message.content or args.get('question')),
+            log_request_id=tool_message.request_id,
+            has_task_file=bool(isinstance(task_file, str) and task_file.strip()),
+        )
+
+    def invoke_on(self, *, task, information, scope_context, data=None, content=None,
+                  log_request_id=None, has_task_file: bool = False) -> ToolResult:
+        """THE manager call, and nothing else: the sub-manager scope seam, the standard
+        ``task_request`` message shape, the invoke, and a structured tool error on failure.
+        Returns the manager's ToolResult verbatim.
+
+        It deliberately knows nothing about why it was called or what the result MEANS —
+        that belongs to the caller. ``execute`` is this plus the tool-call plumbing
+        (argument extraction + the node handoff); the dayflow work dispatcher
+        (``work_objects.discharge``) calls in here directly because it already owns the node
+        it is running. Both therefore get the same scope construction, the same message
+        shape, and the same error contract — instead of the dispatcher hand-rolling its own
+        ``create_manager`` + ``invoke`` and bypassing the scope seam entirely.
+
+        ``task`` wins over ``content``; ``content`` is what the tool path passes when a
+        caller phrased the request as raw content or a ``question`` argument.
+        """
+        data = data if isinstance(data, dict) else {}
         # Route through the scope factory seam (SCOPE_AUDIT.md Step 1).
         # Today this returns parent_scope verbatim; Step 5 will replace this
         # passthrough with the authority-cap + local-tools construction in
@@ -125,14 +225,15 @@ class ManagerInterface:
         # _apply_manager_narrowing on the receiving side — that's where the
         # May 5 fix lives and where Step 5's logic will eventually move.
         inherited_scope = _scope_factory.for_sub_manager(
-            parent_scope=parent_scope,
+            parent_scope=scope_context,
             child_manager_name=self.manager_name,
         )
+        request_id = log_request_id
         if self._should_trace_emi_ingress():
             logger.info(
                 "[emi_team ingress] execute start request_id=%s has_task_file=%s has_inherited_scope=%s data_keys=%s",
                 request_id,
-                bool(isinstance(task_file, str) and task_file.strip()),
+                has_task_file,
                 bool(inherited_scope),
                 sorted(list(data.keys())) if isinstance(data, dict) else [],
             )
@@ -147,17 +248,8 @@ class ManagerInterface:
             logger.debug("manager creation exception details", exc_info=True)
             raise RuntimeError(f"Failed to create a manager for {self.manager_name}: {e}")
 
-        manager_content = None
-        if task:
-            manager_content = task
-        elif tool_message.content:
-            manager_content = tool_message.content
-        elif tool_message.tool_data.get('arguments', {}).get('question'):
-            manager_content = tool_message.tool_data.get('arguments', {}).get('question')
-        elif information:
-            manager_content = information
-        else:
-            manager_content = f"Process request for {self.manager_name}"
+        manager_content = (task or content or information
+                           or f"Process request for {self.manager_name}")
 
         manager_message = Message(
             event_topic="task_request",

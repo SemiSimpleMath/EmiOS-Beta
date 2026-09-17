@@ -9,15 +9,13 @@ llm_params:
 allowed_tools: []
 except_tools: []
 allowed_nodes: []
-entity_scan_keys: [planner_summary, planned_tasks, active_dayflow_items]
+entity_scan_keys: [planner_summary]
 entity_card_level: 0
 
 user_context_items:
   - date_time
   - day_of_week
-  - planned_tasks
-  - active_plan_synopses
-  - active_dayflow_items
+  - node_status_legend
   - ready_work_nodes
   - waiting_work_nodes
   - work_wait_intake

@@ -1,0 +1,65 @@
+{
+  "name": "work_emi_team_manager",
+  "description": "The work team: a group of agents that carries out a piece of work end to end and reports what it actually did. Give it the whole goal in detail — it plans its own steps, uses the tools it needs, and writes its findings back as it goes. Use it for anything that DOES work: research, drafting, gathering, checking, creating a record, sending something through a channel. Anything whose point is to reach the user and wait for their answer is a question, not work.",
+  "inputs": [
+    {
+      "name": "task",
+      "type": "string",
+      "required": true,
+      "description": "the whole goal, in detail"
+    },
+    {
+      "name": "information",
+      "type": "string",
+      "required": true,
+      "description": "supporting context (names, dates, prior results) or ''"
+    },
+    {
+      "name": "work_id",
+      "type": "string",
+      "required": false,
+      "description": "When the caller has already claimed a work-object node for this call, its work object id. The team then runs ON that node instead of as a one-shot."
+    },
+    {
+      "name": "node_id",
+      "type": "string",
+      "required": false,
+      "description": "The claimed node's id, paired with work_id."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "Arguments to this tool are:\narguments: task, information\n\ntask: str — the whole goal, in detail and in the caller's own words. The team plans its own steps, so do not decompose it; do not change its meaning. Copy the wording verbatim where you can.\ninformation: str — supporting context the team would otherwise have to rediscover (names, dates, identifiers, results already gathered), or ''.",
+  "metadata": {
+    "min_authority": 90,
+    "approval_min_authority": 90,
+    "domain": "workflow",
+    "actions": [
+      "orchestrate",
+      "execute"
+    ],
+    "selectors": [
+      "work_object",
+      "node"
+    ],
+    "risk_level": "medium",
+    "side_effects": "external_action",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "medium",
+    "latency_class": "slow",
+    "front_door": true,
+    "room_visibility_default": "show",
+    "approval_required": false
+  }
+}

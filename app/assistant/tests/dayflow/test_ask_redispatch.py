@@ -1,10 +1,11 @@
-"""Ask (user_reply) lifecycle — an ask is a TOOL CALL whose result is the user's reply.
+"""Ask (user_reply) lifecycle — an ask is a TOOL CALL whose result is the user's response.
 
-Surfaced ask = `dispatched + wake_kind=user_reply` (in flight; no re-ask timer). It ends by
-reply/dismissal (materializer -> done), ticket timeout (sweeper -> failed, work_repair
-adjudicates), or the work object closing (cascade). A repair-escalated ask sits
-`proposed + user_reply` with no wake_at and promotes for its first surface; the state_mover
-may HOLD a pre-surface ask (parks `waiting`, keeps user_reply so a late reply still matches).
+Surfaced ask = `dispatched` (in flight; no re-ask timer). It ends by the user's response or by the
+ticket's own timeout — both are ToolResults the session records — or by the work object closing
+(cascade). A repair-escalated
+ask sits `proposed + user_reply` with no wake_at and promotes for its first surface; the
+state_mover may HOLD a pre-surface ask (parks `waiting`, keeps user_reply so a late
+response still matches).
 
 History: asks used to park `waiting + wake_at=<re-ask time>` and re-ticket hourly — the
 2026-07-01 timesheets ask parked forever when promotion paths excluded user_reply, and the
@@ -61,20 +62,6 @@ def _run_promote(bb=None):
                                  agent_registry={}, tool_registry={})
     node.action_handler(message=None)
     return node
-
-
-class FakeTicket:
-    def __init__(self, work_node_ref, user_text):
-        self.trigger_context = {"work_node": work_node_ref}
-        self.user_text = user_text
-
-
-class FakeTicketManager:
-    def __init__(self, tickets):
-        self._tickets = tickets
-
-    def get_tickets(self, **kwargs):
-        return self._tickets
 
 
 class TestAskPromotion:
@@ -157,25 +144,40 @@ class TestAskReplyAndListing:
         items = bb.get_state_value("actionable_items", [])
         assert any(i["item_id"] == f"{wid}::ask1" for i in items)
 
-    def test_reply_completes_inflight_ask(self, monkeypatch):
-        """A reply to an in-flight (dispatched) ask IS its result: evidence + done, no re-listing."""
+    def test_response_completes_inflight_ask(self):
+        """A response to an in-flight ask IS its result: evidence + done, no re-listing.
+
+        Recorded by the same recorder a manager's result goes through — the ask lane has no
+        landing path of its own any more."""
+        from app.assistant.lib.tools.create_dayflow_ticket.create_dayflow_ticket import (
+            format_response_result,
+        )
+        from app.assistant.utils.pydantic_classes import ToolResult
+        from work_objects.result_recorder import record_tool_result
         store = _store()
         wid, gid = _mk_wo(store)
         _inflight_ask(store, wid, gid, node_id="ask1")
 
-        import app.assistant.ticket_manager as tm_mod
-        monkeypatch.setattr(tm_mod, "get_ticket_manager",
-                            lambda: FakeTicketManager([FakeTicket(f"{wid}::ask1", "Sounds good, done!")]))
+        result = ToolResult(
+            result_type="ticket_response",
+            content=format_response_result(answer="Sounds good, done!",
+                                           question="What do you say?"),
+            data={"action": "willdo", "user_text": "Sounds good, done!"},
+        )
+        assert record_tool_result(store, wid, "ask1", result, actor="ask",
+                                  evidence_title="user response") is True
+
+        wo = store.load(wid)
+        assert wo.nodes["ask1"].status == "done"      # completed, awaiting the finalizer's judgment
+        replies = [n for n in wo.nodes.values()
+                   if n.parent_id == "ask1" and n.type == "evidence"]
+        assert replies and "Sounds good" in replies[0].content
+        # The question rides along, or the answer cannot be read.
+        assert "What do you say?" in replies[0].content
 
         bb = FakeBlackboard()
         mat = WorkNodeMaterializerNode(name="work_node_materializer_node", blackboard=bb,
                                        agent_registry={}, tool_registry={})
         mat.action_handler(message=None)
-
-        wo = store.load(wid)
-        assert wo.nodes["ask1"].status == "done"          # completed, awaiting the finalizer's judgment
-        replies = [n for n in wo.nodes.values()
-                   if n.parent_id == "ask1" and n.type == "evidence"]
-        assert replies and "Sounds good" in replies[0].content
         items = bb.get_state_value("actionable_items", [])
         assert not any(i["item_id"] == f"{wid}::ask1" for i in items)

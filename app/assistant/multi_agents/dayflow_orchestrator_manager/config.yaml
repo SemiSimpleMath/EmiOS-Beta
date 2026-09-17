@@ -28,18 +28,12 @@ agents:
 control_nodes:
   - name: tick_router_node
     class: TickRouterNode
-  - name: fast_tick_promoter_node
-    class: FastTickPromoterNode
   - name: intake_triage_prep_node
     class: IntakeTriagePrepNode
   - name: state_mover_prep_node
     class: StateMoverPrepNode
-  - name: state_transition_guard_node
-    class: StateTransitionGuardNode
   - name: triage_spawn_guard_node
     class: TriageSpawnGuardNode
-  - name: view_materializer_node
-    class: ViewMaterializerNode
   - name: triage_persist_node
     class: TriagePersistNode
   - name: context_enricher_prep_node
@@ -54,14 +48,18 @@ control_nodes:
     class: StrategicPlannerWoPersistNode
   - name: work_architect_node
     class: WorkArchitectNode
-  - name: work_repair_node
-    class: WorkRepairNode
   - name: work_finalizer_node
     class: WorkFinalizerNode
+  - name: work_node_wake_router_node
+    class: WorkNodeWakeRouterNode
   - name: work_node_materializer_node
     class: WorkNodeMaterializerNode
   - name: work_node_dispatch_node
     class: WorkNodeDispatchNode
+  - name: dayflow_switchboard_arguments_node
+    class: DayflowSwitchboardArgumentsNode
+  - name: dayflow_tool_caller
+    class: DayflowToolCaller
   - name: action_selector_router_node
     class: ActionSelectorRouterNode
   - name: plan_mode_final_router_node
@@ -92,7 +90,7 @@ tools:
     # --- Direct action tools the switchboard/orchestrator calls itself ---
     - one_shot_tool_runner
     - create_dayflow_ticket
-    - run_work_node
+    - work_emi_team_manager
     - run_task
     - find_tool
     - ask_user
@@ -137,38 +135,69 @@ flow_config:
   state_map:
     "room::delegator": "tick_router_node"
     "tick_router_node": "intake_triage_prep_node"
-    "fast_tick_promoter_node": "view_materializer_node"
     "intake_triage_prep_node": "dayflow_orchestrator::intake_triage"
     "dayflow_orchestrator::intake_triage": "triage_spawn_guard_node"
     "triage_spawn_guard_node": "triage_persist_node"
     "triage_persist_node": "context_enricher_prep_node"
     "context_enricher_prep_node": "context_enricher_persist_node"
-    # --- WORK-OBJECT planner path (live): steward EVALUATES → finalizer reconciles completed nodes →
-    #     architect (re)plans → repair adjudicates failures → state_mover promotes → the materializer/
-    #     switchboard dispatch ONE node per tick (a job thread runs it; the work-progress follow-up
-    #     brings the next tick while more nodes are ready). ---
+    # --- WORK-OBJECT planner path (live): steward EVALUATES → architect (re)plans → repair
+    #     adjudicates failures → state_mover promotes → the materializer/switchboard pick ONE
+    #     node, and the tail of this map calls a tool for it and judges the result. The call
+    #     BLOCKS this run; concurrency is another orchestrator instance, not a thread here. ---
     "context_enricher_persist_node": "strategic_planner_wo_prep_node"
     "strategic_planner_wo_prep_node": "dayflow_orchestrator::strategic_planner_wo"
     "dayflow_orchestrator::strategic_planner_wo": "strategic_planner_wo_persist_node"
-    "strategic_planner_wo_persist_node": "work_finalizer_node"
-    "work_finalizer_node": "work_architect_node"
-    "work_architect_node": "work_repair_node"
-    "work_repair_node": "state_mover_prep_node"
+    # The finalizer is NOT here any more — it is part of the tool return path at the tail
+    # of this map, so a result is judged in the same pass that produced it rather than a
+    # tick later. The architect therefore plans against nodes the finalizer has already
+    # closed, instead of against last pass's unjudged results.
+    "strategic_planner_wo_persist_node": "work_architect_node"
+    # work_repair_node was here, and is retired (2026-09-16). Its three dispositions each
+    # belong to an agent that can see more than one failed step:
+    #   retry    -> the finalizer's `replan`, which must NAME what will be different (an
+    #               unchanged retry reproduces its error — 22 identical attempts in two hours)
+    #   escalate -> asking the user is just a node with a communicate goal; the architect plans it
+    #   abandon  -> the steward's, which sees every work object every run
+    # A failure reached outside a dispatch (sweeper, claim error) is not stranded either: it
+    # sits `failed`, the steward sees it in the projection and flags the work object into
+    # replan_work_ids, and the architect re-plans it. Keeping repair alongside the finalizer
+    # meant two agents judging the same failure, and repair could answer `abandon_goal` on a
+    # node the finalizer had deliberately left to the steward.
+    # Its node + agent files remain on disk, unwired.
+    "work_architect_node": "state_mover_prep_node"
     "state_mover_prep_node": "dayflow_orchestrator::state_mover"
-    "dayflow_orchestrator::state_mover": "state_transition_guard_node"
-    "state_transition_guard_node": "state_mover_persist_node"
-    "state_mover_persist_node": "work_node_materializer_node"
+    "dayflow_orchestrator::state_mover": "state_mover_persist_node"
+    # A targeted time-wake pass rejoins here: the state_mover has judged the moment, and
+    # work_node_wake_router_node either dispatches that one node or ends the pass. On a normal
+    # tick it falls through to the materializer.
+    "state_mover_persist_node": "work_node_wake_router_node"
+    "work_node_wake_router_node": "work_node_materializer_node"
     # relevance_cleaner was retired at the work-object cutover (it cleaned ITEMS; stale items now age
     # out via the freshness windows + tick sweeps). Its agent/node files remain under
     # agents/dayflow_orchestrator/relevance_cleaner + control_nodes/relevance_cleaner_*.py, unwired.
-    "view_materializer_node": "dayflow_orchestrator::action_selector"
     "work_node_materializer_node": "dayflow_orchestrator::action_selector"
     "dayflow_orchestrator::action_selector": "action_selector_router_node"
     "action_selector_router_node": "dayflow_orchestrator::switchboard"
     "dayflow_orchestrator::plan_mode": "plan_mode_final_router_node"
     "plan_mode_final_router_node": "final_answer_node"
+    # The dispatch is a tool call, the same three stages every other room runs: the
+    # switchboard names a tool, the arguments node builds that tool's arguments from the
+    # node, the tool caller executes it (blocking, in this room) and records the
+    # ToolResult on the node. ONE path — a claim that cannot be made raises rather than
+    # routing around itself.
     "dayflow_orchestrator::switchboard": "work_node_dispatch_node"
-    "work_node_dispatch_node": "post_room_finalize_node"
+    "work_node_dispatch_node": "dayflow_switchboard_arguments_node"
+    "dayflow_switchboard_arguments_node": "dayflow_tool_caller"
+    # THE TOOL RETURN PATH. The call has come back and its result is on the node, so it is
+    # judged right here: the finalizer rules on what just landed and writes that verdict to
+    # the graph, and only then does the room finish. A pass that dispatched nothing routes
+    # straight to the finalizer too (work_node_dispatch_node._end_pass), so a result left
+    # unjudged can never wait on some later pass happening to dispatch something.
+    # (work_finalizer_apply_node was merged into work_finalizer_node on 2026-09-16: the agent
+    # call happens in that node, so its schema was already in hand and the blackboard hop to a
+    # second control node carried nothing. work_architect_node has always worked this way.)
+    "dayflow_tool_caller": "work_finalizer_node"
+    "work_finalizer_node": "post_room_finalize_node"
     "post_room_finalize_node": "final_answer_node"
     "final_answer_node": "manager_exit_node"
     "graceful_exit": "graceful_exit_control_node"

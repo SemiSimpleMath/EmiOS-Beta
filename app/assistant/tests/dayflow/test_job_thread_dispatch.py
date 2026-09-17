@@ -1,7 +1,9 @@
 """One thread per open task + tick-side supervision.
 
-Worker dispatch claims the node synchronously (-> dispatched) and runs the worker on its own job
-thread; the dispatching pass returns immediately. sweep_stuck_work_nodes supervises the in-flight
+The dispatch GATE (work_node_dispatch_node) claims the node (-> dispatched) before any tool is
+called; open_session then runs the tool on its own job thread and the dispatching pass returns
+immediately. Tests that call open_session directly must claim first, exactly as the gate does —
+open_session refuses an unclaimed node rather than claiming it a second way. sweep_stuck_work_nodes supervises the in-flight
 jobs each tick: ORPHANED (dispatched, no live thread — restart/crash) and FROZEN (thread alive but
 no subtree/job activity past the timeout) both -> failed, for work_repair to adjudicate. The
 transition machine fences zombie writes (failed -> done is illegal).
@@ -39,6 +41,20 @@ def _sub(store, wid, gid, node_id, status="actionable"):
     return node_id
 
 
+def _claim(store, wid, node_id):
+    """What work_node_dispatch_node does before calling any tool."""
+    store.apply("set_status", {"work_id": wid, "node_id": node_id, "status": "dispatched"},
+                actor="dispatch_gate")
+
+
+def _long_after():
+    """A moment past the longest a call may legitimately block, so the sweeper judges a
+    node quiet. Moving the CLOCK rather than backdating rows keeps the test honest about
+    what the sweeper actually reads."""
+    from app.assistant.dayflow_orchestrator.dispatch_sweeper import _WORK_NODE_FROZEN_TIMEOUT_S
+    return datetime.now(timezone.utc) + timedelta(seconds=_WORK_NODE_FROZEN_TIMEOUT_S + 60)
+
+
 def _wait_for(predicate, timeout_s=5.0):
     deadline = time.time() + timeout_s
     while time.time() < deadline:
@@ -68,8 +84,9 @@ class TestJobThread:
         import work_objects.discharge as wr
         monkeypatch.setattr(wr, "discharge_node", slow_work_on)
 
+        _claim(store, wid, "n1")
         ws.open_session(store, wid, "n1", "run_work_node")
-        # Returned immediately: node claimed, job registered and alive, worker still running.
+        # Returned immediately: job registered and alive, worker still running.
         assert store.load(wid).nodes["n1"].status == "dispatched"
         assert ws.session_alive(wid, "n1") is True
 
@@ -88,20 +105,35 @@ class TestJobThread:
             raise RuntimeError("worker exploded")
         monkeypatch.setattr(wr, "discharge_node", boom)
 
+        _claim(store, wid, "n1")
         ws.open_session(store, wid, "n1", "run_work_node")
         assert _wait_for(lambda: store.load(wid).nodes["n1"].status == "failed")
 
 
 class TestSupervision:
 
-    def test_orphaned_dispatched_node_is_failed(self):
+    def test_a_node_that_has_gone_quiet_is_failed(self):
+        """The call that owned it stopped existing — the run crashed, or it wedged. Both
+        look identical from the graph (nothing written), and both want the same remedy."""
+        store = _store()
+        wid, gid = _mk_wo(store)
+        _sub(store, wid, gid, "n1", status="actionable")
+        store.apply("set_status", {"work_id": wid, "node_id": "n1", "status": "dispatched"})
+
+        sweep_stuck_work_nodes(now_utc=_long_after())
+        assert store.load(wid).nodes["n1"].status == "failed"
+
+    def test_a_node_still_inside_its_call_is_left_alone(self):
+        """THE invariant that protects a live question. An ask blocks for the whole window
+        it was given and writes nothing meanwhile; failing it would take a question away
+        from the user while they are still looking at it."""
         store = _store()
         wid, gid = _mk_wo(store)
         _sub(store, wid, gid, "n1", status="actionable")
         store.apply("set_status", {"work_id": wid, "node_id": "n1", "status": "dispatched"})
 
         sweep_stuck_work_nodes()
-        assert store.load(wid).nodes["n1"].status == "failed"
+        assert store.load(wid).nodes["n1"].status == "dispatched"
 
     def test_live_fresh_job_is_left_alone(self):
         store = _store()
@@ -120,12 +152,16 @@ class TestSupervision:
                 ws._live_sessions.pop(sid, None)
 
     def test_frozen_job_is_failed_and_zombie_write_is_fenced(self):
+        """Idle past the frozen timeout, which is derived from the longest legitimate tool call
+        (see dispatch_sweeper) — so this backdates relative to that rather than to a literal, and
+        stays correct if the ask window moves."""
+        from app.assistant.dayflow_orchestrator.dispatch_sweeper import _WORK_NODE_FROZEN_TIMEOUT_S
         store = _store()
         wid, gid = _mk_wo(store)
         _sub(store, wid, gid, "n1", status="actionable")
         store.apply("set_status", {"work_id": wid, "node_id": "n1", "status": "dispatched"})
         sid = ws.session_id_for(wid, "n1")
-        old = datetime.now(timezone.utc) - timedelta(minutes=30)
+        old = datetime.now(timezone.utc) - timedelta(seconds=_WORK_NODE_FROZEN_TIMEOUT_S + 600)
         with ws._sessions_lock:
             ws._live_sessions[sid] = {"thread": SimpleNamespace(is_alive=lambda: True), "started_at": old}
         # Backdate the whole subtree so "no activity" holds.
@@ -184,84 +220,79 @@ class TestSupervision:
             with ws._sessions_lock:
                 ws._live_sessions.pop(sid, None)
 
-    def test_subtree_nodes_with_dead_session_are_failed(self):
-        # No live session anywhere (restart/crash) -> root AND stamped sub-steps all
-        # orphan-fail for work_repair.
+    def test_a_whole_quiet_subtree_is_failed(self):
+        """A run that dies strands everything it grew, not just the node it was given."""
         store = _store()
         wid, gid = _mk_wo(store)
         _sub(store, wid, gid, "n1", status="actionable")
-        sid = ws.session_id_for(wid, "n1")
-        store.apply("set_status", {"work_id": wid, "node_id": "n1",
-                                   "status": "dispatched", "session_id": sid})
+        store.apply("set_status", {"work_id": wid, "node_id": "n1", "status": "dispatched"})
         store.apply("add_node", {"work_id": wid, "id": "n1a", "type": "subtask",
                                  "parent_id": "n1", "title": "worker sub-step"})
         store.apply("set_status", {"work_id": wid, "node_id": "n1a", "status": "dispatched"})
 
-        sweep_stuck_work_nodes()
+        sweep_stuck_work_nodes(now_utc=_long_after())
         wo = store.load(wid)
         assert wo.nodes["n1"].status == "failed"
         assert wo.nodes["n1a"].status == "failed"
 
-    def test_zombie_thread_does_not_shield_subtree_after_root_failed(self):
-        # A frozen root was failed by an earlier pass but its hung thread is still
-        # alive. Coverage requires the session's ROOT to still be dispatched — the
-        # zombie must not shield the abandoned subtree forever.
+    def test_a_quiet_sub_step_is_failed_even_after_its_root_already_was(self):
+        """Each dispatched node is judged on its own quiet, so an abandoned sub-step
+        cannot be left in flight forever by whatever happened to its parent."""
         store = _store()
         wid, gid = _mk_wo(store)
         _sub(store, wid, gid, "n1", status="actionable")
-        sid = ws.session_id_for(wid, "n1")
-        store.apply("set_status", {"work_id": wid, "node_id": "n1",
-                                   "status": "dispatched", "session_id": sid})
+        store.apply("set_status", {"work_id": wid, "node_id": "n1", "status": "dispatched"})
         store.apply("add_node", {"work_id": wid, "id": "n1a", "type": "subtask",
                                  "parent_id": "n1", "title": "worker sub-step"})
         store.apply("set_status", {"work_id": wid, "node_id": "n1a", "status": "dispatched"})
         store.apply("set_status", {"work_id": wid, "node_id": "n1", "status": "failed"})
-        with ws._sessions_lock:
-            ws._live_sessions[sid] = {"thread": SimpleNamespace(is_alive=lambda: True),
-                                      "started_at": datetime.now(timezone.utc)}
-        try:
-            sweep_stuck_work_nodes()
-            assert store.load(wid).nodes["n1a"].status == "failed"
-        finally:
-            with ws._sessions_lock:
-                ws._live_sessions.pop(sid, None)
+
+        sweep_stuck_work_nodes(now_utc=_long_after())
+        assert store.load(wid).nodes["n1a"].status == "failed"
 
 
 class TestOneDispatchPerTick:
 
-    def test_dispatch_clears_acted_on_and_signals_more_ready(self, monkeypatch):
-        dispatched = []
+    def test_dispatch_claims_clears_acted_on_and_signals_more_ready(self, monkeypatch):
+        store = _store()
+        wid, gid = _mk_wo(store)
+        _sub(store, wid, gid, "n1")
+        _sub(store, wid, gid, "n2")
         signals = []
-        monkeypatch.setattr(nd, "dispatch_node", lambda store, w, n, d: dispatched.append((w, n, d)))
         monkeypatch.setattr(nd, "signal_work_progress", lambda r: signals.append(r))
 
         bb = FakeBlackboard({
-            "acted_on_item_ids": ["work_a::n1"],
+            "acted_on_item_ids": [f"{wid}::n1"],
             "delegate_to": "run_work_node",
             "actionable_items": [
-                {"item_id": "work_a::n1"},
-                {"item_id": "work_b::n2"},
+                {"item_id": f"{wid}::n1"},
+                {"item_id": f"{wid}::n2"},
             ],
         })
         node = WorkNodeDispatchNode(name="work_node_dispatch_node", blackboard=bb,
                                     agent_registry={}, tool_registry={})
         node.action_handler(message=None)
 
-        assert dispatched == [("work_a", "n1", "run_work_node")]
+        # The gate claimed it BEFORE the tool is called — that is what makes it invisible to
+        # every other consumer for the rest of the call. The CALL is the next two stages.
+        assert store.load(wid).nodes["n1"].status == "dispatched"
+        assert bb.get_state_value("work_node_ref") == f"{wid}::n1"
         assert bb.get_state_value("acted_on_item_ids") == []
-        # No loop-back: the state_map routes onward to finalize.
+        # Falls through: the state_map runs the arguments node, then the tool caller.
         assert bb.get_state_value("next_agent") is None
         assert signals == ["more_ready:1"]
 
     def test_no_signal_when_nothing_else_ready(self, monkeypatch):
+        store = _store()
+        wid, gid = _mk_wo(store)
+        _sub(store, wid, gid, "n1")
         signals = []
-        monkeypatch.setattr(nd, "dispatch_node", lambda *a: None)
         monkeypatch.setattr(nd, "signal_work_progress", lambda r: signals.append(r))
 
         bb = FakeBlackboard({
-            "acted_on_item_ids": ["work_a::n1"],
+            "acted_on_item_ids": [f"{wid}::n1"],
             "delegate_to": "create_dayflow_ticket",
-            "actionable_items": [{"item_id": "work_a::n1"}],
+            "actionable_items": [{"item_id": f"{wid}::n1"}],
         })
         WorkNodeDispatchNode(name="work_node_dispatch_node", blackboard=bb,
                              agent_registry={}, tool_registry={}).action_handler(message=None)
@@ -279,73 +310,152 @@ class TestRefCanonicalization:
                                     agent_registry={}, tool_registry={})
 
     def test_glued_label_prefix_is_canonicalized(self, monkeypatch):
-        dispatched = []
-        monkeypatch.setattr(nd, "dispatch_node", lambda store, w, n, d: dispatched.append((w, n)))
+        store = _store()
+        wid, gid = _mk_wo(store)
+        _sub(store, wid, gid, "deliver_x--2a403d")
         monkeypatch.setattr(nd, "signal_work_progress", lambda r: None)
         bb = FakeBlackboard({
-            "acted_on_item_ids": ["task:work_2a403d23f195::deliver_x--2a403d"],
+            "acted_on_item_ids": [f"task:{wid}::deliver_x--2a403d"],
             "delegate_to": "create_dayflow_ticket",
-            "actionable_items": [{"item_id": "work_2a403d23f195::deliver_x--2a403d"}],
+            "actionable_items": [{"item_id": f"{wid}::deliver_x--2a403d"}],
         })
         self._node(bb).action_handler(message=None)
-        assert dispatched == [("work_2a403d23f195", "deliver_x--2a403d")]
+        # The CANONICAL id is what the following stages see, never the transcription.
+        assert bb.get_state_value("work_node_ref") == f"{wid}::deliver_x--2a403d"
+        assert store.load(wid).nodes["deliver_x--2a403d"].status == "dispatched"
 
     def test_exact_match_passes_through(self, monkeypatch):
-        dispatched = []
-        monkeypatch.setattr(nd, "dispatch_node", lambda store, w, n, d: dispatched.append((w, n)))
+        store = _store()
+        wid, gid = _mk_wo(store)
+        _sub(store, wid, gid, "n1")
+        _sub(store, wid, gid, "n2")
         monkeypatch.setattr(nd, "signal_work_progress", lambda r: None)
         bb = FakeBlackboard({
-            "acted_on_item_ids": ["work_a::n1"],
+            "acted_on_item_ids": [f"{wid}::n1"],
             "delegate_to": "run_work_node",
-            "actionable_items": [{"item_id": "work_a::n1"}, {"item_id": "work_b::n2"}],
+            "actionable_items": [{"item_id": f"{wid}::n1"}, {"item_id": f"{wid}::n2"}],
         })
         self._node(bb).action_handler(message=None)
-        assert dispatched == [("work_a", "n1")]
+        assert bb.get_state_value("work_node_ref") == f"{wid}::n1"
+        assert store.load(wid).nodes["n1"].status == "dispatched"
 
     def test_ambiguous_echo_left_unchanged_and_fails_loud(self, monkeypatch):
-        """Two offered ids both contained in the echo -> no unique join; the echo
-        dispatches as-is and the existing loud failure path handles it."""
-        calls = []
-
-        def boom(store, w, n, d):
-            calls.append((w, n))
-            raise KeyError(w)
-
-        monkeypatch.setattr(nd, "dispatch_node", boom)
+        """Two offered ids both contained in the echo -> no unique join; the echo is NOT
+        silently rewritten to either candidate. It fails at the CLAIM (no such node), which
+        now ends the run rather than being absorbed — no tool is ever called with a
+        transcribed id, and neither candidate is touched."""
+        import pytest
+        store = _store()
+        wid, gid = _mk_wo(store)
+        _sub(store, wid, gid, "n1")
+        _sub(store, wid, gid, "n12")
         monkeypatch.setattr(nd, "signal_work_progress", lambda r: None)
         bb = FakeBlackboard({
-            "acted_on_item_ids": ["work_a::n1 and work_a::n12"],
+            "acted_on_item_ids": [f"{wid}::n1 and {wid}::n12"],
             "delegate_to": "run_work_node",
-            "actionable_items": [{"item_id": "work_a::n1"}, {"item_id": "work_a::n12"}],
+            "actionable_items": [{"item_id": f"{wid}::n1"}, {"item_id": f"{wid}::n12"}],
         })
-        self._node(bb).action_handler(message=None)   # must not raise out of the node
-        assert len(calls) == 1
-        # The echo dispatched verbatim (mangled node part) — NOT silently rewritten
-        # to either candidate id.
-        assert calls[0] == ("work_a", "n1 and work_a::n12")
+        with pytest.raises(Exception):
+            self._node(bb).action_handler(message=None)
+        # Neither candidate was touched — no silent rewrite to whichever looked closest.
+        assert store.load(wid).nodes["n1"].status == "actionable"
+        assert store.load(wid).nodes["n12"].status == "actionable"
 
 
 class TestTargetedWakeRouting:
-    """The trigger-unification path: a scheduler time-wake becomes a targeted room
-    invocation (data.triggered_work_node) that tick_router stages straight to the
-    switchboard — same flow, same room, no bespoke wake path."""
+    """A scheduler time-wake becomes a targeted room invocation (data.triggered_work_node) — same
+    room, same dispatch, no bespoke wake path. It routes through the STATE_MOVER first: no
+    re-planning, but the moment is always re-judged, because the world moved since the timer was
+    set. work_node_wake_router_node then dispatches the node, or lets the pass end if it was held."""
 
     def _router(self, bb):
         from app.assistant.control_nodes.tick_router_node import TickRouterNode
         return TickRouterNode(name="tick_router_node", blackboard=bb,
                               agent_registry={}, tool_registry={})
 
-    def test_ready_node_routes_to_switchboard(self):
+    def _wake_router(self, bb):
+        from app.assistant.control_nodes.work_node_wake_router_node import WorkNodeWakeRouterNode
+        return WorkNodeWakeRouterNode(name="work_node_wake_router_node", blackboard=bb,
+                                      agent_registry={}, tool_registry={})
+
+    def test_ready_node_goes_to_the_state_mover_first(self):
         store = _store()
         wid, gid = _mk_wo(store)
         _sub(store, wid, gid, "n1", status="actionable")
         bb = FakeBlackboard({})
         msg = SimpleNamespace(data={"triggered_work_node": f"{wid}::n1", "wake_reason": "t"})
         self._router(bb).action_handler(msg)
+        assert bb.get_state_value("next_agent") == "state_mover_prep_node"
+        assert bb.get_state_value("triggered_work_node") == f"{wid}::n1"
+        assert "step n1" in bb.get_state_value("task")
+
+    def test_a_node_the_state_mover_left_alone_dispatches(self):
+        store = _store()
+        wid, gid = _mk_wo(store)
+        _sub(store, wid, gid, "n1", status="actionable")
+        bb = FakeBlackboard({"triggered_work_node": f"{wid}::n1"})
+        self._wake_router(bb).action_handler(message=None)
         assert bb.get_state_value("next_agent") == "dayflow_orchestrator::switchboard"
         assert bb.get_state_value("acted_on_item_ids") == [f"{wid}::n1"]
         assert bb.get_state_value("actionable_items") == [{"item_id": f"{wid}::n1"}]
-        assert "step n1" in bb.get_state_value("task")
+
+    def test_the_switchboard_is_given_the_node_it_must_route(self):
+        """The switchboard routes on `task`/`information` — its only view of the node.
+
+        This pass skips the materializer -> action_selector -> router chain that fills them on a
+        normal tick, so it has to fill them itself. It did not, and the switchboard was handed an
+        EMPTY task: with nothing but the clock left in its prompt it routed on the clock, answering
+        "UI notification showing the current time" -> create_dayflow_ticket. Every
+        time-waked node went that way. On 2026-09-16 that ticketed "set the AC to 70F" back to the
+        user at 21:00 and "turn off the whole-house lights" at 22:00 — two device actions the user
+        had to answer by hand instead of them simply happening.
+        """
+        store = _store()
+        wid, gid = _mk_wo(store)
+        _sub(store, wid, gid, "n1", status="actionable")
+        store.apply("set_status", {"work_id": wid, "node_id": "n1", "status": "actionable",
+                                   "content": "Turn off all whole-house lights globally."})
+
+        bb = FakeBlackboard({"triggered_work_node": f"{wid}::n1"})
+        self._wake_router(bb).action_handler(message=None)
+
+        task = bb.get_state_value("task") or ""
+        info = bb.get_state_value("information") or ""
+        assert task.strip(), "the switchboard would route on an empty task"
+        assert "lights" in info, "the switchboard must see the node's actual goal"
+
+    def test_a_node_with_no_goal_at_all_is_refused_not_routed(self):
+        """Routing on an empty goal is what broke; guessing at one would hide the next occurrence."""
+        import pytest
+
+        store = _store()
+        wid, gid = _mk_wo(store)
+        store.apply("add_node", {"work_id": wid, "id": "blank", "type": "subtask",
+                                 "parent_id": gid, "title": ""})
+        store.apply("set_status", {"work_id": wid, "node_id": "blank", "status": "actionable"})
+
+        bb = FakeBlackboard({"triggered_work_node": f"{wid}::blank"})
+        with pytest.raises(ValueError, match="neither title nor content"):
+            self._wake_router(bb).action_handler(message=None)
+
+    def test_a_held_node_does_not_fire(self):
+        """The hole this closes: a 10pm reminder used to fire regardless of quiet hours purely
+        because it arrived through the timed door. A HOLD parks it `waiting`, and its
+        reactivate_at re-arms the wake — nothing is lost, it just is not now."""
+        store = _store()
+        wid, gid = _mk_wo(store)
+        _sub(store, wid, gid, "n1", status="actionable")
+        store.apply("set_status", {"work_id": wid, "node_id": "n1", "status": "waiting"})
+        bb = FakeBlackboard({"triggered_work_node": f"{wid}::n1"})
+        self._wake_router(bb).action_handler(message=None)
+        assert bb.get_state_value("next_agent") == "work_finalizer_node"
+        assert not bb.get_state_value("acted_on_item_ids", [])
+
+    def test_a_normal_tick_falls_through_to_the_materializer(self):
+        bb = FakeBlackboard({})
+        self._wake_router(bb).action_handler(message=None)
+        # next_agent untouched -> the state_map's default (the materializer) applies.
+        assert bb.get_state_value("next_agent") is None
 
     def test_stale_wake_exits_cleanly(self):
         store = _store()

@@ -1,5 +1,3 @@
-{%- from "shared/macros/dayflow_items.j2" import task_line, task_block %}
-
 ########## CURRENT STATE ##########
 {%- if resource_afk_statistics_output %}
 **Computer Presence:**
@@ -48,28 +46,6 @@ Snoozed: {% for t in recent_responded_tickets.snoozed %}{{ t.get("title","") }}{
 {%- endif %}
 {%- endif %}
 {%- endif %}
-{%- if planned_tasks %}
-
-##### Planner Tasks
-{%- for t in planned_tasks %}
-- task: {{ t.get("task_id","") }}{% if t.get("plan_id") %} | plan: {{ t.get("plan_id") }}{% endif %}
-
-  {{ t.get("task","") }}{% if t.get("dependencies") %}
-  deps: {{ t.get("dependencies")|join(", ") }}{% endif %}{% if t.get("wait_reason") %}
-  wait: {{ t.get("wait_reason","") }}{% endif %}{% if t.get("reactivate_at") %}
-  reactivate_at: {{ t.get("reactivate_at","") }}{% endif %}{% if t.get("wake_signals") %}
-  wake_signals: {{ t.get("wake_signals")|join(", ") }}{% endif %}
-{%- endfor %}
-{%- endif %}
-{%- if active_plan_synopses %}
-
-##### Active Plans
-{%- for p in active_plan_synopses %}
-- plan: {{ p.get("plan_id","") }}
-  {{ p.get("objective","") }}
-  {{ p.get("synopsis","") }}
-{%- endfor %}
-{%- endif %}
 {% if resource_dayflow_routine %}
 
 ########## ROUTINE (today's cadence) ##########
@@ -77,26 +53,6 @@ Snoozed: {% for t in recent_responded_tickets.snoozed %}{{ t.get("title","") }}{
 {{ resource_dayflow_routine }}
 {% endif %}
 
-########## TRACKED ITEMS ##########
-{%- if active_dayflow_items %}
-{%- set needs_placement = [] %}
-{%- set actionable = [] %}
-{%- set dispatched = [] %}
-{%- set waiting = [] %}
-{%- set completed = [] %}
-{%- for ex in active_dayflow_items %}
-{%- set m = ex.get("metadata", {}) %}
-{%- if m.get("state","") == "important_open" %}{% if needs_placement.append(ex) %}{% endif %}
-{%- elif m.get("state","") == "actionable" %}{% if actionable.append(ex) %}{% endif %}
-{%- elif m.get("state","") == "dispatched" %}{% if dispatched.append(ex) %}{% endif %}
-{%- elif m.get("state","") in ["waiting", "watching"] %}{% if waiting.append(ex) %}{% endif %}
-{%- elif m.get("state","") == "closed" %}{% if completed.append(ex) %}{% endif %}
-{%- endif %}
-{%- endfor %}
-
-{{ task_block(needs_placement, "Needs Placement (decide: actionable, waiting, or watching)") }}
-{{ task_block(waiting, "Waiting Tasks (check if conditions are now met)") }}
-{%- endif %}
 {%- if waiting_work_nodes %}
 
 ########## WORK-OBJECT WAITS (parked on an external event) ##########

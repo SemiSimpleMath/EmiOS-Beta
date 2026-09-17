@@ -27,11 +27,10 @@ agent_runner.py.
 """
 from __future__ import annotations
 
-import uuid
-
 from app.assistant.ServiceLocator.service_locator import DI
+from app.assistant.lib.core_tools.manager_interface.manager_interface import ManagerInterface
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.pydantic_classes import Message, ToolResult
+from app.assistant.utils.pydantic_classes import ToolResult
 
 logger = get_logger(__name__)
 
@@ -69,15 +68,15 @@ def discharge_node(store, work_id: str, node_id: str, *, scope_context,
             "from the caller (room / task run / scenario); this layer never mints a scope.")
     _ensure_registered()
     cur = store.load(work_id).nodes[node_id]
-    # On pickup, flip the node to `dispatched` = in-flight, stamping the owning session when given.
-    if cur.status in {"proposed", "waiting", "actionable"}:
-        claim = {"work_id": work_id, "node_id": node_id, "status": "dispatched"}
-        if session_id:
-            claim["session_id"] = session_id
-        store.apply("set_status", claim, actor="manager")
-    elif session_id and cur.payload.get("session_id") != session_id:
-        # Already claimed by the dispatcher (node_dispatch claims synchronously before the thread
-        # starts) — stamp ownership on the in-flight incarnation.
+    # THE GATE CLAIMS, NOT US. work_node_dispatch_node marks the node `dispatched` before calling
+    # any tool, so by the time we run it is already in flight and every other consumer already sees
+    # that. We only stamp session ownership on it — a graph fact the supervisor reads. A node that
+    # is somehow NOT claimed is a dispatch bug, and it is loud rather than silently re-claimed.
+    if cur.status != "dispatched":
+        raise ValueError(
+            f"discharge_node({work_id}::{node_id}): node is {cur.status!r}, expected 'dispatched' — "
+            f"the dispatch gate claims a node before any tool is called.")
+    if session_id and cur.payload.get("session_id") != session_id:
         store.apply("set_status", {"work_id": work_id, "node_id": node_id,
                                    "status": cur.status, "session_id": session_id}, actor="manager")
     # ONE post-claim snapshot serves the epoch capture and the prompt build.
@@ -94,69 +93,35 @@ def discharge_node(store, work_id: str, node_id: str, *, scope_context,
     config = DI.manager_registry.get(manager_name) or {}
     node_input = config.get("node_input", "render")
     actor = manager_name
-    manager = DI.multi_agent_manager_factory.create_manager(
-        manager_name, name=f"{manager_name}_{uuid.uuid4().hex[:8]}")
+    # THE STANDARD MANAGER-AS-TOOL CALL. This used to hand-roll create_manager +
+    # manager_invoker.invoke with a Message of its own shape, which meant the work lane was
+    # the one caller in the system that skipped ScopeAdapter.for_sub_manager — the single
+    # seam where a sub-manager's scope is constructed — and turned a manager failure into a
+    # raised exception instead of the structured tool error every other caller receives.
+    # ManagerInterface.invoke_on is that call, shared: same scope construction, same
+    # task_request message, same error contract.
+    iface = ManagerInterface(manager_name)
     token = set_work_context(store, work_id, node_id, actor=actor)
     try:
         if node_input == "task":
-            msg = Message(scope_context=scope_context, task=(cur.content or cur.title),
-                          information=_render_dependencies(snapshot, node_id),
-                          request_id=f"work::{uuid.uuid4()}")
+            result = iface.invoke_on(task=(cur.content or cur.title),
+                                     information=_render_dependencies(snapshot, node_id),
+                                     scope_context=scope_context)
         else:
             goal_txt = (cur.content or cur.title or "").strip()
-            task = f"Advance the node you own: {goal_txt}" if goal_txt else "Advance the node you own."
-            msg = Message(scope_context=scope_context, task=task,
-                          request_id=f"work::{uuid.uuid4()}")
-        result = DI.manager_invoker.invoke(manager, msg)
+            lead = "You have been given this node to work on. Try to complete the task in the node."
+            result = iface.invoke_on(task=(f"{lead} {goal_txt}" if goal_txt else lead),
+                                     information="", scope_context=scope_context)
     finally:
         reset_work_context(token)
 
-    # The manager's agent-facing final answer — persist it as the node's RESULT (an evidence child)
-    # so the handoff returns it and a later peek shows it. Prefer the structured field; `content` may
-    # be raw agent JSON.
-    answer = ""
-    if result is not None:
-        rdata = getattr(result, "data", {}) or {}
-        for _k in ("final_answer_answer", "final_answer", "answer"):
-            _v = rdata.get(_k)
-            if _v:
-                answer = str(_v).strip()
-                break
-        if not answer:
-            answer = (getattr(result, "content", "") or "").strip()
-
-    # A surfaced research pod is the node's OUTCOME — attach it (no-op for managers without one).
-    data = getattr(result, "data", None) or {}
-    pod_refs = data.get("pod_references") or []
-    pod_id = next((str(r.get("pod_id")) for r in pod_refs
-                   if isinstance(r, dict) and r.get("pod_id")), None)
-    if pod_id and not store.load(work_id).nodes[node_id].pod_ref:
-        store.apply("attach_pod", {"work_id": work_id, "node_id": node_id, "pod_ref": pod_id}, actor=actor)
-
-    # Close the owned node: clean exit -> done; aborted/errored -> failed. Epoch-fenced.
-    final = store.load(work_id).nodes[node_id]
-    if final.status not in {"done", "failed", "abandoned", "verified", "passed"}:
-        failed = bool(data.get("aborted")) or data.get("exit_state") == "error_exit"
-        try:
-            store.apply("set_status", {"work_id": work_id, "node_id": node_id,
-                                       "status": "failed" if failed else "done",
-                                       "expected_dispatch_epoch": my_epoch}, actor=actor)
-        except ValueError as e:
-            # Stale incarnation: repair re-dispatched this node to a successor while we worked.
-            logger.error(
-                "[discharge] stale incarnation for %s::%s — result DISCARDED (%s)",
-                work_id, node_id, e,
-            )
-            return result
-        if answer:
-            from work_objects.model import new_id
-            store.apply("add_node",
-                        {"work_id": work_id, "id": new_id("result"), "type": "evidence",
-                         "parent_id": node_id, "status": "assumed", "created_by": actor,
-                         "title": "manager result" if not failed else "manager failure (why)",
-                         "content": answer},
-                        actor=actor)
-
+    # ONE CHOKE POINT. What the result MEANS is the finalizer's; turning it into graph state is
+    # result_recorder's, for every dispatch lane alike. This used to be inlined here — and was
+    # skipped entirely whenever the worker had already set its own status, so the caller recorded
+    # nothing at all, not even the result evidence.
+    from work_objects.result_recorder import record_tool_result
+    record_tool_result(store, work_id, node_id, result, actor=actor, expected_epoch=my_epoch,
+                       evidence_title="manager result")
     return result
 
 

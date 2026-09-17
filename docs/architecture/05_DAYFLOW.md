@@ -38,8 +38,9 @@ DayflowScheduler (event-driven, debounced; precise per-node time wakes; work-pro
     -> Invoke dayflow_orchestrator_manager (state_map order):
          tick_router -> intake_triage -> triage_persist -> context_enricher
            -> strategic_planner_wo (EVALUATOR) -> strategic_planner_wo_persist
-           -> work_finalizer_node -> work_architect_node -> work_repair_node
-           -> state_mover -> state_transition_guard -> state_mover_persist (node promotion + event wakes)
+           -> work_finalizer_node -> work_finalizer_apply_node -> work_architect_node -> work_repair_node
+           -> state_mover -> state_mover_persist (node promotion + event wakes)
+           -> work_node_wake_router (a targeted time-wake dispatches here, or is held)
            -> work_node_materializer -> action_selector -> switchboard -> work_node_dispatch
                 (ONE dispatch per tick; the worker detaches onto its own job thread)
            -> post_room_finalize -> final_answer
@@ -170,12 +171,29 @@ writes (`ALLOWED_TRANSITIONS` enforced). Freshness windows age untouched items o
 (`artifact`), master-room delegations (`user_request`), allowlisted pods. Calendar events are not
 ingested — the evaluator sees them via `resource_expected_calendar` and the routine overlay.
 
-**Legacy item lane (retirement, step C).** The item dispatch path (view_materializer -> action_selector
-with items) survives only on fast-tick/plan flows and is instrumented: anything reaching the selector
-logs `LEGACY ITEM LANE fired`, and an item reaching the work dispatch is closed loudly
-(`legacy_item_lane_dispatch_retired`) — the evaluator should have converted it. The relevance_cleaner
-was retired at the cutover (its files remain, unwired). Full lane deletion is pending a dormancy
-observation window.
+**The item dispatch lane is gone (deleted 2026-09-16).** Items are intake and context only; the
+evaluator is the sole intake -> action path. The dormancy window closed with zero traffic — no item had
+armed a wake in the 30 days before removal — so the lane was removed rather than guarded: the
+scheduler's item-timer scan (now `_arm_ceiling_tick`, heartbeat only), the `fast_tick` /
+`triggered_item_id` plumbing, `fast_tick_promoter_node`, `view_materializer_node`,
+`dispatch_sweeper.list_active_dispatches`, and the dispatcher's legacy-item close. A ref that is not
+`work_id::node_id` now logs ERROR and dispatches nothing.
+
+Two things went with it. `state_transition_guard_node` existed to validate and write the state_mover's
+item `state_mutations`; the state_mover no longer emits them, so the node and the
+`state_mutations_persisted_tf` handshake are gone and the state_map runs `state_mover ->
+state_mover_persist` directly. And the state_mover's prompt lost the two-thirds of its text that taught
+the item vocabulary (`important_open`, `watching`, `suppressed`, and item-meanings of `actionable` /
+`waiting` / `dispatched` / `closed` that conflicted with the node meanings). The relevance_cleaner was
+retired at the cutover; its files remain, unwired.
+
+**What the state_mover is now.** Two judgment calls, both things the graph cannot do:
+(1) *did the awaited event arrive?* — for nodes parked on `wake_kind in {event, signal}`, match the
+recent intake and emit `node_wakes` with the arrived content as the worker's resume context;
+(2) *is now the wrong moment?* — hold a ready node via `held_work_nodes` for quiet hours, a meeting, or
+the user being away. Time and dependency gates are deterministic (`WorkObject.is_ready`), and every
+ready node the LLM does not hold is promoted to `actionable`, so the worst failure is "promoted when it
+could have waited", never a stuck node.
 
 ## Tickets
 
@@ -210,9 +228,87 @@ ticket manager, not in dayflow items.
 | `control_nodes/work_architect_node.py` | Decompose new goals, re-plan flagged ones |
 | `control_nodes/work_repair_node.py` | Failed-node adjudication |
 | `control_nodes/state_mover_prep/persist_node.py` | Waits + promotion candidates / promotion + node wakes |
-| `control_nodes/work_node_materializer_node.py` | Ready-node listing + reply pre-step |
-| `control_nodes/work_node_dispatch_node.py` | Carries out the switchboard's routing (+ legacy-item guard) |
+| `control_nodes/work_node_materializer_node.py` | Ready-node listing |
+| `control_nodes/work_node_dispatch_node.py` | Carries out the switchboard's routing |
 | `work_objects/model.py` / `store.py` | Substrate: graph model, validated writer, transitions |
 | `work_objects/work_runtime.py` | `work_on`/`run_node` — drives one node through the worker manager |
 | `multi_agents/work_emi_team_manager/config.yaml` | The worker: render-loop manager (DESIGN.md §4) |
 | `agents/dayflow_orchestrator/` | The pipeline agents (evaluator, architect, switchboard, finalizer, repair, ...) |
+
+## Dispatch and results (reworked 2026-09-16)
+
+The principle: **there is no architectural difference between "check the user's email" and "send the user a
+notify".** Both are tool calls made by the same dispatcher, returning results recorded the same way.
+Every divergence found on 2026-09-16 traced to one root — when work objects arrived they were built
+*beside* the existing machinery rather than *through* it, so each generic seam grew a work-object
+special case and the work lane grew a private copy of each generic mechanism. **When the substrate
+needs something the generic path has, route through it or change it — never copy it.**
+
+**The gate claims.** `work_node_dispatch_node` marks the picked node `dispatched` (bumping
+`dispatch_epoch`) BEFORE any tool is called, so from that instant every consumer — the ready set, the
+portfolio, the next planning pass — sees it as taken. `open_session` and `discharge_node` now REFUSE
+an unclaimed node rather than claiming it a second way. Previously the claim happened in three places
+with different timing, and the ticket lane surfaced the question to the user *before* marking the
+node, leaving a window where the user could answer a node that did not yet say it was asking.
+
+**Everything dispatched is a tool call.** A manager is a tool (`ManagerInterface.invoke_on` — the
+shared call: sub-manager scope seam, standard `task_request` message, structured tool errors). A
+ticket is a tool (`create_dayflow_ticket`, which surfaces the question and blocks until the user
+answers, closes it, or its validity window lapses, returning a ToolResult either way). Both run on a
+session thread; the dispatching tick returns immediately.
+
+**One recorder.** `work_objects/result_recorder.record_tool_result` is the only thing that turns a
+result into graph state, for every lane: result as evidence, research pod attached, node out of
+flight, epoch-fenced. It does not judge — `done` means "a result exists, the finalizer has not
+ruled". The only distinction it makes is the one the ToolResult itself declares: a tool reporting an
+error leaves the node `failed`, which is work_repair's lane. Outcome nuance ("expired, user not
+reached") belongs in the result TEXT, which the finalizer reads in full.
+
+**The worker cannot pre-empt its dispatcher.** `work_finish` records the worker's verdict as evidence
+and returns control; it no longer writes the node's status. It used to, which meant the node was
+already terminal when the manager returned and the recorder wrote nothing at all — not the status,
+not the epoch fence, not the result.
+
+**Supervision and long calls.** A session blocked inside one tool writes nothing meanwhile, so
+silence cannot be the signal that a job died. `_WORK_NODE_FROZEN_TIMEOUT_S` is therefore DERIVED from
+the longest legitimate tool call (the ask window) plus a grace, rather than guessed — it cannot drift
+if either number moves. Crashes and restarts are caught by ORPHAN detection (no live thread), which
+is immediate and does not wait for that timeout.
+
+**The finalizer judges; one node writes.** `work_finalizer_node` reads ONE node's full result and
+emits a verdict — PROCEED or AMEND — and writes nothing. `work_finalizer_apply_node` applies it:
+`done -> closed` (the satisfied terminal `is_satisfied` keys on), plus the re-plan flag and the
+revised intent for the architect. An agent decides meaning; a deterministic node turns the decision
+into graph state, and nothing in between can quietly do both.
+
+**Its reach is the node it judged.** A third verdict, RESOLVE, used to let it set the whole
+WorkObject done or abandoned from a single node's result. That belongs to the STEWARD, which already
+owns `complete_work_ids` / `abandon_work_ids` and sees every work object's outcomes each tick;
+ordinary completion needs nobody, since the store's rollup completes a goal once `is_satisfied`. A
+finalizer that thinks the goal is finished or moot says so in `reasoning`, and the steward rules on
+it next tick.
+
+**No re-planning, but always re-judge the moment.** A work node's precise time-wake fires a targeted
+pass that skips intake, the evaluator, the architect and repair — the architect's decision about what
+to do, and roughly when, is not reopened. It does NOT skip the state_mover: whether right now is a
+good moment is a fresh judgment every time, because the world moved since the timer was set (the user
+went to bed early, the meeting ran long, they are away). `work_node_wake_router_node` then dispatches
+the node if the state_mover left it `actionable`, or ends the pass if it was held — in which case the
+hold's `reactivate_at` re-arms the wake on its own. Until 2026-09-16 the targeted pass went straight
+to the switchboard, so quiet-hours protection applied only to nodes that happened to arrive through a
+planning tick: a 10pm reminder fired regardless, purely because it came through the timed door.
+
+**Crash recovery.** An ask is a tool call that outlives the process that made it: the thread waiting
+on the user dies at shutdown, the QUESTION does not — it is a ticket row that may already carry the
+answer. `work_session.re_arm_inflight_asks()` runs at boot, driven from the ticket side (the durable
+record, which carries `trigger_context.work_node`). For each node still `dispatched` whose session is
+gone: a recorded answer is landed as the result, a lapsed window lands "user not reached", and a
+question still live is waited on for the REMAINDER of its window — never re-asked, because it is
+still on screen. The newest ticket per node wins, a live session is never disturbed, and a timeout is
+re-checked against the row before it is believed.
+
+### Still to do
+
+- **`ManagerInterface._run_on_child_node`** still puts a work-graph special case inside the generic
+  manager-as-tool wrapper. Removing it requires retiring the `node_aware` sub-manager variants
+  (`work_web_manager`) in favour of plain ones, which changes what every run records in the graph.

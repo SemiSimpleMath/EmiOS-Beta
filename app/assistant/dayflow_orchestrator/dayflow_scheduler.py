@@ -18,7 +18,6 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-from app.assistant.dayflow_orchestrator.contracts import get_meta
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import setup_complete
 from app.assistant.utils.pydantic_classes import Message
@@ -36,13 +35,6 @@ MAX_CEILING_SECONDS = 1800
 # for the CPU/GIL + DB writer in the first minute. Overnight items waited all night;
 # an extra ~45s on the first tick is immaterial. Aligns with the ~45s routine grace.
 STARTUP_TICK_DELAY_SECONDS = 45
-
-# A waiting/watching item whose reactivate_at_utc is overdue by more than
-# this is treated as broken-and-stuck — it won't drag the scheduler into a
-# 2-minute hot loop. The item stays in its current state (a separate
-# sweeper / dispatcher fix is needed to actually resolve them); the
-# scheduler just stops using it as wake-up bait.
-ANCIENT_ITEM_OVERDUE_SECONDS = 24 * 3600  # 24 hours
 
 # Work-object time-gated nodes get their OWN precise wake event (one APScheduler job per node, id
 # prefixed below), armed directly from the node's wake_at and firing the node via work_emi_team —
@@ -109,7 +101,7 @@ class DayflowScheduler:
         self._schedule_tick(delay_seconds=DEBOUNCE_SECONDS, reason=reason, is_poke=True)
 
     def _schedule_tick(self, *, delay_seconds: float, reason: str,
-                       triggered_item_id: Optional[str] = None, is_poke: bool = False) -> None:
+                       is_poke: bool = False) -> None:
         now_utc = datetime.now(timezone.utc)
 
         with self._lock:
@@ -146,7 +138,7 @@ class DayflowScheduler:
                 func=self._execute_tick,
                 trigger="date",
                 run_date=run_date,
-                args=[reason, triggered_item_id],
+                args=[reason],
                 id=JOB_ID,
                 replace_existing=True,
                 misfire_grace_time=300,
@@ -205,7 +197,7 @@ class DayflowScheduler:
             )
             logger.debug("[DayflowScheduler] repeated-failure notify exception details", exc_info=True)
 
-    def _execute_tick(self, reason: str, triggered_item_id: Optional[str] = None) -> None:
+    def _execute_tick(self, reason: str) -> None:
         if not setup_complete():
             logger.info("[DayflowScheduler] Setup not complete; skipping tick.")
             return
@@ -244,11 +236,7 @@ class DayflowScheduler:
             self._followup_requested = False
 
         run_id = uuid.uuid4().hex[:8]
-        fast_tick = reason == "item_timer" and bool(triggered_item_id)
-        logger.info(
-            "[DayflowScheduler] === TICK START === run_id=%s reason=%s fast_tick=%s triggered_item_id=%s",
-            run_id, reason, fast_tick, triggered_item_id or "-",
-        )
+        logger.info("[DayflowScheduler] === TICK START === run_id=%s reason=%s", run_id, reason)
         try:
             with self._app.app_context():
                 from app.assistant.dayflow_orchestrator.dayflow_tick import (
@@ -257,8 +245,6 @@ class DayflowScheduler:
                 dayflow_orchestrator_cadence_tick(
                     routine=_SchedulerRoutineStub(run_id),
                     wake_reason=reason,
-                    fast_tick=fast_tick,
-                    triggered_item_id=triggered_item_id,
                 )
             record_tick("dayflow_scheduler", ok=True)
         except Exception as e:
@@ -283,11 +269,11 @@ class DayflowScheduler:
 
             logger.info("[DayflowScheduler] === TICK END === run_id=%s", run_id)
 
-            # Always (re)schedule the next item tick first so scheduled jobs fire on
-            # time. If a delta arrived during the run, also schedule a throttled poke
-            # — the "don't clobber a sooner run" guard keeps whichever is earlier, so
-            # a due item still wins and the delta is absorbed by it.
-            self._schedule_next_from_items()
+            # Always (re)arm the heartbeat first so the loop cannot go dark, then the
+            # precise per-node wakes. If a delta arrived during the run, also schedule a
+            # throttled poke — the "don't clobber a sooner run" guard keeps whichever is
+            # earlier, so a due wake still wins and the delta is absorbed by it.
+            self._arm_ceiling_tick()
             self._arm_work_node_wakes()
             if followup:
                 # Work progressed during this tick (a node reached a result / a reply landed). Follow up
@@ -314,124 +300,26 @@ class DayflowScheduler:
 
         logger.info("[DayflowScheduler] Subscribed to event hub topics")
 
-    def _schedule_next_from_items(self) -> None:
-        """
-        Scan dayflow items for the earliest reactivate_at_utc and schedule
-        a tick at that time. If nothing is pending, schedule the ceiling tick.
+    def _arm_ceiling_tick(self) -> None:
+        """Arm the heartbeat tick.
+
+        This runs in the tick's ``finally`` and is the SOLE place the next ordinary tick is
+        armed, so it must not propagate: a raise here would leave NO tick scheduled AND skip
+        the work-node re-arm that follows the call site, silently ending autonomy until an
+        external poke. On failure it logs loudly; the next tick re-arms.
+
+        It used to scan dayflow ITEMS for the earliest ``reactivate_at_utc`` and arm a
+        fast tick for that item. That lane is retired (2026-09-16): items are intake +
+        context, the evaluator converts anything actionable into a work object, and no item
+        had driven a timer in the 30 days before removal. Precise wakes belong to work
+        nodes, and ``_arm_work_node_wakes`` owns them.
         """
         try:
-            from app.assistant.dayflow_orchestrator.state_store import load_existing_dayflow_items
-
-            now_utc = datetime.now(timezone.utc)
-            earliest: Optional[datetime] = None
-            earliest_item_id: Optional[str] = None
-            ancient_skipped = 0
-            malformed_skipped = 0
-
-            items = load_existing_dayflow_items()
-            for item in items:
-                meta = get_meta(item)
-                state = str(meta.get("state") or "").strip().lower()
-                if state not in ("waiting", "watching"):
-                    continue
-                raw = str(meta.get("reactivate_at_utc") or "").strip()
-                if not raw:
-                    continue
-                try:
-                    parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-                    if parsed.tzinfo is None:
-                        parsed = parsed.replace(tzinfo=timezone.utc)
-                    parsed = parsed.astimezone(timezone.utc)
-                except Exception as e:
-                    # A single malformed timestamp must NOT halt the scan. This method is the
-                    # sole place the next tick is armed (it runs in the tick's finally), so a
-                    # raise here would skip the ceiling-tick re-arm below and leave the heartbeat
-                    # dark until an external poke — which re-hits this same item and re-halts.
-                    # Skip the bad item and keep scanning, the same treatment the ancient-stale
-                    # branch gives a broken item. It stays waiting/watching, so it keeps logging
-                    # loudly every tick until a dispatcher resolves it.
-                    malformed_skipped += 1
-                    logger.error(
-                        "[DayflowScheduler] Skipping item with invalid reactivate_at_utc item_id=%s: %r (%s)",
-                        meta.get("item_id", "?"),
-                        raw,
-                        e,
-                    )
-                    logger.debug("[DayflowScheduler] reactivate_at_utc parse exception details", exc_info=True)
-                    continue
-                item_id = str(meta.get("item_id") or item.get("id") or "").strip()
-                if parsed <= now_utc:
-                    overdue_seconds = (now_utc - parsed).total_seconds()
-                    if overdue_seconds > ANCIENT_ITEM_OVERDUE_SECONDS:
-                        # Ancient stale item — should have fired long ago and
-                        # didn't. Treat as broken; do NOT let it drive a
-                        # 2-minute reschedule loop. Keep scanning for items
-                        # that are either not stale or only-recently-overdue.
-                        ancient_skipped += 1
-                        logger.warning(
-                            "[DayflowScheduler] Ignoring ancient stale item "
-                            "(overdue %.1fh) item_id=%s state=%s reactivate_at_utc=%s",
-                            overdue_seconds / 3600.0,
-                            item_id or "?",
-                            state,
-                            raw,
-                        )
-                        continue
-                    earliest = now_utc + timedelta(seconds=MIN_GAP_SECONDS)
-                    earliest_item_id = item_id
-                    break
-                if earliest is None or parsed < earliest:
-                    earliest = parsed
-                    earliest_item_id = item_id
-            if ancient_skipped:
-                logger.warning(
-                    "[DayflowScheduler] Skipped %d ancient stale item(s) when scheduling — "
-                    "they are stuck in waiting/watching and need dispatcher attention.",
-                    ancient_skipped,
-                )
-            if malformed_skipped:
-                logger.warning(
-                    "[DayflowScheduler] Skipped %d item(s) with an unparseable reactivate_at_utc "
-                    "when scheduling — they are stuck in waiting/watching and need dispatcher attention.",
-                    malformed_skipped,
-                )
-
-            if earliest is not None:
-                delay = max(MIN_GAP_SECONDS, (earliest - now_utc).total_seconds())
-                delay = min(delay, MAX_CEILING_SECONDS)
-                self._schedule_tick(
-                    delay_seconds=delay,
-                    reason="item_timer",
-                    triggered_item_id=earliest_item_id,
-                )
-                logger.info(
-                    "[DayflowScheduler] Next item timer in %.0fs (%s) item=%s",
-                    delay, earliest.isoformat(), earliest_item_id or "?",
-                )
-            else:
-                self._schedule_tick(delay_seconds=MAX_CEILING_SECONDS, reason="ceiling")
-                logger.info(
-                    "[DayflowScheduler] No item timers found — ceiling tick in %ds",
-                    MAX_CEILING_SECONDS,
-                )
+            self._schedule_tick(delay_seconds=MAX_CEILING_SECONDS, reason="ceiling")
+            logger.info("[DayflowScheduler] Ceiling tick armed in %ds", MAX_CEILING_SECONDS)
         except Exception as e:
-            # This is the sole next-tick re-arm and it runs in the tick's finally. Re-raising
-            # would leave NO tick scheduled AND skip the work-node re-arm that follows the call
-            # site — silently ending autonomy until an external poke. So on any unexpected scan
-            # failure, guarantee the heartbeat: arm a ceiling tick (guarded) and return, logging
-            # loudly. The scan runs again next tick, so a transient failure self-heals.
-            logger.error("[DayflowScheduler] Failed scanning items for next wake: %s", e)
-            logger.debug("[DayflowScheduler] item scan exception details", exc_info=True)
-            try:
-                self._schedule_tick(delay_seconds=MAX_CEILING_SECONDS, reason="ceiling_after_scan_error")
-                logger.warning(
-                    "[DayflowScheduler] Item scan failed — armed a ceiling tick in %ds to keep the "
-                    "heartbeat alive.", MAX_CEILING_SECONDS,
-                )
-            except Exception as arm_err:
-                logger.error(
-                    "[DayflowScheduler] Failed to arm ceiling tick after scan error: %s", arm_err,
-                )
+            logger.error("[DayflowScheduler] Failed to arm the ceiling tick: %s", e)
+            logger.debug("[DayflowScheduler] ceiling arm exception details", exc_info=True)
 
     def _arm_work_node_wakes(self) -> None:
         """Arm a precise one-shot per time-gated work-object node, keyed to its wake_at. When it fires,

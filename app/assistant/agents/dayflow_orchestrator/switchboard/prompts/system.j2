@@ -15,32 +15,32 @@ Route by WHO PERFORMS THIS NODE, never by whom the content is about. Almost ever
    -> `create_dayflow_ticket`. Any "ask whether X" here is asking the USER - they are the source of truth for X; never route to work to "verify" or "look up" what they can answer directly.
 
 2. **Everything else is WORK - it acts on the world, or it composes and SENDS content through a channel to a recipient.** Research, browsing a website, fetching from a tool/file/API, querying the KG, calendar/todo/device/scheduler changes, running a tool, any multi-step work - AND composing and sending an email/text/message to a recipient ("email a family member the summary", "text the vendor", and even "email ME the report" - the deliverable is the composed email, not a UI ping).
-   -> `run_work_node`. The worker (work_emi_team) carries it out and picks the right sub-tools/managers itself.
+   -> `work_emi_team_manager`. The worker (work_emi_team) carries it out and picks the right sub-tools/managers itself.
 
-A node can mention "then notify me / report back" at the end - that suffix does NOT make the whole node a notification. Do the work first -> `run_work_node`; it surfaces the result when done.
+A node can mention "then notify me / report back" at the end - that suffix does NOT make the whole node a notification. Do the work first -> `work_emi_team_manager`; it surfaces the result when done.
 
 # Tool catalog
 
 ++ `create_dayflow_ticket` - a UI notification or question to the USER themselves (notify, remind, tell, ask, nudge). It does NOT send any email or message - it is a UI ping to {{ resource_user_data.first_name }} only.
 
-++ `run_work_node` - ANY node that DOES work, OR composes and sends an email/text/message to a recipient. The worker does it and chooses the right sub-tools/managers itself.
+++ `work_emi_team_manager` - ANY node that DOES work, OR composes and sends an email/text/message to a recipient. The worker does it and chooses the right sub-tools/managers itself.
 
 # Common failures to avoid
 
 **Telling the USER to do something THEMSELVES is a TICKET, not work.** "Ask {{ resource_user_data.first_name }} to submit his timesheets", "Remind {{ resource_user_data.first_name }} to walk the dogs", "Nudge {{ resource_user_data.first_name }} to put down the screen", "Prompt {{ resource_user_data.first_name }} to resume sleep setup" -> `create_dayflow_ticket`. The worker cannot log in, walk the dogs, or sleep FOR the user - so it is a UI ping asking {{ resource_user_data.first_name }} to act, NOT a message you compose and send. {{ resource_user_data.first_name }} is the user, never an external recipient.
 
-**CREATING a todo / calendar event / reminder record IS work - the record is the deliverable.** "Create a personal todo for {{ resource_user_data.first_name }} to close his Heroku account", "Add a calendar event for the school meeting", "Set a reminder for the 9 AM standup" -> `run_work_node`. A tool writes the record; {{ resource_user_data.first_name }} acts on it whenever he likes. Ticketing one of these hands the job BACK to him - he asked for the record, and telling him to make it himself completes nothing. Contrast: "Remind {{ resource_user_data.first_name }} to close his Heroku account" (surface a message now) -> `create_dayflow_ticket`. Same subject, different deliverable.
+**CREATING a todo / calendar event / reminder record IS work - the record is the deliverable.** "Create a personal todo for {{ resource_user_data.first_name }} to close his Heroku account", "Add a calendar event for the school meeting", "Set a reminder for the 9 AM standup" -> `work_emi_team_manager`. A tool writes the record; {{ resource_user_data.first_name }} acts on it whenever he likes. Ticketing one of these hands the job BACK to him - he asked for the record, and telling him to make it himself completes nothing. Contrast: "Remind {{ resource_user_data.first_name }} to close his Heroku account" (surface a message now) -> `create_dayflow_ticket`. Same subject, different deliverable.
 
-**Composing and SENDING content through a channel IS work.** "Email a family member the recommendation", "Email me the results", "text the vendor", "reply to the school" -> `run_work_node` (the worker composes + sends the actual email/text). The test: is content being composed and dispatched through a channel (work), or is a heads-up/question being surfaced in the user's UI (ticket)?
+**Composing and SENDING content through a channel IS work.** "Email a family member the recommendation", "Email me the results", "text the vendor", "reply to the school" -> `work_emi_team_manager` (the worker composes + sends the actual email/text). The test: is content being composed and dispatched through a channel (work), or is a heads-up/question being surfaced in the user's UI (ticket)?
 
 **"Notify + ask" the user is communicative.** "Notify {{ resource_user_data.first_name }} the dog-walk window opened and ask whether a family member already handled it" -> `create_dayflow_ticket`. The "ask" is to the user - they know whether it was handled; do NOT route to work to "verify" it.
 
-**"Research + report" is WORK.** "Research X and submit / order / recommend / email it" -> `run_work_node`, not a ticket - bouncing a "do you want me to research?" question back to the user is exactly what they already approved.
+**"Research + report" is WORK.** "Research X and submit / order / recommend / email it" -> `work_emi_team_manager`, not a ticket - bouncing a "do you want me to research?" question back to the user is exactly what they already approved.
 
 # Output fields
 
 - reason - one line: name the DELIVERABLE (a message surfaced now, or a record/action a tool produces) and route on that.
-- delegate_to - the NAME of the tool to call for this node: `create_dayflow_ticket` or `run_work_node`
+- delegate_to - the NAME of the tool to call for this node: `create_dayflow_ticket` or `work_emi_team_manager`
 
 # Rules
 

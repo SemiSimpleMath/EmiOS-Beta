@@ -6,14 +6,15 @@ Guards tested here:
   1. store fence      — an in-flight ask refuses terminal writes (replan cannot
                         prune a question that is out); reply (-> done) and
                         timeout (-> failed) stay open, closure cascades it.
-  2. dispatch gate    — a second ask node queues behind the in-flight ask
-                        instead of surfacing a second ticket.
+  2. dispatch gate    — the gate claims a node before any tool runs, so an in-flight
+                        ask is structurally un-pickable.
   3. ticket supersede — a new ask ticket expires prior open asks of the same
                         work object (id join on trigger_context.work_node).
   4. context          — node.content (the planner's full instruction) is the
                         primary message source, not wake_ref.
-  5. timeout          — the sweeper's _ask_timed_out judgment: expired/lapsed
-                        ticket -> reason; live or responded ticket -> None.
+  5. timeout          — owned by the TOOL now: create_dayflow_ticket waits out its own
+                        window and RETURNS a timeout result, so nothing re-derives it from
+                        the ticket store afterwards (see test_ask_result_landing.py).
 """
 from __future__ import annotations
 
@@ -23,7 +24,6 @@ from types import SimpleNamespace
 import pytest
 
 import app.assistant.dayflow_orchestrator.node_dispatch as nd
-from app.assistant.dayflow_orchestrator.dispatch_sweeper import _ask_timed_out
 
 
 def _store():
@@ -114,57 +114,21 @@ class TestInflightAskFence:
 # ── 2. dispatch gate: one live ask per work object ────────────────
 
 
-class TestOneLiveAskPerWorkObject:
+class TestAskIsAnOrdinaryDispatch:
+    """The dispatch gate claims a node before any tool runs, so a `dispatched` ask is already
+    invisible to the ready set and cannot be picked twice. The old belt-and-braces rule — a
+    second ask node PARKED itself back to `waiting` when a sibling ask was in flight — is
+    retired (owner ruling 2026-09-16): a node the gate picked is never un-picked, and two
+    nodes asking the same thing is an architect prompt problem, not a dispatch-time guard.
+    What still holds the UI to one live question is the tool's own supersede."""
 
-    def test_second_ask_queues_behind_inflight_ask(self, monkeypatch):
+    def test_dispatched_ask_is_not_in_the_ready_set(self):
         store = _store()
         wid, gid = _mk_wo(store)
         _inflight_ask(store, wid, gid, node_id="ask1")
-        _add_node(store, wid, gid, "ask2", content="Second question.")
-        store.apply("set_status", {"work_id": wid, "node_id": "ask2", "status": "actionable"})
-
-        surfaced = []
-        monkeypatch.setattr(nd, "_surface_ticket", lambda *a: surfaced.append(a))
-        nd._ticket(store, wid, "ask2", store.load(wid).nodes["ask2"])
-
-        assert surfaced == []                      # no second ticket reached the user
         wo = store.load(wid)
-        ask2 = wo.nodes["ask2"]
-        assert ask2.status == "waiting"
-        assert ask2.wake_kind == "time"            # queued, gets its turn after the timeout window
-        assert ask2.wake_at is not None
-        assert wo.nodes["ask1"].status == "dispatched"   # the live ask is untouched
-
-    def test_ask_surfaces_normally_when_no_live_ask(self, monkeypatch):
-        store = _store()
-        wid, gid = _mk_wo(store)
-        _add_node(store, wid, gid, "ask1", content="The question.")
-        store.apply("set_status", {"work_id": wid, "node_id": "ask1", "status": "actionable"})
-
-        surfaced = []
-        monkeypatch.setattr(nd, "_surface_ticket", lambda *a: surfaced.append(a))
-        nd._ticket(store, wid, "ask1", store.load(wid).nodes["ask1"])
-
-        assert len(surfaced) == 1
-        node = store.load(wid).nodes["ask1"]
-        assert node.status == "dispatched"
-        assert node.wake_kind == "user_reply"
-        assert node.wake_at is None                # the ticket owns the timeout, not a wake timer
-
-    def test_failed_ask_does_not_block_new_ask(self, monkeypatch):
-        """A timed-out (failed) ask is no longer live — the next ask surfaces."""
-        store = _store()
-        wid, gid = _mk_wo(store)
-        _inflight_ask(store, wid, gid, node_id="ask1")
-        store.apply("set_status", {"work_id": wid, "node_id": "ask1", "status": "failed",
-                                   "content": "ask timed out"}, actor="dispatch_sweeper")
-        _add_node(store, wid, gid, "ask2", content="Second question.")
-        store.apply("set_status", {"work_id": wid, "node_id": "ask2", "status": "actionable"})
-
-        surfaced = []
-        monkeypatch.setattr(nd, "_surface_ticket", lambda *a: surfaced.append(a))
-        nd._ticket(store, wid, "ask2", store.load(wid).nodes["ask2"])
-        assert len(surfaced) == 1
+        assert wo.nodes["ask1"].status == "dispatched"
+        assert not wo.is_ready(wo.nodes["ask1"]), "an in-flight ask must never be offered again"
 
 
 # ── 3. ticket supersede ───────────────────────────────────────────
@@ -191,10 +155,18 @@ class _FakeTM:
 
 
 class TestSupersedeOpenAsks:
+    """Expiring the previous question is ticket-DATABASE work, so it lives in the tool that owns
+    that database — not in the dispatcher. One live question per work object in the UI."""
+
+    def _tool(self):
+        from app.assistant.lib.tools.create_dayflow_ticket.create_dayflow_ticket import (
+            CreateDayflowTicketTool,
+        )
+        return CreateDayflowTicketTool
 
     def test_same_work_object_open_ask_is_expired(self):
         tm = _FakeTM([_FakeOpenTicket("t_old", "work_abc::ask1")])
-        nd._supersede_open_asks(tm, "work_abc", "ask2")
+        self._tool()._supersede_open_asks(tm, {"work_node": "work_abc::ask2"})
         assert tm.expired == [("t_old", "superseded by work_abc::ask2")]
 
     def test_other_work_objects_and_types_untouched(self):
@@ -203,7 +175,7 @@ class TestSupersedeOpenAsks:
             _FakeOpenTicket("t_other_type", "work_abc::ask1", ticket_type="ask_user"),
             _FakeOpenTicket("t_no_ctx", ""),
         ])
-        nd._supersede_open_asks(tm, "work_abc", "ask2")
+        self._tool()._supersede_open_asks(tm, {"work_node": "work_abc::ask2"})
         assert tm.expired == []
 
 
@@ -221,21 +193,18 @@ class TestTicketContext:
                       wake_ref="Notify about music class supplies")
         node = store.load(wid).nodes["ask1"]
 
-        briefs = []
+        calls = []
         from app.assistant.lib.tools.create_dayflow_ticket.create_dayflow_ticket import (
             CreateDayflowTicketTool,
         )
-        monkeypatch.setattr(CreateDayflowTicketTool, "_format_brief",
-                            staticmethod(lambda brief, work_node_ref="": briefs.append(brief) or {}))
-        import app.assistant.ticket_manager as tm_pkg
-        fake_tm = _FakeTM([])
-        fake_tm.create_ticket = lambda **kw: None      # stop after composing — no publish path
-        monkeypatch.setattr(tm_pkg, "get_ticket_manager", lambda: fake_tm)
+        monkeypatch.setattr(CreateDayflowTicketTool, "execute",
+                            lambda self, tm: calls.append(tm) or None)
 
-        nd._surface_ticket(store, wid, "ask1", node)
+        nd.surface_and_await(store, wid, "ask1", node)
 
-        assert len(briefs) == 1
-        assert "instrument on August 21" in briefs[0]           # content made it through
+        assert len(calls) == 1
+        args = calls[0].tool_data["arguments"]
+        assert "instrument on August 21" in args["ticket_brief"]   # content made it through
 
 
 # ── 4b. dispatch hands the composer manager ids, not pre-chewed content ──
@@ -257,20 +226,17 @@ class TestTicketManagerWiring:
         from app.assistant.lib.tools.create_dayflow_ticket.create_dayflow_ticket import (
             CreateDayflowTicketTool,
         )
-        monkeypatch.setattr(
-            CreateDayflowTicketTool, "_format_brief",
-            staticmethod(lambda brief, work_node_ref="": calls.append((brief, work_node_ref)) or {}))
-        import app.assistant.ticket_manager as tm_pkg
-        fake_tm = _FakeTM([])
-        fake_tm.create_ticket = lambda **kw: None
-        monkeypatch.setattr(tm_pkg, "get_ticket_manager", lambda: fake_tm)
+        monkeypatch.setattr(CreateDayflowTicketTool, "execute",
+                            lambda self, tm: calls.append(tm) or None)
 
-        nd._ticket(store, wid, "deliver", store.load(wid).nodes["deliver"])
+        nd.surface_and_await(store, wid, "deliver", store.load(wid).nodes["deliver"])
 
         assert len(calls) == 1
-        brief, ref = calls[0]
-        assert ref == f"{wid}::deliver"                        # ids in
-        assert "Give the user the assessment" in brief         # the goal text rides the brief
+        args = calls[0].tool_data["arguments"]
+        assert args["trigger_context"]["work_node"] == f"{wid}::deliver"   # ids in
+        assert "Give the user the assessment" in args["ticket_brief"]      # goal text rides the brief
+        # The ticket's validity window IS the call's timeout — one number, not two clocks.
+        assert args["wait_timeout_seconds"] == args["valid_hours"] * 3600
 
 
 # ── 4c. repair: ask ceiling + directive preservation ─────────────
@@ -316,49 +282,3 @@ class TestRepairAskCeiling:
         assert node.wake_kind == "user_reply"
         assert node.wake_ref == "Please answer the brief question."   # ask rides wake_ref
         assert node.content == "Deliver the brief."                   # directive untouched
-
-
-# ── 5. sweeper timeout judgment ───────────────────────────────────
-
-
-def _ticket_stub(ref, *, state, valid_until=None, created_at=None):
-    return SimpleNamespace(
-        trigger_context={"work_node": ref}, state=state, valid_until=valid_until,
-        created_at=created_at or datetime.now(timezone.utc),
-    )
-
-
-class TestAskTimedOut:
-    _REF = "work_abc::ask1"
-
-    def _judge(self, monkeypatch, tickets):
-        import app.assistant.ticket_manager as tm_pkg
-        fake = SimpleNamespace(get_tickets=lambda **kw: tickets)
-        monkeypatch.setattr(tm_pkg, "get_ticket_manager", lambda: fake)
-        return _ask_timed_out(self._REF, datetime.now(timezone.utc))
-
-    def test_expired_ticket_times_out(self, monkeypatch):
-        reason = self._judge(monkeypatch, [_ticket_stub(self._REF, state="expired")])
-        assert reason and "expired unanswered" in reason
-
-    def test_lapsed_validity_times_out(self, monkeypatch):
-        past = datetime.now(timezone.utc) - timedelta(minutes=5)
-        reason = self._judge(monkeypatch, [_ticket_stub(self._REF, state="proposed", valid_until=past)])
-        assert reason and "validity window passed" in reason
-
-    def test_live_ticket_is_not_timed_out(self, monkeypatch):
-        future = datetime.now(timezone.utc) + timedelta(minutes=30)
-        assert self._judge(monkeypatch, [_ticket_stub(self._REF, state="proposed", valid_until=future)]) is None
-
-    def test_responded_ticket_left_to_materializer(self, monkeypatch):
-        assert self._judge(monkeypatch, [_ticket_stub(self._REF, state="accepted")]) is None
-
-    def test_no_ticket_found_times_out(self, monkeypatch):
-        assert self._judge(monkeypatch, [_ticket_stub("work_other::askX", state="proposed")]) is not None
-
-    def test_latest_ticket_wins(self, monkeypatch):
-        old = _ticket_stub(self._REF, state="expired",
-                           created_at=datetime.now(timezone.utc) - timedelta(hours=2))
-        fresh = _ticket_stub(self._REF, state="proposed",
-                             valid_until=datetime.now(timezone.utc) + timedelta(minutes=30))
-        assert self._judge(monkeypatch, [old, fresh]) is None

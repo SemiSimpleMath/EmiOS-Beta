@@ -4,7 +4,7 @@ precise time-wake fire (a targeted room invocation routed by tick_router_node).
 
 A work node is anything DISPATCHABLE; the switchboard decides where by READING the node, not by a type:
   - create_dayflow_ticket -> surface a ticket to the user and await their response (which becomes the result).
-  - anything else (run_work_node) -> run the node via the worker (work_emi_team).
+  - anything else (work_emi_team_manager) -> run the node via the worker (work_emi_team).
 
 Both are just tool calls that produce a RESULT recorded on the graph; the finalizer judges the result.
 There is no one-way ticket — every ticket awaits a response. This module is that dispatch; it does not judge.
@@ -25,9 +25,10 @@ from app.assistant.utils.pydantic_classes import Message
 logger = get_logger(__name__)
 
 _TICKET_SUGGESTION_TYPE = "work_notify"
-# An ask is a tool call whose result is the user's reply; the ticket's validity
-# window IS the call's timeout. Expired unanswered -> the sweeper fails the node
-# (timed-out tool call) and work_repair adjudicates. There is no re-ask timer.
+# An ask is a tool call whose result is the user's response; the ticket's validity
+# window IS the call's timeout. Expired unanswered is a result too ("notify expired,
+# user not reached") and the finalizer judges it. There is no re-ask timer — asking
+# again is a planning decision.
 _ASK_TIMEOUT_HOURS = 1
 
 
@@ -49,65 +50,60 @@ def signal_work_progress(ref: str) -> None:
         logger.warning("[node_dispatch] work-progress signal failed for %s: %s", ref, e)
 
 
-def _live_ask(wo, exclude_node_id: str):
-    """The work object's in-flight ask, if any: a `dispatched` node whose
-    wake_kind is `user_reply` — its question is out to the user right now.
-    Pure id/state join — no wording."""
-    for n in wo.nodes.values():
-        if n.id == exclude_node_id:
-            continue
-        if n.status == "dispatched" and n.wake_kind == "user_reply":
-            return n
-    return None
+def surface_and_await(store, work_id: str, node_id: str, node):
+    """Ask the user, as a TOOL CALL, and return its ToolResult.
 
+    `create_dayflow_ticket` surfaces the question and blocks until the user answers it, closes it,
+    or the ticket's validity window lapses — returning a real ToolResult either way (the response,
+    or ``action="timeout"``). That is a tool call in every sense, so this makes it one: the node is
+    already claimed by the dispatch gate, the call runs on the node's own session thread, and the
+    result goes to the same recorder a manager's result does.
 
-def _ticket(store, work_id: str, node_id: str, node) -> None:
-    """Surface the node's question as a ticket and mark the node `dispatched` — an in-flight
-    tool call whose result is the user's reply. It ends exactly like any tool call: the
-    reply/dismissal lands as its result (materializer -> done), or the ticket expires
-    unanswered and the sweeper fails it as a timed-out call for work_repair to adjudicate.
+    It used to be special. This function minted the ticket by hand — borrowing one formatting helper
+    off the tool it declined to call — parked the node with a ``user_reply`` wake, and returned
+    nothing, so the result had to be reconstructed afterwards from the ticket store by a scan in the
+    materializer. A reply that ANSWERED a question survived that; a reply that KILLED the objective
+    did not, because the steward read it first and abandoned the work object, and the scan skips
+    terminal objects. Of 114 work objects the steward dropped between 2026-09-01 and 09-16, five
+    carried a recorded reply.
+    """
+    from app.assistant.lib.tools.create_dayflow_ticket.create_dayflow_ticket import (
+        CreateDayflowTicketTool,
+    )
+    from app.assistant.utils.pydantic_classes import ToolMessage
 
-    ONE LIVE ASK PER WORK OBJECT (2026-08-18 walk-storm): if a sibling ask is already
-    in flight, this node does NOT surface a second question — it queues (deferred to
-    the ask timeout; sink, not drop) and gets its turn once the live ask resolves."""
-    from work_objects.model import utcnow
-    wo = store.load(work_id)
-    live = _live_ask(wo, exclude_node_id=node_id)
-    if live is not None:
-        logger.warning(
-            "[node_dispatch] %s::%s wants to ask the user but %s already has its question "
-            "out — queuing behind it, no second ticket", work_id, node_id, live.id)
-        store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "waiting"},
-                    actor="node_dispatch")
-        store.apply("defer_node", {"work_id": work_id, "node_id": node_id, "wake_kind": "time",
-                                   "wake_at": utcnow() + timedelta(hours=_ASK_TIMEOUT_HOURS),
-                                   "wake_ref": node.wake_ref}, actor="node_dispatch")
-        return
-    _surface_ticket(store, work_id, node_id, node)
-    store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "dispatched"},
-                actor="node_dispatch")
-    store.apply("defer_node", {"work_id": work_id, "node_id": node_id, "wake_kind": "user_reply",
-                               "wake_at": None, "wake_ref": node.wake_ref or node.title},
-                actor="node_dispatch")
-    logger.info("[node_dispatch] ticketed user %s::%s (in-flight ask; reply or timeout ends it)",
-                work_id, node_id)
+    # node.content is the planner's full instruction — the material the user actually needs — and
+    # must be the primary source. wake_ref is a wake-match primitive (often just the node title);
+    # letting it shadow content is how "planner + pencil + instrument on Aug 21" reached the user as
+    # "check on the supplies needed for music class".
+    want = str(node.content or "").strip() or str(getattr(node, "wake_ref", "") or "").strip()
+    report_pods = _research_pod_ids(store.load(work_id), node_id)
+    brief = (f"Communicate with the user so a task can proceed. Task: {node.title}. "
+             f"What I need from them: {want}. "
+             f"Phrase it as a warm, direct message addressed to them; "
+             f"keep every concrete detail (who, what, when) — do not generalize them away.")
+    if report_pods:
+        # The composer writes SHORT when a page carries the body (owner ask, 2026-08-22:
+        # "short question and link to the analysis").
+        brief += (" A full-report page link will be attached below your message "
+                  "automatically — keep the message brief: the decision or question "
+                  "and the few points the user needs at a glance; the linked page "
+                  "carries the full analysis.")
 
-
-def _supersede_open_asks(tm, work_id: str, node_id: str) -> None:
-    """One live ask ticket per work object: before a new ask surfaces, expire any
-    still-open (pending/proposed) dayflow ask ticket bound to the same work_id —
-    the old question disappears as the new one appears, instead of stacking in
-    the UI. Joined purely on trigger_context.work_node ids — no wording."""
-    prefix = f"{work_id}::"
-    for old in tm.get_tickets_pending_or_proposed():
-        if str(old.ticket_type or "") != "dayflow_orchestrator":
-            continue
-        ctx = old.trigger_context if isinstance(old.trigger_context, dict) else {}
-        if not str(ctx.get("work_node") or "").startswith(prefix):
-            continue
-        tm.mark_expired(old.ticket_id, reason=f"superseded by {work_id}::{node_id}")
-        logger.info("[node_dispatch] expired open ask %s (superseded by %s::%s)",
-                    old.ticket_id, work_id, node_id)
+    tool_message = ToolMessage(
+        tool_name="create_dayflow_ticket",
+        tool_data={"arguments": {
+            "ticket_brief": brief,
+            # Full-report page links ride DETERMINISTICALLY after the composed message — a pod id
+            # must reach the user exactly or not at all, never via LLM transcription.
+            "append_links": [f"Full report: /research/{p}" for p in report_pods],
+            "trigger_context": {"work_node": f"{work_id}::{node_id}"},
+            "valid_hours": _ASK_TIMEOUT_HOURS,
+            "wait_timeout_seconds": _ASK_TIMEOUT_HOURS * 3600,
+        }},
+    )
+    logger.info("[node_dispatch] asking the user %s::%s (in-flight tool call)", work_id, node_id)
+    return CreateDayflowTicketTool().execute(tool_message)
 
 
 def _research_pod_ids(wo, node_id: str) -> list[str]:
@@ -126,63 +122,3 @@ def _research_pod_ids(wo, node_id: str) -> list[str]:
         if ref.startswith("datapod:research_finding:") and ref not in ids:
             ids.append(ref)
     return ids
-
-
-def _surface_ticket(store, work_id: str, node_id: str, node) -> None:
-    """Phrase + surface the node's communication as a ticket tagged with this node; the reply is matched
-    back via trigger_context.work_node on a later tick. Content gathering is the
-    ticket_builder_manager's job: its planner reads this work object's graph (and
-    dereferences pod ids) so a deliver-goal's ticket carries the produced result
-    itself — dispatch hands over ids and the goal, never pre-chewed content."""
-    from app.assistant.lib.tools.create_dayflow_ticket.create_dayflow_ticket import CreateDayflowTicketTool
-    from app.assistant.ticket_manager import get_ticket_manager
-    # node.content is the planner's full instruction — the material the user
-    # actually needs — and must be the primary source. wake_ref is a wake-match
-    # primitive (often just the node title); letting it shadow content is how
-    # "planner + pencil + instrument on Aug 21" reached the user as "check on
-    # the supplies needed for music class".
-    want = str(node.content or "").strip() or str(getattr(node, "wake_ref", "") or "").strip()
-    report_pods = _research_pod_ids(store.load(work_id), node_id)
-    brief = (f"Communicate with the user so a task can proceed. Task: {node.title}. "
-             f"What I need from them: {want}. "
-             f"Phrase it as a warm, direct message addressed to them; "
-             f"keep every concrete detail (who, what, when) — do not generalize them away.")
-    if report_pods:
-        # The composer writes SHORT when a page carries the body (owner ask,
-        # 2026-08-22: "short question and link to the analysis").
-        brief += (" A full-report page link will be attached below your message "
-                  "automatically — keep the message brief: the decision or question "
-                  "and the few points the user needs at a glance; the linked page "
-                  "carries the full analysis.")
-    formatted = CreateDayflowTicketTool._format_brief(brief, work_node_ref=f"{work_id}::{node_id}")
-    title = (str(formatted.get("title") or node.title or "I need your input").strip())[:80]
-    message = str(formatted.get("message") or want or title).strip()
-    # Full-report page links ride DETERMINISTICALLY after the composed message — a pod id
-    # must reach the user exactly or not at all, never via LLM transcription. The popup
-    # linkifies /research/... paths into anchors.
-    if report_pods:
-        links = "\n".join(f"Full report: /research/{p}" for p in report_pods)
-        message = f"{message}\n\n{links}"
-    tm = get_ticket_manager()
-    _supersede_open_asks(tm, work_id, node_id)
-    ticket = tm.create_ticket(ticket_type="dayflow_orchestrator", suggestion_type=_TICKET_SUGGESTION_TYPE,
-                              title=title, message=message, trigger_context={"work_node": f"{work_id}::{node_id}"},
-                              valid_hours=_ASK_TIMEOUT_HOURS)
-    if not ticket or not tm.mark_proposed(ticket.ticket_id):
-        return
-    payload = ticket.to_dict()
-    payload["button_layout"] = "decision"
-    payload["plan_mode_available"] = True
-    DI.event_hub.publish(Message(event_topic="proactive_suggestion", data=payload))
-
-    # ACTION LEDGER (2026-09-12): a surfaced ask is an outward-facing act. Recorded here
-    # with the work context passed explicitly — the ticket path returns immediately and
-    # does NOT run on a work-session thread, so the thread-name lookup would find nothing.
-    # An expired ask drops out of "ACTIVE TICKETS (awaiting the user)", which is how a
-    # planning pass could ask a fourth time believing it had never asked at all.
-    from app.assistant.dayflow_orchestrator.action_ledger import record_outbound
-    record_outbound(
-        channel="ticket", target="user", summary=title, outcome="sent",
-        actor="dayflow_ticket", work_id=work_id, node_id=node_id,
-        payload={"ticket_id": getattr(ticket, "ticket_id", "")},
-    )

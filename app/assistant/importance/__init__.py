@@ -149,9 +149,10 @@ Every other call site can treat nodes uniformly.
     importance plays no role. `consumers.is_wiki_growth_candidate`
     raises `NotImplementedError` to mark the intended replacement.
 
-  - `view_materializer_node._importance_sort_key` reads a categorical
-    "low"/"medium"/"high" string from dayflow items, not the KG numeric
-    importance. Different domain; not unified.
+  - (Gone 2026-09-16 with the item dispatch lane: `view_materializer_node`
+    sorted dayflow items by a categorical "low"/"medium"/"high" string
+    rather than the KG numeric importance. Different domain, never
+    unified, and no longer a call site.)
 
   - The email-importance threshold in `DataConversion.py` (hardcoded
     `5`) is a different domain; not unified.

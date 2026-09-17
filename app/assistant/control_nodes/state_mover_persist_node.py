@@ -9,20 +9,21 @@ _EVENT_WAKES = {"event", "user_reply", "signal"}
 
 
 class StateMoverPersistNode(ControlNode):
-    """Post-guard node after state_transition_guard_node.
+    """Applies the state_mover's two outputs to the graph.
 
-    state_transition_guard_node already saved the item ``state_mutations``. This node:
-      1. sets ``state_mutations_persisted_tf`` so post_room_finalize_node skips re-applying them, and
-      2. applies the state_mover's ``node_wakes`` — for each work-object node whose awaited external
-         event arrived, clear its event-wait (so is_ready / the dispatch pick it up next tick) and
-         attach the arrived content as the worker's resume context.
+      1. ``node_wakes`` — for each node whose awaited external event arrived, clear its event-wait
+         (so is_ready / the dispatch pick it up next tick) and attach the arrived content as the
+         worker's resume context. This replaces the standalone event_waker.
+      2. ``held_work_nodes`` — park the few ready nodes the LLM held for a better moment; promote
+         every other ready node to ``actionable``.
 
-    This is the work-object-aware half of the state_mover; it replaces the standalone event_waker.
+    It used to follow state_transition_guard_node, which validated and wrote the state_mover's item
+    ``state_mutations``. The item lane is retired (2026-09-16) and the state_mover no longer emits
+    mutations, so that node and the ``state_mutations_persisted_tf`` handshake went with it.
     """
 
     def action_handler(self, message):
         self.blackboard.update_state_value("next_agent", None)
-        self.blackboard.update_state_value("state_mutations_persisted_tf", True)
         try:
             self._apply_node_wakes()
         except Exception as e:

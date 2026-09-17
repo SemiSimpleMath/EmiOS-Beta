@@ -147,15 +147,32 @@ def _defer(t, a):
     return ToolResult(content="deferred", data={})
 
 
+_VERDICT_PHRASE = {
+    "satisfied": "the task is complete",
+    "failed": "the task could not be completed",
+    "abandoned": "the task is moot",
+}
+
+
 def _finish(t, a):
-    status = a.get("status", "satisfied")
-    if status == "satisfied":
-        t.mark_satisfied()
-    elif status == "failed":
-        t.mark_failed(a.get("reason", ""))
-    else:
-        t.abandon(a.get("reason", ""))
-    return ToolResult(content=f"finished: {status}", data={"status": status})
+    """State the worker's verdict on its own node. It is RECORDED, not applied.
+
+    This used to write the node's terminal status directly (mark_satisfied -> `done`), which made
+    the worker the one caller that could pre-empt its own dispatcher: the node was already terminal
+    when the manager returned, so the recorder wrote nothing — not the status, not the epoch fence,
+    and not the result evidence. The verdict is part of the RESULT now; the work_finalizer judges it
+    along with everything else the node produced.
+    """
+    status = str(a.get("status", "satisfied")).strip().lower()
+    reason = str(a.get("reason") or "").strip()
+    phrase = _VERDICT_PHRASE.get(status, status)
+    line = f"WORKER VERDICT ({status}): {phrase}." + (f" {reason}" if reason else "")
+    t.record_finding(line, None, None)
+    return ToolResult(
+        content=(f"Verdict recorded: {phrase}. It is part of your result and the work_finalizer "
+                 f"judges it. Stop working this node now — return_control."),
+        data={"status": status},
+    )
 
 
 def _graph_search(t, a):
@@ -198,7 +215,7 @@ _SPECS = [
     _Spec("work_produce_artifact", produce_artifact_args, _produce_artifact, "Produce the deliverable as an Artifact node referencing a pod."),
     _Spec("work_ask_question", ask_question_args, _ask_question, "Open a Question (blocks=true makes my node depend on it)."),
     _Spec("work_defer", defer_args, _defer, "Park my node with a wake condition ('too hard now / wait for X')."),
-    _Spec("work_finish", finish_args, _finish, "Close my node: satisfied | failed | abandoned."),
+    _Spec("work_finish", finish_args, _finish, "State your verdict on this node — satisfied | failed | abandoned — then return_control. Recorded as part of your result; the work_finalizer judges it."),
     _Spec("work_graph_search", graph_search_args, _graph_search, "Find nodes by substring of title/content."),
     _Spec("work_graph_peek", graph_peek_args, _graph_peek, "Read one node's full body."),
     _Spec("work_graph_summary", graph_summary_args, _graph_summary, "One-line index of nodes (drill down with peek)."),

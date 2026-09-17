@@ -168,6 +168,10 @@ class StateMoverPrepNode(ControlNode):
                     "kind": str(getattr(n, "type", "") or ""),
                 })
         self.blackboard.update_state_value("ready_work_nodes", ready)
+        # One glossary, one source. The state_mover reads and writes node statuses, so it gets the
+        # same words as the steward, finalizer and repair rather than a private copy that can drift.
+        from app.assistant.dayflow_orchestrator.work_portfolio import STATUS_LEGEND
+        self.blackboard.update_state_value("node_status_legend", STATUS_LEGEND)
 
     def _build_work_object_waits(self, all_items):
         """Find work-object nodes parked on an EXTERNAL event (deps + time already met, so is_ready is
