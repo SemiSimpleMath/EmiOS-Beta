@@ -84,6 +84,50 @@ class ResourceManager:
             logger.error("Failed mirroring resource '%s' to global_blackboard: %s", resource_id, e)
             logger.debug("resource mirror to global blackboard exception details", exc_info=True)
 
+    @staticmethod
+    def _personal_overlay_path(path: Path) -> Path:
+        """The `<stem>_personal<suffix>` sibling that overlays this resource, if any."""
+        return path.with_name(f"{path.stem}_personal{path.suffix}")
+
+    def _read_with_overlay(self, path: Path) -> Any:
+        """Read a file-backed resource EXACTLY as the initial load does — base, then the
+        personal overlay appended after it.
+
+        Every path that re-reads a resource from disk must go through here. When the reload
+        paths called `_read_file` directly they produced the PUBLIC template alone, so any
+        touch of the base file silently replaced the user's personal directives — their
+        devices, their emergency contacts, their standing instructions — with the shipped
+        defaults, in every prompt, until the next restart. A resource that reloads must
+        reload into the same thing it was.
+        """
+        content = self._read_file(path)
+        personal_path = self._personal_overlay_path(path)
+        if personal_path.exists() and personal_path.is_file():
+            try:
+                personal = self._read_file(personal_path)
+                if isinstance(content, str) and isinstance(personal, str) and personal.strip():
+                    content = content.rstrip() + "\n\n" + personal.lstrip()
+            except Exception as e:
+                logger.warning("Failed to apply personal overlay %s: %s", personal_path.name, e)
+                logger.debug("personal overlay exception details", exc_info=True)
+        return content
+
+    def _source_mtime(self, path: Path) -> float:
+        """The newest mtime across the resource's base file AND its personal overlay.
+
+        Keyed on both because the overlay is half of the value: editing only the personal
+        file left the base mtime untouched, so the staleness check never fired and the edit
+        stayed invisible to a running process.
+        """
+        newest = path.stat().st_mtime
+        personal_path = self._personal_overlay_path(path)
+        try:
+            if personal_path.exists():
+                newest = max(newest, personal_path.stat().st_mtime)
+        except OSError:
+            pass
+        return newest
+
     def _set_cached_resource(self, *, resource_id: str, value: Any, source_path: Path | str) -> None:
         self._assert_concrete_resource(resource_id, value, source_path)
         with self._lock:
@@ -93,7 +137,7 @@ class ResourceManager:
             # "<update:X>") are not real files — skip mtime tracking for them.
             if isinstance(source_path, Path) and source_path.exists():
                 try:
-                    self._cached_mtimes[resource_id] = source_path.stat().st_mtime
+                    self._cached_mtimes[resource_id] = self._source_mtime(source_path)
                 except OSError:
                     self._cached_mtimes.pop(resource_id, None)
             else:
@@ -121,7 +165,7 @@ class ResourceManager:
             return cached_value
 
         try:
-            current_mtime = path.stat().st_mtime
+            current_mtime = self._source_mtime(path)
         except OSError:
             # File vanished or unreadable — fall back to cached value.
             return cached_value
@@ -131,7 +175,7 @@ class ResourceManager:
 
         # File is newer than what we cached: reload.
         try:
-            fresh_value = self._read_file(path)
+            fresh_value = self._read_with_overlay(path)
         except Exception as e:
             logger.warning(
                 "Resource '%s' mtime advanced but reload failed; keeping stale cached value. error=%s",
@@ -156,7 +200,7 @@ class ResourceManager:
         if not path.exists():
             logger.warning("Known resource path is missing for '%s': %s", resource_id, path)
             return None
-        value = self._read_file(path)
+        value = self._read_with_overlay(path)
         self._set_cached_resource(resource_id=resource_id, value=value, source_path=path)
         self._publish_to_global_blackboard(resource_id, value)
         return value
@@ -573,9 +617,6 @@ class ResourceManager:
                         skipped_count += 1
                         continue
 
-                content = self._read_file(file_path)
-                self._assert_concrete_resource(resource_id, content, file_path)
-
                 # Personal overlay: append `<stem>_personal<suffix>` if a
                 # sibling exists. Lets users keep personal preferences out
                 # of the public repo (gitignore *_personal.md) while
@@ -583,15 +624,16 @@ class ResourceManager:
                 # personal content goes AFTER the base — later instructions
                 # win at LLM read time, so personal directives override the
                 # template defaults without having to delete from the
-                # public file.
-                personal_path = file_path.with_name(
-                    f"{file_path.stem}_personal{file_path.suffix}"
-                )
+                # public file. Shared with every reload path via
+                # _read_with_overlay, so a reload cannot drop the overlay.
+                content = self._read_with_overlay(file_path)
+                self._assert_concrete_resource(resource_id, content, file_path)
+
+                personal_path = self._personal_overlay_path(file_path)
                 if personal_path.exists() and personal_path.is_file():
                     try:
                         personal = self._read_file(personal_path)
-                        if isinstance(content, str) and isinstance(personal, str) and personal.strip():
-                            content = content.rstrip() + "\n\n" + personal.lstrip()
+                        if isinstance(personal, str) and personal.strip():
                             logger.info(
                                 f"🔧 Applied personal overlay to '{resource_id}' "
                                 f"from {personal_path.name} (+{len(personal)} chars)"
