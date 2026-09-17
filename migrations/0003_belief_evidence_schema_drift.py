@@ -15,9 +15,17 @@ resources/kg_derived/resource_user_beliefs.json was never written and every
 dayflow routine logged "Beliefs file not found" — 674 times in 24h — while
 silently running with no belief context at all.
 
-Additive and idempotent. On a fresh DB create_all builds the columns and the
-runner baseline-stamps this without running it; on an existing DB it ALTERs.
-All three are nullable, matching the ORM, so no backfill is needed.
+Additive and idempotent. On an existing DB it ALTERs; all three are nullable,
+matching the ORM, so no backfill is needed.
+
+A fresh DB is NOT covered by this migration, and originally was not covered at
+all. The app's create_all never builds belief_evidence (table_initializer does
+not import the belief models), so ensure_schema's SCHEMA_SQL is its only
+builder — and it runs AFTER the migration runner has already baseline-stamped
+this file on a fresh install. A new database therefore got the 10-column table
+with 0003 recorded as applied, so it could never self-heal. Fixed by mirroring
+the three columns into SCHEMA_SQL; this migration repairs existing databases
+only, which is the correct division.
 """
 from __future__ import annotations
 

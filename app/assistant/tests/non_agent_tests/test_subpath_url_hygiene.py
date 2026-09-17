@@ -60,7 +60,10 @@ def _js_with_abs_fetch() -> dict[str, int]:
 
 # Counts as of 2026-09-11 (HEAD 7b665d30). Lower them as they are fixed.
 _TPL_BASELINE_TOTAL = 138  # href= AND action=; an earlier pass counted only href= and said 129
-_JS_BASELINE_TOTAL = 100
+# 100 until 2026-09-16, when emi_code.js was rewritten as an xterm.js terminal
+# and lost one root-absolute fetch. Tightened in the same commit, per the rule
+# this file states: pay the debt down, never let the number drift up.
+_JS_BASELINE_TOTAL = 99
 
 
 def test_no_new_literal_absolute_urls_in_templates():

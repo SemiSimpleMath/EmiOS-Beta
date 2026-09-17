@@ -56,7 +56,15 @@ CREATE TABLE IF NOT EXISTS belief_evidence (
     summary             TEXT NOT NULL,          -- one-sentence digest of what this evidence says
     raw_text            TEXT,                   -- original sentence/quote if available
     weight              REAL NOT NULL DEFAULT 1.0,  -- 0.0–5.0
-    created_at          TEXT NOT NULL           -- ISO8601
+    created_at          TEXT NOT NULL,          -- ISO8601
+    -- Added to the ORM by the 2026-05-12 KG overhaul (decay v2) and never
+    -- mirrored here, so a fresh install built a 10-column table while
+    -- BeliefEvidence inserted 13 fields into it. Migration 0003 repairs
+    -- EXISTING databases; these three lines are what stops new ones being
+    -- created broken. Nullable, matching the ORM.
+    valence                  TEXT,              -- decay v2
+    half_life_days_snapshot  INTEGER,           -- decay v2
+    extracted_by             TEXT               -- decay v2
 );
 
 CREATE INDEX IF NOT EXISTS idx_belief_evidence_belief_id   ON belief_evidence(belief_id);

@@ -62,7 +62,9 @@ _BASELINE = {
     "app/assistant/lib/tools/local_camera_snapshot/local_camera_snapshot.py",
     "belief_engine/state/sweep_tracker.py",
     "app/assistant/agent_runtime/services/llm_client.py",
-    "app/assistant/lib/tools/claude_code_invoke/session_store.py",
+    # claude_code_invoke/session_store.py was here until 2026-09-16, when the
+    # EmiCode room was replaced by an embedded terminal and the tool moved to
+    # _archived/ (which _offenders() skips). Debt paid by deletion.
     # belief_engine_v2 is NOT shipped (absent from the Dockerfile COPY list,
     # verified missing from the running image) and nothing outside it imports
     # it. Inert, so baselined rather than edited -- changing unshipped, untested
