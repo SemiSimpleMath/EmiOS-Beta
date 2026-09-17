@@ -41,6 +41,18 @@ _OAUTH_BROWSER_COOLDOWN_S = 3600
 def _open_oauth_browser(account_id: str) -> None:
     """Best-effort: open the OAuth consent flow in the user's browser (debounced)."""
     try:
+        # A test run must never seize the user's browser. Any test that reaches a
+        # Google client without stored credentials lands here, and the consent tab
+        # opens on whatever the developer was doing — twice now it has popped up
+        # mid-session, once while the app was not even running, which reads as the app
+        # spontaneously demanding re-auth. EMI_TEST_MODE is set by
+        # app/assistant/tests/test_setup.py, which every test bootstraps through,
+        # so the guard belongs here rather than in one harness.
+        if os.getenv("EMI_TEST_MODE", "").strip() not in {"", "0", "false", "False"}:
+            logger.info(
+                "OAuth browser suppressed for account_id=%s (test process)", account_id,
+            )
+            return
         if os.getenv("EMI_AUTO_OPEN_GOOGLE_OAUTH", "1").strip() in {"0", "false", "False"}:
             return
         now = time.monotonic()
