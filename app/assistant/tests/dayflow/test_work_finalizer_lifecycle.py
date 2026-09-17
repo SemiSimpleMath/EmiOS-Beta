@@ -3,7 +3,8 @@
 Locks in the done->closed satisfaction flip: a worker-`done` node is NOT satisfied on its own — only the
 finalizer's `closed` counts toward the goal, so nothing auto-completes a work object until the finalizer
 has judged its results. Also covers the finalizer's RESOLVE close/abandon and the tool_success/user_signoff
-re-key. These assertions mirror what work_finalizer_node._apply does to the store.
+re-key. These assertions are about the STORE's lifecycle — who calls it is a separate concern
+(work_finalizer_node closes nodes; the steward ends work objects).
 """
 import os
 
@@ -66,7 +67,7 @@ def test_goal_completes_only_when_all_children_closed(store):
     assert store.load(wid).status == "done"                # rollup completes on the last close
 
 
-def test_resolve_close_completes_wo_with_open_sibling(store):
+def test_steward_completing_a_wo_cascades_its_open_sibling(store):
     wid, gid = _mk(store, "B")
     a, b = _sub(store, wid, gid, "a"), _sub(store, wid, gid, "open")
     _step(store, wid, a, "actionable", "dispatched", "done", "closed")
@@ -80,7 +81,7 @@ def test_resolve_close_completes_wo_with_open_sibling(store):
     assert wo.nodes[b].payload["terminal"]["reason"].startswith("work_object_done")
 
 
-def test_resolve_abandon(store):
+def test_steward_abandoning_a_wo_mirrors_the_goal(store):
     wid, gid = _mk(store, "C")
     _sub(store, wid, gid, "a")
     store.apply("set_work_status", {"work_id": wid, "status": "abandoned", "reason": "test"}, work_id=wid)

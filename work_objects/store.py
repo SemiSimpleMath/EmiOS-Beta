@@ -141,14 +141,14 @@ TRANSITIONS: dict[str, dict[str, set[str]]] = {
         # to it. A surfaced ask IS dispatched (wake_kind=user_reply marks it): the reply is its result
         # (-> done); an expired-unanswered ticket is a timed-out tool call (sweeper -> failed, work_repair
         # adjudicates). There is no re-ask timer.
-        # done = work was done (manager's verdict) | incomplete = acted on but couldn't (+ why). Both await the
-        # finalizer, which ALONE produces closed (the satisfied terminal). [step 2 keys is_satisfied on closed]
+        # done = a tool result was recorded for this node; the work_finalizer has not judged it yet, and
+        # ALONE produces closed (the satisfied terminal). What actually happened — including "acted on but
+        # couldn't" — lives in the result TEXT, not in a status of its own. [is_satisfied keys on closed]
         "proposed": {"actionable", "dispatched", "waiting", "failed", "abandoned"},   # failed = dispatch broke before the node ran
         "actionable": {"dispatched", "waiting", "failed", "abandoned"},   # state_mover-promoted; awaiting action_selector dispatch
-        "dispatched": {"waiting", "done", "incomplete", "failed", "abandoned"},
-        "waiting": {"actionable", "dispatched", "done", "incomplete", "failed", "abandoned"},
+        "dispatched": {"waiting", "done", "failed", "abandoned"},
+        "waiting": {"actionable", "dispatched", "done", "failed", "abandoned"},
         "done": {"closed", "superseded"},
-        "incomplete": {"closed", "actionable", "abandoned"},
         "closed": {"superseded"},
         "failed": {"dispatched", "proposed", "abandoned"},   # proposed = re-open: the work_repair adjudicator re-issues a failed node
         "abandoned": set(), "superseded": set(),
@@ -160,10 +160,9 @@ TRANSITIONS: dict[str, dict[str, set[str]]] = {
         # and transitioning legally.
         "proposed": {"actionable", "dispatched", "waiting", "done", "failed", "abandoned"},
         "actionable": {"dispatched", "waiting", "done", "failed", "abandoned"},   # state_mover-promoted; awaiting action_selector dispatch
-        "dispatched": {"waiting", "done", "incomplete", "failed", "abandoned"},
-        "waiting": {"actionable", "dispatched", "done", "incomplete", "failed", "abandoned"},
+        "dispatched": {"waiting", "done", "failed", "abandoned"},
+        "waiting": {"actionable", "dispatched", "done", "failed", "abandoned"},
         "done": {"closed", "superseded"},
-        "incomplete": {"closed", "actionable", "abandoned"},
         "closed": {"superseded"},
         "failed": {"dispatched", "proposed", "abandoned"},
         "abandoned": set(), "superseded": set(),
@@ -493,6 +492,13 @@ class WorkStore:
         node.status = target
         if target == "dispatched" and prev != "dispatched":
             node.payload["dispatch_epoch"] = int(node.payload.get("dispatch_epoch") or 0) + 1
+        if target == "failed" and prev != "failed":
+            # HOW MANY TIMES THIS STEP HAS NOW FAILED. Nothing counted failures, so nothing could
+            # notice a step failing the same way forever: one delivery node recorded the SAME tool
+            # error seventeen times and every projection read it as seventeen sub-nodes of
+            # progress. Counted here, on the node, because this is the one chokepoint every
+            # failure passes through — and counted by id, never by comparing error text.
+            node.payload["failure_count"] = int(node.payload.get("failure_count") or 0) + 1
         if data.get("session_id") is not None:
             # Ownership is a graph fact (work-session rewrite): the discharging session
             # stamps itself on the node; the supervisor reads this, not a registry.
@@ -509,6 +515,19 @@ class WorkStore:
             if stopped:
                 logger.info("[WorkStore] %s -> %s cascaded %d unstarted descendant(s)",
                             node.id, target, stopped)
+        if data.get("finalizer") is not None:
+            # THE FINALIZER'S VERDICT, ON THE NODE IT JUDGED. Its instruction has to reach the
+            # architect, which runs on a LATER tick — and every tick builds a fresh manager with a
+            # fresh Blackboard (MultiAgentManager.__init__), so a handoff left in memory at the tail
+            # of a tick is thrown away before the reader exists. The graph is the return channel for
+            # results; it is the return channel for judgments too. Sits beside `terminal` rather
+            # than in `content`, which is the node's immutable directive.
+            node.payload["finalizer"] = {
+                "verdict": str(data["finalizer"].get("verdict") or ""),
+                "instruction": str(data["finalizer"].get("instruction") or ""),
+                "reasoning": str(data["finalizer"].get("reasoning") or ""),
+                "at": now,
+            }
         if data.get("note") is not None:
             # Append-only lifecycle note (e.g. the sweeper's timeout reason).
             # Lives in the payload so the node's `content` — its immutable
@@ -529,6 +548,22 @@ class WorkStore:
             node.title = str(data["title"])
         if data.get("content") is not None:
             node.content = str(data["content"])
+        node.updated_at = now
+
+    def _op_consume_finalizer_instruction(self, wo, data, now, actor=None) -> None:
+        """Mark a finalizer instruction as acted on, so the architect reads it exactly once.
+
+        Without this the instruction sits on the node forever and every later re-plan of the
+        same work object re-applies a judgment about a step that was dealt with ticks ago.
+        Stamped rather than deleted: the node keeps the record of what was decided and when."""
+        node = wo.nodes.get(data["node_id"])
+        if node is None:
+            raise KeyError(f"consume_finalizer_instruction: node {data['node_id']!r} not found")
+        entry = node.payload.get("finalizer")
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f"consume_finalizer_instruction: node {node.id!r} carries no finalizer instruction")
+        entry["consumed_at"] = now
         node.updated_at = now
 
     def _op_attach_pod(self, wo, data, now, actor=None) -> None:
@@ -675,6 +710,7 @@ WorkStore._HANDLERS = {
     "edit_node": WorkStore._op_edit_node,
     "set_work_status": WorkStore._op_set_work_status,
     "attach_pod": WorkStore._op_attach_pod,
+    "consume_finalizer_instruction": WorkStore._op_consume_finalizer_instruction,
     "defer_node": WorkStore._op_defer_node,
     "record_action": WorkStore._op_record_action,
 }

@@ -69,6 +69,42 @@ schema change; a newly engine-load-bearing field is an additive `ALTER TABLE`. (
 survives as a legacy type only: new graphs mint plain spine nodes and the switchboard
 reads each node's *goal* to route it — one node type, handler varies.)
 
+### The status vocabulary (audited 2026-09-16)
+
+Every status word has to be taught to the agents that read or write it, so the vocabulary is a cost,
+not a free label space. **One glossary — `work_portfolio.STATUS_LEGEND` — is the single source**, and
+it is injected into every agent that touches statuses (steward, finalizer, repair via the rendered
+portfolio; state_mover via `node_status_legend`). Do not write a second one in a prompt.
+
+| status | meaning |
+|---|---|
+| `proposed` | planned, in the architect's inbox; not yet approved to run |
+| `actionable` | approved and QUEUED — one node dispatches per tick; queued is NOT stalled |
+| `dispatched` | IN-FLIGHT — a worker is on it, or an ask is out. Do not re-dispatch |
+| `waiting` | held ON PURPOSE on a time / event / dependency gate; held is NOT stalled |
+| `done` | produced a RESULT; the finalizer has not judged it yet |
+| `closed` | judged and counted — the satisfied terminal, the only one that completes a goal |
+| `failed` | the step broke; work_repair adjudicates |
+| `abandoned` | dropped |
+| `superseded` | replaced by newer work |
+
+**`done` is not "finished".** A top-level node counts toward its goal only once the finalizer closes
+it. (The glossary taught `done: finished.` until 2026-09-16 and omitted `closed` entirely — while
+`closed` rendered verbatim in the steward's own prompt.) Note the one asymmetry `is_satisfied`
+enforces: a worker's own checklist child (parent != goal) is satisfied at `done`, because the
+finalizer only judges top-level nodes.
+
+**The rule that keeps this small: status = lifecycle position (who may act next); the RESULT text =
+what happened.** When an outcome nuance wants to become a status — "acted on but couldn't", "expired,
+not reached" — that is the signal it belongs in the node's result evidence instead, which the
+finalizer already reads in full and which needs no glossary.
+
+**Known dead words.** The table declares statuses no code writes: `verified`, `stale` (knowledge
+family), `answered`, `unanswerable` (question family), and `active`, `passed` (verification family).
+(`incomplete` was one of these and was removed on 2026-09-16.) Several are still *read* by filters (`is_satisfied` checks `passed`; `discharge` checks
+`verified`/`passed`), which makes them look live. Every evidence node is born `assumed` and stays
+`assumed`. Treat them as vocabulary to delete, not as behaviour to build on.
+
 ### One tree, one DAG — never both for the same job
 
 - **Ownership is a tree on `parent_id`** — ≤1 parent, roots NULL, acyclic (validated).

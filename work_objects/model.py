@@ -63,7 +63,7 @@ EDGE_RELATIONS_KNOWN = {
 }
 NODE_STATUS_KNOWN = {
     # work spine
-    "proposed", "actionable", "dispatched", "waiting", "done", "incomplete", "closed", "failed", "abandoned",
+    "proposed", "actionable", "dispatched", "waiting", "done", "closed", "failed", "abandoned",
     # knowledge (evidence/artifact)
     "assumed", "verified", "stale", "superseded",
     # question / verification ("active" = a verification run in progress)

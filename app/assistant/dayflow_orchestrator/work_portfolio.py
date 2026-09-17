@@ -17,14 +17,23 @@ from typing import Optional
 _TITLE_CHARS = 90
 _BODY_CHARS = 400
 
-# A compact glossary of node statuses, prepended to projections so agents reason over the vocabulary
-# unambiguously (esp. `dispatched`, which means in-flight, NOT "open/available").
+# The ONE glossary of node statuses. Prepended to every projection and injected into every agent that
+# reads or writes them, so the vocabulary cannot drift between prompts.
+#
+# It used to omit `closed` — the status the whole completion model turns on, since `is_satisfied`
+# requires it of every top-level node and the finalizer is its only producer — while `closed` rendered
+# verbatim in the projections agents read. And it taught "done: finished", which is the opposite of
+# what `done` means for a top-level node: a result exists and the finalizer has not yet ruled, so it
+# counts toward nothing. Both are fixed here; every reader gets the same words.
 STATUS_LEGEND = (
     "NODE STATUS KEY — proposed: planned, sitting in the architect's inbox (not yet approved to run). "
     "actionable: approved and QUEUED — one node dispatches per tick, so it is waiting its turn; queued "
     "is NOT stalled. dispatched: IN-FLIGHT — a worker is on it, or an ask is out (do not re-dispatch). "
     "waiting: held ON PURPOSE on a time / event / dependency gate until its wake; held is NOT stalled. "
-    "done: finished. failed: the step broke and is awaiting work_repair. abandoned: dropped."
+    "done: it produced a RESULT and the work_finalizer has not judged it yet — a top-level node counts "
+    "toward its goal only once the finalizer closes it. closed: judged and counted — the satisfied "
+    "terminal, and the only one that completes a goal. failed: the step broke and is awaiting "
+    "work_repair. abandoned: dropped. superseded: replaced by newer work."
 )
 
 
@@ -36,14 +45,25 @@ def _body(n) -> str:
     return (getattr(n, "content", "") or "").strip().replace("\n", " ")[:_BODY_CHARS]
 
 
-def node_result(wo, node) -> str:
+def node_result(wo, node, *, limit: int | None = None) -> str:
     """A node's RESULT is the EVIDENCE it produced — NOT its `content`. `content` is the node's directive,
     its immutable identity; the manager's answer is recorded as evidence/artifact children (a graph row
-    under the node). Returns the joined text of those children."""
+    under the node). Returns the joined text of those children.
+
+    FULL by default. The result text is what every judgment is made from: the finalizer reads it to
+    decide what a node's outcome MEANS, and a failed node's WHY/RESULT is the only account of why the
+    goal is blocked. Both were capped at 400 characters for every reader — clipping the two places it
+    matters most, while the finalizer's own contract promised the FULL result.
+
+    Pass `limit` where the concern is prompt VOLUME rather than judgment: the OUTCOMES list renders
+    every terminal node of every active work object, so it caps; the single node under judgment and
+    the failure account do not.
+    """
     parts = [(m.content or "").strip() for m in wo.nodes.values()
              if m.parent_id == node.id and getattr(m, "type", "") in ("evidence", "artifact")
              and (m.content or "").strip()]
-    return (" | ".join(parts)).replace("\n", " ")[:_BODY_CHARS]
+    joined = (" | ".join(parts)).replace("\n", " ")
+    return joined[:limit] if limit else joined
 
 
 def _ago(dt, now) -> str:
@@ -183,6 +203,14 @@ def render_work_portfolio(wo, now=None) -> str:
         L.append(f"\n⚠ FAILED ({len(failed)}) — goal is BLOCKED until adjudicated (abandon / re-plan / re-issue):")
         for n in failed:
             L.append(f"  - {_t(n)}")
+            # How many times THIS step has failed. One failure is bad luck; the same step failing
+            # again and again is the step being wrong, and nothing used to say so — every failure
+            # read as a first failure to every agent that saw it.
+            repeats = int((n.payload or {}).get("failure_count") or 0)
+            if repeats >= 2:
+                L.append(f"    ⚠ THIS STEP HAS FAILED {repeats} TIMES — it keeps failing at the "
+                         f"same thing. Retrying it will not help: drop it, or have the user asked "
+                         f"for whatever would unblock it.")
             why = node_result(wo, n)
             if why:
                 L.append(f"    WHY/RESULT: {why}")
@@ -192,7 +220,7 @@ def render_work_portfolio(wo, now=None) -> str:
     terminal = [n for n in wo.nodes.values()
                 if n.id != gid and n.status != "failed" and getattr(n, "is_terminal", False)]
     terminal.sort(key=lambda n: getattr(n, "updated_at", now) or now, reverse=True)
-    shown = [(n, node_result(wo, n)) for n in terminal]
+    shown = [(n, node_result(wo, n, limit=_BODY_CHARS)) for n in terminal]
     shown = [(n, r) for n, r in shown if r or n.pod_ref]   # only nodes that actually produced something
     if shown:
         L.append(f"\nOUTCOMES (node -> result; {len(shown)}):")
