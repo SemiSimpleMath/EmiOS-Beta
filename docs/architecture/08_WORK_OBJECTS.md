@@ -84,7 +84,7 @@ portfolio; state_mover via `node_status_legend`). Do not write a second one in a
 | `waiting` | held ON PURPOSE on a time / event / dependency gate; held is NOT stalled |
 | `done` | produced a RESULT; the finalizer has not judged it yet |
 | `closed` | judged and counted — the satisfied terminal, the only one that completes a goal |
-| `failed` | the step broke; work_repair adjudicates |
+| `failed` | the step broke; the finalizer judges it (`replan` re-opens it, `blocked` leaves it) |
 | `abandoned` | dropped |
 | `superseded` | replaced by newer work |
 
@@ -278,7 +278,7 @@ declare a DEV-ONLY `scenario_scope()` under `scenarios/`.
 | **dispatch** (`work_node_dispatch_node` -> `work_session.open_session` / `discharge_node`) | `set_status` (`→ dispatched`, `→ done/failed`), `defer_node` (asks), `attach_pod`, evidence children | one node per tick + the worker's own subtree |
 | **worker** (via `work_*` tools + reconcile hook) | subtasks, evidence, artifacts, questions, defers | inside the job thread |
 | **finalizer** (`work_finalizer_node`) | `set_status` (`done → closed`), `set_work_status` (resolve) | SOLE producer of `closed`; propagates concern outcomes |
-| **repair** (`work_repair_apply`) | `failed → proposed` (retry/escalate + `defer_node`), `set_work_status abandoned` | adjudicates failed nodes; user decline is authoritative |
+| **repair** (`work_repair_apply`) | — | RETIRED 2026-09-16; files remain, unwired. Failed nodes are the finalizer's (`replan` / `blocked`), and abandoning a goal is the steward's |
 | **sweeper** (`sweep_stuck_work_nodes`) | `set_status` (`→ failed`) | orphaned/frozen jobs (ancestor-liveness aware) |
 | **/work UI** | `edit_node`, `set_status`, `set_work_status`, node add/remove | owner's manual surface |
 

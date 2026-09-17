@@ -8,6 +8,33 @@
 > `app/assistant/multi_agents/dayflow_orchestrator_manager/config.yaml`, `work_objects/`).
 > Where a component is defined but **not reached** in the live `state_map`, it is flagged.
 
+> ## ⚠ PARTIALLY STALE — verified against code up to 2026-09-15
+>
+> The dispatch path was reworked on 2026-09-16/17 and the per-path enumeration below (**P3**, **P4**,
+> **P4a–P4c**) describes a pipeline that no longer exists. `05_DAYFLOW.md` is authoritative; read the
+> deltas here first and correct as you go:
+>
+> - **`work_repair` is retired** (files on disk, unwired). Failed nodes are the finalizer's — `replan`
+>   re-opens with a named difference, `blocked` leaves it for the steward. `_MAX_ASK_TIMEOUTS` went
+>   with it, so the 3-strike ask ceiling no longer fires.
+> - **The finalizer runs in the dispatch room, not the tick**, judges only the node that pass
+>   dispatched, has FOUR verdicts (`proceed`/`amend`/`replan`/`blocked` — no `resolve`), and both
+>   judges and writes (`work_finalizer_apply_node` was merged into it). Verdicts persist on the node
+>   (`payload.finalizer`), not on a blackboard.
+> - **The planning tick ends at the CLAIM.** `arguments → tool call → finalizer` run in
+>   `dayflow_dispatch_manager`, one room per claimed node on its own thread, opened by
+>   `work_session.open_session`. So `dayflow_switchboard_arguments_node` and `dayflow_tool_caller` are
+>   the live dispatch core, NOT the "legacy item-lane chain" the closing section calls them.
+> - **`run_work_node` is now `work_emi_team_manager`**, an ordinary manager tool with a normal wrapper.
+> - **An ask no longer parks `waiting`.** The ticket tool blocks for the ask window and the reply
+>   returns as the call's RESULT, recorded by the same recorder as any other tool.
+> - **Deleted:** `view_materializer_node`, `fast_tick_promoter_node`, `state_transition_guard_node`,
+>   `list_active_dispatches`, and the item dispatch lane. **Renamed:** `work_objects/work_runtime.py`
+>   is `runtime.py`. **Vestigial:** `node_dispatch.dispatch_node` (only `signal_work_progress` is used).
+>
+> Sections on intake, the item substrate, the scheduler, and the agent-by-agent descriptions above the
+> path enumeration were re-checked on 2026-09-17 and are current.
+
 ---
 
 ## 0. What the dayflow_orchestrator is
@@ -63,8 +90,7 @@ Assigns `short_id`s and persists via `write_dayflow_items_batch`.
 hard 2 h) and revives the source item to `actionable` only if still `dispatched`.
 `sweep_orphaned_dispatched_tasks` closes tasks stuck `dispatched` > 2 h with no live dispatch row (→
 `closed`, so the planner re-mints fresh). `sweep_zombie_waiting_items` closes `waiting` items overdue > 36 h
-(aged out of the 24 h freshness window, invisible to the cleaner). `sweep_stuck_work_nodes` supervises in-flight work-node sessions: ownership is a GRAPH fact (`payload.session_id`, stamped at claim and inherited by every node grown under the session — work-session rewrite 2026-08-04, replacing the ancestor-liveness walk). ORPHANED = `dispatched` with no live owning session (or the session's root no longer `dispatched` — a frozen-failed root's zombie thread shields nothing); FROZEN = the session root alive but no subtree/session activity for 20+ min. Both -> `failed` for work_repair. `list_active_dispatches` (read-only) is used by `view_materializer_node` to hide actionable items
-already covered by an in-flight dispatch.
+(aged out of the 24 h freshness window, invisible to the cleaner). `sweep_stuck_work_nodes` supervises in-flight work-node sessions: ownership is a GRAPH fact (`payload.session_id`, stamped at claim and inherited by every node grown under the session — work-session rewrite 2026-08-04, replacing the ancestor-liveness walk). ORPHANED = `dispatched` with no live owning session (or the session's root no longer `dispatched` — a frozen-failed root's zombie thread shields nothing); FROZEN = the session root alive but no subtree/session activity for 20+ min. Both -> `failed`, which the finalizer then judges. (`list_active_dispatches` and `view_materializer_node` were deleted with the item dispatch lane.)
 
 ---
 
@@ -210,7 +236,7 @@ The chosen `acted_on_item_ids` (a single `work_id::node_id`) comes from the agen
 
 **switchboard** (`gpt-5-mini`, all tools except `ask_user`) — a **pure LLM router** (no work, no dialog).
 It reads the one picked node and emits `delegate_to` = exactly **`create_dayflow_ticket`** (communicate
-with the user: tell/ask/nudge) or **`run_work_node`** (do something, *including* compose+send an email/text
+with the user: tell/ask/nudge) or **`work_emi_team_manager`** (do something, *including* compose+send an email/text
 — "email me the report" is work). The decisive axis is "communicating with the user vs doing something."
 `task`/`task_information` pass through verbatim. `ask_user` is blocked because routing must not pause for
 the user mid-decision.
@@ -229,9 +255,9 @@ with no `user_reply` wake is delivered via `create_work_notification` and flippe
 (`_surface_ask` → ticket_builder, `suggestion_type="work_notify"`, `trigger_context.work_node=…`) and
 **parks the node `waiting` + `defer_node(user_reply, wake_at = now+1h)`**. Anything else →
 `_do_work` → `work_on`. **Fail-loud:** any dispatch error marks the node **`failed`** (so it leaves the
-ready set for work_repair) instead of silently re-dispatching, and the tick drains the remaining nodes.
+ready set for the finalizer to judge) instead of silently re-dispatching, and the tick drains the remaining nodes.
 
-**run_node / work_on** (`work_objects/work_runtime.py`) — the inner-loop worker driver. On pickup it flips
+**run_node / work_on** (`work_objects/runtime.py`) — the inner-loop worker driver. On pickup it flips
 the node to **`dispatched`** (in-flight) if it was `proposed/waiting/actionable`, sets the work contextvar,
 hands the node to the worker manager (default `work_emi_team_manager`) per its `node_input` config, then
 harvests the manager's final answer (attaching any research pod) and **closes the node** — `failed` on
@@ -239,26 +265,34 @@ abort/error, else **`done`** with the answer written as the node's `content` (it
 `node_id=None` it drives ready top-level nodes until the goal is satisfied or only future-wake nodes remain
 (`"parked"`); it never fast-forwards time.
 
-**work_repair** (`gpt-5.6-luna`) — adjudicates work objects stuck on a **`failed`** node. Driven by
-`work_repair_node` (runs once per tick, before the state_mover lane; ≤ 3 WOs/tick). For each it builds the
-projection (`STATUS_LEGEND + render_work_portfolio`) plus an **un-truncated** `_extract_user_replies` string
-so an authoritative decline past the 400-char cutoff is seen. The agent returns
-`disposition ∈ {escalate, retry, abandon_goal}`, applied by `work_repair_apply`: `abandon_goal` →
-`set_work_status abandoned`; `retry` → failed node → `proposed`; `escalate` → failed node → `proposed` +
-`[Re-issued as an ask…]` + `defer_node(user_reply)`. Surgical/in-place (no new nodes); biases toward
-`escalate` when the goal is still wanted but treats a user decline as authoritative → `abandon_goal`.
+**work_repair** — **RETIRED 2026-09-16.** `work_repair_node` and `work_repair_apply` remain on disk but
+are on no path: the node is absent from the `state_map` and nothing imports the applier. Its three
+dispositions moved to agents that can see more than one failed step — *retry* became the finalizer's
+`replan` (which must NAME what will be different, because an unchanged retry reproduces its error),
+*escalate* became an ordinary node with a communicate goal that the architect plans, and *abandon* is
+the steward's, which sees every work object each run. Its `_MAX_ASK_TIMEOUTS` ceiling went with it, so
+the 3-strike bound on unanswered asks no longer fires.
 
-**work_finalizer** (`gpt-5.6-luna`, no tools) — adjudicates each **completed** node — the success sibling to
-`work_repair`. Driven by `work_finalizer_node`, which runs once per tick **before the architect**; for each
-non-terminal WO it judges every TOP-LEVEL `done` node (a direct child of the goal — the worker's nested
-checklist never counts toward the goal) on its FULL, un-truncated result + the WO projection, and returns
-`verdict ∈ {proceed, amend, resolve}`: **proceed** → set the node `closed` (the satisfied terminal, so its
-dependents unblock and the rollup completes the WO once all children are closed); **amend** → close the node
-+ append the WO to `replan_work_ids` and stash the revised intent in `finalizer_amend_intents` for the
-architect (next node) to re-plan the same tick; **resolve** → close the node + set the WO `done`, or
-(`abandon`) set it `abandoned`. It is the SOLE producer of `closed` — nothing auto-completes a goal until the
-finalizer has judged its results (commit `cb498a40`). Bounded 5/tick; never raises. When a WO carrying
-`constraints.concern_refs` reaches a terminal status here (or via work_repair), the outcome is
+**work_finalizer** (`gpt-5.6-luna`, no tools) — judges the outcome of ONE tool call. Driven by
+`work_finalizer_node`, which runs **in the dispatch room** (`dayflow_dispatch_manager`), in the same
+pass that made the call — not in the planning tick. It judges exactly the node that pass dispatched
+(keyed on `work_node_ref`), always a TOP-LEVEL node (a direct child of the goal — the worker's nested
+checklist never counts toward the goal), on its FULL, un-truncated result plus the WO projection.
+
+Four verdicts, two for a call that returned and two for one that failed:
+**proceed** → `done → closed` (the satisfied terminal, so dependents unblock and the rollup completes
+the WO once all children are closed); **amend** → the same close, plus the revised intent recorded on
+the node; **replan** → `failed → proposed` with an instruction naming what must differ; **blocked** →
+status unchanged, reason recorded. `resolve` was removed the same day — a single node's result must not
+end a whole work object; a finalizer that believes the goal is finished says so in `reasoning` and the
+steward rules next tick.
+
+It both judges AND writes (the former `work_finalizer_apply_node` was merged into it): the agent call
+happens in this node, so passing its schema through a blackboard to a second state_map step carried
+nothing. Verdicts persist on the NODE (`payload.finalizer`), never in memory — the architect that acts
+on an `amend`/`replan` runs a LATER tick, with a fresh manager and a fresh blackboard. It is the SOLE
+producer of `closed`. When a WO carrying
+`constraints.concern_refs` reaches a terminal status here, the outcome is
 back-propagated to the subconscious concerns register (`concern_feedback.propagate_work_outcome`,
 ad887863) — resolved/declined/failed each update the concern, and a user decline parks it dormant.
 

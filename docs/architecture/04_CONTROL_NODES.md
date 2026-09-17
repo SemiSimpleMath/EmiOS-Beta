@@ -158,7 +158,7 @@ ChatSwitchboardArgumentsNode / MasterRoomSwitchboardArgumentsNode
   -> domain-specific extras (master_room writes a dispatch marker; chat does not)
   -> sets next_agent = "tool_caller"
 (The dayflow orchestrator's switchboard routes work-object NODES instead —
- create_dayflow_ticket / run_work_node via node_dispatch, not this path.)
+ create_dayflow_ticket / work_emi_team_manager via the dispatch room, not this path.)
 
 ToolCaller
   -> resolves "get_weather" from tool registry

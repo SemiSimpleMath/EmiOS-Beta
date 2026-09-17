@@ -21,12 +21,17 @@ Sharp role separation, one bounded LLM judgment per role, deterministic mechanic
 | Role | Decides | Deterministic guard |
 |------|---------|---------------------|
 | evaluator (`strategic_planner_wo`) | WHAT work exists (create/change/re-plan/complete/abandon) | `work_persist` applies; intake consumed with provenance |
-| work_finalizer | whether a completed node's RESULT satisfies its step | sole producer of `closed`; `is_satisfied` keys on `closed` |
-| work_architect | the STRUCTURE of one goal (DAG + wake gates) | `work_architect_apply` projects the delta |
-| work_repair | disposition of a FAILED node (escalate/retry/abandon) | `work_repair_apply`, surgical re-open |
-| state_mover | HOLD-only social timing (quiet hours, meetings, away) | promotion itself is deterministic `is_ready` (time + deps) |
+| work_architect | the STRUCTURE of one goal (DAG + wake gates + dedupe) | `work_architect_apply` projects the delta; a dedupe prune is licensed only after the named survivor is verified live |
+| state_mover | did the awaited event arrive; is now the wrong moment | promotion itself is deterministic `is_ready` (time + deps) |
 | switchboard | WHERE one ready node goes, by READING its goal | two routes only: ticket the user, or run the worker |
+| work_finalizer | what ONE call's outcome means (proceed / amend / replan / blocked) | sole producer of `closed`; `is_satisfied` keys on `closed`; `_STATUS_FOR` maps each verdict to one status |
 | worker (`work_emi_team_manager`) | HOW a node gets done | render-loop manager; results land as evidence children |
+
+`work_repair` was retired on 2026-09-16; its three dispositions moved to agents that see more than one
+failed step (retry -> the finalizer's `replan`, which must NAME what will differ; escalate -> an ask is
+just a node with a communicate goal, which the architect plans; abandon -> the steward's, which sees
+every work object each run). Its files remain on disk, unwired — including
+`work_repair_apply._MAX_ASK_TIMEOUTS`, so the 3-strike ask ceiling described below no longer fires.
 
 ## Architecture
 
@@ -38,21 +43,41 @@ DayflowScheduler (event-driven, debounced; precise per-node time wakes; work-pro
     -> Invoke dayflow_orchestrator_manager (state_map order):
          tick_router -> intake_triage -> triage_persist -> context_enricher
            -> strategic_planner_wo (EVALUATOR) -> strategic_planner_wo_persist
-           -> work_finalizer_node -> work_finalizer_apply_node -> work_architect_node -> work_repair_node
+           -> work_architect_node
            -> state_mover -> state_mover_persist (node promotion + event wakes)
            -> work_node_wake_router (a targeted time-wake dispatches here, or is held)
-           -> work_node_materializer -> action_selector -> switchboard -> work_node_dispatch
-                (ONE dispatch per tick; the worker detaches onto its own job thread)
+           -> work_node_materializer -> action_selector -> switchboard
+           -> work_node_dispatch   (CLAIMS the node, opens the dispatch room, ENDS THE PASS)
            -> post_room_finalize -> final_answer
+
+  and, per claimed node, on its own thread (work_session.open_session):
+    -> Invoke dayflow_dispatch_manager:
+         dayflow_switchboard_arguments_node -> dayflow_tool_caller -> work_finalizer_node -> exit
 ```
 
 The pipeline is fixed by the manager's `state_map`
-(`multi_agents/dayflow_orchestrator_manager/config.yaml`), not by free agent handoffs. The
-materializer/selector/switchboard/dispatch segment dispatches ONE node per tick: the worker runs on its
-own job thread and the tick proceeds to finalize; when more ready nodes remain, the work-progress
-follow-up brings the next tick in minutes. Ticks stay mutually exclusive (one planning pass at a time) —
-concurrency comes from job threads overlapping ACROSS ticks, with every pass seeing the in-flight state
-(`dispatched` nodes are structurally excluded from the ready list).
+(`multi_agents/dayflow_orchestrator_manager/config.yaml`), not by free agent handoffs.
+
+**The planning pass ends at the claim.** Once a node is `dispatched`, the graph is stable — every other
+consumer reads it as in-flight and plans around it — so that state, not an elapsed timer, is what makes
+it safe for the next pass to start. The call itself (build arguments, invoke the tool, judge the result)
+runs in `dayflow_dispatch_manager`: one room per claimed node, its own manager instance, its own
+blackboard, its own thread.
+
+This matters because a tool can block for a long time. `create_dayflow_ticket` holds its call open for
+the whole ask window so the user's reply comes back as the tool's RESULT. With the call inside the tick,
+and `DayflowScheduler` admitting one cadence tick at a time and spacing the next from the previous
+tick's FINISH, a single unanswered notify was an hour in which nothing planned, woke, or dispatched.
+
+Concurrency is safe in the dispatch room and not in planning, because the inputs differ. Two planning
+passes read the same portfolio and the same intake, and their only defence against both converting the
+same email is a prompt telling the model to check. A dispatch room's input is ONE node held
+exclusively: the claim is an atomic `set_status -> dispatched` through the store's lock, so a second
+room attempting the same node is refused. Exclusion lives on the work item, not on a global flag.
+
+Cadence ticks remain mutually exclusive. Targeted work-node wakes do NOT go through that gate —
+`_fire_work_node` invokes the orchestrator manager directly — which is safe because a targeted pass
+routes `tick_router -> state_mover -> wake_router -> dispatch` and never plans.
 
 ## The work object lifecycle
 
@@ -86,14 +111,22 @@ when the awaited event appears in intake.
 picks ONE; the switchboard reads the node's goal and routes it:
 - **communicate with the user** (notify/remind/tell/ask — a UI ping) -> `create_dayflow_ticket`
 - **everything else** (research, device/calendar/todo changes, composing and SENDING email/text to a
-  recipient) -> `run_work_node` — the worker (`work_emi_team_manager`) picks its own sub-managers/tools.
-`node_dispatch.dispatch_node` is the single dispatch core, shared by the tick loop and the scheduler's
-off-tick time wakes, so a node routes identically wherever it fires. Worker dispatch is ONE THREAD PER
-OPEN TASK: the node is claimed (`dispatched`) synchronously, the worker runs on a detached job thread,
-and the graph is the return channel. Each tick supervises the in-flight jobs
-(`sweep_stuck_work_nodes`): an orphaned job (restart / thread death) or a frozen one (no subtree/job
-activity for 20+ min) fails the node for work_repair — and the transition machine rejects a zombie
-thread's late writes (`failed -> done` is illegal), so no torn state.
+  recipient) -> `work_emi_team_manager` — the worker picks its own sub-managers/tools.
+
+Both are ordinary tool names, and the dispatch that follows is identical for either: the gate claims the
+node, `open_session` opens a dispatch room on its own thread, and inside that room
+`dayflow_switchboard_arguments_node` builds the arguments FROM THE NODE (branch-free — every call
+carries `work_id`, `node_id`, `task`, `information`), `dayflow_tool_caller` executes it, and
+`work_finalizer_node` judges what comes back. Adding a third tool needs no dispatch code.
+
+Ownership is a graph fact: the session stamps `payload.session_id` on the node, registry-first, so a
+`dispatched` node with no live session is definitively orphaned rather than racing its own
+registration. Each tick supervises the in-flight set (`sweep_stuck_work_nodes`): a node quiet for
+longer than the longest legitimate call is failed, and the transition machine rejects a zombie thread's
+late writes (`failed -> done` is illegal), so no torn state.
+
+`node_dispatch.dispatch_node` still exists but is no longer on any path; the state_map plus
+`open_session` is the dispatch core.
 
 **Asks (user_reply).** An ask is a TOOL CALL whose result is the user's reply. Surfacing it creates the
 ticket (validity window = the call's timeout, currently 1h; a new ask ticket expires prior open asks of
@@ -102,10 +135,12 @@ worker job; one live ask per work object (a second ask node queues behind it). T
 matched back by `trigger_context.work_node`, recorded as an EVIDENCE child (the node's `content` is its
 immutable directive), and the node completes -> the finalizer judges the reply like any result. An
 unanswered ticket expiring is a TIMED-OUT call: the sweeper fails the node (reason appended to
-`payload.status_notes` — never `content`, which is the immutable directive) and work_repair
-adjudicates — re-asking is a repair decision, not a timer, and it is BOUNDED: after 3 unanswered
-timeouts the ask abandons with verdict `ask_unanswered_ceiling` (the user's silence is the result;
-the evaluator judges it at goal level). Ticket text is composed by `ticket_builder_manager`
+`payload.status_notes` — never `content`, which is the immutable directive) and the finalizer judges
+the failure. **The 3-strike bound no longer fires:** `_MAX_ASK_TIMEOUTS` / `ask_unanswered_ceiling`
+live in `work_repair_apply`, which is unwired. `payload.failure_count` counts a node's failures and
+warns the finalizer, architect and steward at two — but it counts PER NODE, and the steward mints a
+fresh work object per occurrence, so an action that fails the same way every day never accumulates.
+Ticket text is composed by `ticket_builder_manager`
 (multi_agents/): dispatch hands over ids and the goal (`work_id::node_id` + the node's directive),
 a read-only planner pulls the SUBSTANCE the goal promises — `read_work_object` on the graph,
 `pod_fetch` to dereference pod ids (never pod_search, never anything world-facing) — and the
@@ -118,11 +153,28 @@ A repair-escalated ask (`proposed + user_reply`, no wake_at) promotes for its fi
 state_mover, which may HOLD it (a held pre-surface ask parks `waiting` and keeps `wake_kind=user_reply`
 so a late reply to an earlier ticket still matches).
 
-**Completion.** A worker-`done` node is only a RESULT. The finalizer (runs BEFORE the architect, so an
-AMEND re-plans same-tick) reads the node's full result against the whole work object and emits one
-verdict: PROCEED (close it — only `closed` counts toward the goal), AMEND (close + re-plan with a
-revised intent), or RESOLVE (the goal itself is settled: complete or abandon the work object). When all
-of the goal's children are closed, the store's rollup completes the work object.
+**Completion.** A worker-`done` node is only a RESULT. The finalizer runs in the DISPATCH ROOM, in the
+same pass that made the call, and reads that node's full result. Four verdicts — two for a call that
+returned, two for one that failed:
+
+| | verdict | writes |
+|---|---|---|
+| returned | `proceed` | `done -> closed` (only `closed` counts toward the goal) |
+| returned | `amend` | `done -> closed`, plus a revised intent for the architect |
+| failed | `replan` | `failed -> proposed`, plus an instruction NAMING what must differ |
+| failed | `blocked` | status unchanged; only the reason is recorded |
+
+`replan` is deliberately rare: re-running a step whose circumstances have not changed reproduces its
+error, so the contract refuses a `replan` that cannot name the difference. RESOLVE was removed on
+2026-09-16 — a single node's result must not end a whole work object; a finalizer that thinks the goal
+is finished or moot says so in `reasoning` and the steward rules next tick.
+
+**Verdicts persist on the NODE**, not in memory: `nodes.payload.finalizer`, beside the terminal
+epitaph. The architect that acts on an `amend` or `replan` runs on a LATER tick, and every tick builds
+a fresh manager with a fresh blackboard, so anything left in memory is discarded before its reader
+exists. `work_architect_node._pending_finalizer_instructions` reads them off the graph and
+`consume_finalizer_instruction` stamps each one, so a judgment made ticks ago stops arriving as fresh
+advice. When all of the goal's children are closed, the store's rollup completes the work object.
 
 **Closure is a transition with obligations (2026-07-31).** Entering `done`/`abandoned` — via the
 steward, finalizer, or repair — cascade-abandons every still-startable node
@@ -135,9 +187,10 @@ the evaluator's `based_on`), the outcome — with the user's recorded words — 
 subconscious concerns register and triggers a cooldown-guarded noticer rerun
 (`subconscious/concern_feedback.py`, 2026-08-01).
 
-**Failure.** A failed node blocks its goal until work_repair adjudicates: ESCALATE (re-issue as an ask —
-the user does/provides what the assistant cannot), RETRY (transient, or the needed info arrived), or
-ABANDON_GOAL (declines are authoritative and override the prefer-escalate bias). Dispatch errors mark
+**Failure.** A failed node is judged by the finalizer in the room that made the call: `replan` re-opens
+it to the architect's inbox carrying what must be different, `blocked` leaves it failed with the reason
+recorded for the steward. A failed node still blocks its goal (`is_satisfied` requires `closed`), so
+the steward sees it loudly in the portfolio and decides what becomes of the goal. Dispatch errors mark
 the node failed loudly rather than silently retrying.
 
 ## DayflowScheduler
@@ -147,7 +200,11 @@ the node failed loudly rather than silently retrying.
   (delta pokes: chat/email/AFK/ticket), `MAX_CEILING_SECONDS=1800`, `STARTUP_TICK_DELAY_SECONDS=45`.
 - **Precise work-node wakes**: one APScheduler one-shot per time-gated node (`dayflow_work_wake::` jobs,
   re-armed idempotently after every tick, restart-safe from the durable store). Firing is `is_ready`-gated
-  and routes through the SAME switchboard as tick dispatch (`route_and_dispatch`).
+  and invokes the orchestrator manager directly (`_fire_work_node`) — outside the `_running` gate, so a
+  targeted wake never waits on a cadence tick. It routes through the same state_mover and switchboard,
+  so a node is judged and routed identically wherever it fires.
+- **Ask recovery at boot**: `start()` calls `work_session.re_arm_inflight_asks()` before the first tick,
+  so a question in flight when the process died is settled from its ticket rather than left orphaned.
 - **Work-progress follow-up**: when a node reaches a result, a reply is recorded, or a dispatch leaves
   more ready nodes waiting, `dayflow_work_progress` schedules a prompt NON-poke tick (~MIN_GAP), so
   sequential chains and ready queues advance in minutes instead of one step per ceiling tick.
@@ -217,23 +274,24 @@ ticket manager, not in dayflow items.
 | `dayflow_orchestrator/ingestion.py` + `input_message_builder.py` | Per-source intake -> items |
 | `dayflow_orchestrator/work_store.py` | The dayflow WorkObject store (emi.db) |
 | `dayflow_orchestrator/work_persist.py` | Applies the evaluator's output (mint/change/complete/abandon) |
-| `dayflow_orchestrator/work_architect_apply.py` | Projects an architect DAG/delta onto the graph |
-| `dayflow_orchestrator/work_repair_apply.py` | Applies a repair disposition |
+| `dayflow_orchestrator/work_architect_apply.py` | Projects an architect DAG/delta onto the graph (+ licensed dedupe prunes) |
+| `dayflow_orchestrator/work_session.py` | Opens a dispatch room per claimed node; session registry; ask recovery at boot |
 | `dayflow_orchestrator/work_portfolio.py` | Strategic projection (failures loud, outcomes as node -> result) |
-| `dayflow_orchestrator/node_dispatch.py` | The single dispatch core (ticket vs worker) + progress signal |
+| `dayflow_orchestrator/node_dispatch.py` | `signal_work_progress` only — `dispatch_node` is vestigial, on no path |
 | `dayflow_orchestrator/state_store.py` / `dayflow_item_writer.py` | Item substrate read / validated write |
 | `dayflow_orchestrator/dispatch_sweeper.py` | Tick sweeps (stale / orphaned / zombie) |
 | `control_nodes/strategic_planner_wo_prep/persist_node.py` | Evaluator context build / output apply |
-| `control_nodes/work_finalizer_node.py` | done -> closed reconciliation (sole closer) |
-| `control_nodes/work_architect_node.py` | Decompose new goals, re-plan flagged ones |
-| `control_nodes/work_repair_node.py` | Failed-node adjudication |
+| `control_nodes/work_finalizer_node.py` | Judges one call's result AND writes the verdict (runs in the dispatch room) |
+| `control_nodes/work_architect_node.py` | Decompose new goals, re-plan flagged ones, read pending finalizer instructions |
+| `control_nodes/dayflow_switchboard_arguments_node.py` / `dayflow_tool_caller.py` | Build the tool's arguments from the node; execute it |
 | `control_nodes/state_mover_prep/persist_node.py` | Waits + promotion candidates / promotion + node wakes |
 | `control_nodes/work_node_materializer_node.py` | Ready-node listing |
 | `control_nodes/work_node_dispatch_node.py` | Carries out the switchboard's routing |
 | `work_objects/model.py` / `store.py` | Substrate: graph model, validated writer, transitions |
-| `work_objects/work_runtime.py` | `work_on`/`run_node` — drives one node through the worker manager |
+| `work_objects/runtime.py` / `result_recorder.py` | Work context for a running node; the one writer of a tool result |
+| `multi_agents/dayflow_dispatch_manager/config.yaml` | The dispatch room: one per claimed node, on its own thread |
 | `multi_agents/work_emi_team_manager/config.yaml` | The worker: render-loop manager (DESIGN.md §4) |
-| `agents/dayflow_orchestrator/` | The pipeline agents (evaluator, architect, switchboard, finalizer, repair, ...) |
+| `agents/dayflow_orchestrator/` | The pipeline agents (evaluator, architect, switchboard, finalizer, state_mover, ...) |
 
 ## Dispatch and results (reworked 2026-09-16)
 
@@ -261,7 +319,7 @@ session thread; the dispatching tick returns immediately.
 result into graph state, for every lane: result as evidence, research pod attached, node out of
 flight, epoch-fenced. It does not judge — `done` means "a result exists, the finalizer has not
 ruled". The only distinction it makes is the one the ToolResult itself declares: a tool reporting an
-error leaves the node `failed`, which is work_repair's lane. Outcome nuance ("expired, user not
+error leaves the node `failed`, which the finalizer then judges. Outcome nuance ("expired, user not
 reached") belongs in the result TEXT, which the finalizer reads in full.
 
 **The worker cannot pre-empt its dispatcher.** `work_finish` records the worker's verdict as evidence
@@ -275,11 +333,13 @@ the longest legitimate tool call (the ask window) plus a grace, rather than gues
 if either number moves. Crashes and restarts are caught by ORPHAN detection (no live thread), which
 is immediate and does not wait for that timeout.
 
-**The finalizer judges; one node writes.** `work_finalizer_node` reads ONE node's full result and
-emits a verdict — PROCEED or AMEND — and writes nothing. `work_finalizer_apply_node` applies it:
-`done -> closed` (the satisfied terminal `is_satisfied` keys on), plus the re-plan flag and the
-revised intent for the architect. An agent decides meaning; a deterministic node turns the decision
-into graph state, and nothing in between can quietly do both.
+**The finalizer judges and writes, in one node.** It was briefly two — one emitting a verdict onto the
+blackboard, one reading it back and writing the graph. The agent call happens in that node, so its
+schema was already in hand and the blackboard hop to a second state_map step carried nothing;
+`work_architect_node` has always called its agent and written its graph in one place. Merged
+2026-09-16. The separation that matters is still there: an agent decides meaning, deterministic code
+turns the decision into graph state via `_STATUS_FOR`, and the store refuses any verdict that maps to
+an illegal transition.
 
 **Its reach is the node it judged.** A third verdict, RESOLVE, used to let it set the whole
 WorkObject done or abandoned from a single node's result. That belongs to the STEWARD, which already
@@ -307,8 +367,39 @@ question still live is waited on for the REMAINDER of its window — never re-as
 still on screen. The newest ticket per node wins, a live session is never disturbed, and a timeout is
 re-checked against the row before it is believed.
 
+**Agents do not share a blackboard.** An agent's context items resolve from the blackboard it was
+constructed with, so handing it one owned by something else silently rebinds every key they both use —
+and `task` is the key every agent uses. `work_architect_node` was briefly built with the TICK's
+blackboard so its context items would resolve; the tick's `task` is `"Dayflow cadence tick"`, which
+then shadowed the goal. For eight hours the architect was asked to decompose the tick with the whole
+portfolio as context, and wrote nodes for whatever it could see — a picture-day goal acquired an AC
+setpoint, a lights ramp and an evening dog walk, two of which failed inside it and, under
+`all_owned_children_done`, made the goal permanently unsatisfiable. An agent invoked from a control
+node gets its own blackboard; what it needs arrives through the Message or as a resource.
+
 ### Still to do
 
 - **`ManagerInterface._run_on_child_node`** still puts a work-graph special case inside the generic
   manager-as-tool wrapper. Removing it requires retiring the `node_aware` sub-manager variants
   (`work_web_manager`) in favour of plain ones, which changes what every run records in the graph.
+- **`amend` completes work that did not happen.** It maps to `closed`; closing the last child rolls
+  the work object up to `done`. Observed 2026-09-17: a lights goal closed as done while its own
+  epitaph read "the result does not show that the lights were actually turned off". The verdict set
+  has no way to say *the call returned but the node's goal did not happen*.
+- **A verdict is orphaned when the rollup wins.** `_pending_finalizer_instructions` scans ACTIVE work
+  objects, so an `amend` on the last node of a goal is destroyed by the completion it triggers. The
+  same verdict on a goal with work left over reaches the architect normally.
+- **The steward re-mints actions that already ran.** Its only defence against duplicate goals is a
+  prompt telling it to check the portfolio. Routine actions that ran this morning were minted again
+  as fresh work objects the same day.
+- **The ROUTINE reads as a backlog.** It is timing context ("judge the goal's timing against this")
+  but is written as imperatives — "Issue the cooling-stop action" — and the architect turns lines
+  into nodes.
+- **`abandon_work_ids` has no reason field**, so `work_persist` writes a hardcoded tautology on every
+  abandon (448 of 592 historic rows). `propagate_work_outcome` then finds no user words, the
+  originating concern stays active, and the goal is re-minted the next morning.
+- **`work_repair` doctrine is still taught** in `work_architect/prompts/system.j2` ("Failed nodes are
+  work_repair's ... repair's verdict reaches you next pass"), pointing at a retired agent.
+- **The failure ceiling counts per node.** A recurring action that fails identically every day gets a
+  fresh node each time, so `failure_count` never accumulates. Catching that needs a counter keyed on
+  something more durable — the action and its target, roughly what the `actions` ledger records.
