@@ -158,6 +158,17 @@ def _render_existing_graph(wo) -> str:
         if n.status in _FINISHED:
             term = (n.payload or {}).get("terminal") if hasattr(n, "payload") else None
             why = f"\n    why: {term.get('reason')}" if isinstance(term, dict) else ""
+            if not why:
+                # A `failed` node has no `terminal` — that payload is only written for the
+                # terminal targets — so its epitaph is the finalizer's verdict and reasoning.
+                # Without this a blocked step arrives here as a bare "status=failed" line, and
+                # BLOCKED means "this needs the user": the one thing the architect must read in
+                # order to plan the node that asks them. A mute failure gets planned around
+                # instead, which is how a dead end turns into another attempt.
+                fin = (n.payload or {}).get("finalizer")
+                if isinstance(fin, dict) and str(fin.get("reasoning") or "").strip():
+                    why = (f"\n    why ({fin.get('verdict') or 'judged'}): "
+                           f"{fin.get('reasoning')}")
             finished.append(f"  - {n.id} | {n.title} | status={n.status}{sub}{why}")
         else:
             detail = " ".join((n.content or "").split())

@@ -195,7 +195,16 @@ TRANSITIONS: dict[str, dict[str, set[str]]] = {
         "actionable": {"dispatched", "waiting", "failed", "abandoned"},   # state_mover-promoted; awaiting action_selector dispatch
         "dispatched": {"waiting", "done", "failed", "abandoned"},
         "waiting": {"actionable", "dispatched", "done", "failed", "abandoned"},
-        "done": {"closed", "superseded"},
+        # done -> failed is the finalizer's BLOCKED verdict on a call that RETURNED. A call can
+        # come back clean and achieve nothing: 2026-09-17 a worker ran four pod searches and two
+        # Gmail searches for a school picture packet, returned an accurate account of finding
+        # none, and had no way to say so. `closed` would have counted it as SATISFYING the goal,
+        # and the only other road out of `done` was `superseded` — so the judgment became `amend`
+        # ("continue"), and the continuation it prescribed needed the user's own credentials,
+        # which sent a browser at the school's contact form instead. `failed` is how a step
+        # reaches the architect (work_repair retired into it), so this edge is what lets a
+        # returned-but-unachieved node ask for a person.
+        "done": {"closed", "superseded", "failed"},
         "closed": {"superseded"},
         "failed": {"dispatched", "proposed", "abandoned"},   # proposed = re-open: the work_repair adjudicator re-issues a failed node
         "abandoned": set(), "superseded": set(),

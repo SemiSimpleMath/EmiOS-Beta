@@ -72,7 +72,13 @@ _REPEAT_FAILURE_LIMIT = 2
 # What each verdict writes. `blocked` maps to None on purpose: the node is already `failed` and
 # that is the truthful status — only the finalizer's account needs recording, which is why the
 # write still happens (with the status unchanged) rather than being skipped.
-_STATUS_FOR = {"proceed": "closed", "amend": "closed", "replan": "proposed", "blocked": None}
+# BLOCKED sends the node to `failed` rather than leaving its status alone. On a node that had
+# already failed this is the same outcome as before (a same-status write). What it adds is the
+# case the verdict set could not previously express: a call that RETURNED and did not achieve
+# the node's goal, with nothing we can do about it. `failed` is the channel to the architect —
+# work_repair retired into it — so a blocked step now reaches the agent that can plan an ask
+# instead of being either counted as satisfied (`closed`) or stranded at `done` forever.
+_STATUS_FOR = {"proceed": "closed", "amend": "closed", "replan": "proposed", "blocked": "failed"}
 _APPLICABLE = set(_STATUS_FOR)
 
 
@@ -163,8 +169,11 @@ class WorkFinalizerNode(ControlNode):
         REPLAN  -> `failed` -> `proposed`: back to the architect's inbox carrying the instruction
                    naming what must be DIFFERENT. The node is NOT simply re-run — re-running a step
                    whose circumstances have not changed reproduces its error.
-        BLOCKED -> the status is untouched (it already says `failed`, which is the truth) and only
-                   the reason is recorded, where the steward and the architect read it.
+        BLOCKED -> `failed`. Not "the call errored" — "the node's goal was not achieved and
+                   nothing we can do changes that". A call that RETURNED can land here: the
+                   worker searched everywhere it can reach and the thing is not there, or the
+                   next step needs the user's own credentials, permission, or knowledge. `failed`
+                   is the channel to the architect, which plans the node that asks them.
         """
         verdict = str(data.get("verdict") or "").strip().lower()
         if verdict not in _APPLICABLE:
@@ -179,7 +188,7 @@ class WorkFinalizerNode(ControlNode):
         # one the architect can only obey or ignore.
         instruction = str((data.get("amend_intent") if verdict == "amend"
                            else data.get("replan_instruction")) or "")
-        target = _STATUS_FOR.get(verdict) or node.status
+        target = _STATUS_FOR[verdict]
 
         from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
         try:
@@ -194,8 +203,7 @@ class WorkFinalizerNode(ControlNode):
                          self.name, wo.id, node.id, target, e)
             return []
 
-        logger.info("[%s] %s::%s -> %s (%s)", self.name, wo.id, node.id,
-                    target if _STATUS_FOR.get(verdict) else "failed (unchanged)", verdict)
+        logger.info("[%s] %s::%s -> %s (%s)", self.name, wo.id, node.id, target, verdict)
         return [{"work_id": wo.id, "node_id": node.id, "verdict": verdict}]
 
     def _scope(self, message):

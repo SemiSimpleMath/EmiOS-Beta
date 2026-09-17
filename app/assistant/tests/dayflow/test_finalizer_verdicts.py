@@ -484,3 +484,71 @@ class TestTheRollupDoesNotRaceTheArchitect:
                     {"work_id": wid, "status": "done", "reason": "steward: objective met"},
                     actor="steward")
         assert store.load(wid).status == "done"
+
+
+class TestACallCanReturnAndAchieveNothing:
+    """BLOCKED on a call that RETURNED — the case the verdict set could not express.
+
+    2026-09-17: a worker ran four pod searches and two Gmail searches for a school picture
+    packet and returned an accurate account of finding none. The node sat at `done`, whose only
+    exits were `closed` (which counts as SATISFYING the goal) and `superseded`. So the verdict
+    became `amend` — continue — and the continuation it prescribed needed the user's own
+    credentials, which sent a browser at the school's public contact form instead.
+    """
+
+    def test_blocked_fails_a_node_whose_call_returned(self, monkeypatch):
+        store = _store()
+        wid = _wo_with_judged_node(store)          # node sits at `done`
+
+        _run(monkeypatch, wid, "n1", {
+            "verdict": "blocked",
+            "reasoning": "searched pods and mail thoroughly; the packet is not in anything we "
+                         "can reach, and the remaining routes need the user's own account",
+        })
+
+        node = store.load(wid).nodes["n1"]
+        assert node.status == "failed", "a returned call that achieved nothing is not satisfied"
+        assert node.payload["finalizer"]["verdict"] == "blocked"
+
+    def test_a_blocked_node_does_not_complete_its_goal(self, monkeypatch):
+        """`closed` is what is_satisfied keys on. Blocked must not look like success."""
+        store = _store()
+        wid = _wo_with_judged_node(store)
+
+        _run(monkeypatch, wid, "n1", {"verdict": "blocked", "reasoning": "needs the user"})
+
+        assert store.load(wid).status == "active", "the goal cannot report done on a blocked step"
+
+    def test_blocked_counts_as_an_attempt_that_did_not_land(self, monkeypatch):
+        """It reaches the goal tally through `failed`, like replan does."""
+        store = _store()
+        wid = _wo_with_judged_node(store)
+
+        _run(monkeypatch, wid, "n1", {"verdict": "blocked", "reasoning": "needs the user"})
+
+        wo = store.load(wid)
+        assert int((wo.nodes[wo.goal_node_id].payload or {}).get("goal_unmet_attempts") or 0) == 1
+
+    def test_the_architect_sees_it_as_failed_work_to_plan_around(self, monkeypatch):
+        """`failed` is the channel to the architect — work_repair retired into it. A blocked
+        node has to be visible there, or asking the user never gets planned."""
+        from app.assistant.control_nodes.work_architect_node import _render_existing_graph
+        store = _store()
+        wid = _wo_with_judged_node(store)
+
+        _run(monkeypatch, wid, "n1", {
+            "verdict": "blocked", "reasoning": "the packet needs the user's ParentSquare account",
+        })
+
+        rendered = _render_existing_graph(store.load(wid))
+        assert "status=failed" in rendered
+        assert "ParentSquare" in rendered, "the WHY has to travel with it"
+
+    def test_blocked_on_an_already_failed_node_is_unchanged(self, monkeypatch):
+        """The original case still behaves exactly as before."""
+        store = _store()
+        wid = _failed_wo(store)
+
+        _run(monkeypatch, wid, "nf1", {"verdict": "blocked", "reasoning": "no route"})
+
+        assert store.load(wid).nodes["nf1"].status == "failed"
