@@ -174,3 +174,73 @@ def test_an_old_quiet_goal_does_not_trip_the_burst_warning(store):
 def test_the_signal_survives_a_goal_with_no_subtasks(store):
     wo = _goal(store)
     assert work_signal(store.load(wo.id), utcnow()) == []
+
+
+# --------------------------------------------------------------------------- #
+# The failure tally the re-plan cannot launder
+# --------------------------------------------------------------------------- #
+# 2026-09-17. The per-node failure_count is reset by the very act of continuing: the architect
+# abandons a failing node and mints its replacement under a fresh slug, and the replacement
+# starts at zero. A picture-day goal walked around the >=2 ceiling all day this way — every
+# per-node counter read 0 or 1 while the goal had been failing at the same thing since morning.
+# The goal node outlives every child, so the goal's own tally lives there.
+
+def _goal_fails(store, wo_id):
+    wo = store.load(wo_id)
+    return int((wo.nodes[wo.goal_node_id].payload or {}).get("goal_failure_count") or 0)
+
+
+def test_the_goal_counts_failures_its_nodes_do_not_survive(store):
+    """Two DIFFERENT nodes failing once each is a goal that has failed twice."""
+    wo = _goal(store, "Get the picture packet.")
+    first = _child(store, wo.id, wo.goal_node_id, "Contact the school")
+    _set(store, wo.id, first, "failed")
+    assert _goal_fails(store, wo.id) == 1
+
+    # The architect abandons the failure and re-plans the same work under a new slug.
+    _set(store, wo.id, first, "abandoned", actor="steward", reason="replaced")
+    second = _child(store, wo.id, wo.goal_node_id, "Reach the school another way")
+    _set(store, wo.id, second, "failed")
+
+    wo2 = store.load(wo.id)
+    assert int((wo2.nodes[second].payload or {}).get("failure_count") or 0) == 1, (
+        "the replacement node has genuinely failed only once")
+    assert _goal_fails(store, wo.id) == 2, (
+        "but the GOAL has now failed twice — the count the re-plan cannot reset")
+
+
+def test_the_architect_is_told_when_the_goal_keeps_failing(store):
+    from app.assistant.control_nodes.work_architect_node import _render_existing_graph
+    wo = _goal(store, "Get the picture packet.")
+    for title in ("Contact the school", "Reach the school another way"):
+        nid = _child(store, wo.id, wo.goal_node_id, title)
+        _set(store, wo.id, nid, "failed")
+
+    rendered = _render_existing_graph(store.load(wo.id))
+    assert "THIS GOAL HAS FAILED 2 TIMES" in rendered
+    assert "ASKS THE USER" in rendered
+
+
+def test_one_failure_is_not_worth_shouting_about(store):
+    from app.assistant.control_nodes.work_architect_node import _render_existing_graph
+    wo = _goal(store, "Get the picture packet.")
+    nid = _child(store, wo.id, wo.goal_node_id, "Contact the school")
+    _set(store, wo.id, nid, "failed")
+
+    assert "THIS GOAL HAS FAILED" not in _render_existing_graph(store.load(wo.id))
+
+
+def test_a_goal_that_never_fails_carries_no_tally(store):
+    wo = _goal(store, "Get the picture packet.")
+    nid = _child(store, wo.id, wo.goal_node_id, "Contact the school")
+    _set(store, wo.id, nid, "done")
+    assert _goal_fails(store, wo.id) == 0
+
+
+def test_re_entering_failed_does_not_double_count(store):
+    """The tally counts transitions INTO failed, like the per-node count it accompanies."""
+    wo = _goal(store, "Get the picture packet.")
+    nid = _child(store, wo.id, wo.goal_node_id, "Contact the school")
+    _set(store, wo.id, nid, "failed")
+    store.apply("set_status", {"work_id": wo.id, "node_id": nid, "status": "failed"}, actor="worker")
+    assert _goal_fails(store, wo.id) == 1

@@ -65,6 +65,26 @@ if care was unconfirmed"). A conditional delivery that turns out moot is simply 
 notify clause left inside a work node sends the message through a worker, which must then improvise a
 channel of its own.
 
+## The household boundary — going outside needs the user's OK first
+Reading what is publicly published is ordinary work: a node may look something up on the open web.
+
+Three things reach past that, and each one needs the user's explicit go BEFORE it happens:
+- Contacting an organization or a person outside the household — a school, a clinic, an office, a
+  vendor — by any route: a contact form, a message box, email, or a phone call.
+- Signing in to an account or portal, or going anywhere that expects the user's credentials.
+- Typing into someone else's form and submitting it.
+
+Shape these as TWO nodes, never one: a node whose goal is to ask the user for the go, and the node
+that acts, with the asking node in its `depends_on`. Put what will be sent, and to whom, in the
+asking node's detail, so the user is approving the actual act.
+
+When the information behind that boundary is what the goal needs, the honest node is the ask. The
+user holds the account, knows the school, and can answer in a sentence what a search cannot reach
+at all. Reaching them is the shortest path to the answer, not the fallback after it fails.
+
+An account the USER has already connected — their own mail, calendar, files — is inside the
+household: read it freely, and prefer it over the open web when the material would be there.
+
 ## A result the user asked for ENDS by giving it to them
 If the goal's purpose is to produce something for the USER — a recommendation, a chosen option, research
 findings, an answer to their question — the graph MUST end with a node whose goal is to give the user that

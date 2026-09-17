@@ -499,6 +499,19 @@ class WorkStore:
             # progress. Counted here, on the node, because this is the one chokepoint every
             # failure passes through — and counted by id, never by comparing error text.
             node.payload["failure_count"] = int(node.payload.get("failure_count") or 0) + 1
+            # AND ON THE GOAL, because the per-node count is reset by the very act of continuing.
+            # A count on the node measures one incarnation: the architect abandons a node and mints
+            # its replacement under a fresh slug, and the replacement starts at zero. The work has
+            # failed twice; nothing in the graph says so. 2026-09-17: a picture-day goal walked
+            # around the >=2 ceiling all day because every re-plan handed it a clean counter.
+            # The goal node is the one anchor node churn cannot launder — it outlives every
+            # child — so the tally of "how many times has THIS GOAL failed at something" lives
+            # here. Still counted by id at the one chokepoint; never by comparing text.
+            goal = wo.nodes.get(wo.goal_node_id or "")
+            if goal is not None and goal.id != node.id:
+                goal.payload["goal_failure_count"] = int(
+                    goal.payload.get("goal_failure_count") or 0) + 1
+                goal.updated_at = now
         if data.get("session_id") is not None:
             # Ownership is a graph fact (work-session rewrite): the discharging session
             # stamps itself on the node; the supervisor reads this, not a registry.
