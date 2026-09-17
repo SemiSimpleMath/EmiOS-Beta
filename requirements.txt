@@ -116,3 +116,8 @@ python-kasa==0.10.2    # imported as kasa — TP-Link smart-home (optional)
 twilio>=9.0.0
 # matplotlib intentionally NOT added: its only importer (app/me/layout_sim.py, a dev
 # visualization) is never imported on the boot path and now imports it lazily.
+
+# EmiCode embedded terminal (app/assistant/terminal/) — ConPTY wrapper used to
+# run the interactive `claude` CLI on a pty and stream it to /emi-code.
+# Windows only; the terminal reports a clear error on other platforms.
+pywinpty==3.0.5 ; sys_platform == "win32"

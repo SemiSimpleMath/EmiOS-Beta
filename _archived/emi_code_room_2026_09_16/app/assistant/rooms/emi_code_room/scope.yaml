@@ -1,4 +1,4 @@
-# Permission scope for emi_code_room (UI dev room — Jukka + Emi -> Claude Code).
+# Permission scope for emi_code_room (UI dev room — the user + EmiOS -> Claude Code).
 #
 # PERMISSION ONLY. Room/session behavior stays in ROOM.md. Identity is stamped
 # per request at load time — never authored here.

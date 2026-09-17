@@ -4,28 +4,26 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>EmiCode — {{ assistant_name }}</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.3.0/xterm.min.css">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/emi_code.css') }}">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
-  <script src="{{ url_for('static', filename='js/emi/socket_heartbeat.js') }}"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.3.0/xterm.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm-addon-fit/0.8.0/xterm-addon-fit.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm-addon-web-links/0.9.0/xterm-addon-web-links.min.js"></script>
 </head>
-<body>
+<body data-terminal-id="{{ terminal_id }}">
   <div class="emi-code-shell">
     <header class="emi-code-header">
       <h1>EmiCode</h1>
-      <span class="emi-code-sub">read-only · CLAUDE.md + arch docs · multi-turn via Claude Code CLI</span>
-      <span id="emi-code-status" class="emi-code-status">connecting…</span>
+      <span class="emi-code-sub">claude &middot; E:\EmiAi_sqlite</span>
+      <span class="emi-code-spacer"></span>
+      <span id="emi-code-status" class="emi-code-status is-connecting">connecting&hellip;</span>
+      <button type="button" id="emi-code-restart" class="emi-code-btn" title="Kill the running session and start a fresh one">
+        Restart
+      </button>
     </header>
 
-    <main class="emi-code-log" id="emi-code-log"></main>
-
-    <form class="emi-code-composer" id="emi-code-composer" autocomplete="off">
-      <textarea
-        id="emi-code-input"
-        rows="3"
-        placeholder="Describe a coding task or ask about Emi's internals — e.g. 'explain how dayflow_orchestrator works', 'how would I add a new pod kind?'"
-        spellcheck="false"></textarea>
-      <button type="submit" id="emi-code-send">Send</button>
-    </form>
+    <main class="emi-code-terminal" id="emi-code-terminal"></main>
   </div>
 
   <script src="{{ url_for('static', filename='js/emi_code.js') }}"></script>

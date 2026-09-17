@@ -1,11 +1,15 @@
 """Tracked Path-A room scope.yaml migrations (Step 2 rollout).
 
-Covers the 5 tracked rooms that go through room_scope_builder:
+Covers the 4 tracked rooms that go through room_scope_builder:
 - 1234 (sms)      -> LOCKED DOWN (allowed_tools: []) — sms never used as an
                      action surface. Tools are the ONLY deliberate change;
                      everything else stays faithful.
-- doc_editor (ui 50), emi_code_room (ui 60), kg_dev_room (ui 50),
-  task_create (ui 50) -> faithful migrations (full tool surface preserved).
+- doc_editor (ui 50), kg_dev_room (ui 50), task_create (ui 50)
+  -> faithful migrations (full tool surface preserved).
+
+emi_code_room (ui 60) was the fifth; it was archived 2026-09-16 when EmiCode
+became an embedded terminal rather than a room. See
+_archived/emi_code_room_2026_09_16/README.md.
 
 IMPORTANT — non-circular by design: this asserts the loaded scope.yaml against
 EXPLICIT GOLDEN VALUES captured from the pre-migration builder, NOT against the
@@ -42,13 +46,6 @@ _GOLDEN = {
     "doc_editor": dict(
         surface="ui", authority=50, allowed_tools=["all"],
         external=True, per_manager={},      # doc_editor: external_action true
-        resources=["all"], resource_groups=[], entity_cards=[],
-        write_kg=False, allow_fact_extraction=False,
-        auto_send=True, allow_initiation=False,
-    ),
-    "emi_code_room": dict(
-        surface="ui", authority=60, allowed_tools=["all"],
-        external=False, per_manager={},
         resources=["all"], resource_groups=[], entity_cards=[],
         write_kg=False, allow_fact_extraction=False,
         auto_send=True, allow_initiation=False,
@@ -115,7 +112,7 @@ def test_sms_no_tools_enforced_fail_closed():
 
 
 def test_ui_rooms_tools_pass_execution_check():
-    for rid in ("doc_editor", "emi_code_room", "kg_dev_room", "task_create"):
+    for rid in ("doc_editor", "kg_dev_room", "task_create"):
         s = _load(rid)
         data = ScopeAdapter()._project_scope_to_runtime_data(base_data={}, scope=s)
         allowed, _ = check_tool_access(

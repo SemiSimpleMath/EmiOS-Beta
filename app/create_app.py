@@ -149,6 +149,10 @@ def create_app(config_class="config.DevelopmentConfig"):
 
     register_socket_handlers(socketio)
 
+    # EmiCode terminal — streams an interactive `claude` pty to /emi-code.
+    from app.assistant.terminal.socket_handlers import register_terminal_handlers
+    register_terminal_handlers(socketio)
+
     # Initialize event bus (registers DI.socket_manager among other services)
     from app.assistant.initialize_system import initialize_system
 
