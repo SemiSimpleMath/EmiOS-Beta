@@ -680,6 +680,29 @@ class WorkStore:
             json.dumps(n.payload, default=str),
         )
 
+    @staticmethod
+    def _unconsumed_finalizer_instruction(wo: WorkObject) -> Optional[str]:
+        """The id of a node still asking the architect to change this plan, if any.
+
+        A finalizer `amend` or `replan` says the plan must change; the architect that acts on it
+        runs a LATER tick. Auto-completion must not win that race — an `amend` on the LAST node of
+        a goal would otherwise be destroyed by the completion it triggers, and the instruction
+        written for the architect becomes unreachable (the reader scans ACTIVE objects only).
+
+        2026-09-17: a lights goal closed as `done` carrying its own epitaph, "the result does not
+        show that the lights were actually turned off". The judgment was right and the rollup
+        overrode it. Only the automatic rollup defers — the steward's explicit
+        `set_work_status` stays authoritative, because a person deciding a goal is over outranks a
+        pending note about how to continue it.
+        """
+        for node in wo.nodes.values():
+            entry = (node.payload or {}).get("finalizer")
+            if not isinstance(entry, dict) or entry.get("consumed_at"):
+                continue
+            if str(entry.get("instruction") or "").strip():
+                return node.id
+        return None
+
     def _rollup(self, wo: WorkObject, now: str) -> None:
         """Derived rollup — when the goal is satisfied, close it and the WorkObject.
         Forward-only in v1: reopening a done WorkObject after a regression is an
@@ -692,6 +715,14 @@ class WorkStore:
             return
         goal = wo.nodes.get(wo.goal_node_id or "")
         if goal is not None and wo.is_satisfied(goal):
+            pending = self._unconsumed_finalizer_instruction(wo)
+            if pending is not None:
+                logger.info(
+                    "[WorkStore] %s is satisfied but holding: %s carries an unconsumed finalizer "
+                    "instruction — the architect re-plans it before this goal can complete.",
+                    wo.id, pending)
+                wo.updated_at = now
+                return
             wo.status = "done"
             if goal.status == "dispatched":      # close the goal node (dispatched->done is legal)
                 goal.status = "done"

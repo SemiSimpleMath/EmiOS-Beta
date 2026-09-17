@@ -414,3 +414,73 @@ class TestTheHandoffToTheArchitect:
              {"verdict": "proceed", "reasoning": "the deadline is confirmed"})
 
         assert wid not in _pending_finalizer_instructions(store)
+
+
+class TestTheRollupDoesNotRaceTheArchitect:
+    """A goal must not auto-complete while a verdict is still asking to change its plan.
+
+    2026-09-17, observed live: a lights node was judged `amend` — the finalizer's own words were
+    "the result does not show that the lights were actually turned off" — and `amend` maps to
+    `closed`. Closing the only child triggered the rollup, the work object went `done`, and the
+    instruction written for the architect became unreachable, because
+    _pending_finalizer_instructions scans ACTIVE objects only. The judgment was right and the
+    rollup overrode it: the goal reported success while the lights were still on.
+    """
+
+    def test_an_unconsumed_amend_holds_the_goal_open(self, monkeypatch):
+        store = _store()
+        wid = _wo_with_judged_node(store)          # a single top-level node, at `done`
+
+        _run(monkeypatch, wid, "n1", {
+            "verdict": "amend", "reasoning": "the result does not show the work happened",
+            "amend_intent": "try the other route before calling this finished",
+        })
+
+        wo = store.load(wid)
+        assert wo.nodes["n1"].status == "closed", "the node is still judged and closed"
+        assert wo.status == "active", (
+            "the goal completed while a verdict was still asking the architect to change it — "
+            "the instruction is now unreachable")
+        assert wid in _pending_finalizer_instructions(store)
+
+    def test_it_completes_once_the_architect_has_consumed(self, monkeypatch):
+        """The hold is temporary: it lasts until the instruction is acted on, not forever."""
+        store = _store()
+        wid = _wo_with_judged_node(store)
+
+        _run(monkeypatch, wid, "n1", {
+            "verdict": "amend", "reasoning": "changes the plan",
+            "amend_intent": "do the other thing",
+        })
+        assert store.load(wid).status == "active"
+
+        store.apply("consume_finalizer_instruction", {"work_id": wid, "node_id": "n1"},
+                    actor="architect")
+        # Any subsequent write re-runs the rollup; nothing is pending now.
+        store.apply("edit_node", {"work_id": wid, "node_id": "n1", "title": "Research the deadline"})
+        assert store.load(wid).status == "done"
+
+    def test_proceed_still_completes_immediately(self, monkeypatch):
+        """`proceed` asks for nothing, so it must not hold the goal open."""
+        store = _store()
+        wid = _wo_with_judged_node(store)
+
+        _run(monkeypatch, wid, "n1", {"verdict": "proceed", "reasoning": "on plan"})
+
+        assert store.load(wid).status == "done"
+
+    def test_the_steward_can_still_close_it_explicitly(self, monkeypatch):
+        """Only the automatic rollup defers. A person deciding the goal is over outranks a pending
+        note about how to continue it."""
+        store = _store()
+        wid = _wo_with_judged_node(store)
+
+        _run(monkeypatch, wid, "n1", {
+            "verdict": "amend", "reasoning": "changes the plan", "amend_intent": "do X instead",
+        })
+        assert store.load(wid).status == "active"
+
+        store.apply("set_work_status",
+                    {"work_id": wid, "status": "done", "reason": "steward: objective met"},
+                    actor="steward")
+        assert store.load(wid).status == "done"
