@@ -90,7 +90,8 @@ def respond_to_ticket():
         "ticket_id": "...",
         "action": "done" | "skip" | "later" | "acknowledge" | "willdo" | "no" | "accept" | "dismiss" | "answer",
         "user_text": "optional user explanation, OR the user's free-form answer for ask_user tickets",
-        "snooze_minutes": 30  // only used if action is "later"
+        "snooze_minutes": 30,  // only used if action is "later"
+        "label": "the text of the button the user pressed, as this surface rendered it"
     }
 
     Actions:
@@ -108,6 +109,7 @@ def respond_to_ticket():
         action = data.get('action', '')
         user_text = data.get('user_text', '')
         snooze_minutes = data.get('snooze_minutes', 30)
+        label = data.get('label', '')
 
         service = get_ticket_service()
         response = service.respond(
@@ -115,6 +117,7 @@ def respond_to_ticket():
             action=action,
             user_text=user_text or None,
             snooze_minutes=snooze_minutes,
+            label=label or None,
         )
 
         result = {

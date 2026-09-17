@@ -13,6 +13,33 @@ logger = get_logger(__name__)
 _DEFAULT_TICKET_TYPE = "dayflow_orchestrator"
 
 
+def _one_line(text) -> str:
+    return " ".join(str(text or "").split())
+
+
+def format_response_result(*, answer: str, question: str) -> str:
+    """The result text for a user response.
+
+    The ANSWER comes first deliberately: a node's joined evidence is capped when rendered into a
+    projection, and the user's own words are the half that must survive the cap. The question
+    follows because without it the answer is unreadable — "No I will do it later" means nothing
+    until you know it answers "Do you want to take the dogs out now?".
+    """
+    answer = _one_line(answer) or "(responded without text)"
+    question = _one_line(question)
+    line = f"User responded: {answer}"
+    return f"{line} (in response to: {question})" if question else line
+
+
+def format_expiry_result(*, reason: str, question: str) -> str:
+    """The result text when nobody answered: the message went out, the user was not reached. A
+    RESULT, not a failure — the finalizer judges it and decides whether to ask again later."""
+    reason = _one_line(reason) or "no response within the ticket's validity window"
+    question = _one_line(question)
+    line = f"Notify expired, user not reached: {reason}"
+    return f"{line} (sent to the user: {question})" if question else line
+
+
 class CreateDayflowTicketTool(BaseTool):
     def __init__(self) -> None:
         super().__init__("create_dayflow_ticket")
@@ -77,6 +104,12 @@ class CreateDayflowTicketTool(BaseTool):
                 raise ValueError("plan_mode_available is not allowed; it is derived from ticket_kind.")
 
             ticket_manager = get_ticket_manager()
+            # ONE LIVE QUESTION PER WORK OBJECT (2026-08-18 walk-storm): before a new ask appears,
+            # expire any still-open ask bound to the same work object, so the old question vanishes
+            # as the new one arrives instead of stacking in the UI. Pure ticket-database work, joined
+            # on trigger_context.work_node ids — no wording — which is why it lives in the tool and
+            # not in the dispatcher.
+            self._supersede_open_asks(ticket_manager, trigger_context)
             ticket = ticket_manager.create_ticket(
                 ticket_type=_DEFAULT_TICKET_TYPE,
                 suggestion_type=suggestion_type,
@@ -93,6 +126,15 @@ class CreateDayflowTicketTool(BaseTool):
                 raise RuntimeError("ticket_manager.create_ticket returned None.")
             if not ticket_manager.mark_proposed(ticket.ticket_id):
                 raise RuntimeError(f"Failed to mark ticket proposed: {ticket.ticket_id}")
+
+            # Deterministic links ride AFTER the composed message — a pod id must reach the user
+            # exactly or not at all, never via LLM transcription.
+            append_links = args.get("append_links")
+            if isinstance(append_links, list) and append_links:
+                links = "\n".join(str(l).strip() for l in append_links if str(l).strip())
+                if links:
+                    ticket.message = f"{ticket.message}\n\n{links}"
+                    ticket_manager.save_ticket(ticket)
 
             ticket_dict = ticket.to_dict()
             ticket_dict["button_layout"] = button_layout
@@ -166,8 +208,14 @@ class CreateDayflowTicketTool(BaseTool):
                     continue
                 data = getattr(m, "data", None)
                 if isinstance(data, dict) and data.get("title"):
+                    # ticket_kind arrives as the composer's TicketKind enum member.
+                    # TicketKind subclasses (str, Enum), so str() on it yields
+                    # "TicketKind.notify" — Enum.__str__, not the value — which
+                    # _ui_policy_for_ticket_kind then rejects. Unwrap to .value.
+                    kind = data.get("ticket_kind")
+                    kind = getattr(kind, "value", kind)
                     return {
-                        "ticket_kind": str(data.get("ticket_kind") or "advice"),
+                        "ticket_kind": str(kind or "advice"),
                         "suggestion_type": str(data.get("suggestion_type") or "general"),
                         "title": str(data.get("title") or ""),
                         "message": str(data.get("message") or brief),
@@ -185,6 +233,76 @@ class CreateDayflowTicketTool(BaseTool):
             "title": brief[:60].strip(),
             "message": brief.strip(),
         }
+
+    # A responded ticket: the user dealt with it, whichever button they pressed.
+    _RESPONDED_STATES = frozenset({"accepted", "dismissed", "completed"})
+    # Still on screen, still answerable.
+    _LIVE_STATES = frozenset({"pending", "proposed", "snoozed"})
+
+    @classmethod
+    def result_for_ticket(cls, ticket) -> "ToolResult | None":
+        """What this ticket's CURRENT state says, as a ToolResult — or None while it is still live.
+
+        The ticket row is the durable record of an in-flight ask; the thread waiting on it is not.
+        After a restart the thread is gone and this is how the call is reconstructed from what
+        actually happened, rather than re-asking a question the user may already have answered.
+        """
+        from app.assistant.utils.time_utils import parse_iso_utc
+
+        state = str(getattr(ticket, "state", "") or "").strip().lower()
+        title = str(getattr(ticket, "title", "") or "")
+        user_text = str(getattr(ticket, "user_text", "") or "").strip()
+        action = str(getattr(ticket, "user_action", "") or "").strip()
+
+        if state in cls._RESPONDED_STATES:
+            return ToolResult(
+                result_type="ticket_response",
+                content=format_response_result(answer=user_text or action or state, question=title),
+                data={"ticket_id": getattr(ticket, "ticket_id", ""), "title": title,
+                      "action": action or state, "user_text": user_text},
+            )
+        if state not in cls._LIVE_STATES:
+            # expired / failed / anything else terminal: it ended without the user.
+            return ToolResult(
+                result_type="ticket_response",
+                content=format_expiry_result(reason=f"the ticket ended unanswered ({state or 'unknown state'})",
+                                             question=title),
+                data={"ticket_id": getattr(ticket, "ticket_id", ""), "title": title,
+                      "action": "timeout", "user_text": ""},
+            )
+
+        valid_until = getattr(ticket, "valid_until", None)
+        if valid_until is not None:
+            due = valid_until if getattr(valid_until, "tzinfo", None) else (
+                parse_iso_utc(str(valid_until)) if isinstance(valid_until, str) else
+                valid_until.replace(tzinfo=timezone.utc))
+            if due is not None and due <= datetime.now(timezone.utc):
+                return ToolResult(
+                    result_type="ticket_response",
+                    content=format_expiry_result(reason="the ticket's validity window passed unanswered",
+                                                 question=title),
+                    data={"ticket_id": getattr(ticket, "ticket_id", ""), "title": title,
+                          "action": "timeout", "user_text": ""},
+                )
+        return None      # still live — the question is genuinely still out
+
+    @staticmethod
+    def _supersede_open_asks(ticket_manager, trigger_context) -> None:
+        """Expire still-open asks bound to the same work object. Joined purely on ids."""
+        ref = str((trigger_context or {}).get("work_node") or "").strip()
+        if "::" not in ref:
+            return
+        prefix = f"{ref.split('::', 1)[0]}::"
+        for old in ticket_manager.get_tickets_pending_or_proposed():
+            if str(getattr(old, "ticket_type", "") or "") != _DEFAULT_TICKET_TYPE:
+                continue
+            ctx = old.trigger_context if isinstance(old.trigger_context, dict) else {}
+            old_ref = str(ctx.get("work_node") or "")
+            if not old_ref.startswith(prefix) or old_ref == ref:
+                continue
+            ticket_manager.mark_expired(old.ticket_id, reason=f"superseded by {ref}")
+            logger.info("[create_dayflow_ticket] expired open ask %s (superseded by %s)",
+                        old.ticket_id, ref)
 
     @staticmethod
     def _wait_for_ticket_response(ticket_id: str, title: str, timeout: float) -> ToolResult:
@@ -241,7 +359,8 @@ class CreateDayflowTicketTool(BaseTool):
                     )
                 return ToolResult(
                     result_type="ticket_response",
-                    content=f"Ticket '{title}' shown to user but no response within {int(timeout)}s.",
+                    content=format_expiry_result(
+                        reason=f"no response within {int(timeout)}s", question=title),
                     data={
                         "ticket_id": ticket_id,
                         "title": title,
@@ -253,21 +372,13 @@ class CreateDayflowTicketTool(BaseTool):
             action = result_holder.get("action", "")
             user_text = result_holder.get("user_text", "")
 
-            # Build human-readable result
-            action_label = {
-                "done": "accepted (done)",
-                "willdo": "accepted (will do)",
-                "acknowledge": "acknowledged",
-                "accept": "accepted",
-                "skip": "declined (skipped)",
-                "no": "declined (no)",
-                "dismiss": "dismissed",
-                "later": "snoozed",
-            }.get(action, action)
-
-            content = f"User {action_label} ticket '{title}'."
-            if user_text:
-                content += f" User said: \"{user_text}\""
+            # `user_text` already carries what the user pressed and what they typed, in
+            # their own words (TicketService builds it from the button's own label). The
+            # table that used to translate the action token into our own phrasing is gone:
+            # the same token reads differently on different layouts, and inventing prose
+            # about intent is how a response ends up misquoted. One shared shape with the
+            # work-node path so both callers of this tool agree on what a result is.
+            content = format_response_result(answer=user_text or action, question=title)
 
             logger.info("[create_dayflow_ticket] Ticket %s response: %s", ticket_id, content)
 

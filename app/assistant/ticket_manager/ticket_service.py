@@ -59,25 +59,11 @@ class TicketService:
             self._ticket_manager = DI.ticket_manager
         return self._ticket_manager
 
-    # Descriptive text for each action (explains user intent to agents)
-    ACTION_DESCRIPTIONS = {
-        # Activity layout
-        "done": "User has completed this activity.",
-        "skip": "User has declined this suggestion.",
-        "later": "User wants to be reminded later.",
-        # Advice layout  
-        "acknowledge": "User has acknowledged this advice but has not committed to action yet.",
-        "willdo": "User has committed to doing this right now.",
-        "no": "User has indicated this suggestion is not applicable or not wanted.",
-        # Tool approval layout
-        "accept": "User has approved this tool action.",
-        "dismiss": "User has denied this tool action.",
-        # ask_user layout — `user_text` is the raw answer, no descriptive
-        # prefix so the calling agent gets the user's words verbatim.
-        "answer": "",
-        # Close (X button) — not a user opinion, just clearing the UI
-        "close": "User closed the ticket without expressing an opinion. Treat as if it was never shown.",
-    }
+    # Actions whose free text IS the answer: the user typed the reply itself, so it
+    # stands alone with no button name in front of it (the ask_user contract — the
+    # calling agent receives the user's words verbatim). Keyed on the action token,
+    # never on what the button is called.
+    TEXT_IS_THE_ANSWER = frozenset({"answer"})
 
     # Map actions to state transitions
     ACTION_TO_STATE = {
@@ -103,10 +89,11 @@ class TicketService:
         action: str,
         user_text: Optional[str] = None,
         snooze_minutes: int = 30,
+        label: Optional[str] = None,
     ) -> TicketResponse:
         """
         Handle a user response to a ticket.
-        
+
         Args:
             ticket_id: The ticket ID
             action: One of:
@@ -115,7 +102,13 @@ class TicketService:
                 - Tool approval layout: "accept", "dismiss"
             user_text: Optional user-provided text/explanation
             snooze_minutes: Minutes to snooze (only used if action="later")
-            
+            label: The text of the button the user actually pressed, passed through
+                verbatim. The surface that rendered the button is the only place that
+                knows what it said — the same action token reads "Acknowledge" in the
+                advice layout and "OK" in the notify layout, and the wording is expected
+                to change. Absent (a surface with no buttons), the action token itself
+                is recorded; we never translate a token into prose about intent.
+
         Returns:
             TicketResponse with success/failure info
         """
@@ -148,29 +141,28 @@ class TicketService:
                 error="ticket not found",
             )
 
-        # Build effective text: action description + optional user elaboration
-        # This gives agents full context about what the user meant.
-        # Special case: actions with an EMPTY description (e.g. "answer" for
-        # ask_user tickets) pass user_text through verbatim so the calling
-        # agent gets the user's words without a descriptive wrapper.
-        action_desc = self.ACTION_DESCRIPTIONS.get(action, "")
+        # Build the effective text: what the user pressed, and what they typed.
+        # Both verbatim. This replaced a table of canned descriptions that guessed at
+        # intent from the action token — on 2026-09-15 that table recorded "User has
+        # acknowledged this advice but has not committed to action yet" directly in
+        # front of the user's own words, "the picture was already taken so this
+        # is all moot", and every reader downstream got both halves.
+        button = str(label or "").strip()
         user_elaboration = user_text.strip() if user_text else ""
 
-        if user_elaboration and action_desc:
-            # Combine: "User has acknowledged... Additional: I'll do it after lunch"
-            effective_text = f"{action_desc} Additional from user: {user_elaboration}"
-        elif user_elaboration:
-            # No descriptive prefix — answer-style actions (ask_user).
-            effective_text = user_elaboration
+        if action in self.TEXT_IS_THE_ANSWER:
+            effective_text = user_elaboration or button or action
+        elif button and user_elaboration:
+            effective_text = f"{button} — {user_elaboration}"
         else:
-            effective_text = action_desc
+            effective_text = user_elaboration or button or action
 
-        # For 'close' (X button), skip recording user_text/user_action so the
-        # ticket looks like it was never interacted with.
-        if action != "close":
-            ticket.user_text = effective_text
-            ticket.user_action = action
-            manager.save_ticket(ticket)
+        # Closing is a response like any other: the ask was surfaced and the user
+        # dealt with it. Recording it is what lets the node that asked receive a
+        # result instead of waiting out its whole timeout.
+        ticket.user_text = effective_text
+        ticket.user_action = action
+        manager.save_ticket(ticket)
 
         # Transition based on action
         success = False
@@ -200,7 +192,11 @@ class TicketService:
             ticket_id, action, target_state, success,
         )
 
-        if success and target_state != "expired":
+        # Every successful response is published, closes included — a node waiting on
+        # this ticket is waiting on a tool call, and "the user closed it" is that
+        # call's result. (A ticket the SWEEPER expires never comes through here; that
+        # branch lands its own result.)
+        if success:
             self._publish_ticket_responded(ticket_id, action, target_state, effective_text)
 
         # Pending-directive transition: if the user accepted the ticket AND added

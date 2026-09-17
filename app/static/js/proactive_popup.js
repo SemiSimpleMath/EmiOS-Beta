@@ -8,6 +8,25 @@
  */
 
 class ProactiveSuggestionPopup {
+    // Button class -> the action token posted for it. Several layouts render the same
+    // action under different words ("OK" and "Acknowledge" are both `acknowledge`,
+    // "Deny" and "Skip" are both `dismiss`), which is exactly why the wording is read
+    // off the button at click time rather than mapped from the token server-side.
+    static ACTION_BY_CLASS = {
+        'proactive-btn-accept': 'accept',
+        'proactive-btn-done': 'done',
+        'proactive-btn-skip': 'skip',
+        'proactive-btn-later': 'later',
+        'proactive-btn-dismiss': 'dismiss',
+        'proactive-btn-ok': 'acknowledge',
+        'proactive-btn-allow': 'accept',
+        'proactive-btn-deny': 'dismiss',
+        'proactive-btn-acknowledge': 'acknowledge',
+        'proactive-btn-willdo': 'willdo',
+        'proactive-btn-no': 'no',
+        'proactive-btn-answer': 'answer',
+    };
+
     constructor() {
         this.suggestions = [];  // All pending suggestions shown at once
         this.pollInterval = null;
@@ -121,20 +140,12 @@ class ProactiveSuggestionPopup {
         this.pollInterval = setInterval(() => this.checkForSuggestions(), intervalMs);
     }
     
-    isUserInteracting() {
-        // Check if user has focus on any element inside the popup
-        const popup = document.getElementById('proactive-popup');
-        if (!popup) return false;
-        return popup.contains(document.activeElement) && document.activeElement !== popup;
-    }
-    
     async checkForSuggestions() {
-        // Skip polling if user is actively interacting with the popup
-        if (this.isUserInteracting()) {
-            console.log('[ProactivePopup] Skipping poll - user is interacting');
-            return;
-        }
-        
+        // Polling used to be skipped entirely while the user had focus inside the popup,
+        // to protect what they were typing. That also froze the list: click into one
+        // card's note field and every other card stopped being pruned, so tickets that
+        // had already lapsed stayed on screen for as long as the cursor sat there.
+        // render() now carries focus and caret across a redraw, so the poll just runs.
         try {
             const response = await fetch('/api/tickets/pending');
             const data = await response.json();
@@ -179,10 +190,20 @@ class ProactiveSuggestionPopup {
     render() {
         const popup = document.getElementById('proactive-popup');
         if (!popup) return;
-        
+
         const listContainer = popup.querySelector('.proactive-popup-list');
         const countEl = popup.querySelector('.proactive-popup-count');
-        
+
+        // A card whose validity window has passed is gone — it is no longer answerable,
+        // and the server has already stopped listing it. Dropping it here means it
+        // disappears the moment it lapses instead of lingering until the next poll.
+        // valid_until is always aware-UTC ISO (AwareUtcDateTime), so Date.parse is exact.
+        // Written as a negated comparison so an unparseable value (NaN) KEEPS the card:
+        // showing one card too long is recoverable, hiding a live question is not.
+        const nowMs = Date.now();
+        this.suggestions = this.suggestions.filter(
+            s => !s.valid_until || !(Date.parse(s.valid_until) <= nowMs));
+
         if (this.suggestions.length === 0) {
             popup.classList.add('hidden');
             return;
@@ -200,6 +221,13 @@ class ProactiveSuggestionPopup {
                 userTextValues[ticketId] = input.value;
             }
         });
+        // Capture the caret too: a poll can redraw the list mid-sentence, and losing
+        // focus (or the cursor position) while someone types is what the old
+        // skip-the-poll guard was really protecting against.
+        const active = document.activeElement;
+        const typingIn = (active && active.classList && active.classList.contains('proactive-user-text'))
+            ? active.closest('.proactive-item')?.dataset.ticketId : null;
+        const caret = typingIn ? [active.selectionStart, active.selectionEnd] : null;
         
         // Build list HTML
         listContainer.innerHTML = this.suggestions.map((s, idx) => {
@@ -317,62 +345,43 @@ class ProactiveSuggestionPopup {
                 input.value = userTextValues[ticketId];
             }
         });
+        // ...and put the cursor back where it was, if that card is still here.
+        if (typingIn) {
+            const el = listContainer.querySelector(
+                `.proactive-item[data-ticket-id="${typingIn}"] .proactive-user-text`);
+            if (el) {
+                el.focus();
+                try { el.setSelectionRange(caret[0], caret[1]); } catch (_) {}
+            }
+        }
         
-        // Bind action buttons
+        // Bind action buttons. Each button's own text rides along as the label, so the
+        // markup above stays the single place a button's wording lives.
+        Object.entries(ProactiveSuggestionPopup.ACTION_BY_CLASS).forEach(([cls, action]) => {
+            listContainer.querySelectorAll(`.${cls}`).forEach(btn => {
+                btn.addEventListener('click', () => this.respond(
+                    parseInt(btn.dataset.idx), action, btn.textContent.trim()));
+            });
+        });
+        // The × carries no text of its own, so it sends its tooltip.
         listContainer.querySelectorAll('.proactive-item-close').forEach(btn => {
-            btn.addEventListener('click', () => this.respond(parseInt(btn.dataset.idx), 'close'));
-        });
-        listContainer.querySelectorAll('.proactive-btn-accept').forEach(btn => {
-            btn.addEventListener('click', () => this.respond(parseInt(btn.dataset.idx), 'accept'));
-        });
-        listContainer.querySelectorAll('.proactive-btn-done').forEach(btn => {
-            btn.addEventListener('click', () => this.respond(parseInt(btn.dataset.idx), 'done'));
-        });
-        listContainer.querySelectorAll('.proactive-btn-skip').forEach(btn => {
-            btn.addEventListener('click', () => this.respond(parseInt(btn.dataset.idx), 'skip'));
-        });
-        listContainer.querySelectorAll('.proactive-btn-later').forEach(btn => {
-            btn.addEventListener('click', () => this.respond(parseInt(btn.dataset.idx), 'later'));
-        });
-        listContainer.querySelectorAll('.proactive-btn-dismiss').forEach(btn => {
-            btn.addEventListener('click', () => this.respond(parseInt(btn.dataset.idx), 'dismiss'));
-        });
-        listContainer.querySelectorAll('.proactive-btn-ok').forEach(btn => {
-            btn.addEventListener('click', () => this.respond(parseInt(btn.dataset.idx), 'acknowledge'));
-        });
-        listContainer.querySelectorAll('.proactive-btn-allow').forEach(btn => {
-            btn.addEventListener('click', () => this.respond(parseInt(btn.dataset.idx), 'accept'));
-        });
-        listContainer.querySelectorAll('.proactive-btn-deny').forEach(btn => {
-            btn.addEventListener('click', () => this.respond(parseInt(btn.dataset.idx), 'dismiss'));
-        });
-        // Advice layout buttons
-        listContainer.querySelectorAll('.proactive-btn-acknowledge').forEach(btn => {
-            btn.addEventListener('click', () => this.respond(parseInt(btn.dataset.idx), 'acknowledge'));
-        });
-        listContainer.querySelectorAll('.proactive-btn-willdo').forEach(btn => {
-            btn.addEventListener('click', () => this.respond(parseInt(btn.dataset.idx), 'willdo'));
-        });
-        listContainer.querySelectorAll('.proactive-btn-no').forEach(btn => {
-            btn.addEventListener('click', () => this.respond(parseInt(btn.dataset.idx), 'no'));
+            btn.addEventListener('click', () => this.respond(
+                parseInt(btn.dataset.idx), 'close', btn.title || 'Close'));
         });
         listContainer.querySelectorAll('.proactive-btn-plan-mode').forEach(btn => {
             btn.addEventListener('click', () => this.startPlanMode(parseInt(btn.dataset.idx)));
         });
-        // ask_user layout: Submit + Enter-to-submit
-        listContainer.querySelectorAll('.proactive-btn-answer').forEach(btn => {
-            btn.addEventListener('click', () => this.respond(parseInt(btn.dataset.idx), 'answer'));
-        });
+        // ask_user layout: Enter submits the same way the Submit button does.
         listContainer.querySelectorAll('.proactive-item').forEach(item => {
-            const layoutInput = item.querySelector('.proactive-btn-answer');
-            if (!layoutInput) return;
-            const idx = parseInt(layoutInput.dataset.idx);
+            const submitBtn = item.querySelector('.proactive-btn-answer');
+            if (!submitBtn) return;
+            const idx = parseInt(submitBtn.dataset.idx);
             const textInput = item.querySelector('.proactive-user-text');
             if (textInput) {
                 textInput.addEventListener('keydown', (e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
-                        this.respond(idx, 'answer');
+                        this.respond(idx, 'answer', submitBtn.textContent.trim());
                     }
                 });
             }
@@ -532,7 +541,11 @@ class ProactiveSuggestionPopup {
         }
     }
     
-    async respond(idx, action) {
+    // `label` is the text of the button the user actually pressed. This popup is the
+    // only place that knows what its buttons say — the same action reads "Acknowledge"
+    // on the advice layout and "OK" on the notify layout — so it travels with the
+    // response instead of the server guessing at it from the action token.
+    async respond(idx, action, label = '') {
         const suggestion = this.suggestions[idx];
         if (!suggestion) return;
         
@@ -562,7 +575,8 @@ class ProactiveSuggestionPopup {
                     ticket_id: ticketId,
                     action: action,
                     user_text: userText,
-                    snooze_minutes: snoozeMinutes
+                    snooze_minutes: snoozeMinutes,
+                    label: label
                 })
             });
             
@@ -590,7 +604,8 @@ class ProactiveSuggestionPopup {
                         ticket_id: suggestion.ticket_id,
                         action: 'close',
                         user_text: '',
-                        snooze_minutes: 0
+                        snooze_minutes: 0,
+                        label: 'Dismiss All'
                     })
                 });
             } catch (e) {
