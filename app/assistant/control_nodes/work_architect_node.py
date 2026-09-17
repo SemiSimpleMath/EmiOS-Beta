@@ -237,14 +237,19 @@ class WorkArchitectNode(ControlNode):
             if created or replan_ids:
                 scope = self._scope(message)
                 info = _situational_context(self.blackboard)
-                # Pass THIS tick's blackboard. create_agent() builds an empty one when given
-                # nothing (`blackboard or Blackboard()`), which silently emptied every
-                # blackboard-sourced context item the architect declares — `admitted_artifacts`
-                # resolved to nothing for as long as it has been listed, and the schedule had to
-                # come from the raw calendar resource because the steward's view was unreachable.
-                # The steward's prep node loaded all of it earlier this same tick.
-                agent = DI.agent_factory.create_agent("dayflow_orchestrator::work_architect",
-                                                      self.blackboard)
+                # Its OWN blackboard, never the tick's. Sharing the tick's looks right — it is
+                # what makes blackboard-sourced context items resolve — but the tick's blackboard
+                # already carries `task` = "Dayflow cadence tick" (dayflow_tick builds the
+                # Message that way), and that value WINS over the Message this node passes. The
+                # architect was then asked to decompose "Dayflow cadence tick" with the whole
+                # portfolio as context, and dutifully wrote nodes for everything it could see:
+                # a picture-day goal acquired an AC setpoint, a whole-house lights ramp and an
+                # evening dog walk, two of which failed there and blocked the goal forever.
+                #
+                # The objective reaches the agent through the Message below. Anything else the
+                # architect needs has to arrive the same way (see _situational_context) or as a
+                # resource — never by borrowing a blackboard whose keys it does not own.
+                agent = DI.agent_factory.create_agent("dayflow_orchestrator::work_architect")
 
                 # CREATE — decompose each freshly-minted goal.
                 for c in created:
