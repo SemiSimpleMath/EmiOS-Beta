@@ -90,7 +90,7 @@ class TestRegistryOwnership:
             ws._live_sessions[sid] = {"thread": successor_thread,
                                       "started_at": datetime.now(timezone.utc)}
         try:
-            # the finally-block owner check in _run_session: emulate a zombie pop
+            # the finally-block owner check in _run_dispatch_room: emulate a zombie pop
             with ws._sessions_lock:
                 entry = ws._live_sessions.get(sid)
                 if entry is not None and entry.get("thread") is threading.current_thread():
@@ -135,9 +135,9 @@ class TestClaimGuard:
     def test_unclaimed_node_is_refused(self, monkeypatch):
         from app.assistant.dayflow_orchestrator import work_session as ws
 
-        monkeypatch.setattr(ws, "_run_session", lambda *a: None)
+        monkeypatch.setattr(ws, "_run_dispatch_room", lambda *a: None)
         store, applies = self._fake_store("actionable")
-        ws.open_session(store, "work_x", "n1", "run_work_node")
+        ws.open_session(store, "work_x", "n1", "work_emi_team_manager")
         assert applies == []                       # nothing written — the gate should have claimed
         with ws._sessions_lock:
             assert ws.session_id_for("work_x", "n1") not in ws._live_sessions
@@ -145,9 +145,9 @@ class TestClaimGuard:
     def test_claimed_node_starts_a_session(self, monkeypatch):
         from app.assistant.dayflow_orchestrator import work_session as ws
 
-        monkeypatch.setattr(ws, "_run_session", lambda *a: None)
+        monkeypatch.setattr(ws, "_run_dispatch_room", lambda *a: None)
         store, applies = self._fake_store("dispatched")
-        ws.open_session(store, "work_y", "n1", "run_work_node")
+        ws.open_session(store, "work_y", "n1", "work_emi_team_manager")
         # The only write is the session stamp — ownership is a graph fact; the status is untouched.
         assert len(applies) == 1
         assert applies[0][0][1]["status"] == "dispatched"
@@ -157,17 +157,32 @@ class TestClaimGuard:
         assert entry is not None
         entry["thread"].join(timeout=5)
 
-    def test_an_ask_runs_the_ask_session(self, monkeypatch):
-        """Both branches are sessions; only the tool differs."""
+    def test_every_tool_runs_the_same_dispatch_room(self, monkeypatch):
+        """ONE runner for every tool. There were two — an ask branch and a worker branch — which
+        is what made an ask a lifecycle of its own instead of a slow tool call. The tool named by
+        the switchboard is carried INTO the room, not used to pick a different one."""
         from app.assistant.dayflow_orchestrator import work_session as ws
 
-        started = []
-        monkeypatch.setattr(ws, "_run_ask_session", lambda *a: started.append("ask"))
-        monkeypatch.setattr(ws, "_run_session", lambda *a: started.append("work"))
-        store, _ = self._fake_store("dispatched")
-        ws.open_session(store, "work_z", "n1", "create_dayflow_ticket")
+        ran = []
+        monkeypatch.setattr(ws, "_run_dispatch_room",
+                            lambda store, wid, nid, sid, delegate_to: ran.append(delegate_to))
+        for tool in ("create_dayflow_ticket", "work_emi_team_manager"):
+            store, _ = self._fake_store("dispatched")
+            ws.open_session(store, f"work_{tool}", "n1", tool)
+            with ws._sessions_lock:
+                entry = ws._live_sessions.pop(ws.session_id_for(f"work_{tool}", "n1"), None)
+            if entry is not None:
+                entry["thread"].join(timeout=5)
+        assert ran == ["create_dayflow_ticket", "work_emi_team_manager"]
+
+    def test_a_node_with_no_tool_is_refused(self, monkeypatch):
+        """The switchboard names the tool; an empty one means it did not run. Opening a room that
+        has nothing to call would burn a claim and strand the node."""
+        from app.assistant.dayflow_orchestrator import work_session as ws
+
+        monkeypatch.setattr(ws, "_run_dispatch_room", lambda *a: None)
+        store, applies = self._fake_store("dispatched")
+        ws.open_session(store, "work_none", "n1", "")
+        assert applies == []
         with ws._sessions_lock:
-            entry = ws._live_sessions.pop(ws.session_id_for("work_z", "n1"), None)
-        if entry is not None:
-            entry["thread"].join(timeout=5)
-        assert started == ["ask"]
+            assert ws.session_id_for("work_none", "n1") not in ws._live_sessions

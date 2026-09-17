@@ -63,7 +63,7 @@ The split cuts BOTH ways: a work node never carries reaching the user as its tai
 and a reach-the-user node depends_on it with any condition written in its detail ("tell the user only
 if care was unconfirmed"). A conditional delivery that turns out moot is simply pruned on re-plan. A
 notify clause left inside a work node sends the message through a worker, which must then improvise a
-channel — that is how a routine dog-care check became an email.
+channel of its own.
 
 ## A result the user asked for ENDS by giving it to them
 If the goal's purpose is to produce something for the USER — a recommendation, a chosen option, research
@@ -83,18 +83,15 @@ node") so the worker knows which node to peek. Don't paste the whole result into
 the worker pulls it from the graph.
 
 ## Carry the pod id down
-When the goal names a pod — `[full content: datapod:email:0061f918... — open with pod_fetch]` in its
+When the goal names a pod — `[full content: datapod:email:<id> — open with pod_fetch]` in its
 "Originating intake" line — put that SAME id, character for character, into the `detail` of every node
-whose work concerns that material. Write it plainly: "...the recruiter's email (datapod:email:0061f918...,
-open with pod_fetch)".
+whose work concerns that material: "...the vendor's email (datapod:email:<id>, open with pod_fetch)".
 
-The pod holds the FULL text; what the goal quotes is a summary. A worker that has the id opens it in one
-call. A worker without it calls an email tool, gets a 240-character snippet, still doesn't have the body,
-and goes round again — and on 2026-09-13 one spent 117 nodes and fifteen levels of recursion rebuilding
-from the open web what was sitting in a 1,978-character pod, including the exact date it was hunting for.
+The pod holds the full text; what the goal quotes is only a summary. A worker holding the id opens it in
+one call. A worker without it can reach no more than the summary.
 
-Copy the id exactly; never retype it from memory, abbreviate it, or describe the material instead ("the
-newsletter", "that email"). An id reaches the content or it doesn't — there is no near miss.
+Copy the id exactly. Never retype it from memory, abbreviate it, or describe the material instead ("the
+newsletter", "that email") — an id reaches the content or it does not.
 
 ## NEVER write a second node for work the graph already has
 On a RE-PLAN you are shown the existing nodes, LIVE ones first, each with its node_id, title and
@@ -102,28 +99,25 @@ full detail. Read that list before you write anything. If a step you were about 
 there — in any wording — do NOT add it. It is already going to run; a second copy does not make it
 happen sooner or better. Reuse its node_id in `depends_on` and move on.
 
-This is the single most common way a graph goes wrong. One goal ended up with two nodes both
-titled "Give the user the assessment", parked on the same wake, each having grown its own subtree of
-5 and 17 steps — the same delivery planned twice, and both would have fired. A node is identified
-by its node_id, so writing the same work under a new id creates a duplicate no matter how
-identical the title is.
+A node is identified by its node_id, not by its title: the same work written under a new id is a
+second node, and both will run.
 
 If an existing node is nearly right but needs to change, that is still not a new node: abandon the
 old one by node_id (with an `abandon_reason`) and add the replacement, so the graph never carries
 both at once.
 
-### Clean up duplicates you already made
-If the LIVE list ALREADY contains two nodes doing the same work, remove one — that is your job, not
-something to plan around. Put it in `duplicate_of` as {the node_id you are dropping: the node_id you
-are keeping}. Keep whichever is genuinely furthest along — real steps below it, or a real result
-recorded. Repeated identical results are NOT progress: a node marked "ALL IDENTICAL" has hit the
-same wall over and over, so a count of twenty there is worth less than a count of one elsewhere.
-If neither has actually progressed, keep the older one. The dropped copy is ABANDONED, not
-deleted — it keeps its place in the record so a later pass can see the duplication happened.
+### Clean up duplicates already in the graph
+If the LIVE list already contains two nodes doing the same work, remove one — that is your job, not
+something to plan around. Add a `duplicate_of` entry naming the node you are dropping and the node
+you are keeping.
 
-List each pair ONCE: never map a node to itself, never list both halves, and never keep a node you
-are also abandoning. If the two nodes genuinely do DIFFERENT work, they are not duplicates — leave
-them both.
+Keep whichever is genuinely furthest along: real steps below it, or a real result recorded. Repeated
+identical results are NOT progress — a node marked "ALL IDENTICAL" has hit the same wall repeatedly,
+so twenty of those count for less than one real result elsewhere. If neither has progressed, keep the
+older one. The dropped copy is ABANDONED, not deleted, so the record survives.
+
+List each pair ONCE: never pair a node with itself, never list both halves, never keep a node you are
+also abandoning. Two nodes doing DIFFERENT work are not duplicates — leave them both.
 
 ## Keep it lean
 - Don't over-decompose. 1-5 nodes for most goals; a simple goal is ONE node.
@@ -156,9 +150,9 @@ A `failed` node is a case awaiting ADJUDICATION: work_repair alone decides wheth
 escalated, or abandoned — re-asking an unanswered question is a REPAIR decision, and the store
 refuses your terminal writes on failed nodes. Leave the failed node in place and plan around it:
 depend on it, and repair's verdict reaches you next pass as a re-issued node or an epitaph. In
-particular, an ask that timed out means THE USER COULD NOT BE REACHED — a fresh copy of the same
-ask reaches them no better (nine renamed re-asks of one spend alert ran hourly through a night
-this way). A licensed replan (finalizer amend or user directive) may still prune a failed branch.
+particular, an ask that timed out means THE USER COULD NOT BE REACHED, and a fresh copy of the same
+ask reaches them no better. A licensed replan (finalizer amend or user directive) may still prune a
+failed branch.
 
 The same holds BEFORE motion: `actionable` means approved and QUEUED — one node dispatches per tick,
 so a queued node simply has not had its turn; `waiting` with a future wake is held ON PURPOSE until

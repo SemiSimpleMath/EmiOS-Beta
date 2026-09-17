@@ -1,0 +1,90 @@
+name: dayflow_dispatch_manager
+class_name: MultiAgentManager
+description: "One claimed work node: build its tool's arguments, make the call, judge the result."
+max_cycles: 12
+
+# THE DISPATCH ROOM. One instance per claimed node, on its own thread, opened by
+# work_session.open_session and closed when its call returns.
+#
+# It exists so the orchestrator stops holding the phone call. The planning tick used to run
+# these three stages itself, which meant the tick lasted as long as the tool did — and
+# create_dayflow_ticket blocks for the full ask window. An unanswered notify therefore froze
+# the whole orchestrator for an hour: DayflowScheduler admits one tick at a time and spaces the
+# next from the previous tick's FINISH, so a long tick is dead time for everything, not just
+# for itself.
+#
+# The tick now ends at the claim (seconds, as the scheduler has always assumed) and this room
+# blocks in its place. Nothing is shared between them: a fresh manager, a fresh blackboard, one
+# node's worth of work. The same shape master_room gets per chat.
+#
+# Concurrency is safe HERE and not in planning because the inputs differ. Two planning passes
+# read the same portfolio and the same intake, so both would convert the same email and mint
+# duplicate work. This room's input is ONE node, held exclusively: the claim is an atomic
+# set_status -> dispatched through the store's lock, so a second room attempting the same node
+# has its claim refused. Exclusion lives on the work item, not on a global flag.
+
+role_bindings:
+  delegator: room::delegator
+
+agents:
+  - name: room::delegator
+    class: Delegator
+
+control_nodes:
+  - name: dayflow_switchboard_arguments_node
+    class: DayflowSwitchboardArgumentsNode
+  - name: dayflow_tool_caller
+    class: DayflowToolCaller
+  - name: work_finalizer_node
+    class: WorkFinalizerNode
+  - name: final_answer_node
+    class: FinalAnswerNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+# The switchboard already chose; this room only executes that choice. The set mirrors the
+# orchestrator's so any tool the switchboard may name is callable here.
+tools:
+  allowed_tools:
+    - emi_team_manager
+    - personal_admin_manager
+    - web_manager
+    - devices_manager
+    - one_shot_tool_runner
+    - create_dayflow_ticket
+    - work_emi_team_manager
+    - run_task
+    - find_tool
+    - ask_user
+    - set_ui_mute
+    - set_screen_capture_enabled
+    - ask_kg
+  except_tools: []
+
+scope_contract:
+  tools:
+    allowed_tools: ["all"]
+    blocked_tools:
+      - install_tool
+      - mcp::npm/playwright-mcp::browser_run_code
+    requires_approval_tools: []
+
+flow_config:
+  strict_routing: true
+  flow:
+    normal:
+      source_agent: "dayflow_switchboard_arguments_node"
+  state_map:
+    # delegate_to and work_node_ref are seeded on the blackboard by open_session; there is no
+    # planning here and nothing to route on, so the path is a straight line.
+    "room::delegator": "dayflow_switchboard_arguments_node"
+    "dayflow_switchboard_arguments_node": "dayflow_tool_caller"
+    # THE TOOL RETURN PATH, unchanged — the call comes back and is judged in the same pass that
+    # made it, so a result can never be stranded between ticks. It is simply this room's pass now.
+    "dayflow_tool_caller": "work_finalizer_node"
+    "work_finalizer_node": "final_answer_node"
+    "final_answer_node": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "final_answer_node"

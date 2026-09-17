@@ -105,7 +105,6 @@ def open_session(store, work_id: str, node_id: str, delegate_to: str) -> None:
     node = store.load(work_id).nodes.get(node_id)
     if node is None:
         return
-    is_ask = str(delegate_to or "").strip() == "create_dayflow_ticket"
 
     if node.status != "dispatched":
         logger.error(
@@ -114,9 +113,14 @@ def open_session(store, work_id: str, node_id: str, delegate_to: str) -> None:
         )
         return
 
+    if not str(delegate_to or "").strip():
+        logger.error("[work_session] refusing to run %s::%s — the switchboard named no tool",
+                     work_id, node_id)
+        return
+
     sid = session_id_for(work_id, node_id)
-    runner = _run_ask_session if is_ask else _run_session
-    thread = threading.Thread(target=runner, args=(store, work_id, node_id, sid),
+    thread = threading.Thread(target=_run_dispatch_room,
+                              args=(store, work_id, node_id, sid, delegate_to),
                               name=sid, daemon=True)
     with _sessions_lock:
         _live_sessions[sid] = {"thread": thread, "started_at": datetime.now(timezone.utc)}
@@ -130,14 +134,24 @@ def open_session(store, work_id: str, node_id: str, delegate_to: str) -> None:
     logger.info("[work_session] session %s started", sid)
 
 
-def _run_ask_session(store, work_id: str, node_id: str, sid: str) -> None:
-    """The session thread for an ASK: one tool call to the user, its result on the graph.
+def _run_dispatch_room(store, work_id: str, node_id: str, sid: str, delegate_to: str) -> None:
+    """The session thread: open the dispatch room on this node and hold it until its call returns.
 
-    Identical in shape to _run_session — the only difference is which tool is called. The call
-    blocks for as long as the ticket is valid; that is a slow tool, not a special lifecycle.
+    ONE runner for every tool. There used to be two — an ask branch that called the ticket tool
+    by hand and a worker branch that called discharge_node — which is the split that made asks a
+    lifecycle of their own instead of a slow tool call. The room runs the same three stages the
+    orchestrator's tail used to run (arguments -> tool caller -> finalizer), so what differs
+    between a ticket and the work team is only which tool the switchboard named.
+
+    Blocking here is the point. create_dayflow_ticket holds the call open for the whole ask
+    window so the user's answer comes back as the tool's RESULT and lands on the graph like any
+    other — that is what stops a decline being reconstructed from the ticket store after the
+    steward has already closed the object. This thread can afford to wait; the orchestrator
+    tick, which the scheduler admits one at a time, cannot.
     """
-    from app.assistant.dayflow_orchestrator.node_dispatch import signal_work_progress, surface_and_await
-    from work_objects.result_recorder import record_tool_result
+    from app.assistant.dayflow_orchestrator.node_dispatch import signal_work_progress
+    from app.assistant.ServiceLocator.service_locator import DI
+    from app.assistant.utils.pydantic_classes import Message
 
     ref = f"{work_id}::{node_id}"
     my_epoch = None
@@ -146,39 +160,22 @@ def _run_ask_session(store, work_id: str, node_id: str, sid: str) -> None:
         if node is None:
             return
         my_epoch = int(node.payload.get("dispatch_epoch") or 0)
-        result = surface_and_await(store, work_id, node_id, node)
-        record_tool_result(store, work_id, node_id, result, actor="ask",
-                           expected_epoch=my_epoch, evidence_title="user response")
-    except Exception as e:
-        logger.error("[work_session] ask session %s crashed: %s", sid, e, exc_info=True)
-        try:
-            fail_data = {"work_id": work_id, "node_id": node_id, "status": "failed"}
-            if my_epoch is not None:
-                fail_data["expected_dispatch_epoch"] = my_epoch
-            store.apply("set_status", fail_data, actor="work_session")
-        except Exception as e2:
-            logger.error("[work_session] could not fail %s after crash: %s", sid, e2)
-    finally:
-        with _sessions_lock:
-            entry = _live_sessions.get(sid)
-            if entry is not None and entry.get("thread") is threading.current_thread():
-                _live_sessions.pop(sid, None)
-        signal_work_progress(ref)
 
-
-def _run_session(store, work_id: str, node_id: str, sid: str) -> None:
-    """The session thread: room scope -> worker -> result on the graph -> follow-up signal."""
-    from app.assistant.dayflow_orchestrator.node_dispatch import signal_work_progress
-    from work_objects.discharge import discharge_node
-
-    ref = f"{work_id}::{node_id}"
-    my_epoch = None
-    try:
-        node = store.load(work_id).nodes.get(node_id)
-        if node is not None:
-            my_epoch = int(node.payload.get("dispatch_epoch") or 0)
-        result_scope = room_session_scope(work_id, node_id)
-        discharge_node(store, work_id, node_id, scope_context=result_scope, session_id=sid)
+        manager = DI.multi_agent_manager_factory.create_manager("dayflow_dispatch_manager")
+        # The room's whole input. The arguments node reads the NODE for everything else, so
+        # these two values plus the graph are the entire contract.
+        manager.blackboard.update_state_value("delegate_to", str(delegate_to).strip())
+        manager.blackboard.update_state_value("work_node_ref", ref)
+        DI.manager_invoker.invoke(manager, Message(
+            event_topic="dayflow_dispatch",
+            sender="system",
+            receiver=None,
+            task="",
+            information="",
+            content="",
+            data={"work_node": ref, "delegate_to": str(delegate_to).strip()},
+            scope_context=room_session_scope(work_id, node_id),
+        ))
         n = store.load(work_id).nodes.get(node_id)
         logger.info("[work_session] %s -> %s", sid, n.status if n else "missing")
     except Exception as e:

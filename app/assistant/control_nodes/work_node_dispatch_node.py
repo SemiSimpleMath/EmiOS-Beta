@@ -68,8 +68,7 @@ class WorkNodeDispatchNode(ControlNode):
             # and marked the node afterwards, leaving a window where the user could answer a
             # node that did not yet say it was asking.
             #
-            # The CALL is not made here. The state_map runs the arguments node and the tool
-            # caller next, the same two stages every other room's switchboard dispatch runs.
+            # The CALL is not made here, and not on this thread — see the hand-off below.
             self._claim(store, work_id, node_id)
         except Exception:
             # Fail the node before re-raising, so it leaves the ready set instead of being
@@ -78,6 +77,26 @@ class WorkNodeDispatchNode(ControlNode):
             # just offered means the ready set and the graph disagree, and that ends the run
             # loudly rather than continuing into a call that has nothing to run.
             logger.error("[%s] claim failed for %s::%s", self.name, work_id, node_id, exc_info=True)
+            self._fail_node(work_id, node_id)
+            raise
+
+        # HAND OFF AND END THE TICK. The node is claimed, so the graph is stable: every other
+        # consumer now reads it as in-flight and plans around it. That state — not a timer — is
+        # what makes it safe for the next orchestrator instance to start, so this is where the
+        # planning pass stops.
+        #
+        # The call itself happens in its own room on its own thread (work_session.open_session),
+        # which blocks for as long as the tool takes. It used to happen HERE, inline, which made
+        # the tick last as long as the tool: create_dayflow_ticket holds its call open for the
+        # full ask window, and the scheduler admits one tick at a time and spaces the next from
+        # the previous one's FINISH — so a single unanswered notify was an hour in which nothing
+        # else planned, woke, or dispatched.
+        try:
+            from app.assistant.dayflow_orchestrator.work_session import open_session
+            open_session(store, work_id, node_id, delegate_to)
+        except Exception:
+            logger.error("[%s] could not open the dispatch room for %s::%s",
+                         self.name, work_id, node_id, exc_info=True)
             self._fail_node(work_id, node_id)
             raise
 

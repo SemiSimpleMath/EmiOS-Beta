@@ -76,16 +76,18 @@ class TestJobThread:
         signals = []
         monkeypatch.setattr(nd, "signal_work_progress", lambda r: signals.append(r))
 
-        def slow_work_on(s, work_id, node_id=None, **kw):
+        # The dispatch room IS the slow thing now: open_session hands the node to
+        # dayflow_dispatch_manager, which blocks until its tool returns. Patch the invocation so
+        # the test controls when that happens.
+        def slow_room(manager, message):
             gate.wait(timeout=5)
-            s.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "done"})
-            return "done"
+            store.apply("set_status", {"work_id": wid, "node_id": "n1", "status": "done"})
 
-        import work_objects.discharge as wr
-        monkeypatch.setattr(wr, "discharge_node", slow_work_on)
+        from app.assistant.ServiceLocator.service_locator import DI
+        monkeypatch.setattr(DI.manager_invoker, "invoke", slow_room)
 
         _claim(store, wid, "n1")
-        ws.open_session(store, wid, "n1", "run_work_node")
+        ws.open_session(store, wid, "n1", "work_emi_team_manager")
         # Returned immediately: job registered and alive, worker still running.
         assert store.load(wid).nodes["n1"].status == "dispatched"
         assert ws.session_alive(wid, "n1") is True
@@ -95,18 +97,64 @@ class TestJobThread:
         assert _wait_for(lambda: not ws.session_alive(wid, "n1"))
         assert signals == [ref]
 
+    def test_the_planning_tick_does_not_wait_for_the_tool(self, monkeypatch):
+        """The whole point of the dispatch room, and the bug it closes.
+
+        The three call stages used to run in the planning tick, so the tick lasted as long as
+        the tool did — and create_dayflow_ticket blocks for the full ask window. Since
+        DayflowScheduler admits one tick at a time and spaces the next from the previous tick's
+        FINISH, a single unanswered notify was an hour in which nothing planned, woke, or
+        dispatched. The gate must claim and return while the call is still in flight.
+        """
+        from app.assistant.control_nodes.work_node_dispatch_node import WorkNodeDispatchNode
+        from app.assistant.ServiceLocator.service_locator import DI
+
+        store = _store()
+        wid, gid = _mk_wo(store)
+        _sub(store, wid, gid, "n1", status="actionable")
+        ref = f"{wid}::n1"
+
+        in_call, release = threading.Event(), threading.Event()
+
+        def blocking_room(manager, message):
+            in_call.set()
+            release.wait(timeout=5)          # stands in for an unanswered ticket
+
+        monkeypatch.setattr(DI.manager_invoker, "invoke", blocking_room)
+        monkeypatch.setattr(nd, "signal_work_progress", lambda r: None)
+
+        bb = FakeBlackboard({
+            "delegate_to": "create_dayflow_ticket",
+            "acted_on_item_ids": [ref],
+            "actionable_items": [{"item_id": ref}],
+        })
+        gate = WorkNodeDispatchNode(name="work_node_dispatch_node", blackboard=bb,
+                                    agent_registry={}, tool_registry={})
+        try:
+            gate.action_handler(message=None)     # must RETURN, not wait
+
+            assert in_call.wait(timeout=5), "the dispatch room never opened"
+            # The gate has returned while the call is still blocked — the tick is free.
+            assert store.load(wid).nodes["n1"].status == "dispatched"
+            assert ws.session_alive(wid, "n1") is True
+            assert bb.get_state_value("work_node_ref") == ref
+        finally:
+            release.set()
+            _wait_for(lambda: not ws.session_alive(wid, "n1"))
+
     def test_job_crash_fails_the_node(self, monkeypatch):
         store = _store()
         wid, gid = _mk_wo(store)
         _sub(store, wid, gid, "n1")
 
-        import work_objects.discharge as wr
         def boom(*a, **kw):
             raise RuntimeError("worker exploded")
-        monkeypatch.setattr(wr, "discharge_node", boom)
+
+        from app.assistant.ServiceLocator.service_locator import DI
+        monkeypatch.setattr(DI.manager_invoker, "invoke", boom)
 
         _claim(store, wid, "n1")
-        ws.open_session(store, wid, "n1", "run_work_node")
+        ws.open_session(store, wid, "n1", "work_emi_team_manager")
         assert _wait_for(lambda: store.load(wid).nodes["n1"].status == "failed")
 
 
@@ -448,7 +496,9 @@ class TestTargetedWakeRouting:
         store.apply("set_status", {"work_id": wid, "node_id": "n1", "status": "waiting"})
         bb = FakeBlackboard({"triggered_work_node": f"{wid}::n1"})
         self._wake_router(bb).action_handler(message=None)
-        assert bb.get_state_value("next_agent") == "work_finalizer_node"
+        # Straight to the room's tail: the finalizer runs in the dispatch room that made the
+        # call, so a pass which dispatched nothing has nothing here to judge.
+        assert bb.get_state_value("next_agent") == "post_room_finalize_node"
         assert not bb.get_state_value("acted_on_item_ids", [])
 
     def test_a_normal_tick_falls_through_to_the_materializer(self):

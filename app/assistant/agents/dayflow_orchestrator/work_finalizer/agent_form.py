@@ -19,9 +19,8 @@ Two of the four verdicts are for a call that returned, two for a call that faile
                blocked   nothing can be different; the step cannot be made to work
 
 `replan` is the rare one. Retrying a step whose circumstances have not changed reproduces the
-same error — that is exactly how one broken argument became twenty-two identical attempts in
-two hours. So a replan has to name the thing that will be different, and "try again" is not a
-thing that will be different.
+same error, however many times it is tried. So a replan has to name the thing that will be
+different, and "try again" is not a thing that will be different.
 
 It judges one node; work_finalizer_node writes that verdict to the graph, and its reach is
 THE NODE IT JUDGED. Whether the GOAL is achieved, moot, or should be dropped is the steward's

@@ -48,18 +48,12 @@ control_nodes:
     class: StrategicPlannerWoPersistNode
   - name: work_architect_node
     class: WorkArchitectNode
-  - name: work_finalizer_node
-    class: WorkFinalizerNode
   - name: work_node_wake_router_node
     class: WorkNodeWakeRouterNode
   - name: work_node_materializer_node
     class: WorkNodeMaterializerNode
   - name: work_node_dispatch_node
     class: WorkNodeDispatchNode
-  - name: dayflow_switchboard_arguments_node
-    class: DayflowSwitchboardArgumentsNode
-  - name: dayflow_tool_caller
-    class: DayflowToolCaller
   - name: action_selector_router_node
     class: ActionSelectorRouterNode
   - name: plan_mode_final_router_node
@@ -180,24 +174,18 @@ flow_config:
     "action_selector_router_node": "dayflow_orchestrator::switchboard"
     "dayflow_orchestrator::plan_mode": "plan_mode_final_router_node"
     "plan_mode_final_router_node": "final_answer_node"
-    # The dispatch is a tool call, the same three stages every other room runs: the
-    # switchboard names a tool, the arguments node builds that tool's arguments from the
-    # node, the tool caller executes it (blocking, in this room) and records the
-    # ToolResult on the node. ONE path — a claim that cannot be made raises rather than
-    # routing around itself.
+    # The dispatch gate CLAIMS the node and the planning pass ends. The call itself — the
+    # arguments node, the tool caller, and the finalizer that judges what comes back — runs in
+    # dayflow_dispatch_manager, one room per claimed node on its own thread.
+    #
+    # Those three stages lived here until 2026-09-17, which made the tick last as long as the
+    # tool did. create_dayflow_ticket blocks for the whole ask window, and DayflowScheduler
+    # admits one tick at a time while spacing the next from the previous tick's FINISH — so one
+    # unanswered notify was an hour in which nothing planned, woke or dispatched. The tick now
+    # ends at the claim, which is the state (not the elapsed time) that makes the graph stable
+    # enough for the next instance to start.
     "dayflow_orchestrator::switchboard": "work_node_dispatch_node"
-    "work_node_dispatch_node": "dayflow_switchboard_arguments_node"
-    "dayflow_switchboard_arguments_node": "dayflow_tool_caller"
-    # THE TOOL RETURN PATH. The call has come back and its result is on the node, so it is
-    # judged right here: the finalizer rules on what just landed and writes that verdict to
-    # the graph, and only then does the room finish. A pass that dispatched nothing routes
-    # straight to the finalizer too (work_node_dispatch_node._end_pass), so a result left
-    # unjudged can never wait on some later pass happening to dispatch something.
-    # (work_finalizer_apply_node was merged into work_finalizer_node on 2026-09-16: the agent
-    # call happens in that node, so its schema was already in hand and the blackboard hop to a
-    # second control node carried nothing. work_architect_node has always worked this way.)
-    "dayflow_tool_caller": "work_finalizer_node"
-    "work_finalizer_node": "post_room_finalize_node"
+    "work_node_dispatch_node": "post_room_finalize_node"
     "post_room_finalize_node": "final_answer_node"
     "final_answer_node": "manager_exit_node"
     "graceful_exit": "graceful_exit_control_node"

@@ -42,9 +42,10 @@ class WorkNodeWakeRouterNode(ControlNode):
             status = node.status if node is not None else "missing"
             logger.info("[%s] %s not dispatching this pass (status=%s) — the state_mover held it, "
                         "or it ended; its wake re-arms if it was held.", self.name, ref, status)
-            # To the finalizer, not the exit — one way out of the run. It decides for
-            # itself that a pass which made no call has nothing to judge.
-            self.blackboard.update_state_value("next_agent", "work_finalizer_node")
+            # Straight to the room's tail. The finalizer no longer runs in this room — it runs
+            # in the dispatch room that made the call — so a pass which dispatched nothing has
+            # nothing here to judge and simply ends.
+            self.blackboard.update_state_value("next_agent", "post_room_finalize_node")
             self.blackboard.update_state_value("last_agent", self.name)
             return
 
