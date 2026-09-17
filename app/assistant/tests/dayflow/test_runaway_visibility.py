@@ -292,3 +292,48 @@ def test_the_architect_is_told_to_stop_and_ask_after_two_amends(store):
     rendered = _render_existing_graph(store.load(wo.id))
     assert "2 ATTEMPTS HAVE NOT ACHIEVED THIS GOAL" in rendered
     assert "Stop trying" in rendered
+
+
+# --------------------------------------------------------------------------- #
+# An automatic completion says what it achieved
+# --------------------------------------------------------------------------- #
+def test_a_rolled_up_goal_records_what_satisfied_it(store):
+    """Only set_work_status used to write `terminal`, so a goal that finished on its own left an
+    empty epitaph and rendered to the steward as a bare title with no evidence."""
+    wo = _goal(store, "Get the picture packet.")
+    nid = _child(store, wo.id, wo.goal_node_id, "Find the packet")
+    _set(store, wo.id, nid, "done")
+    store.apply("set_status", {"work_id": wo.id, "node_id": nid, "status": "closed",
+                               "reason": "judged",
+                               "finalizer": {"verdict": "proceed", "instruction": "",
+                                             "reasoning": "found it"}}, actor="finalizer")
+
+    loaded = store.load(wo.id)
+    assert loaded.status == "done"
+    term = (loaded.nodes[loaded.goal_node_id].payload or {}).get("terminal") or {}
+    assert term.get("verdict") == "rollup"
+    assert "Find the packet" in term.get("reason", ""), "names the step that satisfied it"
+
+
+def test_a_hollow_completion_is_legible_in_its_epitaph(store):
+    """Every child closed on `amend` = a goal that completed having achieved nothing. The
+    verdicts are in the epitaph so the next planning pass can see that."""
+    from app.assistant.control_nodes.strategic_planner_wo_prep_node import _goal_epitaph
+    wo = _goal(store, "Get the picture packet.")
+    nid = _child(store, wo.id, wo.goal_node_id, "Find the packet")
+    _set(store, wo.id, nid, "done")
+    store.apply("set_status", {"work_id": wo.id, "node_id": nid, "status": "closed",
+                               "reason": "judged",
+                               "finalizer": {"verdict": "amend", "instruction": "keep looking",
+                                             "reasoning": "packet not found"}}, actor="finalizer")
+    store.apply("consume_finalizer_instruction", {"work_id": wo.id, "node_id": nid},
+                actor="architect")
+    store.apply("edit_node", {"work_id": wo.id, "node_id": nid, "title": "Find the packet"})
+
+    epitaph = _goal_epitaph(store.load(wo.id))
+    assert "amend" in epitaph, f"the hollow completion must show its verdicts: {epitaph!r}"
+
+
+# --------------------------------------------------------------------------- #
+# A concern that has already spent work objects says so
+# --------------------------------------------------------------------------- #

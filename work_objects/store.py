@@ -124,6 +124,25 @@ def _cascade_abandon_subtree(wo: WorkObject, node_id: str, now: str, reason: str
 _SUBTREE_CASCADE_STATUSES = {"done", "closed", "abandoned", "superseded"}
 
 
+def _satisfying_children(wo: WorkObject, goal) -> str:
+    """The goal's own children and how each one was judged, as the epitaph of an auto-completion.
+
+    The finalizer's verdict is the part that carries meaning: `proceed` says the step achieved
+    its goal, `amend` says it did not. A reader seeing every child on `amend` is looking at a
+    goal that completed without doing anything, which is invisible from the status alone.
+    """
+    parts = []
+    for cid in wo.children_of(goal.id):
+        child = wo.nodes.get(cid)
+        if child is None or child.type != "subtask":
+            continue
+        verdict = str(((child.payload or {}).get("finalizer") or {}).get("verdict") or "").strip()
+        parts.append(f"{child.title or child.id}" + (f" ({verdict})" if verdict else ""))
+    if not parts:
+        return "the goal had no owned steps"
+    return "every owned step finished: " + "; ".join(parts)
+
+
 def _count_unmet_attempt(wo: WorkObject, node, now: str) -> None:
     """Record, ON THE GOAL, that one more attempt did not achieve it.
 
@@ -766,10 +785,25 @@ class WorkStore:
                 wo.updated_at = now
                 return
             wo.status = "done"
+            # WHAT SATISFIED IT. An automatic completion used to record nothing at all: only
+            # set_work_status wrote `terminal`, so a goal that finished on its own left an empty
+            # epitaph, and the steward's ALREADY COMPLETED list rendered it as a bare title with
+            # no evidence. 2026-09-17: two picture-day goals sat in that list as identical
+            # 80-character stubs while a DROPPED entry beside them carried a full reason saying
+            # the work was still needed — so the steward, choosing between evidence and silence,
+            # recreated the goal. Naming the children and their verdicts makes a hollow
+            # completion legible: a goal whose every child closed on `amend` achieved nothing,
+            # and now says so where the next planning pass reads it.
             if goal.status == "dispatched":      # close the goal node (dispatched->done is legal)
                 goal.status = "done"
-                goal.updated_at = now
             _cascade_abandon_startable(wo, now, reason="work_object_done")
+            # AFTER the cascade, which writes its own `terminal` on every node it sweeps and would
+            # otherwise overwrite this one with a cascade epitaph.
+            goal.payload["terminal"] = {
+                "status": "done", "verdict": "rollup", "at": now,
+                "reason": "completed automatically — " + _satisfying_children(wo, goal),
+            }
+            goal.updated_at = now
         wo.updated_at = now
 
     _HANDLERS: dict[str, Callable] = {}
