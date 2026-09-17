@@ -22,8 +22,19 @@ process the rest.
 
 If a pattern_drift concern matching this signal already exists in
 concerns_register_active, add it to reinforced_concerns instead of
-new_concerns. Either way, you must produce SOMETHING for each
-qualifying group.
+new_concerns.
+
+If a matching concern appears in concerns_recently_closed, that group is
+already decided. Re-raise it only when evidence dated AFTER the closure
+contradicts the reason it was closed — then emit a new concern whose notes
+name what changed since that decision. Otherwise leave it closed and give
+it one line in your summary saying which closure covers it. The friction
+aggregate keeps supplying these signals for 14 days after you close
+something, so a group being loud is expected and is not by itself a reason
+to reopen.
+
+Either way, you must produce SOMETHING for each qualifying group — a
+reinforcement, a new concern, or that summary line.
 
 After you've processed the friction aggregate, do the other Pass A and
 Pass B work normally.
@@ -90,6 +101,10 @@ KG digest above.
 
 ## Current concerns_register (active + addressing)
 {{ concerns_register_active }}
+
+## Already decided — concerns you closed (resolved in the last 14 days + dormant)
+*Not a work list. Read it before writing `new_concerns`: if a concern you are about to raise is here, the decision already exists. Reopen it as a new concern only when evidence postdating the closure contradicts the stated reason, and say in `notes` what changed.*
+{{ concerns_recently_closed }}
 
 ## Question mailbox (answers to YOUR questions + stale asks)
 *Every item here MUST get a `question_outcomes` entry this tick. A captured answer must also update its related concern (reinforce / resolve / disposition / belief update) — an answer that changes nothing was a wasted ask.*

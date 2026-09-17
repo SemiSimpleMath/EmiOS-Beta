@@ -61,6 +61,7 @@ def build_noticer_context(
         "kg_household_digests": _build_kg_household_digests(household_members),
         "ambient_state_digest": _build_ambient_state_digest(household_members),
         "concerns_register_active": _build_concerns_register_active(),
+        "concerns_recently_closed": _build_concerns_recently_closed(),
         "question_mailbox": _build_question_mailbox(),
         "exploration_outcomes_30d": _build_exploration_outcomes(now_utc=now_utc),
         "dayflow_recent": _build_dayflow_recent(now_utc=now_utc),
@@ -530,6 +531,94 @@ def _build_concerns_register_active() -> str:
                 f"[{why}; reinforcements={count if count is not None else '?'}]"
             )
     return "\n\n".join(lines)
+
+
+# A concern closed inside this window is still being re-supplied by the very
+# evidence the noticer reads — the friction aggregate spans 14 days — so it is
+# the one most at risk of being re-derived as if it were new.
+_CLOSED_CONCERN_WINDOW_DAYS = 14
+
+
+def _build_concerns_recently_closed(register: Optional[Dict[str, Any]] = None) -> str:
+    """Render the decisions the noticer already made: concerns resolved inside
+    the window, plus every dormant (accept_chronic) one.
+
+    Without this section the noticer decides blind. It resolves a concern, and on
+    the next tick the evidence that produced it is still in context while the
+    decision is not — so it re-derives the same concern and files it under a fresh
+    UUID. `persist.apply_noticer_output` dedups on concern_id against active +
+    addressing only, so a fresh UUID never collides and the register grows a twin.
+    One sleep concern was re-minted five times this way, twice past an
+    accept_chronic that had deliberately archived it.
+
+    Dormant entries are never aged out: accept_chronic is a standing decision that
+    a pattern is real but no longer worth tick-by-tick attention, and that stays
+    true however long ago it was taken.
+
+    `register` is injected by tests; production reads the resource file.
+    """
+    if register is None:
+        path = get_resources_dir() / "subconscious" / "resource_concerns_register.json"
+        if not path.is_file():
+            return _NO_DATA_FMT.format(kind="concerns register")
+        try:
+            register = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.warning("[noticer.context] concerns_register parse failed: %s", e)
+            return _NO_DATA_FMT.format(kind="concerns register")
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=_CLOSED_CONCERN_WINDOW_DAYS)
+    recent_resolved: List[tuple] = []
+    for c in register.get("resolved") or []:
+        raw = str(c.get("resolved_at_utc") or "").strip()
+        when = None
+        if raw:
+            try:
+                when = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                if when.tzinfo is None:
+                    when = when.replace(tzinfo=timezone.utc)
+            except ValueError:
+                logger.warning(
+                    "[noticer.context] concern %s has unreadable resolved_at_utc %r; "
+                    "listing it anyway", c.get("concern_id"), raw,
+                )
+        # An unreadable or absent timestamp is listed rather than dropped: the
+        # cost of showing one stale closure is a line of prompt, the cost of
+        # hiding a fresh one is the duplicate this section exists to prevent.
+        if when is None or when >= cutoff:
+            recent_resolved.append((when, c))
+
+    dormant = list(register.get("dormant") or [])
+    if not recent_resolved and not dormant:
+        return "(nothing closed recently)"
+
+    # Newest closure first; undated ones sort last rather than raising on None.
+    _UNDATED = datetime.min.replace(tzinfo=timezone.utc)
+    recent_resolved.sort(key=lambda item: item[0] or _UNDATED, reverse=True)
+
+    lines = [
+        "These are decisions you already made. The signals behind them are still "
+        "in your context, so re-deriving one of them is expected — recognising it "
+        "as already-decided is the point of this section."
+    ]
+    for when, c in recent_resolved:
+        stamp = when.date().isoformat() if when else "date unknown"
+        lines.append(_render_closed_concern(c, status=f"resolved {stamp}",
+                                            why=c.get("resolution_reason")))
+    for c in dormant:
+        lines.append(_render_closed_concern(c, status="dormant (accepted as chronic)",
+                                            why=c.get("dormant_reason")))
+    return "\n\n".join(lines)
+
+
+def _render_closed_concern(c: Dict[str, Any], *, status: str, why: Any) -> str:
+    """One block for a concern that is no longer tracked."""
+    return "\n".join([
+        f"[{status}] {c.get('concern_id', '?')} — {c.get('title', '(no title)')}",
+        f"  subject: {c.get('subject') or 'household'}",
+        f"  kind: {c.get('kind')} | horizon: {c.get('horizon')}",
+        f"  why it was closed: {str(why or '(no reason recorded)').strip()}",
+    ])
 
 
 def _build_question_mailbox() -> str:
