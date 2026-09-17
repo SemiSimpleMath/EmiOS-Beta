@@ -4,12 +4,17 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>EmiCode — {{ assistant_name }}</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.3.0/xterm.min.css">
+  {# xterm and socket.io are served from app/static/vendor/xterm, not a CDN. cdnjs does not
+     carry the xterm package at all: every /ajax/libs/xterm/... URL here returned 404, so
+     window.Terminal was undefined and the page died on `new window.Terminal(...)` before it
+     ever opened a socket — reporting nothing but its initial "connecting…". A terminal for a
+     local-first assistant should not need the internet to open either. #}
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/xterm/xterm.min.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/emi_code.css') }}">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.3.0/xterm.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm-addon-fit/0.8.0/xterm-addon-fit.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm-addon-web-links/0.9.0/xterm-addon-web-links.min.js"></script>
+  <script src="{{ url_for('static', filename='vendor/xterm/socket.io.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='vendor/xterm/xterm.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='vendor/xterm/xterm-addon-fit.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='vendor/xterm/xterm-addon-web-links.min.js') }}"></script>
 </head>
 <body data-terminal-id="{{ terminal_id }}">
   <div class="emi-code-shell">
