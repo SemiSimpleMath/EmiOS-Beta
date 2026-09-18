@@ -39,10 +39,20 @@ orchestrator + worker managers import `work_objects.*`).
 five tables alongside `unified_log_2026`, so the planner's portfolio projection and item
 state are transactional joins in one DB. It is a per-path singleton with locked
 double-checked creation (audit W3 — two racing first-touches used to mint two stores with
-two separate RLocks), runs the one-time `active → dispatched` status migration, and runs
-`repair_terminal_zombies()` before any write. `DAYFLOW_WORK_DB` overrides the path
-(tests); the `work.db` / `business_run.db` files inside the package serve scenario
-harnesses only.
+two separate RLocks), runs **two** one-time migrations, and runs `repair_terminal_zombies()`
+before any write. `DAYFLOW_WORK_DB` overrides the path (tests); the `work.db` /
+`business_run.db` files inside the package serve scenario harnesses only.
+
+The two migrations are worth knowing because they encode two model changes:
+
+- **`active → dispatched`** — the in-flight rename. Verification nodes keep `active` (a
+  verification run genuinely in progress). Plain `UPDATE`, idempotent, so it self-guards.
+- **`waiting → dispatched` for surfaced asks** (2026-08-18 owner ruling: a surfaced ask IS
+  an in-flight tool call) — also clears `wake_at`, since the re-ask timer is retired. This
+  one is guarded by a marker row in a `work_store_meta` table because it must run **exactly
+  once**: under the current model `waiting` + `wake_kind=user_reply` legitimately reappears
+  for a *pre-surface* ask parked by a state_mover HOLD, and a second run would mis-flip
+  those to in-flight.
 
 ## The model
 
@@ -76,8 +86,11 @@ reads each node's *goal* to route it — one node type, handler varies.)
 
 Every status word has to be taught to the agents that read or write it, so the vocabulary is a cost,
 not a free label space. **One glossary — `work_portfolio.STATUS_LEGEND` — is the single source**, and
-it is injected into every agent that touches statuses (steward, finalizer, repair via the rendered
-portfolio; state_mover via `node_status_legend`). Do not write a second one in a prompt.
+every reader takes it from there: the steward and the dayflow situation snapshot through
+`render_portfolio`, which prepends it; the finalizer by prepending it to the single object's
+projection; the state_mover *and the wake lane* as a `node_status_legend` blackboard item their prep
+nodes set. Do not write a second one in a prompt. (The retired `work_repair_node` renders it too;
+that path is unwired.)
 
 | status | meaning |
 |---|---|
