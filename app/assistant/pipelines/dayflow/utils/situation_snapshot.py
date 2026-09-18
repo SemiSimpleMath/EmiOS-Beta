@@ -89,17 +89,21 @@ def _build_time_and_presence(now_local: datetime) -> str:
 
 def _build_calendar(now_utc: datetime) -> str:
     try:
-        from app.assistant.pipelines.dayflow.utils.context_sources import get_calendar_events_for_orchestrator
-        events = get_calendar_events_for_orchestrator(hours=8)
+        # Overlap, not "starts in window": a meeting in progress is the calendar fact that
+        # matters most to "is now a bad moment", and the starts-only query hid it the moment
+        # it began (the auditor then read "no upcoming events" beside an ongoing standup).
+        from app.assistant.pipelines.dayflow.utils.context_sources import get_calendar_events_in_window
+        events = get_calendar_events_in_window(hours=8)
         if not events:
-            return "### Calendar\nNo upcoming events in next 8 hours."
+            return "### Calendar\nNothing on the calendar now or in the next 8 hours."
 
-        lines = ["### Calendar (next 8 hours)"]
+        lines = ["### Calendar (in progress + next 8 hours)"]
         for ev in events:
             start = ev.get("start_time", "")
             end = ev.get("end_time", "")
             name = ev.get("event_name", "")
-            lines.append(f"- {start} - {end}: {name}")
+            tag = " (in progress)" if ev.get("in_progress") else ""
+            lines.append(f"- {start} - {end}: {name}{tag}")
         return "\n".join(lines)
     except Exception as e:
         logger.debug("situation_snapshot: calendar failed: %s", e)

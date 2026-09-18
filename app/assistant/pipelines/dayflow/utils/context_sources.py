@@ -306,6 +306,37 @@ def get_calendar_events_for_orchestrator(hours: int = 4) -> List[Dict[str, Any]]
     return result
 
 
+def get_calendar_events_in_window(hours: int = 8) -> List[Dict[str, Any]]:
+    """Events that OVERLAP the next `hours` — in progress now, or starting before the window ends.
+
+    For "is now a bad moment" readers (the situation snapshot). The *_for_orchestrator variant
+    above lists events that START in the window, which drops a meeting the moment it begins:
+    on 2026-09-18 at 09:17 the snapshot said "No upcoming events in next 8 hours" two minutes
+    into a standup, beside a schedule block showing the standup, and the situation auditor filed
+    the contradiction. Each row carries `in_progress` so the reader can say which it is.
+    """
+    now = datetime.now(timezone.utc)
+    window_end = now + timedelta(hours=hours)
+    result: List[Dict[str, Any]] = []
+
+    for event in _load_calendar_events():
+        start = event.get("start_utc")
+        end = event.get("end_utc")
+        if not start or not end:
+            continue
+        if end > now and start < window_end:
+            result.append(
+                {
+                    "event_name": event.get("summary", "Untitled"),
+                    "start_time": _format_local_time(start),
+                    "end_time": _format_local_time(end),
+                    "in_progress": start <= now,
+                }
+            )
+
+    return result
+
+
 def get_calendar_events_for_health_inference(hours: int = 8) -> List[Dict[str, Any]]:
     now = datetime.now(timezone.utc)
     window_end = now + timedelta(hours=hours)
