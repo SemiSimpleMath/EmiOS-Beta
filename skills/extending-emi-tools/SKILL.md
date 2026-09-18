@@ -17,18 +17,18 @@ metadata:
 
 # Adding a new tool
 
-Tools live in `app/assistant/lib/tools/<name>/`. The `ToolRegistry`
-discovers them on import — drop the directory, restart Flask, and
-agents that include the tool in their `allowed_tools` can call it.
+Tools live in `app/assistant/lib/tools/<name>/`. `ToolRegistry.load_tools()`
+scans that directory at boot (from `bootstrap`) — drop the directory, restart
+Flask, and agents that include the tool in their `allowed_tools` can call it.
 
 ## Files to create
 
 ```
 app/assistant/lib/tools/<name>/
 ├── <name>.py                          # required — exposes get_tool_class()
-├── tool_contract.json                 # required — schema, metadata, planner copy
+├── tool_contract.json                 # effectively required — see below
 ├── prompts/
-│   └── <name>_description.j2          # required — planner-facing description
+│   └── <name>_description.j2          # dir required; template strongly advised
 └── tool_forms/
     └── tool_forms.py                  # required — `<name>_args` + `<name>_arguments` Pydantic models
 ```
@@ -36,6 +36,27 @@ app/assistant/lib/tools/<name>/
 The registry loads all four pieces by these exact names. Argument-fill
 guidance lives in the contract's `arguments_prompt` string (the args
 agent reads it when filling a call).
+
+**Exactly how strict each piece is** — the difference matters when something
+doesn't show up:
+
+| Piece | If absent |
+|---|---|
+| `<name>.py` | the directory is **skipped silently** (debug log only) — the usual reason a new tool "isn't registered" |
+| `get_tool_class()` inside it | raises → boot fails |
+| `tool_forms/tool_forms.py`, or either model | raises → boot fails |
+| `<name>_args` / `<name>_arguments` not `BaseModel` subclasses | raises → boot fails |
+| `prompts/` directory | raises → boot fails |
+| `prompts/<name>_description.j2` | tolerated: logs an error and the planner sees "No description available." |
+| `tool_contract.json` | tolerated, **but `min_authority` then fails closed at 99**, so no scope below 100 can see or call the tool. 141 of the 142 tools in the repo ship one. |
+| a malformed `tool_contract.json` | raises → boot fails (deliberate: swallowing it would silently strip the authority gate) |
+
+Two directory-level escapes: a `.disabled` file in the tool directory skips it,
+and directories starting with `__` are ignored.
+
+> **A tool that fails to load stops the process.** `load_tools` collects failures
+> and raises `RuntimeError("refusing to start with a partial registry")`. A
+> security-gated tool must never silently vanish while boot reports success.
 
 ## tool_contract.json shape
 
@@ -57,6 +78,7 @@ agent reads it when filling a call).
   "metadata": {
     "min_authority": 90,
     "approval_min_authority": 95,
+    "planner_description": "One short line — this IS the planner's capability line.",
     "domain": "email | calendar | smart_home | web | kg | …",
     "actions": ["send", "read", "delete", …],
     "selectors": ["recipient", "thread", …],
@@ -87,10 +109,39 @@ latency_class) are INFORMATIONAL today — they document the tool for
 humans and audits; no runtime gate reads them. Fill them honestly, and
 express any gating intent through the two enforced fields above.
 
+### What the planner actually sees — and the caps that truncate it
+
+`get_tool_descriptions()` renders a **card**, not your full description:
+
+- **capability line** = `metadata.planner_description` if set, truncated at **200
+  characters**; otherwise the first sentence of `description`, truncated at **140**
+- **one line per input**: `· name (req|opt): hint`, where the hint is the first
+  sentence of that input's `description`, truncated at **120**
+
+So `planner_description` and `inputs[].description` are the two fields that decide
+whether a planner picks your tool and fills it correctly in one pass. Curate them.
+`arguments_prompt` is deliberately **not** in the card — it is served separately to
+the args agent when a call needs filling.
+
+An entry in `inputs` missing either `name` or `type` is **silently dropped** during
+normalization, so a typo'd field simply never reaches the planner.
+
 ## The tool class
 
-`<name>.py` exposes `get_tool_class()` returning a `BaseTool` subclass
-whose `execute` takes a `ToolMessage` and returns a `ToolResult`:
+`<name>.py` exposes `get_tool_class()`. Three patterns are in use and all are
+valid:
+
+1. **Self-class tool** (most tools) — define a `BaseTool` subclass in the file and
+   return it. Class name is CamelCase with a `Tool` suffix.
+2. **Manager-as-tool** — wrap a multi-agent manager via `ManagerInterface`; the
+   class is named in snake_case to match the directory and manager id (e.g.
+   `class web_manager(BaseTool)`). Every `*_manager/` tool directory is this shape.
+3. **Shared-core adapter** — a three-line module pointing at a shared core class:
+   `get_tool_class = create_tool_loader(CalendarTool)`. Used when several tools
+   delegate to one core (the calendar create/update/delete trio).
+
+The common case, returning a `BaseTool` subclass whose `execute` takes a
+`ToolMessage` and returns a `ToolResult`:
 
 ```python
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
@@ -130,10 +181,14 @@ If the tool needs DB access, use `get_db_manager().read_session()` /
 
 ## After dropping the files
 
-1. Restart Flask.
-2. Verify in logs: `ToolRegistry: loaded N tools` should include yours.
+1. Restart Flask. If your tool is malformed, **boot fails** with
+   "refusing to start with a partial registry" naming it — that is the real test.
+   A successful load logs `Registered tool: <name>`.
+2. If the tool is simply absent from the registry with no error, the directory was
+   skipped: check that `<name>.py` exists and is named after the directory.
 3. Add the tool name to whichever agents should be able to call it
-   (their `config.yaml` `allowed_tools:` list).
+   (their `config.yaml` `allowed_tools:` list) — and remember the manager's own
+   `tools.allowed_tools` is the outer gate.
 4. The tool will appear in `/dev/agent-workbench` if dev tools are on.
 
 ## Canonical examples
