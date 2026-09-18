@@ -309,9 +309,53 @@ change-objective / flag-for-replan / complete / abandon — never decomposing or
 `create_work_object` then `set_status → dispatched` (the goal node); a non-empty one → in-place objective
 change; complete/abandon → `set_work_status`. It then **consumes intake** — artifacts a new WO cites in
 `based_on` are folded into the goal content and their source items closed
-(`converted_to_work_object:<wid>`) — and leaves `replan_work_ids` for the architect. Policy: one WO per
+(`converted_to_work_object:<wid>`) — and leaves `replan_work_ids` for the architect.
+
+Only items in **this** tick's `admitted_artifacts` are eligible to be consumed, and only **created**
+work objects consume (a changed one already did). The fold appends under an "— Originating intake —"
+heading via a same-status `set_status`, which is a content-only write and one of the legitimate uses
+of the store's same-target bypass. Crucially it carries the **pod handle, not just the summary**:
+`[full content: <pod_id> — open with pod_fetch]`. That line is the only thing a worker ever sees about
+where its goal came from, and a summary is a paraphrase — on 2026-09-13 a worker was told its answer
+was in "newsletter [7667]", could not open a `short_id` (no tool accepts one, and that one named two
+different items), asked the user three times, then spent 117 nodes reconstructing from the open web
+what was sitting in a 1,978-character pod. Policy: one WO per
 objective (check the portfolio before creating), the ROUTINE section is authoritative for timing, ticket
 responses are authoritative, and an already-DONE recurring automation is never re-minted.
+
+> **The portfolio must never LIE about being empty** — the single most important property of this prep
+> node. It is the only thing standing between the evaluator and recreating work already in flight, and
+> "(no active work objects)" is true of an empty store and false of a broken one while reading
+> identically to the planner, which then does exactly what its prompt says to do with an empty
+> portfolio: create the work. On 2026-08-30 three rows with NULL timestamps failed `WorkObject`
+> validation, the comprehension raised, the `except` left the default in place, and the planner minted
+> **34 duplicate work objects and 28 notifications** before anyone noticed. Four hours.
+>
+> The two failures are now told apart. A store that cannot be **listed** at all **raises** — a tick
+> planned blind is worse than a tick not taken. Individual objects that will not **load** are skipped,
+> logged as ERROR, and **named at the top of the rendered portfolio** behind an `!! INCOMPLETE VIEW`
+> banner that tells the planner work exists which is not listed, and to prefer changing or re-planning
+> over creating anything this cycle.
+
+The done-logs carry WHY, not just titles, and that is deliberate. A DONE entry appends the goal's
+epitaph; an ABANDONED entry (`_abandoned_line`) carries when it was dropped, the **recorded epitaph
+rendered in full** — never truncated, since that is where "user declined — DO NOT RECREATE" lives —
+the user's **last recorded reply** on that goal, and the goal's final content. Without those, the
+evaluator re-mints a goal the user just settled: on 2026-07-27 a July-timesheets work object was
+dropped on "those are done first of next month always", the DROPPED section showed the bare title
+alone, and an identical work object appeared 11 minutes later. (The scan relies on summaries being
+newest-updated-first and breaks out of the loop at the window edge.)
+
+Two window sizes, easily conflated: the done-logs look back **18 h** (as does the action log), while
+responded tickets look back **12 h**. Replies reach the evaluator as a **flat, newest-first list** so
+every reply is visible with the user's own words primary, acknowledged ones included; the categorized
+dict is kept alongside it for the architect's context builder.
+
+`_resolve_ticket_provenance` exists because of the 2026-07-29 trash re-mint: the daily context
+tracker's echo of an accepted ticket read as a bare unowned ongoing activity and was minted as new
+work. So a schedule entry whose `source` carries a verbatim ticket id is chased ticket → work node →
+work object → status by deterministic lookup. The evaluator judges what to do; it is never asked
+whether two phrasings are the same task.
 
 **strategic_planner** (LEGACY items-lane planner, `gpt-5.6-luna`) — the older evaluator that emitted
 **plans (DAGs of task nodes) + standalone tasks** instead of work objects, with per-task
@@ -547,10 +591,13 @@ It both judges AND writes (the former `work_finalizer_apply_node` was merged int
 happens in this node, so passing its schema through a blackboard to a second state_map step carried
 nothing. Verdicts persist on the NODE (`payload.finalizer`), never in memory — the architect that acts
 on an `amend`/`replan` runs a LATER tick, with a fresh manager and a fresh blackboard. It is the SOLE
-producer of `closed`. When a WO carrying
-`constraints.concern_refs` reaches a terminal status here, the outcome is
-back-propagated to the subconscious concerns register (`concern_feedback.propagate_work_outcome`,
-ad887863) — resolved/declined/failed each update the concern, and a user decline parks it dormant.
+producer of `closed`.
+
+It does **not** back-propagate to the subconscious concerns register, and cannot: that fires on a
+terminal *WorkObject* status, which the finalizer deliberately no longer sets (`resolve` was removed
+the same day). `propagate_work_outcome` has exactly two call sites — the **steward's**
+complete/abandon in `work_persist`, and the retired `work_repair_apply`. So a concern-born goal is
+reported on when the steward ends it, not when the finalizer closes its last node.
 
 ### Surface, comms & finalization
 

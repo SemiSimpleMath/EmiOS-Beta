@@ -1,9 +1,16 @@
 """dayflow_orchestrator.work_persist — apply the steward's output to the dayflow WorkObject store.
 
-The strategic_planner_wo steward emits goals + advance/complete/abandon directives (no tasks). This
-module mints/updates/closes the corresponding work objects. `advance_work_ids` is NOT handled here —
-the execution phase consumes it (Phase 2: bounded work_on). The worker decomposes each new goal's graph
-when it is first advanced (cold-start), so creation just mints the goal node.
+The strategic_planner_wo evaluator emits goals + complete/abandon directives (no tasks). This module
+mints/updates/closes the corresponding work objects; creation just mints the GOAL node.
+
+Decomposition is not this module's job and not the worker's: `work_architect_node` runs immediately
+after the persist node in the same tick and lays the goal's DAG. (`advance_work_ids` and the
+"decomposed by the worker when first advanced" cold-start both went with the pre-architect design —
+there is no advance directive any more, and dispatch runs every ready node.)
+
+`based_on` entries prefixed `concern:` are lifted into `constraints.concern_refs` at creation so a
+terminal outcome can be back-propagated to the subconscious register; complete/abandon call
+`propagate_work_outcome` here, directly.
 """
 from __future__ import annotations
 

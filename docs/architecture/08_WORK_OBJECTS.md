@@ -418,7 +418,12 @@ declare a DEV-ONLY `scenario_scope()` under `scenarios/`.
 
 Concern back-propagation: a WO carrying `constraints.concern_refs` reports its terminal
 outcome to the subconscious register (`concern_feedback.propagate_work_outcome`,
-ad887863) from the finalizer and repair paths.
+ad887863). It fires from the **steward's** `set_work_status` only — `work_persist` calls it
+directly on complete and abandon. The one other call site is the retired `work_repair_apply`.
+**Not** the finalizer: that path needs a terminal *WorkObject* status, and the finalizer
+stopped setting one when `resolve` was removed, so a concern is reported on when the steward
+ends the goal rather than when the finalizer closes its last node. The `concern:` refs
+themselves are lifted out of the evaluator's `based_on` at creation, in `work_persist`.
 
 ## The /work UI
 
