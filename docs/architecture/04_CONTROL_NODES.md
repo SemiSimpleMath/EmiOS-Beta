@@ -20,14 +20,15 @@ Route based on blackboard state:
 - **`work_node_wake_router_node.py`** — After the state_mover in the wake pass: dispatch the node if left `actionable`, end the pass if held
 - **`tool_return_router.py`** — Routes tool results back to the calling agent
 
-(Other room-specific routers follow the same shape: `emi_code_chat_task_router_node.py`,
+(Other room-specific routers follow the same shape:
 `kg_dev_chat_task_router_node.py`, `geoguessr_router_node.py`,
-`doc_create_final_router_node.py`, `plan_mode_final_router_node.py`,
+`doc_create_final_router_node.py`, `plan_mode_final_router_node.py`
+(master_room only — the dayflow plan_mode was retired 2026-09-18),
 `task_create_final_router_node.py`, `task_spec_router_node.py`.)
 
 ### Tool/Action Execution
 
-- **`tool_caller.py`** (~480 lines) — The canonical dispatcher:
+- **`tool_caller.py`** — The canonical dispatcher:
   - Is the action a **tool**? -> Execute via tool registry with scope enforcement
   - Is the action an **agent**? -> Push call context on blackboard, invoke agent
   - Is the action a **control node**? -> Set `next_agent` to the control node
@@ -42,15 +43,13 @@ Route based on blackboard state:
 
 ### Data Transform Nodes
 
-- **`view_materializer_node.py`** — Builds views from state
 - **`task_compile_metadata_node.py`** — Builds task metadata
 - **`task_compile_final_output_node.py`** — Compiles final task output
 
 ### Flow Gates & Critics
 
 - **`critic_pre_node.py` / `critic_post_node.py` / `critic_capture_node.py`** (`CriticPreNode` etc.) — Critic loop: pre-check, post-check, and capture of the critic verdict around an agent step
-- **`relevance_cleaner_gate_node.py`** — Gate in the relevance-cleaner pipeline (paired with `relevance_cleaner_prep_node.py` / `relevance_cleaner_persist_node.py`)
-- **`state_transition_guard_node.py`** — Normalizes/guards dayflow state-transition fields (e.g. maps LLM-facing `reactivate_at` to internal `reactivate_at_utc`)
+- **`relevance_cleaner_gate_node.py`** — RETIRED at the work-object cutover; on disk but wired into no manager (paired with `relevance_cleaner_prep_node.py` / `relevance_cleaner_persist_node.py`)
 - **`triage_spawn_guard_node.py`** (`TriageSpawnGuardNode`) — Guards intake-triage spawning
 - **`task_compile_critic_node.py`** (`TaskCompileCriticNode`) — Quality gate on compiled task output
 
@@ -62,20 +61,24 @@ Route based on blackboard state:
 
 ### Dayflow / Work-Object Nodes
 
-The work-object cutover (2026-06) replaced the item-dispatch lane
-(`dayflow_switchboard_arguments_node`, `dayflow_tool_caller`,
-`action_result_normalizer_node` — all deleted) with the work-object tick
-pipeline. Its control nodes:
+The work-object cutover (2026-06) replaced the item-dispatch lane with the work-object
+tick pipeline; `action_result_normalizer_node` was deleted with it.
+`dayflow_switchboard_arguments_node` and `dayflow_tool_caller` were **not** deleted —
+they are live, and since the 2026-09-17 dispatch split they are the first two stages of
+`dayflow_dispatch_manager` (arguments → tool call → `work_finalizer_node`), which runs one
+claimed node on its own thread. Its control nodes:
 
 - **`strategic_planner_wo_prep_node.py` / `_persist_node.py`** — build the
   evaluator's context (portfolio, ticket replies with resolved work refs,
   `expected_schedule_view` with id-chain provenance) / persist its verdicts
   (mint/change/complete/abandon via `work_persist`, consume cited intake items,
   forward `concern:` refs onto the work object)
-- **`work_finalizer_node.py`** — judges each completed node's result; sole
-  producer of the `closed` terminal; closure propagates concern outcomes
+- **`work_finalizer_node.py`** — judges whether each completed node's GOAL was achieved;
+  sole producer of the `closed` terminal; runs in `dayflow_dispatch_manager`, not the tick
 - **`work_architect_node.py`** — per-goal DAG decomposition + re-plan
-- **`work_repair_node.py`** — adjudicates failed nodes (retry / escalate / abandon)
+- **`work_repair_node.py`** — RETIRED 2026-09-16; on disk but wired into no manager. Its
+  three dispositions became the finalizer's verdicts (retry / unrecoverable + stop /
+  new_approach / ask_user)
 - **`work_node_dispatch_node.py` / `work_node_materializer_node.py`** — dispatch a
   ready node (job thread or ticket) / record results and ticket replies on the graph
 - **`workobject_render_node.py`** — renders work-object views
@@ -85,7 +88,6 @@ pipeline. Its control nodes:
   enrichment prep/persist pairs
 - **`post_room_finalize_node.py`** — closes acted_on items, persists state
   mutations, writes action log entries
-- **`fast_tick_promoter_node.py`** — fast-tick deterministic promoter
 - **`dag_executor_node.py` / `dag_manager_control_node.py`** — DAG-shaped
   multi-step execution
 
@@ -173,12 +175,40 @@ ToolResultHandler
 
 ## How to Add a New Control Node
 
-1. Create file in `app/assistant/control_nodes/`
-2. Inherit from base `ControlNode`
-3. Implement `action_handler(message)` with deterministic logic
-4. Read inputs from blackboard, write outputs to blackboard
-5. Set `next_agent` on blackboard to route to next step
-6. Reference the node in a manager's `state_map` to wire it into a flow
+1. Create a file in `app/assistant/control_nodes/`. **The filename is the contract**:
+   it becomes the registry key, and the class inside must be its CamelCase form
+   (`work_node_wake_prep_node.py` → `WorkNodeWakePrepNode`). A file whose name starts
+   with `_` is treated as a helper module and never loaded as a node.
+2. Inherit from base `ControlNode`. The class must be **defined in that module** — an
+   imported `ControlNode` subclass is deliberately ignored, so a node that imports another
+   node's class still resolves to its own. If a module defines several local subclasses and
+   none matches the expected name, boot raises "Ambiguous control node classes".
+3. Implement `action_handler(message)` with deterministic logic. Conventionally clear the
+   route first (`self.blackboard.update_state_value("next_agent", None)`) and set
+   `last_agent` to your own name at the end.
+4. **Read inputs from the BLACKBOARD, never from `message.data`.** The manager copies the
+   trigger's `data` onto the blackboard once, at `request_handler`; the activation Message a
+   node receives carries none of it. Reading `message.data` yields nothing, silently, and
+   the node falls through to its state_map default — the bug that made every dayflow time
+   wake run a full planning tick for two days (fixed 2026-09-18).
+5. Set `next_agent` to route explicitly (the Delegator honours it and returns early), or
+   leave it `None` to let the manager's `state_map` decide.
+6. Declare the node in a manager's `control_nodes:` with `name:` + `class:`, and reference
+   that `name` in the `state_map`. A `state_map` value naming nothing configured is a
+   **boot-time `ValueError`**, not a runtime dead end.
+
+Two conveniences from the base class worth using instead of re-inventing:
+
+- **Config**: `_node_cfg()` reads this node's own `config:` block from the manager entry;
+  `_flow_section_cfg("<section>")` reads a `flow_config` section; `_merged_section_node_cfg`
+  overlays the two with the node's own winning. Validators: `_required_str`,
+  `_optional_str`, `_optional_node`.
+- **Returning to a caller**: `_pop_and_route_to_calling_agent()` pops the call-context
+  triple `(calling_agent, called_agent, scope_id)` and routes back to the caller.
+
+Control nodes are **free** in the manager's budget: `max_cycles` counts LLM-agent
+activations only. A separate iteration backstop (`max_cycles * 8`, minimum 40) exists
+precisely to catch a control-node routing loop.
 
 ## Key Files
 
