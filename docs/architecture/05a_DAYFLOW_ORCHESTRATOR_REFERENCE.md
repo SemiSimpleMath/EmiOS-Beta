@@ -630,9 +630,14 @@ listens on `dayflow_ticket_responded` for its `ticket_id`. **Expiry:** it waits 
 (default 600s) then marks the ticket expired (`reason="wait_timeout"`), publishes a
 `proactive_suggestion_update` so the UI refreshes instead of waiting for its poll, and returns
 `action="timeout"`. Separately, `valid_hours` (default 4) is the ticket's DB validity window. (Note:
-`EXPIRED` is terminal in the ticket state machine, so a reply after the wait-timeout cannot be
-accepted — a known sharp edge. That claim is about `ticket_manager`, which this section has not
-been checked against.)
+`EXPIRED` is terminal in the ticket state machine — `_ALLOWED_TRANSITIONS[EXPIRED]` is an empty
+set — so a reply arriving after the wait-timeout is **refused with a warning and silently
+discarded**, and `result_for_ticket` then reports "user not reached". Verified against
+`ticket_manager`. On this lane the exposure is only the race between the timeout and the UI
+refresh, because `valid_hours` and `wait_timeout_seconds` are both driven from
+`ASK_WINDOW_HOURS` and end together. A caller using the tool's own defaults, 4 hours of
+validity against a 600 s block, leaves the question answerable-looking on screen for nearly
+four hours after the reply stops being accepted.)
 
 On reply it returns `action` + `user_text`, and the result TEXT is built by `format_response_result`
 as *answer first, question second*: the answer must survive a projection's cap, and "No I will do it
