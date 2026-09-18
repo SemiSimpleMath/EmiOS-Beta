@@ -128,10 +128,21 @@ Use `class:`, never `type:`.
   `graceful_exit`, `max_limit`, `error_exit`, and `<agent>_return_control`.
 - **Values are closed** — see validation below.
 
-## Validation — your config is checked at construction, and it raises
+## Validation — two validators, at two different moments
 
-`MultiAgentManager._validate_strict_routing_config()` runs every time the manager is built. It raises
-`ValueError` (it does not warn) when:
+**1. At boot** — `agent_validator.validate_all()` (called from `initialize_system`) runs
+`_check_manager_configs`, which reads **every `*.yaml`** under `app/assistant/multi_agents/`
+(skipping `.archive`):
+
+- **raises `RuntimeError`** when `agents:` names an agent that is not in the registry
+  ("references unknown agents")
+- **warns** when a declared agent is never reachable. Reachability counts: `state_map` keys and
+  values, values inside any `control_nodes[].config` block, values inside any `flow_config`
+  sub-section, other agents' `allowed_nodes`, and `role_bindings` values. If your agent is declared
+  but reached none of those ways, either wire it or remove it.
+
+**2. At construction** — `MultiAgentManager._validate_strict_routing_config()` runs every time the
+manager is built. It raises `ValueError` (it does not warn) when:
 
 - `flow_config.state_map` is missing, not a dict, or empty
 - any src/dst is not a non-empty string
@@ -143,7 +154,8 @@ Use `class:`, never `type:`.
 - a `critic:` section omits any of `subject_agent` / `critic_agent` / `continue_agent`
 - a `summary:` section omits any of `source_agent` / `summary_agent` / `resume_agent`
 
-So the cheapest test of a new manager is simply to build it:
+Between them: boot catches unknown/unreachable agent names, construction catches broken routing. So
+the cheapest test of a new manager is simply to build it:
 
 ```python
 DI.manager_registry.preload_all()
