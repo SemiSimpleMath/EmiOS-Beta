@@ -325,7 +325,44 @@ projected deterministically by `apply_architect_dag` into `add_node` (born `prop
 `add_edge` (`depends_on`) → `defer_node` (wake-gates). Conventions: lean (1–5 nodes; a simple goal = 1
 node), no verify/confirm/cleanup nodes, three wake kinds (TIME / USER_REPLY / EVENT|SIGNAL), reaching the
 owner is a `notify` node (never `send_email`), and an owner-requested result must end in a `notify` node.
-Never raises.
+Never raises — a per-object failure leaves that object as-is and the pipeline continues.
+
+> **The architect gets its OWN blackboard, never the tick's.** Sharing the tick's looks right — it is
+> what makes blackboard-sourced context items resolve — but the tick's blackboard already carries
+> `task = "Dayflow cadence tick"`, because that is how `dayflow_tick` builds the Message, and **that
+> value wins over the Message this node passes.** The architect was therefore asked to decompose
+> "Dayflow cadence tick" with the whole portfolio as its context, and dutifully wrote nodes for
+> everything it could see: a picture-day goal acquired an AC setpoint, a whole-house lights ramp and
+> an evening dog walk, two of which failed there and blocked that goal permanently. Anything the
+> architect needs must arrive through its Message (see `_situational_context`) or as a resource.
+
+Four more mechanics worth knowing:
+
+- **The prune licence is computed here.** `licensed = bool(licence) or (work_id in user_directed)`,
+  where `licence` is the joined finalizer recommendations and `user_directed` comes from
+  `user_directed_replan_ids` (a steward-classed user directive). It is passed to
+  `apply_architect_dag`, and without it the store's churn fence refuses to prune queued or
+  future-wake-held nodes. An unlicensed re-plan — the steward's own read of progress — may add but
+  not kill.
+- **`duplicate_of`** lets the agent name `{duplicate_node_id: keep_node_id}` pairs, converted from a
+  LIST here because OpenAI structured output rejects a free-form object. The apply reports
+  `deduplicated` alongside added and abandoned.
+- **`consume_finalizer_instruction` is stamped only AFTER the graph write succeeds**, so a re-plan
+  that raised can run again rather than losing the verdict it never acted on.
+- **A re-plan skips objects created in the same tick** — they were just decomposed.
+
+`_render_existing_graph` is the only thing standing between a re-plan and a duplicate, so its shape
+is deliberate: **direct children of the goal ONLY** (the worker's own decomposition drowned the list
+it was meant to read — one object rendered 49 lines, 41 of them worker-grown), LIVE nodes first and
+never abbreviated, epitaphs never truncated (a cut-off "user declined … DO NOT RE" is how dead chains
+get re-laid), and **steps counted separately from results**, with an explicit "ALL IDENTICAL" warning
+when several results share one body. That last one exists because 17 evidence rows carrying the *same*
+tool error read as progress, and that count was used to judge which of two duplicates was further
+along. The goal's own `goal_unmet_attempts` renders first and unmissably, since by then the node that
+kept failing has usually been abandoned and replaced, leaving every per-node count reading zero. And
+because a `failed` node has no `terminal` payload, its epitaph is taken from the finalizer's verdict —
+without which a BLOCKED step arrives as a bare `status=failed` line, and blocked is precisely the case
+where the architect must plan the node that asks the user.
 
 **state_mover** (`gpt-5-mini`, no tools, `action_required: false`) — the deterministic
 "mechanics-only" lifecycle mover, now a **two**-node sequence: `state_mover_prep_node` (context) → agent →
@@ -347,6 +384,21 @@ time and was held to 9 AM the next morning, citing the very cutoff it existed to
 first surface. In a **wake pass** (`dayflow_wake_manager`) the persist node is scoped by
 `triggered_work_node` and promotes or parks that ONE node only — never the rest of the graph, which the
 LLM was never shown.
+
+Three details of a HOLD:
+
+- A hold **with** a `reactivate_at` parks the node `waiting` + a wake. A hold **without** one is left
+  `proposed` and simply re-judged next tick, rather than being parked with no way back.
+- A held **ask** keeps `wake_kind=user_reply` (with the pushed-back `wake_at`), so a reply arriving
+  during the hold is still matched and recorded. Everything else parks as a plain `time` wake.
+- The hold **reason is not written into the node**. It stays in the LLM's `held_work_nodes` output and
+  the log line, because writing it into the node's directive polluted the worker's task text and
+  *accumulated* across successive holds.
+
+Promotion also consults `TRANSITIONS` and skips any node whose family cannot reach `actionable` at all
+(knowledge / question / verification). And `_apply_node_wakes` is the one place a node's `content` is
+legitimately *appended* to: the arrived evidence lands as `[Awaited event arrived] …` so the worker has
+its resume context. Appending, not overwriting — the directive itself is preserved.
 
 ### Dispatch & execution (the live engine)
 
