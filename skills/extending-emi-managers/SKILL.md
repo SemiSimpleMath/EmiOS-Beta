@@ -4,7 +4,7 @@ description: How to add a new multi-agent manager to EmiOS. A manager wires agen
 license: Apache-2.0
 metadata:
   author: emi-team
-  version: "1.0"
+  version: "2.0"
   auto_inject_when:
     task_keywords:
       - "new manager"
@@ -17,104 +17,191 @@ metadata:
 
 # Adding a new manager
 
-Managers live in `app/assistant/multi_agents/<name>/`. The
-`ManagerInvoker` discovers them on import — drop the directory,
-restart Flask, invoke via `DI.manager_invoker.invoke(<name>, message)`.
+A manager is a **directory containing `config.yaml`** under `app/assistant/multi_agents/`. There is
+no Python to write: every manager in the repo is the same `MultiAgentManager` class, differing only
+in its config. Drop the directory, restart Flask.
+
+`ManagerRegistry.preload_all()` scans `app/assistant/multi_agents/*/` at boot and registers a
+directory **iff it contains `config.yaml`**. Nothing else is required — the live
+`dayflow_wake_manager/` directory contains that one file and nothing else.
+
+> **The registry key is the DIRECTORY name, not the `name:` field inside the file.** You invoke
+> `create_manager("<directory name>")`. Keep them identical to avoid confusion.
 
 ## Files to create
 
 ```
 app/assistant/multi_agents/<name>/
-├── __init__.py            # required (can be empty)
-└── manager_config.yaml    # required — agents + state map + permissions
+└── config.yaml        # the whole manager
 ```
 
-## manager_config.yaml shape
+No `__init__.py` is needed. A directory without `config.yaml` is silently skipped — that is the
+usual reason a new manager "isn't found".
+
+## config.yaml — the verified shape
 
 ```yaml
-name: my_manager
-class_name: MultiAgentManager
+name: my_manager                  # keep equal to the directory name
+class_name: MultiAgentManager     # required; names a class in app/assistant/agent_classes/
+description: "One line — what this manager is for."
+max_cycles: 20                    # budget of LLM-AGENT activations (default 30)
+max_exit_cycles: 10               # budget for the graceful-exit loop (default 10)
 
-allowed_tools:                     # tools any agent in this manager can call
-  - send_email
-  - get_calendar_events
-blocked_tools: []                  # explicit denials (overrides allowed)
-hidden_tools: []                   # callable but invisible to planner
+role_bindings:
+  delegator: room::delegator      # REQUIRED — the loop resolves the 'delegator' role every run
+  tool_selector: shared::tool_selector
 
-agents:                            # list of agents this manager uses
+agents:                           # REQUIRED key (may be a short list, but must exist)
+  - name: room::delegator
+    class: Delegator
   - name: my_namespace::planner
-  - name: my_namespace::critic
-  - name: shared::summary_writer
+    class: Agent
 
-control_nodes:                     # deterministic non-LLM nodes
+control_nodes:                    # REQUIRED key, and at least one named entry
+  - name: my_prep_node
+    class: MyPrepNode             # CamelCase class; see "the class key" below
   - name: tool_caller
-    type: tool_caller
-  - name: critic_post_node
-    type: critic_post_node
-    config:
-      critic_agent: "my_namespace::critic"
+    class: ToolCaller
+  - name: final_answer_node
+    class: FinalAnswerNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+tools:                            # the manager's OUTER tool gate
+  allowed_tools:
+    - send_email
+    - ask_kg
+  except_tools: []                # subtracted from allowed_tools
+
+scope_contract:                   # the scope ceiling; narrows, never expands
+  tools:
+    allowed_tools: ["all"]
+    blocked_tools:
+      - install_tool
+    requires_approval_tools: []
 
 flow_config:
-  state_map:                       # who-runs-after-whom
-    init:                       my_namespace::planner
-    my_namespace::planner:      tool_caller
-    tool_caller:                critic_post_node
-    critic_post_node:           my_namespace::planner
-    # ...
-
-  summary:                         # which agent writes the wrap-up
-    agent: shared::summary_writer
-
-role_bindings:                     # named roles other agents reference
-  delegator: my_namespace::planner
-
-scope_contract:
-  type: narrow_only                # permissions can narrow, never expand
-  permissions:
-    can_mutate_kg: false
-    can_send_email: true
+  strict_routing: true
+  state_map:                      # REQUIRED, non-empty
+    "room::delegator": "my_prep_node"
+    "my_prep_node": "my_namespace::planner"
+    "my_namespace::planner": "tool_caller"
+    "tool_caller": "final_answer_node"
+    "final_answer_node": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "final_answer_node"
 ```
 
-## Agents declared but not in flow_config
+`tools.allowed_tools` may contain the literal `"all"`, which expands to the whole tool registry.
+An empty/missing `allowed_tools` logs "has no allowed tools configured" and the manager runs with none.
 
-The validator warns if an agent is in `agents:` but not reachable
-via `state_map`, `role_bindings`, control-node configs, or another
-agent's `allowed_nodes`. Either reach it or remove it.
+## The `class:` key, and manager-local aliases
+
+Each entry under `agents:` and `control_nodes:` carries `name:` and `class:`.
+
+`AgentLoader._resolve_entry_from_declared_class` converts `class:` from CamelCase to snake_case and
+looks **that** up in the registry. Control nodes are registered under their **filename stem**, so
+`class: ReturnControlNode` resolves to `return_control_node.py`. This is how a manager gives a node a
+local alias:
+
+```yaml
+  - name: return_control          # the name your state_map uses
+    class: ReturnControlNode      # resolves to control_nodes/return_control_node.py
+```
+
+Use `class:`, never `type:`.
+
+## state_map — how routing actually works
+
+`Delegator.pick_next_agent` does exactly one thing: `state_map[last_agent]`. Each node/agent sets
+`last_agent` to its own name when it finishes, so the map is "who runs after whom".
+
+- **The first hop is keyed by the delegator's bound name** (`room::delegator` above), because
+  `run_agent_loop` sets `last_agent` to the delegator before the first cycle. There is no `init:` key.
+  (If `last_agent` is ever empty, the key looked up is `NO_PREVIOUS_AGENT`.)
+- A node may **override** routing by setting `next_agent` itself; the delegator honours it and returns
+  early. That is how conditional branches are expressed — never by logic in the delegator, which holds
+  no policy by design.
+- Keys are an open vocabulary: besides agent/node names, the loop emits synthetic states
+  `graceful_exit`, `max_limit`, `error_exit`, and `<agent>_return_control`.
+- **Values are closed** — see validation below.
+
+## Validation — your config is checked at construction, and it raises
+
+`MultiAgentManager._validate_strict_routing_config()` runs every time the manager is built. It raises
+`ValueError` (it does not warn) when:
+
+- `flow_config.state_map` is missing, not a dict, or empty
+- any src/dst is not a non-empty string
+- `control_nodes` is not a list, or names no node
+- **any state_map VALUE does not name a configured agent, control node, or role binding** — the most
+  common mistake, and it is caught at boot rather than mid-run
+- a `*_return_control` key's prefix is not a configured agent
+- `flow_config.tool_return.tool_call_result_handler_node` is set but absent from `state_map`
+- a `critic:` section omits any of `subject_agent` / `critic_agent` / `continue_agent`
+- a `summary:` section omits any of `source_agent` / `summary_agent` / `resume_agent`
+
+So the cheapest test of a new manager is simply to build it:
+
+```python
+DI.manager_registry.preload_all()
+DI.multi_agent_manager_factory.create_manager("my_manager")   # raises if the config is wrong
+```
+
+## Invoking it
+
+```python
+manager = DI.multi_agent_manager_factory.create_manager("my_manager")
+DI.manager_invoker.invoke(manager, message)
+```
+
+`invoke` takes the **manager instance**, not its name. One fresh instance per invocation, each with
+its own `Blackboard` — managers share no state.
+
+## What your nodes can see
+
+`MultiAgentManager.request_handler` copies the inbound message's `task`, `information`, and **every
+key of `message.data`** onto the blackboard once, at the start. Control nodes are then activated with
+a bare `Message(data_type='agent_activation', …)` that carries **no data**.
+
+> **Read trigger data from the blackboard, never from `message.data`.** A node that reads
+> `message.data` gets nothing, silently, and falls through to whatever its state_map default is. A
+> dayflow time-wake ran a full planning tick for two days on exactly this mistake (2026-09-18).
+
+Per-node config is available too: give an entry a `config:` block and read it with the node's
+`_node_cfg()`; flow sections are read with `_flow_section_cfg("<section>")`.
+
+## Budgets
+
+`max_cycles` counts **LLM-agent activations only** — control nodes and tool plumbing are free. A
+separate backstop (`max_cycles * 8`, minimum 40 iterations) catches control-node routing loops. On
+exhaustion the manager runs its graceful-exit loop with `max_exit_cycles`.
+
+## Scope
+
+A manager invoked without a `scope_context` **raises in production** — every invocation must carry a
+scope, which `manager_invoker` attaches. Under `EMI_TEST_MODE` (or pytest) a permissive scope is
+substituted so harnesses run.
 
 ## Read vs write managers
 
-By convention, managers that mutate persistent state (KG, settings,
-user data) are SEPARATE from read-only managers. The general
-assistant uses `emi_team_manager`; KG mutations route through
-`kg_mutation_manager`. Don't add `kg_create_node` to
-`emi_team_manager.allowed_tools` — that's the safety pattern.
-
-## After dropping the files
-
-1. Restart Flask.
-2. Watch validation output — `_check_manager_configs` will reject
-   unknown agent names or unreachable agent declarations.
-3. Wire the manager from a router (e.g. `master_room::switchboard`)
-   or call directly via `DI.manager_invoker.invoke("my_manager", msg)`.
+By convention, managers that mutate persistent state (KG, settings, user data) are SEPARATE from
+read-only managers. The general assistant uses `emi_team_manager`; KG mutations route through
+`kg_mutation_manager`. Don't add `kg_create_node` to `emi_team_manager` — that separation is the
+safety pattern.
 
 ## Canonical examples
 
-- Generalist with many sub-managers: `app/assistant/multi_agents/emi_team_manager/`
-- Domain-specific (admin tasks): `app/assistant/multi_agents/personal_admin_manager/`
-- Read-only KG access: the `ask_kg` leaf tool (LLM-RAG over the knowledge graph)
-- Approval-gated browser automation: `app/assistant/multi_agents/playwright_manager/`
+- Straight line, one node's worth of work: `app/assistant/multi_agents/dayflow_dispatch_manager/`
+- Minimal directory (config.yaml only): `app/assistant/multi_agents/dayflow_wake_manager/`
+- Long deterministic pipeline: `app/assistant/multi_agents/dayflow_orchestrator_manager/`
+- Generalist with sub-managers: `app/assistant/multi_agents/emi_team_manager/`
 
 ## Notes
 
-- Room-bound managers are still `MultiAgentManager`; room modes
-  (`task_creation_mode` / `doc_creation_mode`) are selected at ingress,
-  which seeds `next_agent` with the mode's source agent.
-- Control nodes available out of the box: `tool_caller`,
-  `critic_post_node`, `final_answer_node`, `summary_post_node`,
-  `approval_node`, `return_control_node`. Register custom nodes by
-  adding them to `app/assistant/control_nodes/`.
-- Manager-level `allowed_tools` is the OUTER gate. Per-agent
-  `allowed_tools` (in agent config) further narrows. A tool must
-  pass BOTH to be callable.
 - Tests live in `app/assistant/tests/manager_tests/<manager>/`.
-  Each manager typically has a `<manager>_test.py` smoke script.
+- Adding a brand-new control node means adding a file to `app/assistant/control_nodes/`; it is
+  discovered by filename, and its class must be the file stem in CamelCase. See
+  `extending-emi-agents` for the agent side of the contract.
