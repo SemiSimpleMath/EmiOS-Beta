@@ -257,7 +257,7 @@ paragraphs:
 | `action_selector` | `gpt-5.6-luna` | none | live |
 | `switchboard` | `gpt-5-mini` | `all` except `ask_user` | live |
 | `work_finalizer` | `gpt-5.6-luna` | none | live (dispatch room) |
-| `result_formatter` | `gpt-5.6-luna` | none | dormant |
+| `result_formatter` | `gpt-5.6-luna` | none | live (called by master_room) |
 | `strategic_planner` | `gpt-5.6-luna` | none | retired, unwired |
 | `relevance_cleaner` | `gpt-5-mini` | none | retired, unwired |
 | `work_repair` | `gpt-5.6-luna` | none | retired, unwired |
@@ -661,8 +661,19 @@ what lets `work_session.re_arm_inflight_asks` rebuild an ask that outlived its p
 asking again.
 
 **result_formatter** (`gpt-5.6-luna`, no tools) — condenses a dispatched manager's full result into a
-compact 1–3 line task-update (verdict-first, specifics verbatim, no "I" voice). Invoked synchronously
-inside `post_room_finalize_node` — **so reachable only on the legacy item lane** (see flag below).
+compact 1–3 line task-update (verdict-first, specifics verbatim, no "I" voice). **It is LIVE, and not
+only on the dayflow lane.** Two callers invoke it synchronously:
+
+- `post_room_finalize_node._format_compact_outcome` — the dayflow item-lane path, which is the dormant
+  one.
+- **`master_room_tool_caller._close_dayflow_dispatch_marker`** — very much live. When master_room
+  dispatches through a dayflow marker, it stamps `execution_result` on that item and closes it, and
+  this agent writes the line. The source text is passed **whole**: the formatter reads the full result
+  and decides what matters, rather than anything being truncated upstream.
+
+Note that master_room's tool caller imports both `_extract_full_result_text` and
+`_format_compact_outcome` **from `post_room_finalize_node`**, so that module is a live helper host even
+where its own reconciliation work is dormant.
 
 **room_summary** — a compaction agent for the dayflow internal event log. The dayflow-specific variant
 (`dayflow_orchestrator::room_summary`) was **retired** — the dayflow `ROOM.md` declared no `chat_compaction`,
@@ -860,8 +871,10 @@ deleted); `dayflow_orchestrator::room_summary` (the generic `room_summary` is un
 `state_transition_guard_node`, `action_result_normalizer_node`, `work_execution_node`,
 `list_active_dispatches`. `_switchboard_arguments_util` is KEPT — master_room uses it.
 
-**Dormant:** `post_room_finalize_node`'s item-lane reconciliation (the node itself is live in the exit
-path, with nothing to reconcile), and `result_formatter`.
+**Dormant:** `post_room_finalize_node`'s item-lane reconciliation only — the node itself is live in the
+exit path with nothing to reconcile, and two of its helpers (`_extract_full_result_text`,
+`_format_compact_outcome`) are imported by master_room's tool caller. `result_formatter` is **not**
+dormant: master_room invokes it on every dispatch that carries a dayflow marker.
 
 **Lifecycle (shipped):** the `active → dispatched` rename; the finalizer cutover (`is_satisfied` keys on
 `closed`, `work_finalizer_node` is the sole producer of it); the dispatch-room split (2026-09-17, the tick
