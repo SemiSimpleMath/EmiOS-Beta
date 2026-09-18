@@ -680,15 +680,57 @@ where its own reconciliation work is dormant.
 so nothing bound it. The **generic** `room_summary` (per-room chat compaction via `room_chat_summary` /
 `room_summary_service`, e.g. `master_room::room_summary`) is live and untouched.
 
-**post_room_finalize_node** — the legacy item-lane post-room hook: closes acted-on source items
-(`acted_on_item_ids` → `closed`), reconciles them against dispatch records (raises on mismatch), calls
-result_formatter to stamp `execution_result` onto plan steps, writes action-log rows, persists planned
-tasks / synopses / plan completions. **Flag — the node is LIVE, its work is not.** It has a real
-inbound edge (`work_node_dispatch_node` → `post_room_finalize_node`) and sits on the main path in
-§4 P3, plus the materializer's empty-list short-circuit. What is dormant is the reconciliation:
-`work_node_dispatch_node` deliberately clears `acted_on_item_ids` before handing off, precisely so
-this node's item-lane bookkeeping never tries to close a nonexistent item row named like a work
-ref. The work-object lane records outcomes through `result_recorder` instead.
+**post_room_finalize_node** — the legacy item-lane post-room hook, and **the node every path in every
+dayflow manager exits through**. It has a real inbound edge (`work_node_dispatch_node` →
+`post_room_finalize_node`), sits on the main path in §4 P3, and is also where the materializer's
+empty-list short-circuit, the wake prep's stale-wake exit and the wake router's held-node exit all
+land. So it runs on essentially every pass.
+
+What it does, when it has input: closes acted-on source items (`acted_on_item_ids` → `closed` via a
+mutation it appends itself), reconciles them against the dispatch records, sends the **full**
+manager result to `result_formatter` and stamps the compact outcome onto `plan`/`plan_task` items as
+`execution_result` (+ `executed_at`, `planner_reviewed: false`), writes two `write_action_log` rows
+per dispatch record keyed by an idempotency key (`<dispatch_id>|dispatch`, `|result`), mints an
+`action_result:<dispatch_id>` item, closes the `action_dispatch` marker, and persists planned tasks,
+plan synopses, plan completions and task cancellations.
+
+**It is the strictest validator in the tick.** Seven blackboard keys raise if present and not a list,
+three contract validators run (`validate_dayflow_items`, `validate_mutations`,
+`validate_planned_tasks`), a dispatch record missing any of its four provenance ids raises, and three
+cross-checks raise outright: results present with no dispatch records, dispatch records present with
+no results, and a selector/dispatch `acted_on_item_ids` set mismatch. Since it is the universal exit,
+a malformed value on any of those keys ends the whole pass.
+
+> **Almost all of that work is unreachable — it has no producers.** Not "dormant": the keys it reads
+> are written by nothing.
+>
+> | key | producer today |
+> |---|---|
+> | `acted_on_item_ids` | set on the work lane, then **deliberately cleared** by `work_node_dispatch_node` |
+> | `planned_tasks` | none — `state_mover_prep_node` only enriches a list it reads back |
+> | `state_mutations` | none — the state_mover stopped emitting them |
+> | `state_mutations_persisted_tf` | none — `state_transition_guard_node` was deleted |
+> | `plan_synopses`, `completed_plan_ids`, `closed_task_ids` | none |
+> | `action_result_events`, `active_dispatch_records` | none |
+>
+> So `_build_planned_task_messages`, `_persist_action_selector_action_logs`,
+> `_attach_execution_results`, `_close_completed_plans`, `_cancel_tasks`, the synopsis diffing and the
+> `state_mutations_persisted_tf` branch are all dead today. The work-object lane records outcomes
+> through `result_recorder` instead. Two ideas in here are worth preserving deliberately rather than
+> deleting by accident if this lane is retired:
+>
+> - **The auto-synopsis safety net.** A plan created implicitly through a task's `plan_id`, with no
+>   matching synopsis, leaves no memory: its tasks close, get suppressed, the plan vanishes, and a
+>   persistent concern re-creates it from scratch. That is the HVAC re-research loop. The node
+>   detects the missing synopsis and writes a minimal one from the task text.
+> - **The deterministic `changed=false` override.** If the planner marks a synopsis unchanged but its
+>   objective or `step_outline` actually differ, the node logs a warning and persists anyway. The diff
+>   outranks the model's claim about its own output.
+
+Two hazards in this file are recorded in the bug list rather than here: the `created_ticket_id`
+recovered by searching result prose for the words "ticket" and "Created", and
+`_format_compact_outcome` returning hedged strings like `"(formatter unavailable; see action_log)"`
+that land in an item's `execution_result` and are read as an outcome.
 
 **view_materializer_node** — DELETED with the item dispatch lane. (It was the item-lane view builder and
 logged a loud `LEGACY ITEM LANE fired` warning whenever an item reached `action_selector`.)
@@ -871,10 +913,13 @@ deleted); `dayflow_orchestrator::room_summary` (the generic `room_summary` is un
 `state_transition_guard_node`, `action_result_normalizer_node`, `work_execution_node`,
 `list_active_dispatches`. `_switchboard_arguments_util` is KEPT — master_room uses it.
 
-**Dormant:** `post_room_finalize_node`'s item-lane reconciliation only — the node itself is live in the
-exit path with nothing to reconcile, and two of its helpers (`_extract_full_result_text`,
-`_format_compact_outcome`) are imported by master_room's tool caller. `result_formatter` is **not**
-dormant: master_room invokes it on every dispatch that carries a dayflow marker.
+**Dead, not dormant:** `post_room_finalize_node`'s item-lane work. The node itself is the universal
+exit and runs on every pass, but the eight blackboard keys it acts on have **no producers left**, so
+its planned-task, synopsis, plan-completion, cancellation and dispatch-reconciliation machinery is
+unreachable (see §3 for the table, and the bug list for what to preserve before retiring it). Two of
+its helpers are live by import: `_extract_full_result_text` and `_format_compact_outcome`, both used
+by master_room's tool caller. `result_formatter` is **not** dormant either — master_room invokes it on
+every dispatch that carries a dayflow marker.
 
 **Lifecycle (shipped):** the `active → dispatched` rename; the finalizer cutover (`is_satisfied` keys on
 `closed`, `work_finalizer_node` is the sole producer of it); the dispatch-room split (2026-09-17, the tick

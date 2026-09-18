@@ -100,8 +100,13 @@ claimed node on its own thread. Its control nodes:
 - **`intake_triage_prep_node.py` / `triage_persist_node.py`**,
   **`context_enricher_prep_node.py` / `_persist_node.py`** — intake triage and
   enrichment prep/persist pairs
-- **`post_room_finalize_node.py`** — closes acted_on items, persists state
-  mutations, writes action log entries
+- **`post_room_finalize_node.py`** — the universal EXIT node: every dayflow path lands here,
+  including the materializer's empty-list short-circuit and both wake-pass early exits. It closes
+  acted_on items, stamps `execution_result` onto plan steps via `result_formatter`, writes action-log
+  rows, and persists planned tasks / synopses / plan completions. It is also the tick's strictest
+  validator (seven list-typed keys, three contract validators, three cross-checks that raise).
+  **Most of its work is dead code** — the blackboard keys it reads have no producers left; see
+  `05a` for the table
 - **`dag_executor_node.py` / `dag_manager_control_node.py`** — DAG-shaped
   multi-step execution (wired in `multi_tool_manager`, not the dayflow orchestrator)
 
