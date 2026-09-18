@@ -97,7 +97,33 @@ Assigns `short_id`s and persists via `write_dayflow_items_batch`.
 hard 2 h) and revives the source item to `actionable` only if still `dispatched`.
 `sweep_orphaned_dispatched_tasks` closes tasks stuck `dispatched` > 2 h with no live dispatch row (→
 `closed`, so the planner re-mints fresh). `sweep_zombie_waiting_items` closes `waiting` items overdue > 36 h
-(aged out of the 24 h freshness window, invisible to the cleaner). `sweep_stuck_work_nodes` supervises in-flight work-node sessions: ownership is a GRAPH fact (`payload.session_id`, stamped at claim and inherited by every node grown under the session — work-session rewrite 2026-08-04, replacing the ancestor-liveness walk). ORPHANED = `dispatched` with no live owning session (or the session's root no longer `dispatched` — a frozen-failed root's zombie thread shields nothing); FROZEN = the session root alive but no subtree/session activity for 20+ min. Both -> `failed`, which the finalizer then judges. (`list_active_dispatches` and `view_materializer_node` were deleted with the item dispatch lane.)
+(aged out of the 24 h freshness window, invisible to the cleaner).
+
+`sweep_stuck_work_nodes` supervises in-flight work nodes, and it has exactly **one rule: has this
+node or its owned subtree been written to lately?** It consults **no** session liveness — a run
+blocked inside a tool call writes nothing while it waits, so a crashed process and a wedged call
+look identical from the graph, and both want the same remedy. `_job_idle_seconds` walks the node's
+subtree for the newest `updated_at`; past the tolerance the node goes **`failed`**, which the
+finalizer then judges. Goal nodes are skipped (a goal sits `dispatched` by design while its children
+run), and a late write from the abandoned call is harmless because the transition machine refuses
+`failed → done`.
+
+The tolerance is **derived, not chosen**: `_WORK_NODE_FROZEN_TIMEOUT_S = ASK_WINDOW_HOURS * 3600 +
+20 min`, so **80 minutes** today. It has to exceed the longest a call may legitimately block, which
+is the ask. Set below that and a question the user has simply not answered yet is failed out from
+under them, which reads as the system asking and then losing interest.
+
+> **Vestigial session plumbing — do not trust the comments here.** The 2026-08-04 work-session
+> rewrite supervised by session *ownership*: `payload.session_id` stamped at claim and inherited by
+> every node grown under it, with ORPHANED (no live session) and FROZEN (session alive, subtree
+> quiet) as two separate verdicts. The sweep no longer works that way, and these are the leftovers:
+> `payload.session_id` is still **written** in three places and **read by nothing**;
+> `_session_root_dispatched` in `dispatch_sweeper.py` has no callers at all; `session_alive` and
+> `session_started_at` have no production callers. Only `session_alive_by_id` is live, and its one
+> caller is the boot-time ask re-arm. Several docstrings still assert that "ownership is a graph
+> fact the supervisor reads" — the supervisor does not read it.
+
+(`list_active_dispatches` and `view_materializer_node` were deleted with the item dispatch lane.)
 
 ---
 
@@ -118,7 +144,11 @@ Accessor `dayflow_orchestrator/work_store.py :: get_dayflow_work_store()` — a 
 creates five tables (`work_objects`, `nodes`, `edges`, `actions` = the outward-act ledger, and the
 append-only `events` = source of truth; nodes/edges are a rebuildable projection),
 `busy_timeout=10000` (coexists with the main writer via WAL,
-single-writer by design), and runs a one-time idempotent **`active → dispatched`** node-status migration.
+single-writer by design), and runs **two** one-time migrations plus `repair_terminal_zombies()`
+before any write: **`active → dispatched`** node status (idempotent, so it self-guards; verification
+nodes keep `active`), and surfaced asks **`waiting → dispatched`** with `wake_at` cleared — that one
+marker-guarded in a `work_store_meta` row because it must run exactly once, since a *pre-surface* ask
+parked by a state_mover HOLD legitimately looks identical.
 A **WorkObject** (`status = active | done | abandoned | blocked`) is a graph container: ownership is a
 `parent_id` tree; dependency/knowledge is a DAG of typed edges (`depends_on`, `produces`, `verifies`…);
 `ready`/`blocked`/`satisfied` are derived, never stored. A **WorkNode** has an open `type`
@@ -126,13 +156,19 @@ A **WorkObject** (`status = active | done | abandoned | blocked`) is a graph con
 *family* via `FAMILY_BY_TYPE` (default `spine`).
 
 **Spine node lifecycle** (`work_objects/store.py` TRANSITIONS):
-`proposed → actionable → dispatched → done | incomplete → closed`, with side states
-`waiting`, `failed`, `abandoned`, `superseded`.
+`proposed → actionable → dispatched → done → closed`, with side states `waiting`, `failed`,
+`abandoned`, `superseded`.
 - `proposed` = architect's inbox (born here, not dispatchable);
 - `actionable` = state_mover-promoted, dispatchable;
 - `dispatched` = in-flight (a worker is on it, or an ask is out) — the action_selector/gate are blind to it;
-- `done` = the worker's verdict "work was done"; `incomplete` = "acted on, couldn't" (+ reason);
-- `closed` = the finalizer's terminal — the satisfied state.
+- `done` = a RESULT exists and the finalizer has not ruled on it yet. **Not** "the worker's verdict":
+  the worker's own `work_finish` verdict is recorded as evidence and judged like anything else;
+- `failed` = the tool reported it could not run, or the finalizer judged the goal not achieved;
+- `closed` = the finalizer's terminal — the satisfied state, and the only one that completes a goal.
+
+**`incomplete` is gone** (removed 2026-09-16). It sat in the transition table from the start, was
+written by nothing, and was taught to no agent. The rule it broke is the one that keeps this
+vocabulary small: status = lifecycle position, outcome nuance = the result text.
 
 > **Lifecycle status.** The `active → dispatched` rename (Step 1) and the **finalizer cutover** (Step 3,
 > commit `cb498a40`) are **live**. `is_satisfied` now keys on **`closed`**, not `done`: a worker-`done` node
@@ -264,22 +300,53 @@ if a matching `work_notify` ticket carries `trigger_context.work_node == work_id
 it appends `[User replied: …]` and clears the wake. When the list is empty it short-circuits
 `next_agent → post_room_finalize_node`. It is the head of the dispatch loop.
 
-**work_node_dispatch_node** — carries out the switchboard's decision for the one picked node, then loops
-back to the materializer. `delegate_to == create_dayflow_ticket` → `_communicate`: a `notify`-family node
-with no `user_reply` wake is delivered via `create_work_notification` and flipped to **`done`**; otherwise
-(an ask, or a spine node the switchboard judged needs the user) it surfaces a **phrased decision ticket**
-(`_surface_ask` → ticket_builder, `suggestion_type="work_notify"`, `trigger_context.work_node=…`) and
-**parks the node `waiting` + `defer_node(user_reply, wake_at = now+1h)`**. Anything else →
-`_do_work` → `work_on`. **Fail-loud:** any dispatch error marks the node **`failed`** (so it leaves the
-ready set for the finalizer to judge) instead of silently re-dispatching, and the tick drains the remaining nodes.
+**work_node_dispatch_node** — **the gate, and only the gate.** It does not call anything, and it
+does not branch on ticket-vs-work. Its whole job: canonicalize the selector's echoed id against the
+`actionable_items` the runtime itself offered (echoes arrive decorated — `"task:work_x::node_y"` —
+and dispatching the transcription instead of the canonical id used to poison the failure path too),
+publish `work_node_ref`, clear `acted_on_item_ids` so post_room's item-lane bookkeeping never tries
+to close a nonexistent item named like a work ref, **CLAIM** the node (`→ dispatched`, bumping
+`dispatch_epoch`), then `work_session.open_session(...)` and **end the planning pass**. The claim is
+what makes it safe for the next instance to start — that state, not a timer.
 
-**run_node / work_on** (`work_objects/runtime.py`) — the inner-loop worker driver. On pickup it flips
-the node to **`dispatched`** (in-flight) if it was `proposed/waiting/actionable`, sets the work contextvar,
-hands the node to the worker manager (default `work_emi_team_manager`) per its `node_input` config, then
-harvests the manager's final answer (attaching any research pod) and **closes the node** — `failed` on
-abort/error, else **`done`** with the answer written as the node's `content` (its result). With
-`node_id=None` it drives ready top-level nodes until the goal is satisfied or only future-wake nodes remain
-(`"parked"`); it never fast-forwards time.
+Everything unreachable raises rather than routing around itself: a ref with no `::`, or an empty
+`delegate_to` (the switchboard's form requires it, so empty means it did not run). **Fail-loud:**
+every error path marks the node **`failed`** first, so it leaves the ready set instead of being
+re-picked every pass — the mechanism that turned a notify transition bug into duplicate-notification
+spam. `_signal_if_more_ready` asks the scheduler for a prompt follow-up tick when other ready nodes
+were listed. It claimed deeper and differently per lane once: the worker lane claimed inside
+`open_session`, and the ticket lane showed the user the question FIRST and marked the node after,
+leaving a window where the user could answer a node that did not yet say it was asking.
+
+**`work_session.open_session` / `_run_dispatch_room`** (`dayflow_orchestrator/work_session.py`) —
+the single dispatch host, where both branches became one shape. It refuses a node that is not
+already `dispatched` ("the dispatch gate claims a node before any tool is called") and one with no
+tool named. Then: register the session **first** (so a `dispatched` node with no session is
+definitively orphaned rather than racing its own registration), stamp `session_id` on the graph,
+and start a daemon thread that opens `dayflow_dispatch_manager` on the node with `delegate_to` +
+`work_node_ref` seeded on its blackboard — the room's entire input. Blocking there is the point. A
+crash inside the thread fails the node under its own `expected_dispatch_epoch`; the `finally` always
+deregisters the session and fires `signal_work_progress`.
+
+It also owns **crash recovery**, which nothing else could: `re_arm_inflight_asks()` runs once at
+boot, driven from the TICKET side because the ticket is the durable record and carries
+`trigger_context.work_node`. An ask is a tool call that can outlive its process. For each node still
+`dispatched` with no live session it either lands the answer the user already gave, lands "user not
+reached" if the window lapsed, or waits out the remainder on the ticket **already on screen** —
+never minting a second one. Without it the orphan sweep would fail those nodes and the question
+would be asked twice, discarding an answer given minutes earlier.
+
+**`discharge_node` / `drive_work`** (`work_objects/discharge.py`) — the worker driver, for
+everything that is not a ticket. Note the module: the old `work_runtime.py` split, and
+`work_objects/runtime.py` is now only the contextvar binding, **not** the driver. It **does not
+claim** — the gate already did, so it *raises* if the node is any other status, because a node that
+is somehow unclaimed is a dispatch bug and is made loud rather than silently re-claimed. It sets the
+work contextvar, invokes the worker through `ManagerInterface.invoke_on` (the same manager-as-tool
+seam everyone else uses, so the sub-manager scope is built once and a manager failure comes back as
+a structured tool error), and hands the result to `result_recorder`. The result lands as an
+**evidence child** — the node's `content` is its directive and is never overwritten. With
+`node_id=None`, `drive_work` drives ready top-level nodes up to `max_passes=200` until the goal
+satisfies or only future-wake nodes remain (`"parked"`); it never fast-forwards time.
 
 **work_repair** — **RETIRED 2026-09-16.** `work_repair_node` and `work_repair_apply` remain on disk but
 are on no path: the node is absent from the `state_map` and nothing imports the applier. Its three
@@ -295,13 +362,36 @@ pass that made the call — not in the planning tick. It judges exactly the node
 (keyed on `work_node_ref`), always a TOP-LEVEL node (a direct child of the goal — the worker's nested
 checklist never counts toward the goal), on its FULL, un-truncated result plus the WO projection.
 
-Four verdicts, two for a call that returned and two for one that failed:
-**proceed** → `done → closed` (the satisfied terminal, so dependents unblock and the rollup completes
-the WO once all children are closed); **amend** → the same close, plus the revised intent recorded on
-the node; **replan** → `failed → proposed` with an instruction naming what must differ; **blocked** →
-status unchanged, reason recorded. `resolve` was removed the same day — a single node's result must not
-end a whole work object; a finalizer that believes the goal is finished says so in `reasoning` and the
-steward rules next tick.
+It judges BOTH outcomes — `done` (the call returned) and `failed` (the tool reported it could not
+run). Judging the failure is the point: the result text is the only account of the failure MODE, and
+the mode is what decides whether trying again could possibly go differently. The tool's own status is
+stated to the agent as *input, not the verdict*, deliberately without naming the verdicts, because
+that is how a returned-but-empty call could only ever be judged a success.
+
+Four verdicts, and the status SEQUENCE each one writes (`_STATUS_FOR`). A not-achieved verdict
+always passes through `failed`, the one chokepoint that counts an attempt, even when the call itself
+returned cleanly:
+
+| verdict | writes | meaning |
+|---|---|---|
+| `achieved` | `closed` | counts toward the goal, dependents unblock, the rollup completes the WO once every child is closed |
+| `achieved_plan_changes` | `closed` | the same close, plus a recommendation on the node; the architect revises the graph next tick and the rollup holds the goal open meanwhile |
+| `retry` | `failed` → `proposed` | back in the architect's inbox with a recommendation **naming what will differ** |
+| `unrecoverable` | `failed` | with `next_step` typed `stop` / `new_approach` / `ask_user`; the architect prunes, re-plans, or plans the ask |
+
+Every verdict carries `outcome` — prose for the planner — and it travels on the node. A verdict
+outside those four is logged as unusable and **not applied**. `resolve` was removed on 2026-09-16:
+a single node's result must not end a whole work object, so a finalizer that believes the goal is
+finished says so in its reasoning and the steward rules next tick.
+
+**Repeated failure is the runtime's call, not the model's.** `_REPEAT_FAILURE_LIMIT = 2`. When this
+verdict would be the goal's second attempt that did not achieve it, any not-achieved route becomes
+`ask_user` regardless of what the finalizer recommended: the sequence is forced to `["failed"]` so
+the node never re-opens, `escalated: true` is recorded, and the architect is told to plan the
+question. The count lives on the GOAL (`goal_unmet_attempts`) so it survives the architect replacing
+the step under a fresh node id — and when it is already at the limit the finalizer is told so in its
+prompt, so it writes `question_for_user` precisely rather than having one synthesised from its
+recommendation.
 
 It both judges AND writes (the former `work_finalizer_apply_node` was merged into it): the agent call
 happens in this node, so passing its schema through a blackboard to a second state_map step carried

@@ -335,14 +335,27 @@ top-level nodes (`parent == goal`) one at a time, up to `max_passes=200`, until 
 satisfies or only future-wake nodes remain (`"parked"` — it never fast-forwards time).
 
 **Dayflow dispatch is the WorkSession** (`dayflow_orchestrator/work_session.py`): a copy
-of the orchestrator room, open until its call returns. `open_session` hosts both
-branches — ticket (surface + park, unchanged) and work: claim with session stamp, then
-`discharge_node` on the session thread under the ROOM'S OWN scope
-(`room_session_scope` — the standard loader over `rooms/dayflow_orchestrator/scope.yaml`:
-pods `[all]`, authority 95, write_kg). Supervision (`sweep_stuck_work_nodes`) reads the
-graph: a `dispatched` node is orphaned when its stamped session isn't live (or its
-session's root is no longer dispatched — a frozen-failed root's zombie thread shields
-nothing); frozen = the session root's subtree-wide idle walk.
+of the orchestrator room, open until its call returns. `open_session` does **not** branch on
+ticket-vs-work and does not claim — the dispatch gate already claimed the node, and it *refuses* one
+that is not already `dispatched`. It registers the session first, stamps `session_id` on the graph,
+and starts a thread that opens `dayflow_dispatch_manager` on that node under the ROOM'S OWN scope
+(`room_session_scope` — the standard loader over `rooms/dayflow_orchestrator/scope.yaml`: pods
+`[all]`, authority 95, write_kg). Both branches run the same three stages; only the tool the
+switchboard named differs. The ticket branch used to be the exception — it surfaced a ticket by hand,
+parked the node on a `user_reply` wake and returned nothing, so the user's answer had to be
+reconstructed from the ticket store later.
+
+Supervision (`sweep_stuck_work_nodes`) reads the graph and applies **one rule**: nothing written to
+this node or its owned subtree for `ASK_WINDOW_HOURS * 3600 + 20 min` (80 minutes today) → `failed`.
+It consults **no** session liveness — a run blocked in a tool call writes nothing meanwhile, so a
+dead process and a wedged call are indistinguishable and want the same remedy — and the tolerance is
+derived from the ask window so a question the user has not answered yet is never failed out from
+under them. The session-ownership supervision this replaced left plumbing behind:
+`payload.session_id` is still written in three places and read by nothing, and
+`dispatch_sweeper._session_root_dispatched` has no callers. `session_alive_by_id` is the one live
+piece, used by `re_arm_inflight_asks()` at boot — which reconnects an ask that outlived its process
+from the ticket side, landing an answer already given or waiting out the remainder of the window on
+the ticket already on screen, rather than asking twice.
 
 ### The worker's graph vocabulary
 
