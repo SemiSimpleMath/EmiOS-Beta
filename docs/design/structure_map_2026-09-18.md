@@ -321,9 +321,32 @@ Read end to end beyond §1: `tool_registry.py`, `validation/agent_validator.py`,
 Shipped: seven `extending-emi-*` skills, `ROOM_CONTRACT.md`, `EXTENDING.md`, and four architecture
 docs (`CLAUDE.md` + `AGENTS.md`, `05a`, `08`, `04`), one commit each.
 
-### Still unverified — claims left standing, deliberately
+### Verification pass (asked why these were unverified — fair question)
 
-Each was in a doc I touched; none is asserted as true by me, and none was rewritten:
+The list below was a rationing decision, not a property of the code: each item needed one or two
+files. All were then read (`scope/loader.py`, `room_scope_builder.py`, `tool_scope_service.py`,
+`tool_access_control.py`, `discharge.py`, plus targeted checks). **Three of the seven turned out to
+be claims I had already shipped, wrong** — see commit `2d024750`:
+
+1. **ROOM.md vs `scope.yaml` is an overlay**, not "scope.yaml is what the permission system reads":
+   the scope is built from ROOM.md first, then seven permission blocks are replaced wholesale when
+   a `scope.yaml` exists. A room without one keeps ROOM.md's permissions.
+2. **`domain` / `actions` / `selectors` are NOT informational** — they drive planner visibility
+   (an exact `domain` match outweighs an exact tool-name match) and can short-circuit the LLM
+   narrower. I had shipped the opposite in the tools skill.
+3. **`discharge_node` neither claims the node nor uses `manager_invoker`** — it raises unless the
+   node is already `dispatched`, and invokes via `ManagerInterface.invoke_on`. 08 said otherwise.
+
+Also settled: `approval_min_authority` is enforced (`tool_execution/tool_approval.py`);
+`min_authority` is enforced at both the visibility and execution gates, with MCP/contract-less tools
+exempt from the fail-closed 99; `flow_config.flow.<mode>.source_agent` is read at room ingress by
+`_resolve_mode_source_agent`; and 08's "dead words" hold for production code.
+
+**Genuinely still unverified — one item:** the per-agent paragraphs in `05a` §3 (each agent's model
+name and context-item list). Cheap but tedious — ~15 `config.yaml` reads — and nothing in this
+session's work depends on them. Only the stage/wiring claims around them were checked.
+
+### Superseded: the original "left standing" list
 
 - **`flow_config.flow.normal.source_agent`** — present in all three dayflow configs; nothing I read
   consumes it (router nodes read `source_agent` from *named* flow sections). Omitted from the
