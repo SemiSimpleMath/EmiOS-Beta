@@ -28,8 +28,8 @@ orchestrator + worker managers import `work_objects.*`).
 | `runtime.py` | The work **contextvar** (`set_work_context` / `get_work_context`) binding graph tools to the active node |
 | `runtime_setup.py` | `ensure_manager_services()` — a TEST/scenario shim, not production wiring: loads `.env` and registers `mam_instance_manager` (the one service the minimal test bootstrap omits), then preloads manager configs, so scenario runs take the standard `manager_invoker → scope_adapter → sub-manager` path. The full app does this in `initialize_system.py` |
 | `result_recorder.py` | **The ONE place a tool result becomes graph state.** Attaches the result as an evidence child, attaches a surfaced research pod first (so the node is never briefly complete-without-its-deliverable), and takes the node OUT OF FLIGHT: `done`, or `failed` when the tool reported an error/abort **or returned nothing** (with a stated reason, so a blocked goal never renders a blank WHY). Epoch-fenced, and it refuses to overwrite a node that already ended. It does NOT judge — meaning is the finalizer's, read from the result text |
-| `work_tools.py` | The `work_*` graph tools registered into the live tool registry + `register_manager_as_tool` |
-| `tools.py` | `WorkGraphTools` — the underlying op wrappers the tools call |
+| `work_tools.py` | The ten `work_*` tools, built from one `_SPECS` table and injected straight into `tool_registry.registry` at runtime (synthesised contracts: domain `work_graph`, `min_authority` 0); also `pod_summary` and the unused `register_manager_as_tool` |
+| `tools.py` | `WorkGraphTools` — plain-Python op wrappers bound to ONE node, which the registered tools call, so a scripted agent can drive the graph with no LLM. Holds one read method the tool layer never exposes: `graph_neighbors` |
 | `scenarios/_scenario_scope.py` | DEV-ONLY harness scope — production authority always derives from the caller (room / task run) |
 | `ui/blueprint.py` | The `/work` editor (list, graph view, event log, manual node edits) |
 | `README.md`, `DESIGN.md`, `EMI_TEAM_VS_WORK.md` | Design docs — node taxonomy, mission tier, worker split |
@@ -345,14 +345,24 @@ reads the active node from the contextvar:
 | `work_produce_artifact` | mint an Artifact node referencing a pod |
 | `work_ask_question` | open a Question (`blocks=true` adds the dependency) |
 | `work_defer` | park my node with a wake condition |
-| `work_finish` | close my node: satisfied / failed / abandoned |
+| `work_finish` | **state a verdict — it does NOT close the node.** `satisfied`/`failed`/`abandoned` is recorded as an evidence finding (`WORKER VERDICT (…)`) and the worker is told to return control; the finalizer judges it with everything else the node produced. It used to write the terminal status directly, which made the worker the one caller able to pre-empt its own dispatcher: the node was already terminal when the manager returned, so the recorder wrote nothing — not the status, not the epoch fence, not the result evidence |
 | `work_graph_search` / `work_graph_peek` / `work_graph_summary` | read the graph (peek surfaces content or the pod one-liner, never a bare `datapod:` id) |
 
-`active_attribution_node` nests a planner's tool evidence and delegated child nodes
-under the single in-flight checklist subtask it is currently working (goal → checklist
-item → delegation), read identically by the reconcile hook and the node handoff.
-`register_manager_as_tool` exposes node managers (`work_web_manager`, …) as ordinary
-manager-as-tool wrappers at runtime.
+Every one of them catches its own exceptions and returns the error as ordinary tool
+*content* ("ERROR from `work_add_subtask`: … Fix your arguments and try again") rather
+than raising — a malformed call is recoverable by the agent and must not kill the manager
+loop.
+
+`active_attribution_node` nests a planner's tool evidence and delegated child nodes under
+the single in-flight (`dispatched`) checklist subtask it is currently working — goal →
+checklist item → delegation. It is read identically by `WorkPlanner._reconcile_to_graph`
+and the `manager_interface` node handoff, so every `work_*` manager attributes the same
+way; ambiguity (0 or >1 in-flight children) falls back to the owned node.
+
+`register_manager_as_tool`, in the same module, would register a manager-as-tool wrapper
+at runtime — but **nothing calls it**. The two node managers ship as ordinary *static*
+tool directories (`app/assistant/lib/tools/work_web_manager/`,
+`…/work_emi_team_manager/`) like every other manager-as-tool. Treat the function as unused.
 
 ### Scope — one stable identity per effort
 
