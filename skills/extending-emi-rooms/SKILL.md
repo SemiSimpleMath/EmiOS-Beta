@@ -68,7 +68,23 @@ per request at load time and is **never authored** in `scope.yaml`.
 > Permissive settings must be declared explicitly. `write_kg`,
 > `allow_fact_extraction`, `pods: [all]` and `entities: [all]` are more permissive
 > than the model defaults — omitting them silently downgrades the room to the
-> fail-closed floor. Read `docs/architecture/SCOPE.md` before authoring one.
+> fail-closed floor. In particular, a `scope.yaml` with **no `tools.allowed_tools`
+> gets `[]` — no tools at all**, not "all" (`loader._apply_fail_closed_floor`).
+> Read `docs/architecture/SCOPE.md` before authoring one.
+
+**How the two files combine.** `room_scope_builder` builds the room's scope from
+ROOM.md's `policy`/`permissions`/`access`, then — if `scope.yaml` exists — replaces
+these blocks wholesale with the file's: `tools`, `pods`, `resources`, `entities`,
+`cards`, `writes`, `approval`, plus `delivery.auto_send` and
+`delivery.allow_initiation`. Identity, room behaviour (history / retention /
+execution), `delivery.allowed_reply_types` and skills stay builder-computed. A room
+without `scope.yaml` keeps ROOM.md's permissions, so the overlay is a no-op — but
+every room in the repo ships one.
+
+Identity fields (`scope_id`, `owner_id`, `actor_id`, `room_id`, `room_context_id`,
+`reply_to`, `acting_as`, `policy_id`) may **not** be authored in `scope.yaml`; they
+are stamped per request, and any found in the file are dropped with a warning.
+Unknown keys are rejected outright (`extra="forbid"`).
 
 ## ROOM.md template
 

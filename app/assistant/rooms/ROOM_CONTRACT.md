@@ -21,10 +21,25 @@ is never authored. `room_bootstrap._TEMPLATE_FILES` provisions both files
 for every new room and raises if either template is absent; every room in
 the repo has both. See `docs/architecture/SCOPE.md` for scope semantics.
 
-Note that several concepts appear in BOTH files (authority level,
-retention/write flags, delivery, allowed resources and entity cards).
-`ROOM.md`'s copies are returned to prompt context by the room loader;
-`scope.yaml` is what the permission system reads.
+### How the two files combine (verified in `room_scope_builder`)
+
+Several concepts appear in BOTH files — authority level, write flags, delivery,
+allowed resources and entity cards. They are not rivals; they are an **overlay**:
+
+1. `room_scope_builder` builds the room's `ScopeContext` from **ROOM.md**'s
+   `policy` / `permissions` / `access` blocks.
+2. If the room has a `scope.yaml`, `_overlay_scope_yaml_permission` then
+   **replaces these blocks wholesale** with the file's:
+   `tools`, `pods`, `resources`, `entities`, `cards`, `writes`, `approval` —
+   plus `delivery.auto_send` and `delivery.allow_initiation` field-by-field.
+3. Everything else stays builder-computed: identity, room behaviour
+   (history / retention / execution), `delivery.allowed_reply_types`, and skills.
+4. A room with **no** `scope.yaml` keeps the ROOM.md-derived permissions — the
+   overlay is a no-op. Every room in the repo has one today, so in practice
+   `scope.yaml` governs permission and ROOM.md governs behaviour and prose.
+
+Separately, `load_room_context_for_manager` returns ROOM.md's three blocks as
+`room_policy` / `room_permissions` / `room_access` for prompt context.
 
 ## Frontmatter
 

@@ -84,6 +84,9 @@ scope_contract:                   # the scope ceiling; narrows, never expands
 
 flow_config:
   strict_routing: true
+  flow:                           # ROOM-SERVING managers only — see below
+    normal:
+      source_agent: "my_prep_node"
   state_map:                      # REQUIRED, non-empty
     "room::delegator": "my_prep_node"
     "my_prep_node": "my_namespace::planner"
@@ -96,6 +99,17 @@ flow_config:
 
 `tools.allowed_tools` may contain the literal `"all"`, which expands to the whole tool registry.
 An empty/missing `allowed_tools` logs "has no allowed tools configured" and the manager runs with none.
+
+## `flow_config.flow` — only if a ROOM routes to this manager
+
+`flow.<room_mode>.source_agent` names the agent that starts that mode's flow. It is read at
+**ingress** by `room_ingress_service._resolve_mode_source_agent`, which maps the inbound
+`room_mode` (`normal`, `planning_mode`, `task_creation_mode`, …) to that agent and seeds
+`next_agent` with it. It **raises** if the mode is not configured under `flow_config.flow`, or if
+its `source_agent` is missing or empty; a room may name a fallback via `policy.default_room_mode`.
+
+A manager invoked directly — `create_manager(...)` + `invoke(...)`, like the dayflow trio — never
+goes through ingress and does not need a `flow` block. Omit it unless a room reaches your manager.
 
 ## The `class:` key, and manager-local aliases
 

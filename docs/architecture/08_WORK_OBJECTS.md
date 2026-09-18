@@ -102,8 +102,14 @@ what happened.** When an outcome nuance wants to become a status — "acted on b
 not reached" — that is the signal it belongs in the node's result evidence instead, which the
 finalizer already reads in full and which needs no glossary.
 
-**Known dead words.** The table declares statuses no code writes: `verified`, `stale` (knowledge
-family), `answered`, `unanswerable` (question family), and `active`, `passed` (verification family).
+**Known dead words** (re-verified 2026-09-18). No PRODUCTION code writes these node statuses:
+`verified`, `stale` (knowledge family), `answered`, `unanswerable` (question family), and
+`active`, `passed` (verification family). Two things make them look alive to a search, and neither
+is a counter-example: a scenario harness under `work_objects/scenarios/` writes `verified` on an
+evidence node, and several unrelated subsystems (plan sessions, the signal router, subconscious
+concerns) have their own `status="active"` fields that are not work-node statuses at all. Note also
+that `active` IS a live **WorkObject container** status (`active | done | abandoned | blocked`) —
+it is only dead as a verification-family *node* status.
 (`incomplete` was one of these and was removed on 2026-09-16.) Several are still *read* by filters (`is_satisfied` checks `passed`; `discharge` checks
 `verified`/`passed`), which makes them look live. Every evidence node is born `assumed` and stays
 `assumed`. Treat them as vocabulary to delete, not as behaviour to build on.
@@ -284,22 +290,36 @@ session_id=None)` — **scope_context is required and always caller-derived** (t
 WorkSession passes the orchestrator room's scope, the task runner its run scope,
 scenarios their declared scope; a missing scope raises):
 
-1. **Claim** — flip `proposed/waiting/actionable → dispatched`, stamp
-   `payload.session_id` (ownership is a graph fact; children grown under the node
-   inherit the stamp at creation, store-level), snapshot once, capture `my_epoch`.
+1. **Verify the claim — it does NOT claim.** `work_node_dispatch_node` marks the node
+   `dispatched` *before* any tool is called, so by the time this runs the node is already
+   in flight and every other consumer sees that. `discharge_node` **raises** if the node
+   is any other status ("the dispatch gate claims a node before any tool is called") —
+   a node that is somehow unclaimed is a dispatch bug, made loud rather than silently
+   re-claimed. It only stamps `payload.session_id` when one is passed and differs
+   (ownership is a graph fact; children grown under the node inherit the stamp at
+   creation, store-level), takes one post-claim snapshot, and captures `my_epoch`.
 2. **Hand off** — set the work **contextvar** so the `work_*` tools know which
-   node/store they act on, then invoke the worker manager through the standard
-   `manager_invoker` (which auto-registers the instance — @-mention reachability rides
-   the standard machinery). The manager's `node_input` config decides the handoff shape:
-   `"task"` (node content + upstream `depends_on` results) or `"render"` (graph
+   node/store they act on, then invoke the worker through **`ManagerInterface.invoke_on`**
+   — the same manager-as-tool call every other caller uses. This matters: the work lane
+   used to hand-roll `create_manager` + `manager_invoker.invoke` with a message of its own
+   shape, which made it the one caller in the system that skipped
+   `ScopeAdapter.for_sub_manager` (the single seam where a sub-manager's scope is built)
+   and turned a manager failure into a raised exception instead of the structured tool
+   error everyone else receives. The manager's `node_input` config decides the handoff
+   shape: `"task"` (node content + upstream `depends_on` results) or `"render"` (graph
    projection; the message still carries the node's real goal).
-3. **Harvest** — the manager's final answer is recorded as an **evidence child** (the
-   node's `content` is its directive and is never overwritten); a surfaced research pod
-   is attached; the node closes `done`/`failed` with the epoch fence.
+3. **Harvest — one choke point.** `result_recorder.record_tool_result` turns the result
+   into graph state for *every* dispatch lane alike, epoch-fenced with `my_epoch`: the
+   manager's final answer lands as an **evidence child** titled "manager result" (the
+   node's `content` is its directive and is never overwritten). What the result MEANS is
+   the finalizer's job, not this layer's. Recording used to be inlined here and was
+   skipped entirely whenever the worker had already set its own status — so the caller
+   recorded nothing at all, not even the evidence.
 
 `drive_work(store, work_id, *, scope_context, node_id=None)` is the standalone arm
 (scenarios, run-to-goal): with a node id it runs that node; with none it drives ready
-top-level nodes until the goal satisfies or only future-wake nodes remain (`"parked"`).
+top-level nodes (`parent == goal`) one at a time, up to `max_passes=200`, until the goal
+satisfies or only future-wake nodes remain (`"parked"` — it never fast-forwards time).
 
 **Dayflow dispatch is the WorkSession** (`dayflow_orchestrator/work_session.py`): a copy
 of the orchestrator room, open until its call returns. `open_session` hosts both

@@ -95,19 +95,38 @@ and directories starting with `__` are ignored.
 Two metadata fields are ENFORCED at dispatch — set them deliberately:
 
 - `min_authority` (0-100, declare it on every first-party tool): the
-  see+use floor. Scopes below it never see the tool in their allowlists
-  (tool_scope_service drops it at scope-build) and dispatch refuses it.
-  A contract that omits the field fails closed at 99.
+  see+use floor, enforced at BOTH gates — `tool_scope_service._filter_to_ceiling`
+  drops the tool from the visible list, and `check_tool_access` refuses it at
+  execution ("requires authority N; this scope has M"). A first-party contract that
+  omits the field **fails closed at 99**. MCP and contract-less core/dynamic tools
+  are exempt (no floor at all — the `allowed_tools` ceiling is their only gate), so
+  the 99 can never strand them.
 - `approval_min_authority` (0-100): scopes below it get an approval
-  ticket before the tool executes; at or above, it runs directly.
-  `approval_required: true` is the blunt always-ask variant. Per-room
+  ticket before the tool executes; at or above, it runs directly
+  (`tool_execution/tool_approval.py`). `approval_required: true` is the blunt
+  always-ask variant, consulted only when no threshold is set. Per-room
   `scope.requires_approval_tools` lists add approval on top regardless.
 
-The remaining fields (domain, actions, selectors, risk_level,
-side_effects, requires_auth, requires_network, cost_level,
-latency_class) are INFORMATIONAL today — they document the tool for
-humans and audits; no runtime gate reads them. Fill them honestly, and
-express any gating intent through the two enforced fields above.
+**`domain`, `actions` and `selectors` are NOT informational** — they decide whether a
+planner ever SEES your tool, which matters as much as the gates above:
+
+- `KeywordMetadataToolRanker` scores every tool against the task. An exact match on
+  `domain` is the heaviest signal in the table (weight 10 — above an exact tool-name
+  match at 8); `actions` hits score 4 and `selectors` 3, and all three also feed the
+  general text match. A low-scoring tool sinks down the visible list.
+- `tool_domain_filter.filter_candidates` runs a **deterministic pre-filter** on
+  `domain` + `actions` before the LLM narrower — and on a tight, confident match
+  (inferred domains, ≤10 candidates, no unmigrated contracts) it **short-circuits the
+  narrower entirely**, so those two fields alone choose the visible set.
+
+Get them wrong and the tool is invisible to the planner that needed it, with no error
+anywhere. Note both accept legacy names: `category`/`verbs`/`entities` are read as
+fallbacks for `domain`/`actions`/`selectors`.
+
+Genuinely informational today (parsed and carried, but no reader found outside the
+registry): `risk_level`, `side_effects`, `requires_auth`, `requires_network`,
+`cost_level`, `latency_class`, `front_door`, `room_visibility_default`. Fill them
+honestly for humans and audits, and express gating intent through the enforced fields.
 
 ### What the planner actually sees — and the caps that truncate it
 
