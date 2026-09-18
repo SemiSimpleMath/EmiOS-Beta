@@ -568,8 +568,45 @@ the 2026-09-17 split they are the first two stages of `dayflow_dispatch_manager`
 builds the chosen tool's call from the claimed node (`delegate_to` + `work_node_ref` are seeded on the
 blackboard by `work_session.open_session`), the tool caller makes the call and BLOCKS on it, and
 `work_finalizer_node` judges what comes back — all on the session's own thread, in the same pass that
-made the call. `action_result_normalizer_node` was the only member of the old trio actually deleted. The
-shared `_switchboard_arguments_util` is KEPT (master_room's switchboard-arguments node also uses it).
+made the call. `action_result_normalizer_node` was the only member of the old trio actually deleted.
+
+**The arguments node does NOT use the shared `normalize_switchboard_args`**, unlike its chat and
+master_room siblings, and the reason is structural: a chat switchboard restates the user's request as
+`task`/`task_information` prose the helper can read off the blackboard, whereas the dayflow
+switchboard emits only `reason` and `delegate_to` — because the task is not prose it invents, it is
+the NODE, and the node is on the graph. So this node reads the node. (`_switchboard_arguments_util`
+is still KEPT; master_room's arguments node uses it.)
+
+Every dispatch carries **the same facts, with no argument conditioned on which tool was picked** —
+`work_id`/`node_id`, `trigger_context.work_node` as id-joined provenance, `task`/`information` from
+the node, and `append_links` when it has any. Each tool takes what it needs and ignores the rest, so
+adding a third tool needs no change here. Two details are load-bearing:
+
+- **`content` beats `wake_ref`** for the detail field. `wake_ref` is a wake-MATCH primitive, often
+  just the title; letting it shadow `content` is how "planner + pencil + instrument on Aug 21"
+  reached the user as "check on the supplies needed for music class".
+- **`append_links` is built here, deterministically**, by a pure id walk: pod refs on the node, on
+  its `depends_on` upstreams, and on those upstreams' evidence/artifact children, filtered on the
+  `datapod:research_finding:` URI prefix. A pod id must reach the user exactly or not at all, never
+  through LLM transcription.
+
+**`ASK_WINDOW_HOURS = 1` is defined in this node**, and supplied on EVERY dispatch as both
+`valid_hours` and `wait_timeout_seconds`. It is the CALLER's policy, not a property of the tool — and
+it must be passed rather than left to defaults, because `create_dayflow_ticket`'s own two defaults
+disagree: a 4-hour ticket that blocks for only 600 s. Defaulting would make the call report "user not
+reached" after ten minutes while the question sat on screen for three and a half hours more.
+`dispatch_sweeper` imports this constant, which is why its stuck-node tolerance is derived rather
+than guessed (§1).
+
+**`dayflow_tool_caller`** goes through the same shared `execute_dispatch` as `MasterRoomToolCaller`
+and `ChatToolCaller`, so a dayflow dispatch gets every dispatch-layer gate the rooms get:
+`check_tool_access` against the scope's authority, the approval flow, and a `request_context`
+carrying room_id / request_id / reply_to. It captures the node's `dispatch_epoch` **before** the
+call, rebuilds `execute_dispatch`'s flattened payload back into a real `ToolResult` (the recorder
+reads a ToolResult's own contract — `result_type` / `data.aborted` / `data.exit_state`), records it
+epoch-fenced, then fires `signal_work_progress`. That signal is **not** for the verdict, which runs
+next in this very pass — it is for the NEXT node, so whatever this result unblocks dispatches in
+minutes rather than at the ceiling tick.
 
 ---
 
@@ -636,6 +673,21 @@ refuses an architect write on a `failed` node unless that verdict (or a user dir
 there are no item-lane dispatch records for finalize to reconcile.)
 
 **P7 — Precise work-node wake (the WAKE PASS).** The scheduler's `_arm_work_node_wakes` arms a per-node APScheduler job for each time-gated node (`wake_kind=time`, status `proposed/waiting`, `wake_at` set). When it fires, `_fire_work_node` opens `dayflow_wake_manager` with `data.triggered_work_node` (copied onto the blackboard by the manager) — `work_node_wake_prep_node` stages the due node as the state_mover's only candidate, the state_mover re-judges the moment, `work_node_wake_router_node` sends it to the switchboard, which flows into the SAME `work_node_dispatch -> WorkSession -> finalize` chain as the planning pass. The wake manager has no intake / steward / architect, so it cannot plan (2026-09-18; it used to be a routing hint inside the orchestrator that never fired). A stale wake exits cleanly (is_ready gated in the scheduler AND re-checked by the prep, inside `_run_gate`).
+
+The router **consumes** `triggered_work_node` (blanks it) so only this pass acts on the wake. Held
+(`waiting`) or gone → straight to the room's tail: a pass that dispatched nothing has nothing to
+judge, since the finalizer now lives in the dispatch room. A held node's own `reactivate_at` re-arms
+its wake.
+
+> **Why the router fills `task`/`information` itself, and what happened when it did not.** The
+> switchboard routes on `task` + `information` — those are its `user_context_items`. On a normal tick
+> the materializer → action_selector → `action_selector_router_node` chain fills them; the wake pass
+> skips all three, so the router must. It didn't, and the switchboard was handed an **empty task**:
+> with nothing but the clock in its prompt it routed on the clock — "UI notification showing the
+> current time" → `create_dayflow_ticket`. Every time-waked node went that way, which is nearly every
+> scheduled reminder and device action. On 2026-09-16 the 21:00 "set the AC to 70F" and the 22:00
+> "turn off the whole-house lights" were both ticketed back to the user instead of being done. The
+> node now **raises** when a node has neither title nor content, rather than routing on a guess.
 
 **P8 — Fast-tick path: RETIRED 2026-09-16.** The item-timer wake is gone with the item dispatch lane:
 `fast_tick_promoter_node` and `view_materializer_node` are deleted, `tick_router_node` is deleted, and the

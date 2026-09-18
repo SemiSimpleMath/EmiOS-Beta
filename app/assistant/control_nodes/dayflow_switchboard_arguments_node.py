@@ -19,8 +19,8 @@ conditioned on which tool was picked:
 - ``task`` / ``information`` — the node's own goal and detail
 - ``append_links`` — research pages this node hands over, when it has any
 
-Each tool takes what it needs and ignores the rest: `run_work_node` reads the
-ids, `create_dayflow_ticket` reads task/information (it builds its own brief
+Each tool takes what it needs and ignores the rest: `work_emi_team_manager` reads
+the ids, `create_dayflow_ticket` reads task/information (it builds its own brief
 from them) plus the context and links. Adding a third tool needs no change
 here, which is the point — the caller does not know what kind of tool it picked.
 """
