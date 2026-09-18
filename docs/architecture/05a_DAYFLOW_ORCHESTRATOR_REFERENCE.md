@@ -147,14 +147,45 @@ under them, which reads as the system asking and then losing interest.
 ## 2. The two persistence lanes
 
 ### Lane A — Items (`unified_log_2026`, `source='dayflow_item'`)
-State lives in `metadata_json`, upserted on `Message.id` (= `metadata.item_id`); a short numeric `short_id`
-is used in prompts. Sole writer: `dayflow_item_writer.py` (`write_dayflow_item` /
-`write_dayflow_items_batch`, both stamp `last_reviewed_at` + log the caller). Reader: `state_store.py`
-(`get_dayflow_items` = the eligible working set; excludes suppressed, drops active items > 24 h and closed
-items > 2 h). Lifecycle is enforced by `ALLOWED_TRANSITIONS`: canonical
+State lives in `metadata_json`, upserted on `Message.id` (= `metadata.item_id`); a short numeric
+`short_id` is used in prompts. Sole writer: `dayflow_item_writer.py` (`write_dayflow_item` /
+`write_dayflow_items_batch`, both stamp `last_reviewed_at` + log the caller). Reader:
+`state_store.py`. Lifecycle is `ALLOWED_TRANSITIONS`: canonical
 `new → artifact / important_open / actionable → dispatched → closed`, with side states `waiting`,
-`watching`, `suppressed` (terminal), `needs_planning`, `pending_directive`, and `active` (plan-synopsis).
+`watching`, `suppressed`, `needs_planning`, `pending_directive`, and `active` (plan-synopsis).
 `DONE_STATES={closed}`, `TERMINAL_STATES={suppressed}`.
+
+**Neither terminal is a dead end**, which is the part the constant names hide: `closed → {suppressed,
+actionable, pending_directive}` (a reopen), and `suppressed → pending_directive` as an explicit
+narrow exception, so a user directive that references a suppressed artifact can still revive it.
+
+**Three ways a write escapes the state machine**, all deliberate, all worth knowing before trusting
+the word "enforced":
+- An item with **no current state** (legacy/corrupt row) permits any transition, with a warning.
+- A **same-state write** (`X → X`) is always allowed, so the state_mover can update auxiliary fields
+  like `reactivate_at` on a waiting item without a state change. The same-target bypass exists in
+  the work store too — there it is an unclosed hole, here it is the intended mechanism.
+- **`write_dayflow_items_batch` does not validate at all.** It upserts (`on_conflict_do_update`) and
+  defaults new items to `important_open`. Transitions are enforced by `write_dayflow_item`, singular.
+
+**Reading is bounded twice, on different axes**, and conflating them is the easy mistake:
+- **SQL scan window, 7 days** (`_SCAN_WINDOW_DAYS`). Not a simple date cut — a three-way OR: rows
+  created inside the window, OR in a **live** state (only `closed`/`suppressed`/`artifact` are
+  age-bounded), OR touched inside it (`last_reviewed_at`, which every writer stamps). So a weeks-old
+  `waiting` item or a long-lived plan synopsis is never lost to the bound. Origin: 16,475 rows were
+  being materialized and JSON-parsed ~6 times a tick to surface 45 live items (persistence audit P1).
+- **View filter** (`get_dayflow_items`, the eligible working set): excludes suppressed, drops active
+  items older than **24 h** and closed ones older than **2 h**. Freshness is read from
+  `last_reviewed_at`, then `created_at`, then the row timestamp — and an **unparseable** timestamp
+  excludes the item rather than risking an ancient one surfacing.
+
+**Point lookups by id skip the scan window entirely** (`_load_dayflow_items_by_ids_unbounded`,
+matching row id *or* `metadata.item_id` for legacy rows). That is what keeps a months-old parked
+artifact findable when a user directive names it — the revival path above would otherwise be
+unreachable in practice.
+
+Action-log rows are written `state='closed'` **on purpose**, so the 2 h filter prunes them: they are
+ephemeral context for the current planning window, not permanent records.
 
 ### Lane B — Work objects (the `WorkStore` graph, in `emi.db`)
 Accessor `dayflow_orchestrator/work_store.py :: get_dayflow_work_store()` — a singleton per DB path,
