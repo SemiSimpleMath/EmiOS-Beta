@@ -365,10 +365,18 @@ the user mid-decision.
 
 **work_node_materializer_node** — builds the `actionable_items` list from **READY work-object nodes**
 (`status=="actionable"` non-goal nodes; excludes terminal WOs and not-yet-promoted nodes), one node =
-one item `work_id::node_id`. As a pre-step it runs **`_record_replies`**: for each `user_reply` ask node,
-if a matching `work_notify` ticket carries `trigger_context.work_node == work_id::node_id` with reply text,
-it appends `[User replied: …]` and clears the wake. When the list is empty it short-circuits
-`next_agent → post_room_finalize_node`. It is the head of the dispatch loop.
+one item `work_id::node_id` whose summary is `title. content`. **It builds the list and nothing
+else.** When the list is empty it short-circuits `next_agent → post_room_finalize_node`.
+
+It used to run a `_record_replies` pre-step that scanned the ticket store for answers to in-flight
+asks, appended `[User replied: …]` and cleared the wake. **That is gone, deliberately.** Landing a
+tool result was never this node's job, and doing it here put it seven stops into the tick, *behind*
+the steward — which is how a decline the user had explicitly given was still being reconstructed
+after the steward had already ruled. A ticket response is now recorded by the ask's own session,
+whose blocking tool call returns the user's reply as its result.
+
+External-event nodes never appear here at all: they are never promoted to `actionable`, because the
+state_mover wakes them through `work_wait_intake` instead.
 
 **work_node_dispatch_node** — **the gate, and only the gate.** It does not call anything, and it
 does not branch on ticket-vs-work. Its whole job: canonicalize the selector's echoed id against the

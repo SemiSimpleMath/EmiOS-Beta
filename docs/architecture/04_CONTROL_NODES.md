@@ -15,7 +15,10 @@ Route based on blackboard state:
 
 - **`chat_task_router_node.py`** — Routes chat responses: if `handoff_tf=true` -> switchboard, else -> final answer
 - **`master_room_chat_task_router_node.py`** — Master room variant: adds dayflow delegation path
-- **`action_selector_router_node.py`** — Dayflow: routes based on ticket_tf vs handoff_tf
+- **`action_selector_router_node.py`** — Dayflow: routes **everything** to the switchboard, one path for
+  all dispatches. A `ChatTaskRouterNode` subclass whose only override is `_cfg()`, reading
+  `flow_config.action_selector` instead of `flow_config.chat_gate`. (It branched on ticket vs handoff
+  before the work-object cutover; there is no ticket branch here now — the switchboard decides.)
 - **`work_node_wake_prep_node.py`** — Head of `dayflow_wake_manager`: stages the one due node for the state_mover, or ends the pass if it is no longer ready
 - **`work_node_wake_router_node.py`** — After the state_mover in the wake pass: dispatch the node if left `actionable`, end the pass if held
 - **`tool_return_router.py`** — Routes tool results back to the calling agent
@@ -79,9 +82,20 @@ claimed node on its own thread. Its control nodes:
 - **`work_repair_node.py`** — RETIRED 2026-09-16; on disk but wired into no manager. Its
   three dispositions became the finalizer's verdicts (retry / unrecoverable + stop /
   new_approach / ask_user)
-- **`work_node_dispatch_node.py` / `work_node_materializer_node.py`** — dispatch a
-  ready node (job thread or ticket) / record results and ticket replies on the graph
-- **`workobject_render_node.py`** — renders work-object views
+- **`work_node_dispatch_node.py`** — the CLAIM GATE, and nothing else: canonicalize the selector's
+  pick, publish `work_node_ref`, mark the node `dispatched`, hand off to
+  `work_session.open_session`, end the planning pass. It calls no tool and chooses no branch —
+  the switchboard already named the tool, and the dispatch room makes the call on its own thread
+- **`work_node_materializer_node.py`** — **builds the actionable list and nothing else**: one item
+  per `actionable` non-goal node (`item_id = work_id::node_id`), skipping terminal work objects and
+  anything the state_mover has not promoted. Empty list → short-circuits to
+  `post_room_finalize_node`. It used to carry a reply pre-step that scanned the ticket store for
+  answers to in-flight asks; that was removed on purpose — landing a tool result was never this
+  node's job, and doing it here put it seven stops into the tick, behind the steward. A ticket
+  response is now recorded by the ask's own session, whose tool call returns the user's reply
+- **`workobject_render_node.py`** — renders the work-object view a worker sees. Wired into the
+  WORKER managers (`work_emi_team_manager`, `work_web_manager`), not the dayflow orchestrator —
+  it serves the `node_input: render` handoff shape
 - **`state_mover_prep_node.py` / `_persist_node.py`** — is_ready promotion + HOLD
 - **`intake_triage_prep_node.py` / `triage_persist_node.py`**,
   **`context_enricher_prep_node.py` / `_persist_node.py`** — intake triage and
@@ -89,7 +103,7 @@ claimed node on its own thread. Its control nodes:
 - **`post_room_finalize_node.py`** — closes acted_on items, persists state
   mutations, writes action log entries
 - **`dag_executor_node.py` / `dag_manager_control_node.py`** — DAG-shaped
-  multi-step execution
+  multi-step execution (wired in `multi_tool_manager`, not the dayflow orchestrator)
 
 ### Node families
 
@@ -97,7 +111,9 @@ Many nodes come in per-agent **prep/persist pairs**: a `*_prep_node.py` loads th
 agent's context off the items table before it runs, and a `*_persist_node.py` writes its
 output back. Examples: `context_enricher_prep_node` / `context_enricher_persist_node`,
 `relevance_cleaner_prep/persist`, `state_mover_prep/persist`, `triage_persist_node`,
-`planner_persist_node`, `summary_pre/post_node`, `task_compile_metadata/post/final_output_node`.
+`summary_pre/post_node`, `task_compile_metadata/post/final_output_node`. (`planner_persist_node` was
+listed here until 2026-09-18 — it was deleted with the legacy plan-task planner and no such file
+exists.)
 There is no monolithic blackboard builder — each agent's prep node loads its own slice.
 
 ## Blackboard Interaction
