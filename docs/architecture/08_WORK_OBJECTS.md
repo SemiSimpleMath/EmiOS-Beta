@@ -3,12 +3,13 @@
 Everything actionable in EmiOS is a **work object**: a goal plus a small graph of typed
 nodes, event-sourced in SQLite, that agents *mutate* rather than describe. The dayflow
 orchestrator plans against it, workers execute inside it, the scheduler wakes from it,
-and repair/finalize adjudicate on it. The graph is the source of truth and **the return
+and the finalizer adjudicates on it. The graph is the source of truth and **the return
 channel** — a worker reports by writing nodes, not by passing messages back.
 
 This page is the substrate reference: the model, the store, the invariants, the runtime,
-and every writer that touches the graph. For how a *tick* drives it (evaluate → finalize
-→ architect → repair → promote → dispatch) see [05_DAYFLOW.md](05_DAYFLOW.md) and
+and every writer that touches the graph. For how a *tick* drives it (evaluate → architect
+→ promote → dispatch, with the finalizer judging the result in the dispatch room) see
+[05_DAYFLOW.md](05_DAYFLOW.md) and
 [05a_DAYFLOW_ORCHESTRATOR_REFERENCE.md](05a_DAYFLOW_ORCHESTRATOR_REFERENCE.md). Design
 history and the node-taxonomy rationale live in `work_objects/README.md` and
 `work_objects/DESIGN.md` (package-local, authoritative on the *why*).
@@ -25,6 +26,8 @@ orchestrator + worker managers import `work_objects.*`).
 | `store.py` | `WorkStore` — the validated event-sourced writer (`apply()`), transition machine, closure cascade, boot repair |
 | `discharge.py` | `discharge_node` / `drive_work` — drive one node through a worker manager; scope REQUIRED (caller-derived), session stamp at claim, result-as-evidence convention |
 | `runtime.py` | The work **contextvar** (`set_work_context` / `get_work_context`) binding graph tools to the active node |
+| `runtime_setup.py` | Runtime wiring for the package's tool/context registration |
+| `result_recorder.py` | Records a tool/manager result onto the node as an evidence child — the ONE result writer |
 | `work_tools.py` | The `work_*` graph tools registered into the live tool registry + `register_manager_as_tool` |
 | `tools.py` | `WorkGraphTools` — the underlying op wrappers the tools call |
 | `scenarios/_scenario_scope.py` | DEV-ONLY harness scope — production authority always derives from the caller (room / task run) |
@@ -33,7 +36,7 @@ orchestrator + worker managers import `work_objects.*`).
 
 **Production data lives in `emi.db`** (decision #56): the accessor
 `app/assistant/dayflow_orchestrator/work_store.py::get_dayflow_work_store()` opens the
-four tables alongside `unified_log_2026`, so the planner's portfolio projection and item
+five tables alongside `unified_log_2026`, so the planner's portfolio projection and item
 state are transactional joins in one DB. It is a per-path singleton with locked
 double-checked creation (audit W3 — two racing first-touches used to mint two stores with
 two separate RLocks), runs the one-time `active → dispatched` status migration, and runs
@@ -84,7 +87,7 @@ portfolio; state_mover via `node_status_legend`). Do not write a second one in a
 | `waiting` | held ON PURPOSE on a time / event / dependency gate; held is NOT stalled |
 | `done` | produced a RESULT; the finalizer has not judged it yet |
 | `closed` | judged and counted — the satisfied terminal, the only one that completes a goal |
-| `failed` | the step broke; the finalizer judges it (`replan` re-opens it, `blocked` leaves it) |
+| `failed` | judged NOT ACHIEVED. The finalizer's `outcome` + `recommendation` are on the node with a route (retry / new approach / stop / ask the user); the architect acts on them next tick. Every not-achieved verdict passes through here — including a call that returned cleanly |
 | `abandoned` | dropped |
 | `superseded` | replaced by newer work |
 
@@ -116,6 +119,30 @@ family), `answered`, `unanswerable` (question family), and `active`, `passed` (v
   `references`) — relational and indexed because the ready-set query is the hot path.
   A node owned once can be reused by many via edges.
 
+### ActionRecord — what this goal actually DID to the outside world
+
+A fourth model, with its own table and its own op (`record_action`). Nodes record what is
+*planned* and what state it is in; nothing recorded what was **done**, so no planning pass
+could see its own past tense. Origin: a stuck goal emailed one recipient eleven times in
+fifty-two minutes while every guard in the system counted timeouts, prunes and minutes —
+because nothing counted sends.
+
+Fields: `channel` (email | ticket | sms | chat | post | call), `target`, `summary`,
+`outcome` (sent | expired | answered | dismissed | failed), `actor`, `ts`, optional
+`node_id`, `payload`.
+
+Two deliberate properties:
+
+- **Keyed on `work_id`, not `node_id`** — so the ledger survives the replanning that
+  resets every node-keyed counter.
+- **Written by the TOOL that causes the side effect, at the moment it happens**, and
+  deliberately unvalidated against node state: an act that reached the outside world is a
+  fact, and a ledger that can refuse a fact is worse than none. An `outcome` is revised by
+  appending a new row, never by editing one.
+
+`work_portfolio` renders this as the ACTIONS TAKEN block, and calls out repeats to one
+target — the projection every planning pass reads before deciding to act again.
+
 ### Derived, never stored
 
 `is_ready(node)` — status ∈ {proposed, waiting, actionable}, `wake_at` not in the
@@ -129,9 +156,9 @@ work_finalizer alone judges it and produces `closed` (commit `cb498a40`). `ready
 
 ## The store — event-sourced, validated, atomic
 
-Four tables: `work_objects`, `nodes`, `edges`, and the append-only `events` log — the
-**source of truth**; nodes/edges are the rebuildable projection. Every mutation goes
-through one entrypoint:
+Five tables: `work_objects`, `nodes`, `edges`, `actions` (the outward-act ledger, see
+ActionRecord above), and the append-only `events` log — the **source of truth**;
+nodes/edges are the rebuildable projection. Every mutation goes through one entrypoint:
 
 ```python
 store.apply(op, data, actor)   # load → validate → rollup → validate() → event + projection
@@ -142,19 +169,26 @@ never diverge. All access serializes on one in-process RLock (single-writer by d
 on the shared `emi.db` a `busy_timeout=10000` makes writes wait for the main db_manager
 writer instead of failing "database is locked". WAL is on.
 
-**Ops:** `create_work_object` (mints the goal node, `satisfied_when_kind` default
-`all_owned_children_done`), `add_node`, `add_edge`, `set_status`, `edit_node` (manual
-UI edit — title/content only), `set_work_status` (the steward's authoritative
-complete/abandon), `attach_pod`, `defer_node` (set/clear a wake; a `dispatched` node
-parks to `waiting`).
+**Ops — ten, and that is the whole write surface:** `create_work_object` (mints the goal
+node, `satisfied_when_kind` default `all_owned_children_done`), `add_node`, `add_edge`,
+`set_status`, `edit_node` (manual UI edit — title/content only), `set_work_status` (the
+steward's authoritative complete/abandon), `attach_pod`, `defer_node` (set/clear a wake; a
+`dispatched` node parks to `waiting` — except a `user_reply` wake, which leaves it
+dispatched), `consume_finalizer_instruction` (stamps a finalizer verdict `consumed_at` so
+the architect reads it exactly once), `record_action` (append to the outward-act ledger).
 
 **Transition machine.** `FAMILY_BY_TYPE` maps each node type to a lifecycle family
 (default `spine`); `TRANSITIONS[family][from] → {allowed targets}` rejects everything
-else loudly. The spine: `proposed → actionable → dispatched → done|incomplete →
-closed`, side states `waiting`, `failed` (repair re-opens via `proposed` or
-re-dispatches), terminal `abandoned`/`superseded`. Knowledge, question, and
-verification families have their own lifecycles (`assumed/verified/stale`,
+else loudly. The spine: `proposed → actionable → dispatched → done → closed`, side states
+`waiting` and `failed` (the finalizer's `retry` re-opens it to `proposed`; it can also be
+re-dispatched or abandoned), terminal `abandoned`/`superseded`. `done → failed` exists so
+a call that RETURNED but achieved nothing can still reach the architect. Knowledge,
+question, and verification families have their own lifecycles (`assumed/verified/stale`,
 `open/answered/unanswerable`, `active/passed/failed`).
+
+One gap worth knowing: the transition check runs **only when the target differs from the
+current status**, so a same-status write (e.g. `dispatched → dispatched`) bypasses
+validation entirely.
 
 ### Invariants and fences
 
@@ -169,18 +203,57 @@ verification families have their own lifecycles (`assumed/verified/stale`,
   `done` object kept an armed timer and fired a ghost ticket a day after closure.
   `repair_terminal_zombies()` healed the pre-cascade backlog at boot (182 nodes); a
   nonzero repair count after the first run means some writer bypassed the invariant.
+  One exception inside the exception: a `dispatched` **ask** (`wake_kind=user_reply`) has
+  no thread and no result to land, so closure moots the question and it cascades too —
+  its ticket dies on its own `valid_until`. The same subtree cascade fires when any node
+  reaches `done`/`closed`/`abandoned`/`superseded`: its unstarted descendants stop with
+  it, because a node that has declared its outcome cannot have it changed by children that
+  never began (the 2026-09-13 runaway — a closed research node whose descendants kept
+  spawning ten levels down while every supervisor read "progress: 1/2").
 - **Incarnation fence (audit W2).** Every claim (`→ dispatched`) bumps
   `payload.dispatch_epoch`. Completion paths pass `expected_dispatch_epoch`; a zombie
   thread whose node was sweeper-failed and repair-re-dispatched holds a stale epoch and
   its late write is **rejected** — it cannot overwrite the successor incarnation's
   result (`discharge` logs "result DISCARDED").
+- **Every terminal write must carry a reason.** A transition to
+  `closed`/`abandoned`/`superseded` with an empty `reason` is **refused**, and the reason
+  is recorded as `payload.terminal` (status, verdict, reason, timestamp). The graph records
+  WHY, not just what, so the next planning pass reads epitaphs instead of a mute corpse
+  pile (origin: 187 reasonless abandons driving a replan loop).
+- **The churn fence.** Abandoning a node that is `actionable`, or `waiting` with a FUTURE
+  wake, requires `licensed` in the write. Queued and held work belongs to the runtime and
+  WILL run — "hasn't run yet" is not "will never run". 33 generations of one delivery node
+  died to replan churn before this existed. A licence means evidence: the finalizer's
+  verdict on that node, or a user directive.
+- **The failed-node fence.** A `set_status` on a `failed` node by `actor == "architect"`
+  without `licensed` is refused. The finalizer's verdict is what licenses what happens next
+  (retry / new approach / stop / ask the user). Origin: the architect's prompt once claimed
+  failed nodes "come back to you", so it consumed each failure as a planning problem —
+  abandon, mint a fresh identical ask, hourly, nine times.
+- **The in-flight-ask fence.** A `dispatched` node with `wake_kind=user_reply` cannot be
+  written terminal: the question is out and the reply is its result, so a terminal write
+  would orphan that reply.
 - **Global node ids (slug-theft guard).** `nodes.id` is a global primary key;
   `add_node` refuses a caller-supplied id that already lives in *another* work object
   (INSERT OR REPLACE would silently re-home the row and strand the old graph's
   children/edges). Callers minting meaningful ids namespace them per work object.
 - **Rollup is forward-only.** `_rollup` auto-completes the object when the goal
   satisfies (with the same closure cascade); it never reopens a done object, and a
-  force-`abandoned` object is never auto-completed.
+  force-`abandoned` object is never auto-completed. On completion it writes the goal's
+  epitaph naming each child and its finalizer verdict — **after** the cascade, which would
+  otherwise overwrite it — so a hollow completion (every child judged not-achieved) is
+  legible to the next planning pass.
+- **Auto-completion yields to a pending plan change.** If any node carries an unconsumed
+  finalizer verdict with a `next_step`, `_rollup` **holds** the object open rather than
+  completing it: the architect that acts on that verdict runs a LATER tick, and a
+  completion would destroy the recommendation before its reader exists (the reader scans
+  ACTIVE objects only). The steward's explicit `set_work_status` still wins — a person
+  deciding a goal is over outranks a pending note about how to continue it.
+- **A not-achieved attempt is counted on the GOAL.** Entering `failed` bumps the node's
+  `payload.failure_count` *and* the goal's `payload.goal_unmet_attempts`, because the
+  per-node count is reset by the very act of continuing (the architect abandons a failing
+  node and mints its replacement under a fresh slug, starting at zero). The goal node
+  outlives every child, so it is the one anchor churn cannot launder.
 
 ## Wake primitives
 
@@ -189,15 +262,20 @@ user_reply, signal}` with `wake_at` (time) or `wake_ref` (event/signal id). Thre
 consumers act on them:
 
 - **`time`** — the DayflowScheduler's `_arm_work_node_wakes` arms one APScheduler
-  one-shot per time-gated node (cap 200); on fire, `_fire_work_node` runs that single
-  node as a TARGETED ROOM INVOCATION (`data.triggered_work_node` -> switchboard -> the same dispatch flow) iff `is_ready` still holds — precision wakes without a bespoke path (work-session rewrite, 2026-08-04), off the
-  planning tick (path P7 in 05a).
+  one-shot per time-gated node (cap 200, soonest first); on fire, `_fire_work_node` opens
+  **`dayflow_wake_manager`** for that single node — a manager with no planning stage in its
+  state_map, so a wake cannot re-plan. It holds the scheduler's `_run_gate` (shared with
+  the planning tick, so one pass runs at a time) and re-checks `is_ready` **inside** the
+  gate, so a wake queued behind another pass sees that pass's writes.
 - **`event` / `signal`** — the state_mover matches incoming intake against parked nodes
   (`work_wait_intake`) and clears the wait with the arrived evidence.
-- **`user_reply`** — the ask lane: dispatch parks the node `waiting` with a re-ask
-  `wake_at`; the materializer's `_record_replies` matches the ticket reply back by the
-  deterministic `trigger_context.work_node` join, appends `[User replied: …]`, and
-  clears the wake. Excluded from state_mover promotion (owned by the dispatch ask path).
+- **`user_reply`** — the ask lane. An in-flight ask is a TOOL CALL whose result is the
+  user's reply: the node stays **`dispatched`** (`defer_node` deliberately does not park a
+  `user_reply` wake to `waiting`), and **there is no re-ask timer**. It ends one of three
+  ways — the reply/dismissal lands it, the ticket expires and the sweeper fails it, or the
+  whole object closes and the cascade clears it. The store refuses a terminal write on one
+  while the question is out. A *pre-surface* ask (parked before it was ever shown) does
+  ride state_mover promotion toward its first surface.
 
 ## The runtime — driving a node
 
@@ -309,7 +387,7 @@ every other writer.
 ## Cross-references
 
 - [05_DAYFLOW.md](05_DAYFLOW.md) — the tick pipeline that plans against this substrate.
-- [05a_DAYFLOW_ORCHESTRATOR_REFERENCE.md](05a_DAYFLOW_ORCHESTRATOR_REFERENCE.md) — per-agent detail, paths P3–P8, supervision.
+- [05a_DAYFLOW_ORCHESTRATOR_REFERENCE.md](05a_DAYFLOW_ORCHESTRATOR_REFERENCE.md) — per-agent detail and supervision.
 - `work_objects/README.md` / `DESIGN.md` — node taxonomy rationale, mission tier, worker-split design.
 - [14_PODS.md](14_PODS.md) — the pod scope wall the shared effort identity exists for.
 - [15_EMI_TEAM_AND_SCOPE.MD](15_EMI_TEAM_AND_SCOPE.md) — the scope model the room-derived session scope participates in.
