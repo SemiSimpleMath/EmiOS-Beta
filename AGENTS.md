@@ -1,5 +1,4 @@
-# CLAUDE.md
-
+# AGENTS.md
 <!-- MIRROR-START — everything below this line is byte-identical in CLAUDE.md and AGENTS.md -->
 
 Guidance for AI coding agents working in this repository.
