@@ -203,17 +203,21 @@ the node failed loudly rather than silently retrying.
 - `DEBOUNCE_SECONDS=60`, `MIN_GAP_SECONDS=120` (mutual-exclusion floor), `POKE_MIN_INTERVAL_SECONDS=600`
   (delta pokes: chat/email/AFK/ticket), `MAX_CEILING_SECONDS=1800`, `STARTUP_TICK_DELAY_SECONDS=45`.
 - **Precise work-node wakes**: one APScheduler one-shot per time-gated node (`dayflow_work_wake::` jobs,
-  re-armed idempotently after every tick, restart-safe from the durable store). Firing is `is_ready`-gated
-  and invokes the orchestrator manager directly (`_fire_work_node`) — outside the `_running` gate, so a
-  targeted wake never waits on a cadence tick. It routes through the same state_mover and switchboard,
-  so a node is judged and routed identically wherever it fires.
+  re-armed idempotently after every tick, restart-safe from the durable store). Firing invokes the
+  orchestrator manager directly (`_fire_work_node`) as a TARGETED pass — `tick_router_node` reads
+  `triggered_work_node` off the blackboard and routes state_mover → wake router → switchboard → dispatch,
+  skipping intake, the steward and the architect. **One pass at a time, ticks and wakes alike**: both
+  lanes hold `_run_gate` for the length of the manager invocation, and a wake re-checks `is_ready`
+  inside the gate so it sees what the pass before it wrote. (Until 2026-09-18 the wake lane was
+  ungated and, because the router read the activation Message instead of the blackboard, every wake
+  ran the full planning pipeline — three nodes sharing one `wake_at` were three architects on one graph.)
 - **Ask recovery at boot**: `start()` calls `work_session.re_arm_inflight_asks()` before the first tick,
   so a question in flight when the process died is settled from its ticket rather than left orphaned.
 - **Work-progress follow-up**: when a node reaches a result, a reply is recorded, or a dispatch leaves
   more ready nodes waiting, `dayflow_work_progress` schedules a prompt NON-poke tick (~MIN_GAP), so
   sequential chains and ready queues advance in minutes instead of one step per ceiling tick.
-- **Item timers** still wake the scheduler for `waiting`/`watching` items (fast-tick promotes one item
-  deterministically); ancient overdue items (>24h) are ignored as broken rather than hot-looping.
+- **Item timers are retired** (2026-09-16): items are intake + context only; every timer is a work-node
+  wake. The `fast_tick` branch of the router went with them.
 - **Failure escalation**: 3 consecutive tick failures surface one owner-visible ticket via the ticket
   manager's direct write (which does not run this pipeline).
 

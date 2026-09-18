@@ -6,10 +6,18 @@ that indicate new data is available (emails, calendar changes, user ticket
 responses, AFK return) and runs the orchestrator after a debounce window.
 
 Guarantees:
-- At most one orchestrator tick runs at a time (mutual exclusion).
+- At most one orchestrator pass runs at a time — a planning tick OR a work-node wake pass. Both
+  lanes hold ``_run_gate`` for the length of their manager invocation (mutual exclusion).
 - Minimum gap between runs (MIN_GAP_SECONDS) is enforced.
 - Rapid-fire pokes are debounced (DEBOUNCE_SECONDS).
 - Uses APScheduler one-shot jobs for precise timing.
+
+The gate covers the wake lane since 2026-09-18. Before that only the planning tick was gated
+(``_running``); each work-node wake was its own APScheduler job with no gate against the tick or
+against each other, so three nodes sharing one wake_at were three orchestrator passes on one graph
+twenty milliseconds apart — three state_movers judging the same node, two holding it and one
+promoting it, first write wins. A wake that arrives while another pass runs now waits its turn and
+re-checks is_ready inside the gate, so it sees what the pass before it wrote.
 """
 from __future__ import annotations
 
@@ -54,7 +62,8 @@ class DayflowScheduler:
         self._scheduler = timing_engine.scheduler
         self._app = app
 
-        self._lock = threading.Lock()
+        self._lock = threading.Lock()          # guards the flags below; held for microseconds
+        self._run_gate = threading.Lock()      # held for a whole manager pass; ticks AND wakes
         self._running = False
         self._last_run_finished_utc: Optional[datetime] = None
         self._pending_poke_reason: Optional[str] = None
@@ -255,7 +264,7 @@ class DayflowScheduler:
         run_id = uuid.uuid4().hex[:8]
         logger.info("[DayflowScheduler] === TICK START === run_id=%s reason=%s", run_id, reason)
         try:
-            with self._app.app_context():
+            with self._run_gate, self._app.app_context():
                 from app.assistant.dayflow_orchestrator.dayflow_tick import (
                     dayflow_orchestrator_cadence_tick,
                 )
@@ -403,11 +412,16 @@ class DayflowScheduler:
         planning re-judgment: the wake decision was made when the state_mover set the timer.
         Gated by is_ready here (cheap, avoids a manager run for a stale wake) and re-checked by
         the router inside the invocation. Runs in the app context; never propagates (a leaf
-        APScheduler job — a raise would just be swallowed)."""
+        APScheduler job — a raise would just be swallowed).
+
+        Waits on ``_run_gate`` first: one pass at a time, shared with the planning tick. The
+        is_ready check happens INSIDE the gate, so a wake queued behind another pass sees that
+        pass's writes — a node the earlier pass just held or dispatched no-ops here instead of
+        being judged a second time on stale state."""
         if not setup_complete():
             return
         try:
-            with self._app.app_context():
+            with self._run_gate, self._app.app_context():
                 import uuid as _uuid
                 from app.assistant.ServiceLocator.service_locator import DI
                 from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store

@@ -17,9 +17,17 @@ state_mover — the only thing that can HOLD for quiet hours, a meeting, or the 
 protection existed but applied only to nodes that happened to arrive through a planning tick: a 10pm
 reminder fired regardless, purely because it came through the timed door.
 
-``wake_reason`` stays in the message for logging but is not load-bearing for routing. There used to
-be a third branch — a ``fast_tick`` carrying a dayflow ITEM id. The item dispatch lane is retired
-(2026-09-16); everything dispatched is a work node.
+``wake_reason`` is logged but is not load-bearing for routing. There used to be a third branch — a
+``fast_tick`` carrying a dayflow ITEM id. The item dispatch lane is retired (2026-09-16); everything
+dispatched is a work node.
+
+BOTH VALUES ARE READ OFF THE BLACKBOARD, never off the activation Message. The manager copies the
+trigger's ``data`` onto the blackboard once (MultiAgentManager.request_handler) and then activates
+every control node with a bare ``Message(data_type='agent_activation')`` that carries no data. This
+node read ``message.data`` from 2026-09-16 to 2026-09-18, so ``triggered_work_node`` was never seen
+here: every timed wake ran the FULL pipeline — intake, steward, architect — and only the wake router
+at the tail (which reads the blackboard) knew it was a wake. Three nodes sharing one wake_at were
+three whole planning passes on one graph, twenty milliseconds apart.
 """
 from __future__ import annotations
 
@@ -33,20 +41,17 @@ class TickRouterNode(ControlNode):
     def action_handler(self, message):
         self.blackboard.update_state_value("next_agent", None)
 
-        data = getattr(message, "data", {}) or {}
-        triggered_work_node = str(data.get("triggered_work_node") or "").strip()
+        triggered_work_node = str(self.blackboard.get_state_value("triggered_work_node", "") or "").strip()
+        wake_reason = self.blackboard.get_state_value("wake_reason", "")
 
         if triggered_work_node:
-            self._route_work_node_wake(triggered_work_node, data)
+            self._route_work_node_wake(triggered_work_node, wake_reason)
         else:
-            logger.info(
-                "[%s] normal-tick path (wake_reason=%s)",
-                self.name, data.get("wake_reason", ""),
-            )
+            logger.info("[%s] normal-tick path (wake_reason=%s)", self.name, wake_reason)
 
         self.blackboard.update_state_value("last_agent", self.name)
 
-    def _route_work_node_wake(self, ref: str, data) -> None:
+    def _route_work_node_wake(self, ref: str, wake_reason) -> None:
         """Send the due node into the state_mover for a timing judgment.
 
         The node is staged here so work_node_wake_router_node — which runs after the state_mover
@@ -76,4 +81,4 @@ class TickRouterNode(ControlNode):
         self.blackboard.update_state_value("triggered_work_node", ref)
         self.blackboard.update_state_value("next_agent", "state_mover_prep_node")
         logger.info("[%s] targeted pass for work node %s — state_mover judges the moment "
-                    "(wake_reason=%s)", self.name, ref, data.get("wake_reason", ""))
+                    "(wake_reason=%s)", self.name, ref, wake_reason)
