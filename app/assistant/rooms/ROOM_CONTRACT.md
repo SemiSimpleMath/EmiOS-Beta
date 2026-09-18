@@ -1,15 +1,30 @@
 # Room Contract (Strict)
 
-Each room directory under `app/assistant/rooms/<room_id>/` must contain
-exactly one file:
+Each room directory under `app/assistant/rooms/<room_id>/` contains two
+files:
 
 ```
 <room_id>/
-└── ROOM.md
+├── ROOM.md        # room behaviour + prose (this document)
+└── scope.yaml     # the permission scope (unified-scope refactor)
 ```
 
-The file is YAML frontmatter (machine-readable config) followed by a
+`ROOM.md` is YAML frontmatter (machine-readable config) followed by a
 markdown body (human-editable prose injected into agent prompts).
+
+`scope.yaml` is PERMISSION ONLY — what callers in this room may do and
+see (`approval.authority_level`, `tools` incl. `per_manager` narrowing,
+`pods`, `resources`, `entities`, `writes`, `delivery`). Room/session
+behaviour stays here in ROOM.md; identity (`scope_id`, `owner_id`,
+`actor_id`, `surface`, `reply_to`) is stamped per request at load time and
+is never authored. `room_bootstrap._TEMPLATE_FILES` provisions both files
+for every new room and raises if either template is absent; every room in
+the repo has both. See `docs/architecture/SCOPE.md` for scope semantics.
+
+Note that several concepts appear in BOTH files (authority level,
+retention/write flags, delivery, allowed resources and entity cards).
+`ROOM.md`'s copies are returned to prompt context by the room loader;
+`scope.yaml` is what the permission system reads.
 
 ## Frontmatter
 
@@ -63,7 +78,7 @@ access:
 
 H1 sections route to the named blackboard keys agents read at prompt
 time. Order doesn't matter; multiple sections targeting the same key
-concatenate. Unknown headers are silently ignored.
+concatenate. Order DOES matter for unrecognized headers — see below.
 
 | H1 section            | Blackboard key                       |
 | --------------------- | ------------------------------------ |
@@ -85,7 +100,25 @@ it is. Other sections are optional.
   expected from the legacy multi-file shape — no caller changes.
 - Missing or malformed `ROOM.md` raises loudly.
 - Missing `# Identity` content raises loudly.
-- Unknown frontmatter or body sections are ignored, not errors.
+- Unknown FRONTMATTER keys are ignored, not errors.
+- Unknown BODY sections are **not** ignored: an unrecognized H1 is folded
+  into the most recently recognized section, so prose under a
+  `# Working notes` heading placed after `# Identity` is appended to
+  `room_identity` and reaches agent prompts. Dropping them silently had
+  hidden whole authored personality / engagement-policy blocks, so the
+  loader keeps them instead. An unknown header before any recognized
+  section has no anchor and is dropped with a warning. ROOM.md is not a
+  scratchpad.
+- A `policy:` / `permissions:` / `access:` block that is present but not a
+  mapping raises. `load_room_context_for_manager` tolerates a block being
+  absent, but `load_room_policy` / `load_room_access` — used by
+  orchestrators and schedulers building a scope outside the session path —
+  raise when theirs is missing. Author all three.
+- A room id containing `::` resolves its config directory from the prefix
+  via `_ROOM_CONFIG_PREFIX_MAP` (`task_spec::…` reads `task_create/`).
+- Defaults when unset: `manager_name` → `room_manager`, `policy_id` →
+  `room_policy::<room_id>`, `surface` → `unknown`, `default_visibility` →
+  `room_shared`, contact name → titleized last path segment, else `User`.
 
 ## Surface-native room ids
 

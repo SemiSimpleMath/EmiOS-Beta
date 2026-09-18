@@ -1,6 +1,8 @@
-"""Load a room's config + prose blocks from a single ROOM.md per room.
+"""Load a room's config + prose blocks from the ROOM.md of one room.
 
-Each room directory contains exactly one file:
+This loader reads ONE file, `ROOM.md`. A room directory holds two: `ROOM.md`
+(behaviour + prose, below) and `scope.yaml` (the permission scope, read by the
+scope subsystem — see app/assistant/rooms/ROOM_CONTRACT.md).
 
     app/assistant/rooms/<room_id>/ROOM.md
 

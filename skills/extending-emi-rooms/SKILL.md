@@ -1,6 +1,6 @@
 ---
 name: extending-emi-rooms
-description: How to add a new room to EmiOS. A room is a bounded conversation workspace with its own manager, tools, identity, and policy — all declared in a single ROOM.md file (frontmatter + markdown body). Use when the task involves creating a new chat surface, channel, or scoped agent environment.
+description: How to add a new room to EmiOS. A room is a bounded conversation workspace with its own manager, tools, identity, and policy — declared in ROOM.md (frontmatter + markdown body) plus scope.yaml (the permission scope). Use when the task involves creating a new chat surface, channel, or scoped agent environment.
 license: Apache-2.0
 metadata:
   author: emi-team
@@ -16,16 +16,59 @@ metadata:
 
 # Adding a new room
 
-Every room is **one file**:
+Every room is **two files**:
 
 ```
 app/assistant/rooms/<room_id>/
-└── ROOM.md
+├── ROOM.md        # room behaviour + the prose agents read
+└── scope.yaml     # the permission scope
 ```
 
-Frontmatter holds the structured config (policy, permissions, access).
-Body holds the prose injected into agent prompts (identity, conversation
-style, safety rules, facts) — sectioned by H1 headers.
+`ROOM.md` frontmatter holds the structured room config (policy, permissions,
+access); its body holds the prose injected into agent prompts (identity,
+conversation style, safety rules, facts), sectioned by H1 headers.
+
+`scope.yaml` is **permission only** — what callers in this room may DO and SEE.
+It arrived with the unified-scope refactor, and `room_bootstrap` copies **both**
+files into every new room (`_TEMPLATE_FILES = ("ROOM.md", "scope.yaml")`), raising
+if either template is missing. All 11 rooms in the repo have both; so do both
+surface templates. A room with only `ROOM.md` is not a complete room.
+
+Its top-level blocks:
+
+```yaml
+approval:
+  authority_level: 50
+tools:
+  allowed_tools: [all]              # or an explicit list
+  allow_external_side_effects: true
+  per_manager:                      # narrows ONE manager's direct pool
+    emi_team_manager:
+      allow: [personal_admin_manager, web_manager, ask_kg]
+pods:
+  allowed_scopes: [all]
+resources:
+  allowed_global_resources: [all]
+  resource_groups: [chat, memory]
+entities:
+  enabled: true
+  allowed_entity_cards: [all]
+writes:
+  write_unified_log: true
+  write_kg: true
+  allow_fact_extraction: true
+delivery:
+  auto_send: true
+  allow_initiation: true
+```
+
+Identity (`scope_id`, `owner_id`, `actor_id`, `surface`, `reply_to`) is stamped
+per request at load time and is **never authored** in `scope.yaml`.
+
+> Permissive settings must be declared explicitly. `write_kg`,
+> `allow_fact_extraction`, `pods: [all]` and `entities: [all]` are more permissive
+> than the model defaults — omitting them silently downgrades the room to the
+> fail-closed floor. Read `docs/architecture/SCOPE.md` before authoring one.
 
 ## ROOM.md template
 
@@ -108,15 +151,35 @@ Body sections route to the named keys agents read at prompt time:
 | `# Room facts`        | `room_facts`                         | optional |
 | `# Participant facts` | `room_participant_facts`             | optional |
 
-Unknown headers are silently ignored — useful for working notes
-inside ROOM.md that aren't meant to ship to agents.
+> **Unknown headers are NOT ignored — do not put private notes in ROOM.md.**
+> An unrecognized H1 is folded into the **most recently recognized** section, so a
+> `# Working notes` heading placed after `# Identity` is appended to
+> `room_identity` and ships straight into the room's prompts. This is deliberate:
+> silently dropping unknown sections had hidden whole authored personality and
+> engagement-policy blocks from room prompts, so the loader now keeps them.
+>
+> An unknown header appearing *before* any recognized section has no anchor — it
+> is dropped with a warning. Either way, ROOM.md is not a scratchpad.
 
 ## After writing the file
 
-1. Restart Flask. Room loaders pick up the new file at startup.
+1. Restart Flask. Room loaders read the files on demand, per room id.
 2. The room is callable via `room_id` matching the directory name
    (or `<surface>/<id>` for surface-native rooms).
 3. Test by sending a message into the room (UI, Slack, Telegram, etc.).
+
+A room id containing `::` resolves its config directory from the **prefix**, via
+`_ROOM_CONFIG_PREFIX_MAP` in `room_resource_loader` (`task_spec::…` reads
+`task_create/`). Room ids are validated against `^[A-Za-z0-9._:/-]+$` and no
+segment may be empty, `.` or `..`.
+
+Failure modes worth knowing: a missing or malformed `ROOM.md` **raises**, and so
+does a body with no identity content — `# Identity` (or `# Room context`) is the
+one section a room cannot omit. A missing `policy:` block is tolerated by the
+prompt-context loader but **raises** for callers that use `load_room_policy`
+(orchestrators and schedulers building a scope outside the session path), so
+author it. Unset fields fall back: `manager_name` → `room_manager`, `surface` →
+`unknown`, `default_visibility` → `room_shared`.
 
 ## Surface-native room ids
 
@@ -140,11 +203,9 @@ domain-specific manager, see `extending-emi-managers`.
   `app/assistant/rooms/master_room/ROOM.md`
 - Doc-editing room with mode-router:
   `app/assistant/rooms/doc_editor/ROOM.md`
-- Code-CLI bridge:
-  `app/assistant/rooms/emi_code_room/ROOM.md`
-- One-contact room (Slack/Telegram personality):
-  `app/assistant/rooms/katy/ROOM.md`
-- Autonomous orchestrator room (no human user):
+- KG development room: `app/assistant/rooms/kg_dev_room/ROOM.md`
+- Mode-scoped task room: `app/assistant/rooms/task_create/ROOM.md`
+- Autonomous orchestrator room (no human user, authority 95):
   `app/assistant/rooms/dayflow_orchestrator/ROOM.md`
 - Surface-native (Telegram chat):
   `app/assistant/rooms/telegram/7295968126/ROOM.md`
