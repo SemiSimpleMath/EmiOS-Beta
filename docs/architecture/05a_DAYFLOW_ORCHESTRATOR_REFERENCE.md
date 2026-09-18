@@ -8,34 +8,31 @@
 > `app/assistant/multi_agents/dayflow_orchestrator_manager/config.yaml`, `work_objects/`).
 > Where a component is defined but **not reached** in the live `state_map`, it is flagged.
 
-> ## ⚠ PARTIALLY STALE — verified against code up to 2026-09-15
+> ## Status — path enumeration rewritten 2026-09-18
 >
-> The dispatch path was reworked on 2026-09-16/17 and the per-path enumeration below (**P3**, **P4**,
-> **P4a–P4c**) describes a pipeline that no longer exists. `05_DAYFLOW.md` is authoritative; read the
-> deltas here first and correct as you go:
+> §4 (paths) and §5 (wiring) were rewritten against the three live manager configs; §1–§3 were
+> corrected in place. `05_DAYFLOW.md` remains authoritative on the pipeline. What changed under this
+> document, for anyone holding an older mental model:
 >
+> - **Dayflow is THREE managers**, not one. `dayflow_orchestrator_manager` plans;
+>   `dayflow_wake_manager` runs one due node (no planning stage exists in it);
+>   `dayflow_dispatch_manager` executes one claimed node's call on its own thread.
+> - **The planning tick ends at the CLAIM.** `arguments → tool call → finalizer` run in the dispatch
+>   room. So `dayflow_switchboard_arguments_node` and `dayflow_tool_caller` are the live dispatch
+>   core, NOT the "legacy item-lane chain" older text called them.
 > - **`work_repair` is retired** (files on disk, unwired). Failed nodes carry the finalizer's verdict
->   and route — `retry` re-opens with a named difference; `unrecoverable` + stop / new_approach /
->   ask_user is acted on by the architect. Repeated failure escalates to `ask_user` in
->   `work_finalizer_node` (`_REPEAT_FAILURE_LIMIT` against the goal's `goal_unmet_attempts`).
-> - **The finalizer runs in the dispatch room, not the tick**, judges only the node that pass
->   dispatched, answers "was the node's goal achieved" with FOUR verdicts
+>   and route; repeated failure escalates to `ask_user` in `work_finalizer_node`
+>   (`_REPEAT_FAILURE_LIMIT` against the goal's `goal_unmet_attempts`).
+> - **The finalizer** answers "was the node's GOAL achieved" with four verdicts
 >   (`achieved`/`achieved_plan_changes`/`retry`/`unrecoverable`) plus an `outcome` prose account, and
->   both judges and writes (`work_finalizer_apply_node` was merged into it). Verdicts persist on the
->   node (`payload.finalizer`), not on a blackboard.
-> - **The planning tick ends at the CLAIM.** `arguments → tool call → finalizer` run in
->   `dayflow_dispatch_manager`, one room per claimed node on its own thread, opened by
->   `work_session.open_session`. So `dayflow_switchboard_arguments_node` and `dayflow_tool_caller` are
->   the live dispatch core, NOT the "legacy item-lane chain" the closing section calls them.
-> - **`run_work_node` is now `work_emi_team_manager`**, an ordinary manager tool with a normal wrapper.
+>   persists them on the node (`payload.finalizer`), never on a blackboard.
 > - **An ask no longer parks `waiting`.** The ticket tool blocks for the ask window and the reply
->   returns as the call's RESULT, recorded by the same recorder as any other tool.
-> - **Deleted:** `view_materializer_node`, `fast_tick_promoter_node`, `state_transition_guard_node`,
->   `list_active_dispatches`, and the item dispatch lane. **Renamed:** `work_objects/work_runtime.py`
->   is `runtime.py`. **Vestigial:** `node_dispatch.dispatch_node` (only `signal_work_progress` is used).
->
-> Sections on intake, the item substrate, the scheduler, and the agent-by-agent descriptions above the
-> path enumeration were re-checked on 2026-09-17 and are current.
+>   returns as the call's RESULT; the node stays `dispatched` until reply or timeout.
+> - **`run_work_node` is now `work_emi_team_manager`**, an ordinary manager tool.
+> - **Deleted:** `tick_router_node`, `view_materializer_node`, `fast_tick_promoter_node`,
+>   `state_transition_guard_node`, `list_active_dispatches`, the item dispatch lane and its fast-tick
+>   wake, and `dayflow_orchestrator::plan_mode`. **Renamed:** `work_objects/work_runtime.py` →
+>   `runtime.py`. **Vestigial:** `node_dispatch.dispatch_node` (only `signal_work_progress` is used).
 
 ---
 
@@ -60,17 +57,22 @@ The engine runs on **two persistence lanes** that share `emi.db`:
 ### DayflowScheduler — `dayflow_orchestrator/dayflow_scheduler.py`
 Event-driven (not interval-polled), with strong debounce + mutual-exclusion guarantees. It subscribes to
 the EventHub and pokes a tick on: `repo_update` for actionable content types (`email`, `calendar`,
-`todo_task`, `scheduler_events`), `afk_state_changed` → `active` (the user returned), and
-`dayflow_ticket_responded` (always). Guarantees: a **single** APScheduler one-shot job
+`todo_task`, `scheduler_events`), `afk_state_changed` → `active` (the user returned),
+`dayflow_ticket_responded` (always), and `dayflow_work_progress` (a node produced a result — a
+NON-poke follow-up so a sequential chain advances in minutes). Guarantees: a **single** APScheduler one-shot job
 (`JOB_ID = dayflow_scheduler_next_tick`, `replace_existing=True`) → at most one pending tick; `poke()`
 during a running tick stores the reason instead of scheduling; pokes are floored at
 `POKE_MIN_INTERVAL_SECONDS = 600` since the last finish, scheduled item-wakes use `MIN_GAP_SECONDS = 120`,
-and a sooner already-scheduled run is never clobbered by a later one. `_execute_tick` holds `self._lock`
-+ `self._running` so two ticks never overlap; on the 3rd consecutive failure it surfaces one owner ticket.
-Its `finally` block **always** re-arms the next wake: `_schedule_next_from_items` (earliest
-`reactivate_at_utc` among waiting/watching items, clamped 120s–1800s; items overdue > 24h are ignored as
-broken) and **`_arm_work_node_wakes`** (a *separate* one-shot APScheduler job per time-gated work-object
-node, cap 200). When a node-wake fires, `_fire_work_node` opens **`dayflow_wake_manager`** (2026-09-18: its own manager, no planning stage — `work_node_wake_prep_node` -> state_mover -> wake router -> the same switchboard/WorkSession dispatch as the planning pass), under the same `_run_gate` as the tick — and only if `is_ready` still holds.
+and a sooner already-scheduled run is never clobbered by a later one. `_execute_tick` gates on
+`setup_complete()` and on `unified_log_2026` being non-empty (no chat history → no tick, but it still
+arms a ceiling tick so the heartbeat cannot go dark), then holds `self._lock` + `self._running` and —
+since 2026-09-18 — **`self._run_gate` for the whole manager invocation**. That gate is shared with the
+wake lane, so a planning tick and a node wake never run at once. On the 3rd consecutive failure it
+surfaces one owner ticket. Its `finally` block **always** re-arms: `_arm_ceiling_tick`
+(`MAX_CEILING_SECONDS = 1800`, the sole place the next ordinary tick is armed — it swallows its own
+errors because a raise there would end autonomy silently) and **`_arm_work_node_wakes`** (a *separate*
+one-shot APScheduler job per time-gated work-object node, cap 200, soonest-first). The item-timer
+scan it used to run (`_schedule_next_from_items`) went with the item lane on 2026-09-16. When a node-wake fires, `_fire_work_node` opens **`dayflow_wake_manager`** (2026-09-18: its own manager, no planning stage — `work_node_wake_prep_node` -> state_mover -> wake router -> the same switchboard/WorkSession dispatch as the planning pass), under the same `_run_gate` as the tick — and only if `is_ready` still holds.
 
 ### The tick body — `dayflow_orchestrator/dayflow_tick.py :: dayflow_orchestrator_cadence_tick`
 Ordered: (1) **block check** — if `blocked_until_utc` is in the future (master-room chat is active),
@@ -78,9 +80,12 @@ skip the whole tick; (2) **ingestion** — `run_dayflow_ingestion`; (3) **sweeps
 `sweep_stale_dispatches` → `sweep_orphaned_dispatched_tasks` → `sweep_zombie_waiting_items` →
 `sweep_stuck_work_nodes`; (4) minimal
 blackboard extras (`day_of_week` only — per-agent prep nodes load their own context); (5) **manager
-invocation** — build a `Message(event_topic="dayflow_tick", data={trigger, fast_tick, triggered_item_id…})`
-with the ROOM-DERIVED scope (load_scope_for_source kind="room"), create `dayflow_orchestrator_manager`, and `DI.manager_invoker.invoke`; (6) persist
-status. `fast_tick` is set when the scheduler woke for one specific due item timer.
+invocation** — build a `Message(event_topic="dayflow_tick", data={trigger, routine_id, wake_reason})`
+with the ROOM-DERIVED scope (load_scope_for_source kind="room"), create
+`dayflow_orchestrator_manager`, and `DI.manager_invoker.invoke`; (6) persist status. (`fast_tick` /
+`triggered_item_id` are gone with the item lane.) Everything in `data` is copied onto the manager's
+blackboard once — which is where control nodes must read it, since the activation Message they each
+receive carries no data.
 
 ### run_dayflow_ingestion — `dayflow_orchestrator/ingestion.py`
 Dedups against existing item IDs, then pulls new items from four sources — `_ingest_chat`,
@@ -110,8 +115,9 @@ items > 2 h). Lifecycle is enforced by `ALLOWED_TRANSITIONS`: canonical
 
 ### Lane B — Work objects (the `WorkStore` graph, in `emi.db`)
 Accessor `dayflow_orchestrator/work_store.py :: get_dayflow_work_store()` — a singleton per DB path,
-creates four tables (`work_objects`, `nodes`, `edges`, append-only `events` = source of truth;
-nodes/edges are a rebuildable projection), `busy_timeout=10000` (coexists with the main writer via WAL,
+creates five tables (`work_objects`, `nodes`, `edges`, `actions` = the outward-act ledger, and the
+append-only `events` = source of truth; nodes/edges are a rebuildable projection),
+`busy_timeout=10000` (coexists with the main writer via WAL,
 single-writer by design), and runs a one-time idempotent **`active → dispatched`** node-status migration.
 A **WorkObject** (`status = active | done | abandoned | blocked`) is a graph container: ownership is a
 `parent_id` tree; dependency/knowledge is a DAG of typed edges (`depends_on`, `produces`, `verifies`…);
@@ -216,17 +222,25 @@ owner is a `notify` node (never `send_email`), and an owner-requested result mus
 Never raises.
 
 **state_mover** (`gpt-5-mini`, no tools, `action_required: false`) — the deterministic
-"mechanics-only" lifecycle mover, a three-node sequence: `state_mover_prep_node` (context) → agent →
-`state_transition_guard_node` (persists item mutations) → `state_mover_persist_node` (work-object
-effects). It does three jobs: (a) places dayflow ITEMS out of `important_open` into
-`actionable/waiting/watching`; (b) **promotes ready WORK-OBJECT nodes `proposed/waiting → actionable`** —
-the work-object analogue of the item lane's `important_open → actionable`, gated on `is_ready` (time + deps
-clear); and (c) **wakes** nodes parked on an external `event`/`signal` by matching incoming intake
-(`work_wait_intake`) and clearing the wait with the arrived evidence. **PROMOTE is the safe default** — the
-LLM's only discretion on ready nodes is to HOLD a few (`held_work_nodes`) for quiet-hours, an in-progress
-meeting, or the user being away/better-batched; anything not held is promoted, so the worst case is
-"promoted when it could have waited," never stuck. `user_reply` waits are excluded from promotion (owned by
-the dispatch ask path). It explicitly replaced the standalone event_waker.
+"mechanics-only" lifecycle mover, now a **two**-node sequence: `state_mover_prep_node` (context) → agent →
+`state_mover_persist_node` (effects). (`state_transition_guard_node` persisted the ITEM mutations and was
+deleted with the item lane on 2026-09-16, along with the `state_mutations_persisted_tf` handshake; the
+agent no longer emits mutations.) It now does two jobs: (a) **promotes ready WORK-OBJECT nodes
+`proposed/waiting → actionable`**, gated on `is_ready` (time + deps clear); and (b) **wakes** nodes parked
+on an external `event`/`signal` by matching incoming intake (`work_wait_intake`) and clearing the wait with
+the arrived evidence. **PROMOTE is the safe default** — the LLM's only discretion on ready nodes is to HOLD
+a few (`held_work_nodes`) for quiet-hours, an in-progress meeting, or the user being away/better-batched;
+anything not held is promoted, so the worst case is "promoted when it could have waited," never stuck. It
+explicitly replaced the standalone event_waker.
+
+A timed node is ready BECAUSE its time came, and the prompt says so: a node that ANNOUNCES a boundary
+("work hours are over") arrives at that boundary by design and is never held for it, and a hold moves a
+node by minutes or an hour — never to the next day. (2026-09-17: the 5 PM "workday over" notice fired on
+time and was held to 9 AM the next morning, citing the very cutoff it existed to announce.) An in-flight
+`user_reply` ask is `dispatched` and invisible here; a *pre-surface* ask does ride promotion toward its
+first surface. In a **wake pass** (`dayflow_wake_manager`) the persist node is scoped by
+`triggered_work_node` and promotes or parks that ONE node only — never the rest of the graph, which the
+LLM was never shown.
 
 ### Dispatch & execution (the live engine)
 
@@ -330,16 +344,16 @@ live `state_map`; the work-object lane closes nodes inside `work_node_dispatch_n
 (In the live exit path the materializer still routes through `post_room_finalize_node` → `final_answer` →
 `manager_exit`, but with no item-lane dispatch records to reconcile.)
 
-**view_materializer_node** — the deterministic (no-LLM) view builder for the **legacy item lane**: reads
-items, applies the state_mover's mutations virtually, drops stale items (> 12 h), and buckets them for
-`action_selector`. Reached only on the fast-tick / relevance-cleaner sub-paths; logs a loud
-`LEGACY ITEM LANE fired` WARNING whenever an item reaches `action_selector`, since that means intake the
-evaluator failed to convert into a work object.
+**view_materializer_node** — DELETED with the item dispatch lane. (It was the item-lane view builder and
+logged a loud `LEGACY ITEM LANE fired` warning whenever an item reached `action_selector`.)
 
-**dayflow_switchboard_arguments_node** (+ `dayflow_tool_caller`, `action_result_normalizer_node`) — the
-legacy item-lane dispatch chain (normalizer/provenance writer → tool caller → result normalizer). **Retired**
-— no inbound edge in the live map; `work_node_dispatch_node` is the node-native replacement. The shared
-`_switchboard_arguments_util` is KEPT (master_room's switchboard-arguments node still uses it).
+**dayflow_switchboard_arguments_node** + **dayflow_tool_caller** — **LIVE, and the dispatch core.** Since
+the 2026-09-17 split they are the first two stages of `dayflow_dispatch_manager`: the arguments node
+builds the chosen tool's call from the claimed node (`delegate_to` + `work_node_ref` are seeded on the
+blackboard by `work_session.open_session`), the tool caller makes the call and BLOCKS on it, and
+`work_finalizer_node` judges what comes back — all on the session's own thread, in the same pass that
+made the call. `action_result_normalizer_node` was the only member of the old trio actually deleted. The
+shared `_switchboard_arguments_util` is KEPT (master_room's switchboard-arguments node also uses it).
 
 ---
 
@@ -352,47 +366,54 @@ legacy item-lane dispatch chain (normalizer/provenance writer → tool caller �
 is in the future (master-room chat is active), it records a skip and **returns without invoking the
 manager**. No agents run.
 
-**P2 — Empty-intake skip.** `room::delegator → tick_router_node → intake_triage_prep_node`; if no items are
+**P2 — Empty-intake skip.** `room::delegator → intake_triage_prep_node`; if no items are
 eligible, the prep node sets `next_agent → triage_spawn_guard_node`, **skipping the triage LLM**, and the
 tick proceeds to context-enrichment + the evaluator with no new admissions.
 
-**P3 — Main work-object tick (the live pipeline).**
-`tick_router_node → intake_triage_prep → intake_triage → triage_spawn_guard → triage_persist →
-context_enricher_prep → context_enricher_persist → strategic_planner_wo_prep → strategic_planner_wo →
-strategic_planner_wo_persist → work_finalizer_node → work_architect_node → work_repair_node →
-state_mover_prep → state_mover → state_transition_guard → state_mover_persist → work_node_materializer_node`.
-This is the normal cadence: ingest → triage → evaluate (create/change/replan/complete/abandon work objects)
-→ **finalize completed nodes** (close / re-plan / resolve) → decompose new/replanned goals (incl. the
-finalizer's AMENDs) → repair failed nodes → promote ready nodes → materialize the actionable list.
+**P3 — The planning tick (`dayflow_orchestrator_manager`, the whole of it).**
+`room::delegator → intake_triage_prep_node → intake_triage → triage_spawn_guard_node →
+triage_persist_node → context_enricher_prep_node → context_enricher_persist_node →
+strategic_planner_wo_prep_node → strategic_planner_wo → strategic_planner_wo_persist_node →
+work_architect_node → state_mover_prep_node → state_mover → state_mover_persist_node →
+work_node_materializer_node → action_selector → action_selector_router_node → switchboard →
+work_node_dispatch_node → post_room_finalize_node → final_answer_node → manager_exit_node`.
 
-**P4 — Dispatch loop (the execution engine).** From a non-empty materializer:
-`work_node_materializer → action_selector → action_selector_router → switchboard → work_node_dispatch →
-work_node_materializer (loop)`. Each iteration dispatches **exactly one** node and loops; a node is
-dispatched at most once per tick (`dispatched_this_tick` guard). The loop drains until no `actionable`
-nodes remain.
+The cadence: ingest → triage → enrich → evaluate (create / change / re-plan / complete / abandon work
+objects) → decompose new and re-planned goals → promote ready nodes → materialize → pick ONE → **claim
+it, and end the pass**. Neither the finalizer nor repair appears here: the finalizer moved into the
+dispatch room, and repair is retired.
 
-**P4a — Work branch.** Inside dispatch, `delegate_to == run_work_node` → `_do_work → work_on → run_node`:
-the node flips to `dispatched`, the worker manager runs it, and the node closes `done` (or `failed`) with
-its result written as `content`.
+**P4 — The dispatch room (`dayflow_dispatch_manager`), one per claimed node, own thread.**
+`work_node_dispatch_node` claims the node (`→ dispatched`, atomic through the store's lock) and
+`work_session.open_session` opens this manager on a new thread; the planning pass then ends.
+`room::delegator → dayflow_switchboard_arguments_node → dayflow_tool_caller → work_finalizer_node →
+final_answer_node → manager_exit_node`.
 
-**P4b — Notify branch.** `delegate_to == create_dayflow_ticket` on a `notify`-family node with no reply
-wake → `_communicate` delivers via `create_work_notification` and flips the node to `done` (fire-and-forget).
+The tool call **blocks this room**, not the tick. That is the whole point of the split: the ticket tool
+holds its call open for the entire ask window, and while those stages lived in the tick a single
+unanswered notify was an hour in which nothing planned, woke or dispatched. The result is judged in the
+same pass that produced it, so a result can never be stranded between ticks.
 
-**P4c — Ask branch.** `delegate_to == create_dayflow_ticket` on any other node → `_communicate` surfaces a
-phrased **decision ticket** (via ticket_builder) tagged `trigger_context.work_node`, then **parks** the
-node `waiting` + `defer_node(user_reply, wake_at = now+1h)`. The reply is matched back next tick by
-`work_node_materializer._record_replies`, which appends `[User replied: …]` and clears the wake.
-(Once the reply clears the wake the node runs → `done`, and the **finalizer** reconciles that result like
-any other completed node.)
+Two branches, chosen by the switchboard reading the node's GOAL:
+- **reach the user** → `create_dayflow_ticket`. The ticket is composed by `ticket_builder_manager` and
+  tagged `trigger_context.work_node`; the call blocks for the ask window and **the user's reply returns
+  as the call's RESULT**. The node stays `dispatched` throughout — no `waiting` park, no re-ask timer.
+  An unanswered ticket expiring is a timed-out tool call: the sweeper fails the node.
+- **do the work** → `work_emi_team_manager` (an ordinary manager tool; the old `run_work_node` name is
+  gone). The worker grows its own subtree under the node and its answer is recorded as an evidence child.
 
-**P5 — Repair branch.** Any node left `failed` (by a dispatch error or a worker abort) is picked up by
-`work_repair_node` on the next tick (it runs early, before the state_mover lane) → adjudicates
-escalate (re-issue as a user ask) / retry (re-open to `proposed`) / abandon_goal.
+Either way `record_tool_result` writes the outcome and `work_finalizer_node` judges whether the node's
+GOAL was achieved — `achieved` / `achieved_plan_changes` / `retry` / `unrecoverable` (+ `next_step`), each
+with an `outcome` prose account persisted at `payload.finalizer`. It is the **sole** producer of `closed`,
+so it alone can complete a work object; `done` never does.
 
-**P5b — Finalize branch.** Any node left `done` (a worker verdict) is picked up by `work_finalizer_node` on
-the next tick (it runs before the architect) → judges the full result → **proceed** (set `closed`), **amend**
-(close + re-plan via the architect the same tick), or **resolve** (close/abandon the WO). This is the only
-path to `closed`, so it is what completes a work object — `done` alone never does.
+**P5 — Failure handling (no repair stage).** A node reaches `failed` three ways: the finalizer judged it
+not-achieved, dispatch broke before it ran, or the sweeper failed a stuck/expired one. In every case the
+node carries the finalizer's verdict and route, and the **architect** acts on it next tick — keep/retry,
+plan a different approach, prune the branch, or plan the ONE node that asks the user. Repeated failure is
+the runtime's call, not the model's: at `_REPEAT_FAILURE_LIMIT` unmet attempts on the GOAL,
+`work_finalizer_node` forces `ask_user` and does not re-open the node. The store's failed-node fence
+refuses an architect write on a `failed` node unless that verdict (or a user directive) licenses it.
 
 **P6 — Tick exit.** When the materializer finds no ready nodes it sets
 `next_agent → post_room_finalize_node → final_answer_node → manager_exit_node`. (On the work-object lane
@@ -400,15 +421,9 @@ there are no item-lane dispatch records for finalize to reconcile.)
 
 **P7 — Precise work-node wake (the WAKE PASS).** The scheduler's `_arm_work_node_wakes` arms a per-node APScheduler job for each time-gated node (`wake_kind=time`, status `proposed/waiting`, `wake_at` set). When it fires, `_fire_work_node` opens `dayflow_wake_manager` with `data.triggered_work_node` (copied onto the blackboard by the manager) — `work_node_wake_prep_node` stages the due node as the state_mover's only candidate, the state_mover re-judges the moment, `work_node_wake_router_node` sends it to the switchboard, which flows into the SAME `work_node_dispatch -> WorkSession -> finalize` chain as the planning pass. The wake manager has no intake / steward / architect, so it cannot plan (2026-09-18; it used to be a routing hint inside the orchestrator that never fired). A stale wake exits cleanly (is_ready gated in the scheduler AND re-checked by the prep, inside `_run_gate`).
 
-**P8 — Fast-tick path.** When the scheduler woke for one specific due *item* timer (`fast_tick` +
-`triggered_item_id`), `tick_router_node` routes `→ fast_tick_promoter_node` (atomically promotes that one
-item `waiting/watching → actionable`) `→ view_materializer_node → action_selector → action_selector_router
-→ switchboard → work_node_dispatch → (loop) → post_room_finalize → final_answer → manager_exit`. Note it
-uses the *item-lane* `view_materializer` but dispatches via the work-object `work_node_dispatch_node`.
-**P7 vs P8:** P7 is the work-object lane's wake — a per-NODE APScheduler job that runs that single node
-directly through `work_on`, no manager tick at all. P8 is the item lane's wake — an ITEM's
-`reactivate_at_utc` timer that runs a full (abbreviated) manager tick through the item-lane view path.
-As the item dispatch lane retires, P8 shrinks toward legacy; P7 is the live precision-wake mechanism.
+**P8 — Fast-tick path: RETIRED 2026-09-16.** The item-timer wake is gone with the item dispatch lane:
+`fast_tick_promoter_node` and `view_materializer_node` are deleted, `tick_router_node` is deleted, and the
+scheduler no longer scans items for the next wake. Every timer in the system is now a work-node wake (P7).
 
 **P9 — Planning-mode path: RETIRED 2026-09-18.** `dayflow_orchestrator::plan_mode`, its `planning_mode`
 flow section and the `room_mode` short-circuit in `intake_triage_prep_node` are gone (never invoked in
@@ -417,15 +432,16 @@ any log on disk). `plan_mode_final_router_node` remains — master_room's planni
 **P10 — Graceful-exit path.** `graceful_exit → graceful_exit_control_node → final_answer_node` — a clean
 early termination of the manager loop.
 
-**P11 — Relevance-cleaner cadence (items lane, ≤ every 30 min).** `relevance_cleaner_gate_node` (when its
-interval has elapsed) → `relevance_cleaner_prep → relevance_cleaner → relevance_cleaner_persist →
-view_materializer_node`. Closes finished/stale items and suppresses safe-to-forget ones. **Currently
-orphaned** — no inbound edge routes into the gate in the live map.
+**P11 — Relevance-cleaner cadence: ORPHANED.** `relevance_cleaner_gate_node → relevance_cleaner_prep →
+relevance_cleaner → relevance_cleaner_persist` cleaned the items lane. No inbound edge routes into the
+gate in any live map, and its old exit (`view_materializer_node`) is deleted. Files remain on disk. Stale
+items now age out via the freshness windows and the tick sweeps instead.
 
-**P12 — Legacy item-lane dispatch (RETIRED).** The pre-work-object dispatch chain
-(`dayflow_switchboard_arguments_node → dayflow_tool_caller → action_result_normalizer_node`) was deleted;
-`work_node_dispatch_node` is the node-native replacement. `post_room_finalize_node` stays (live exit path),
-and `view_materializer` still logs `LEGACY ITEM LANE fired` if any item reaches `action_selector`.
+**P12 — Legacy item-lane dispatch (PARTLY RETIRED — read carefully).** Of the old chain, only
+`action_result_normalizer_node` was deleted. `dayflow_switchboard_arguments_node` and
+`dayflow_tool_caller` were **repurposed, not removed**: they are the live dispatch core inside
+`dayflow_dispatch_manager` (P4). What retired is the *item* dispatch lane they used to serve;
+`work_node_dispatch_node` is the node-native claim that now feeds them.
 
 **P13 — Legacy plan-task planner (RETIRED).** The old `strategic_planner_prep_node → strategic_planner →
 planner_persist_node` path is gone — the two control nodes were deleted and the agent unwired;
@@ -436,23 +452,32 @@ planner_persist_node` path is gone — the two control nodes were deleted and th
 
 ## 5. Wiring status summary
 
-**Live:** the scheduler (debounced, mutually-exclusive, with precise per-node wakes) → tick body
-(block-check → ingestion → sweeps → manager) → P3 main tick → P4 dispatch loop (work/notify/ask) → P5
-repair / P5b **finalize** → P6 exit, plus P7 out-of-band node wakes and P8 fast-tick.
+**Live — three managers, one gate.** The scheduler (debounced, `_run_gate`-serialized, with precise
+per-node wakes) drives two entry paths, and each claim opens a third manager:
 
-**Retired:** `work_execution_node` (its passes are now the `materializer → action_selector → switchboard →
-dispatch → run_node` loop + `_communicate`); the legacy `strategic_planner` trio (`StrategicPlannerPrepNode`
-/ `PlannerPersistNode` deleted + the agent unwired — its dir is kept, prompts as reference per `KEEP.md`); the
-legacy item-lane dispatch chain (`dayflow_switchboard_arguments_node`, `dayflow_tool_caller`,
-`action_result_normalizer_node`; `_switchboard_arguments_util` kept — master_room uses it); and
-`dayflow_orchestrator::room_summary` (the generic `room_summary` is untouched).
+| Manager | Path | Runs |
+|---|---|---|
+| `dayflow_orchestrator_manager` | P3 | the planning tick: intake → evaluate → decompose → promote → claim ONE node |
+| `dayflow_wake_manager` | P7 | one due node: re-judge the moment → dispatch or hold. No planning stage exists in it |
+| `dayflow_dispatch_manager` | P4 | one claimed node: build arguments → make the (blocking) call → finalize |
 
-**Dormant / legacy (defined but inert on the work-object lane):** `post_room_finalize_node`'s item-lane
-reconciliation work (the node itself is live in the exit path), `result_formatter`, and the
-`relevance_cleaner` sub-chain (cleans the items lane; orphaned — likely wants re-wiring, not removal).
+Plus P1/P2 skips, P6 exit, P10 graceful exit.
 
-**Lifecycle (shipped):** the `active → dispatched` rename (Step 1) and the **finalizer cutover** (Step 3,
-`cb498a40`) are live — `is_satisfied` keys on `closed`, and `work_finalizer_node` (sibling to `work_repair`,
-on the success path) is the sole producer of `closed`, judging each completed node proceed/amend/resolve and
-driving the WO close; `_rollup` is kept, now gated on all-children-`closed`. Still future: renaming the
-WorkObject container `active/done → open/closed`.
+**Retired (files on disk, wired into nothing):** `work_repair_node` + the `work_repair` agent (2026-09-16
+— its three dispositions became the finalizer's verdicts); the `relevance_cleaner` sub-chain; the legacy
+`strategic_planner` trio (`StrategicPlannerPrepNode` / `PlannerPersistNode` deleted, agent unwired, dir
+kept for prompt reference per `KEEP.md`); `dayflow_orchestrator::plan_mode` (2026-09-18, agent dir
+deleted); `dayflow_orchestrator::room_summary` (the generic `room_summary` is untouched).
+
+**Deleted outright:** `tick_router_node`, `view_materializer_node`, `fast_tick_promoter_node`,
+`state_transition_guard_node`, `action_result_normalizer_node`, `work_execution_node`,
+`list_active_dispatches`. `_switchboard_arguments_util` is KEPT — master_room uses it.
+
+**Dormant:** `post_room_finalize_node`'s item-lane reconciliation (the node itself is live in the exit
+path, with nothing to reconcile), and `result_formatter`.
+
+**Lifecycle (shipped):** the `active → dispatched` rename; the finalizer cutover (`is_satisfied` keys on
+`closed`, `work_finalizer_node` is the sole producer of it); the dispatch-room split (2026-09-17, the tick
+ends at the claim); the finalizer's goal-achieved verdict set and deterministic `ask_user` escalation, and
+UTC-in-store / local-in-prompts (2026-09-18). Still future: renaming the WorkObject container
+`active/done → open/closed`.
