@@ -401,7 +401,7 @@ class ResourceManager:
                     self._publish_to_global_blackboard(resource_id, None)
                     continue
 
-                content = self._read_file(path)
+                content = self._read_with_overlay(path)
                 self._set_cached_resource(resource_id=resource_id, value=content, source_path=path)
                 self._publish_to_global_blackboard(resource_id, content)
                 logger.info(f"Loaded shared resource '{resource_id}' from {path}")
@@ -573,7 +573,7 @@ class ResourceManager:
                         skipped_count += 1
                         continue
 
-                content = self._read_file(file_path)
+                content = self._read_with_overlay(file_path)
                 self._set_cached_resource(resource_id=resource_id, value=content, source_path=file_path)
                 with self._lock:
                     self._resource_files[resource_id] = file_path
@@ -714,7 +714,7 @@ class ResourceManager:
                 return
 
         try:
-            content = self._read_file(path)
+            content = self._read_with_overlay(path)
             self._set_cached_resource(resource_id=rid, value=content, source_path=path)
             self._publish_to_global_blackboard(rid, content)
         except Exception as e:

@@ -57,3 +57,32 @@ def test_no_overlay_file_is_fine(rm, tmp_path):
     b = tmp_path / "resource_solo.md"
     b.write_text("JUST THE BASE", encoding="utf-8")
     assert rm._read_with_overlay(b) == "JUST THE BASE"
+
+
+def test_refresh_resource_keeps_the_overlay(rm, tmp_path):
+    """The explicit refresh API is a re-read like any other, and dropped the overlay.
+
+    2026-09-17: _read_with_overlay's own docstring says every path that re-reads from disk must
+    go through it. Three did not — load_from_config, the JSON phase, and refresh_resource. The
+    last is the dangerous one: refreshing the orchestrator prefs replaced the user's personal
+    directives with the public template, silently, exactly the bug the overlay read was added
+    to fix.
+    """
+    b, _ = _pair(tmp_path)
+    rm._resource_files["resource_prefs"] = b
+    rm._resource_values["resource_prefs"] = rm._read_with_overlay(b)
+    rm.base_dir = tmp_path
+    rm.refresh_resource("resource_prefs")
+    assert "PERSONAL TEXT" in rm._resource_values["resource_prefs"], (
+        "refresh_resource dropped the personal overlay")
+
+
+def test_a_json_resource_is_unharmed_by_the_overlay_read(rm, tmp_path):
+    """Routing every read through _read_with_overlay must not corrupt non-text resources:
+    the append only fires when BOTH base and overlay are strings."""
+    import json
+    b = tmp_path / "resource_thing.json"
+    b.write_text(json.dumps({"a": 1}), encoding="utf-8")
+    (tmp_path / "resource_thing_personal.json").write_text(json.dumps({"b": 2}), encoding="utf-8")
+    out = rm._read_with_overlay(b)
+    assert out == {"a": 1}, f"JSON resource must come back unchanged, got {out!r}"
