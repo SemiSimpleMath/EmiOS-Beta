@@ -152,10 +152,11 @@ def _ingest_pods(
 ) -> list[Message]:
     """Ingest new pods from pod_store as dayflow items.
 
-    Filters by `ingestion_pod_kinds` allowlist in access.json. Pods of
-    other kinds (manual uploads, email attachments, etc.) are not
-    ingested — they remain available via pod_search but don't enter
-    dayflow's working set unless explicitly allowed.
+    Filters by the `ingestion_pod_kinds` allowlist in the dayflow room's `access`
+    block — ROOM.md frontmatter, not an access.json. Pods of other kinds (manual
+    uploads, email attachments, etc.) are not ingested — they remain available via
+    pod_search but don't enter dayflow's working set unless explicitly allowed.
+    An absent key means pod ingestion is OFF.
     """
     filters = _load_dayflow_pod_kinds_filter()
     if not filters:

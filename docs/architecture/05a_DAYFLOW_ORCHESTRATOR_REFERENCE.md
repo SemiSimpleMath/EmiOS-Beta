@@ -89,8 +89,25 @@ receive carries no data.
 
 ### run_dayflow_ingestion — `dayflow_orchestrator/ingestion.py`
 Dedups against existing item IDs, then pulls new items from four sources — `_ingest_chat`,
-`_ingest_emails`, `_ingest_delegation_requests`, `_ingest_pods` (chat + pods carry persistent watermarks).
-Assigns `short_id`s and persists via `write_dayflow_items_batch`.
+`_ingest_emails`, `_ingest_delegation_requests`, `_ingest_pods` — assigns `short_id`s, and persists
+via `write_dayflow_items_batch`. Delegation requests are marked ingested only after that write.
+
+**Two of the four are gated by the room's `access` block, which lives in the frontmatter of
+`rooms/dayflow_orchestrator/ROOM.md` — there is no `access.json`, whatever the code comments say.**
+The two gates fail in deliberately opposite directions:
+
+- `chat_ingestion_entitled_rooms` is **required**: missing, non-list or empty **raises**. Today it is
+  `[master_room]`, so dayflow ingests chat from the main UI room only. (`chat_ingestion.py`'s
+  docstring claims a fallback to `shared_chat_room_ids`; there is none on this path.)
+- `ingestion_pod_kinds` **absent = pod ingestion off**, silently and by design. Present today with
+  exactly two entries, both `kind: image` — `source_kind: ring_doorbell_significant` and
+  `ring_bedroom_notable`. So "pods" in this lane means Ring camera stills, not pods generally;
+  everything else stays reachable through `pod_search` without entering the working set.
+
+Chat and pods carry **persistent watermarks** in the orchestrator status resource, and both advance
+**even when every row deduped** — the rows have been seen, and re-querying them each tick is the cost
+this avoids. A first pod run with no watermark caps at start-of-day rather than replaying history.
+`short_id`s continue from the highest existing one and wrap to 1 past 10,000.
 
 ### The four sweeps — `dayflow_orchestrator/dispatch_sweeper.py`
 `sweep_stale_dispatches` closes in-flight `action_dispatch` items (soft 10 min when no live invocation,
@@ -236,8 +253,9 @@ keep history) and `suppress`es items safe to forget (irreversible). Driven by a 
 (`relevance_cleaner_gate_node`) → prep → agent → persist (which stamps the last-run time, resolves
 `short_id`s, applies `write_dayflow_item`, and **refuses to close/suppress any `pending_directive` item**
 so a user's owed follow-up is never stranded). Operates on items, not work objects. **Wiring flag:** the
-gate node is registered but **nothing routes into it** in the live `state_map` — orphaned/own-cadence,
-consistent with it being the legacy lane's cleaner.
+gate node is **not declared in the manager's `control_nodes:` list at all**, and nothing routes into
+it in any live `state_map` — so it is unreachable, not merely unrouted. Consistent with it being the
+legacy lane's cleaner; the files remain on disk.
 
 ### Planning structure
 
@@ -429,10 +447,12 @@ so nothing bound it. The **generic** `room_summary` (per-room chat compaction vi
 **post_room_finalize_node** — the legacy item-lane post-room hook: closes acted-on source items
 (`acted_on_item_ids` → `closed`), reconciles them against dispatch records (raises on mismatch), calls
 result_formatter to stamp `execution_result` onto plan steps, writes action-log rows, persists planned
-tasks / synopses / plan completions. **Flag:** part of the legacy item lane — **no inbound edge** in the
-live `state_map`; the work-object lane closes nodes inside `work_node_dispatch_node` / `run_node` instead.
-(In the live exit path the materializer still routes through `post_room_finalize_node` → `final_answer` →
-`manager_exit`, but with no item-lane dispatch records to reconcile.)
+tasks / synopses / plan completions. **Flag — the node is LIVE, its work is not.** It has a real
+inbound edge (`work_node_dispatch_node` → `post_room_finalize_node`) and sits on the main path in
+§4 P3, plus the materializer's empty-list short-circuit. What is dormant is the reconciliation:
+`work_node_dispatch_node` deliberately clears `acted_on_item_ids` before handing off, precisely so
+this node's item-lane bookkeeping never tries to close a nonexistent item row named like a work
+ref. The work-object lane records outcomes through `result_recorder` instead.
 
 **view_materializer_node** — DELETED with the item dispatch lane. (It was the item-lane view builder and
 logged a loud `LEGACY ITEM LANE fired` warning whenever an item reached `action_selector`.)

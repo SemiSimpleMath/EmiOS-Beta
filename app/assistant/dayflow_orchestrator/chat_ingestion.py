@@ -1,9 +1,15 @@
 """Ingest cross-room chat into dayflow items.
 
-Reads chat messages from the unified log for rooms the dayflow is entitled
-to (via ``chat_ingestion_entitled_rooms`` in access.json; falls back to
-``shared_chat_room_ids``), converts each to a
-standard dayflow item Message, and returns them for persistence.
+Reads chat messages from the unified log for the rooms passed in as
+``entitled_room_ids``, converts each to a standard dayflow item Message, and
+returns them for persistence.
+
+The caller resolves that list from ``chat_ingestion_entitled_rooms`` in the
+dayflow room's ``access`` block — which lives in the FRONTMATTER of
+rooms/dayflow_orchestrator/ROOM.md, not in an access.json — and it RAISES when
+the key is missing, non-list or empty. There is no fall-through to
+``shared_chat_room_ids`` on this path; that key belongs to the room-session and
+dayflow-pipeline scopes, not to item ingestion.
 
 The caller is responsible for:
   1. Providing the watermark (``since_utc``) so only new messages are loaded.
