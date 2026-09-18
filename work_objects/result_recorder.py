@@ -14,9 +14,10 @@ explicitly closed was minted into fresh work the next morning, four days running
 
 WHAT THIS DOES NOT DO. It does not judge. `done` here means exactly what the status glossary says —
 a result exists and the work_finalizer has not ruled on it. The only distinction made is the one the
-ToolResult itself declares: a tool that reports an error or an aborted run leaves the node `failed`,
-which is work_repair's lane, not the finalizer's. Meaning is read from the result TEXT by the
-finalizer, which is why outcome nuance belongs in that text and never in a new status.
+ToolResult itself declares: a tool that reports an error or an aborted run leaves the node `failed`
+rather than `done`. Both land with the finalizer — since work_repair retired (2026-09-16) it judges
+failed nodes too, and routes them. Meaning is read from the result TEXT by the finalizer, which is
+why outcome nuance belongs in that text and never in a new status.
 """
 from __future__ import annotations
 
@@ -67,9 +68,9 @@ def record_tool_result(store, work_id: str, node_id: str, result, *, actor: str,
     not lost (it is still the caller's return value), but an outcome already on the graph is never
     overwritten.
 
-    ``expected_epoch`` fences a zombie: if repair re-dispatched this node to a successor while the
-    call was in flight, the stale incarnation's result is refused rather than written over the live
-    one.
+    ``expected_epoch`` fences a zombie: if the node was re-dispatched to a successor incarnation
+    while this call was in flight (the sweeper fails a stuck node, the architect re-plans it), the
+    stale incarnation's result is refused rather than written over the live one.
     """
     from work_objects.model import new_id
 
@@ -97,8 +98,8 @@ def record_tool_result(store, work_id: str, node_id: str, result, *, actor: str,
 
     # A tool that returned NOTHING is closer to "it did not run" than to "here is the outcome",
     # so it fails rather than quietly completing. And it fails WITH a stated reason: a blocked goal
-    # whose WHY/RESULT renders blank is the worst of both — repair and the steward see that a node
-    # failed and nothing about why.
+    # whose WHY/RESULT renders blank is the worst of both — the finalizer and the steward see that a
+    # node failed and nothing about why.
     answer = _answer_text(result)
     failed = _is_failure(result) or not answer
     if not answer:
