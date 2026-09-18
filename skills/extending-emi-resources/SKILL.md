@@ -33,9 +33,21 @@ reference it in the prompt. Three steps, no code.
 resources/instructions/resource_<name>.md
 ```
 
-The `resource_manager` auto-discovers any `resource_*.md` (or `.json`)
-file under `resources/`. After a restart the value is in the global
-blackboard under that exact key.
+The `resource_manager` walks `resources/` recursively at boot and loads every
+`.json`, `.md`, `.txt` or extension-less file it finds. **The resource id is the
+filename stem** — the `resource_` prefix is a convention the loader does not
+enforce, so `my_thing.md` would register as `my_thing`. Keep the prefix anyway;
+every consumer expects it.
+
+Skipped during the scan: hidden files and directories, `README*`, and anything
+under `tmp/`, `tests/`, `__pycache__/`, `templates/`, `day_context/` or
+`pointers/`. A `*_personal.*` file is never a standalone resource (see overlays).
+
+> **Resources must be CONCRETE.** A loaded value containing `{{` or `{%` is
+> rejected with an error — `Resource 'X' is not concrete`. Jinja belongs in
+> `resources/templates/**`, which the loader compiles into real resources in a
+> separate phase (same relative path, minus `templates/`). Putting a Jinja token
+> in an instruction file is a hard failure, not a passthrough.
 
 ### Three places that wire it together
 
@@ -60,9 +72,10 @@ blackboard under that exact key.
    {{ resource_my_thing }}
    ```
 
-The validator at startup will fail loud if a context item is declared
-but not referenced in the corresponding prompt. So the loop is closed
-end-to-end at boot.
+The validator checks that loop at boot, but it only **warns** — it does not fail.
+A declared-but-unreferenced context item, or a `{{ resource_X }}` in a prompt that
+nothing declares, logs a warning and the process starts normally. So the loop is
+*reported* end-to-end at boot; reading the warnings is on you.
 
 ## Personal overlays (gitignored, appended at runtime)
 
@@ -73,9 +86,21 @@ resources/instructions/resource_<name>.md           # public, tracked
 resources/instructions/resource_<name>_personal.md  # private, gitignored
 ```
 
-The resource_manager appends the `_personal.md` content to the public
-version at LLM read time. `git pull` doesn't clobber the personal
-overlay; the personal overlay doesn't push to the public repo.
+The resource_manager appends the `_personal` content **after** the public base
+(`base + "\n\n" + personal`) every time the file is read from disk — initial load
+and every reload alike, via `_read_with_overlay`. Later instructions win at LLM
+read time, so personal directives override the template's defaults without
+editing the public file. `git pull` doesn't clobber the personal overlay; the
+personal overlay doesn't push to the public repo.
+
+Two details that matter:
+
+- **Text only.** The append happens only when base and overlay are both strings,
+  so a `.json` resource (which loads as a dict) silently ignores its
+  `_personal.json`. Overlays are for markdown/text resources.
+- **Editing only the overlay still takes effect.** Staleness is keyed on the
+  newest mtime across base *and* overlay, so touching just the personal file
+  triggers the reload.
 
 Pattern in use:
 - `resource_orchestrator_user_prefs.md` (public template)
@@ -89,9 +114,13 @@ These resource kinds exist but are not added by dropping a file:
   `resources/daily_insights_pipeline_outputs/*.json`,
   `resources/kg_derived/*.json`. Written by background pipelines.
   Adding a new one means writing a pipeline step that populates it.
-- **Computed-on-demand** — e.g. `resource_weather`, populated by
-  the weather routine. Adding a new computed resource = writing the
-  routine that updates it.
+- **Computed-on-demand** — two flavours. Either a routine/pipeline writes the
+  file (e.g. `resource_weather`), or the resource has **no file at all** and is
+  computed per read by a registered provider:
+  `resource_manager.register_provider("resource_x", lambda scope: …)`. The
+  provider receives the live scope, so the value can differ per caller —
+  `resource_accounts` and `resource_email_accounts` work this way. Providers are
+  registered in `bootstrap`, not by dropping a file.
 - **Live state** — e.g. `resource_dayflow_status`, written
   continuously by the orchestrator.
 
@@ -119,12 +148,13 @@ resources/
 ├── instructions/      <- static markdown (DROP-IN ZONE)
 ├── assistant/         <- assistant identity / persona JSON
 ├── context/           <- shared context blobs
-├── day_context/       <- daily-context resource (written by pipelines)
 ├── dayflow_pipeline_outputs/    <- pipeline output (DON'T HAND-EDIT)
 ├── daily_insights_pipeline_outputs/  <- pipeline output
 ├── kg_derived/        <- KG-projected resources (DON'T HAND-EDIT)
 ├── identity/          <- user/assistant identity files
-└── pointers/          <- pointer/index files
+├── templates/         <- Jinja SOURCES, compiled into resources (not loaded directly)
+├── day_context/       <- NOT LOADED as resources (skipped by the scan)
+└── pointers/          <- NOT LOADED as resources (skipped by the scan)
 ```
 
 For a new user-editable resource: `resources/instructions/`. For
@@ -134,10 +164,13 @@ anything else, you're in deeper-architecture territory.
 
 1. Declare it in any agent's `*_context_items` that should see it.
 2. Reference it in that agent's prompt template.
-3. Restart Flask.
-4. Check startup logs — the agent_validator will complain loud if
-   a declared resource isn't actually referenced in the prompt
-   (the typo guard).
+3. Restart Flask — needed to **discover a new file**. Editing an existing
+   resource does **not** need a restart: reads compare the file's mtime against
+   the cached one and auto-reload when it advances (`Resource 'X' auto-reloaded
+   after file mtime advanced`).
+4. Check startup logs for `✅ Loaded text resource 'X'` and for validator
+   warnings about a declared item missing from the prompt (a warning, not a
+   failure — see above).
 
 ## Canonical examples
 
@@ -152,8 +185,15 @@ anything else, you're in deeper-architecture territory.
 
 ## Notes
 
-- Resource names must be globally unique. The blackboard is one
-  flat namespace.
+- Resource names must be globally unique — the id is the filename stem and the
+  namespace is flat. On a collision the loader prefers a canonical subfolder file
+  over a root-level one (with a warning) and otherwise skips the duplicate (also
+  with a warning). Two `resource_weather.json` files are a hard error.
+- Reads are scope-gated: `get_resource` raises `PermissionError` unless the
+  resource is in the scope's `allowed_global_resources` (or it lists `all`), and
+  an explicit `denied_resources` entry always wins. A resource can additionally
+  carry a `requires_scope` lock (`register_lock`) — `resource_user_email` is
+  locked to `acting_as: user` so it cannot leak into self/assistant mode.
 - `{{ resource_X }}` and `{{ resource_X.field }}` both work — JSON
   resources expose nested fields; markdown resources are strings.
 - Prompts that reference a resource the agent didn't declare in
