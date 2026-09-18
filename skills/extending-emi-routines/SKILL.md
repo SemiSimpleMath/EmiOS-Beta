@@ -124,6 +124,20 @@ def my_handler(*, target_date=None, routine=None, event_message=None):
 The decorator opt-in registers it as `my_handler`. Pass
 `name="custom_alias"` to register under a different name.
 
+Discovery (`discover_handlers`) is **best-effort by design**, which shapes how a
+broken handler fails:
+
+- a module that raises on import is skipped with a warning — so the handler
+  simply never registers, and the routine later fails with an unresolvable
+  `function_name` rather than an import traceback. If a routine reports "function
+  not found", check the boot log for
+  `[routine_handlers] failed to import <module>`.
+- two handlers registering the same name: the first wins, with a warning.
+- modules whose filename starts with `_` are skipped (helpers).
+
+A successful scan logs `[routine_handlers] discovered N handler(s): …` — the
+quickest confirmation your handler was picked up.
+
 ## Active windows
 
 Reference a named window from `configs/windows.json`:
@@ -169,6 +183,15 @@ its trigger / window / on_error / watchdog config visible.
 
 ## Notes
 
+- A routine may carry its OWN permission scope (`load_scope_for_source`
+  with `kind="routine"`), surfaced to the run as
+  `RoutineRunContext.scope_context`. It applies to `tool` and `function`
+  payloads; `pipeline`, `task` and `job` payloads self-scope and ignore it.
+  No routine in the repo declares one today, so the default is None — see
+  `docs/architecture/SCOPE.md` before adding one.
+- A handler returns nothing or a `RoutineRunResult` whose `status` is
+  `success` | `error` | `skipped`; raising is the normal way to signal failure
+  and let `on_error` back off.
 - `manual_toggle` is for the armed/disarmed-via-resource-file
   pattern (see `screen_capture` routine). NOT a duplicate of
   `enabled` — different semantics.
