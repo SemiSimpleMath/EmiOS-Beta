@@ -406,13 +406,14 @@ class DayflowScheduler:
             logger.debug("[DayflowScheduler] arm work-wake exception details", exc_info=True)
 
     def _fire_work_node(self, work_id: str, node_id: str) -> None:
-        """A work node's deterministic time-wake fired: run a TARGETED DISPATCH PASS through the
-        orchestrator room — the same room, scope, switchboard, and dispatch flow as the planning
-        tick; the trigger only changes what the message says (data.triggered_work_node). No
-        planning re-judgment: the wake decision was made when the state_mover set the timer.
-        Gated by is_ready here (cheap, avoids a manager run for a stale wake) and re-checked by
-        the router inside the invocation. Runs in the app context; never propagates (a leaf
-        APScheduler job — a raise would just be swallowed).
+        """A work node's deterministic time-wake fired: open dayflow_wake_manager for it — the
+        WAKE PASS, a manager that holds no planning stage (state_mover -> wake router -> the same
+        switchboard/dispatch tail the tick uses). It re-judges the moment and dispatches or holds;
+        it cannot re-plan, because the nodes that plan are not in its state_map. Until 2026-09-18
+        this invoked the orchestrator itself with a routing hint the router never saw, so every
+        wake was a full planning tick. Gated by is_ready here (cheap, avoids a manager run for a
+        stale wake) and re-checked by the wake prep inside the invocation. Runs in the app
+        context; never propagates (a leaf APScheduler job — a raise would just be swallowed).
 
         Waits on ``_run_gate`` first: one pass at a time, shared with the planning tick. The
         is_ready check happens INSIDE the gate, so a wake queued behind another pass sees that
@@ -448,14 +449,18 @@ class DayflowScheduler:
                         "room_id": "dayflow_orchestrator",
                     },
                 )
+                from app.assistant.dayflow_orchestrator.blackboard_builder import (
+                    build_dayflow_blackboard_extras,
+                )
+                data = {"trigger": "work_node_wake", "wake_reason": f"work_node_wake:{ref}",
+                        "triggered_work_node": ref}
+                data.update(build_dayflow_blackboard_extras())      # day_of_week, as the tick sends
                 msg = Message(
-                    event_topic="dayflow_tick", sender="system",
-                    data={"trigger": "work_node_wake", "wake_reason": f"work_node_wake:{ref}",
-                          "triggered_work_node": ref},
+                    event_topic="dayflow_tick", sender="system", data=data,
                     request_id=request_id, scope_context=scope,
                 )
-                logger.info("[DayflowScheduler] work-wake %s -> targeted dispatch pass.", ref)
-                manager = DI.multi_agent_manager_factory.create_manager("dayflow_orchestrator_manager")
+                logger.info("[DayflowScheduler] work-wake %s -> wake pass.", ref)
+                manager = DI.multi_agent_manager_factory.create_manager("dayflow_wake_manager")
                 DI.manager_invoker.invoke(manager, msg)
         except Exception as e:
             logger.error("[DayflowScheduler] _fire_work_node(%s::%s) failed: %s", work_id, node_id, e)

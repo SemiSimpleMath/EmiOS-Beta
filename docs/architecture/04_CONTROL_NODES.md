@@ -16,7 +16,8 @@ Route based on blackboard state:
 - **`chat_task_router_node.py`** — Routes chat responses: if `handoff_tf=true` -> switchboard, else -> final answer
 - **`master_room_chat_task_router_node.py`** — Master room variant: adds dayflow delegation path
 - **`action_selector_router_node.py`** — Dayflow: routes based on ticket_tf vs handoff_tf
-- **`tick_router_node.py`** — Top-of-pipeline router for the dayflow orchestrator manager
+- **`work_node_wake_prep_node.py`** — Head of `dayflow_wake_manager`: stages the one due node for the state_mover, or ends the pass if it is no longer ready
+- **`work_node_wake_router_node.py`** — After the state_mover in the wake pass: dispatch the node if left `actionable`, end the pass if held
 - **`tool_return_router.py`** — Routes tool results back to the calling agent
 
 (Other room-specific routers follow the same shape: `emi_code_chat_task_router_node.py`,

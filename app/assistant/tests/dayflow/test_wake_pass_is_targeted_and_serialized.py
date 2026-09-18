@@ -1,25 +1,38 @@
-"""A work-node time wake is a TARGETED pass, and passes run one at a time.
+"""A work-node time wake is its OWN pass (dayflow_wake_manager), and passes run one at a time.
 
-Two defects found together on 2026-09-18, reading the 18:00 log of the day before:
+Until 2026-09-18 a wake was a routing hint inside the planning tick's manager: tick_router_node
+jumped to the state_mover when it saw `triggered_work_node`. It read the activation Message; the
+trigger was on the blackboard; so it never saw one, and every wake silently took the default
+branch — a full planning pass, architect included. Three nodes sharing one wake_at were three
+orchestrators on one graph twenty milliseconds apart, with no gate between them or the tick.
 
-  * tick_router_node read `triggered_work_node` off the activation Message. The manager copies the
-    trigger's data onto the blackboard once and then activates control nodes with a bare Message,
-    so the router never saw it: every timed wake ran the FULL pipeline — intake, steward, architect —
-    and only the wake router at the tail knew it was a wake.
-  * _fire_work_node had no gate against the planning tick or against other wakes. Three nodes
-    sharing one wake_at were three orchestrator passes on one graph twenty milliseconds apart.
+Now: a wake opens dayflow_wake_manager, whose state_map holds no planning stage, so there is
+nothing to fall into. And both lanes hold the scheduler's _run_gate for the length of a pass.
 """
 from __future__ import annotations
 
 import threading
 import time
 from contextlib import contextmanager
+from pathlib import Path
 from types import SimpleNamespace
 
-from app.assistant.control_nodes.tick_router_node import TickRouterNode
+import pytest
+import yaml
+
+from app.assistant.control_nodes.state_mover_persist_node import StateMoverPersistNode
+from app.assistant.control_nodes.work_node_wake_prep_node import WorkNodeWakePrepNode
 from app.assistant.dayflow_orchestrator.dayflow_scheduler import DayflowScheduler
 from app.assistant.tests.dayflow.conftest import FakeBlackboard
 from app.assistant.utils.pydantic_classes import Message
+
+_WAKE_CONFIG = Path(__file__).resolve().parents[2] / "multi_agents" / "dayflow_wake_manager" / "config.yaml"
+_TICK_CONFIG = Path(__file__).resolve().parents[2] / "multi_agents" / "dayflow_orchestrator_manager" / "config.yaml"
+_PLANNING_STAGES = {
+    "intake_triage_prep_node", "dayflow_orchestrator::intake_triage", "triage_persist_node",
+    "strategic_planner_wo_prep_node", "dayflow_orchestrator::strategic_planner_wo",
+    "work_architect_node", "work_node_materializer_node", "dayflow_orchestrator::action_selector",
+}
 
 
 def _store():
@@ -35,45 +48,105 @@ def _ready_node(store, title="Notify at five", nid="n1"):
     return f"{wo.id}::{nid}"
 
 
-class TestTheWakePassIsTargeted:
+def _prep(bb):
+    return WorkNodeWakePrepNode(name="work_node_wake_prep_node", blackboard=bb,
+                                agent_registry={}, tool_registry={})
 
-    def test_a_wake_on_the_blackboard_routes_straight_to_the_state_mover(self):
+
+def _activation():
+    # What the manager actually hands a control node: no data on it. The trigger is on the blackboard.
+    return Message(data_type="agent_activation")
+
+
+class TestTheWakeManagerCannotPlan:
+
+    def test_its_state_map_holds_no_planning_stage(self):
+        cfg = yaml.safe_load(_WAKE_CONFIG.read_text(encoding="utf-8"))
+        state_map = cfg["flow_config"]["state_map"]
+        named = set(state_map) | set(state_map.values())
+        assert not (named & _PLANNING_STAGES), named & _PLANNING_STAGES
+        declared = {a["name"] for a in cfg["agents"]} | {c["name"] for c in cfg["control_nodes"]}
+        undeclared = {n for n in named if n != "graceful_exit"} - declared
+        assert not undeclared, f"state_map names nodes the manager does not declare: {undeclared}"
+        assert cfg["flow_config"]["flow"]["normal"]["source_agent"] == "work_node_wake_prep_node"
+
+    def test_the_planning_tick_no_longer_knows_about_wakes(self):
+        cfg = yaml.safe_load(_TICK_CONFIG.read_text(encoding="utf-8"))
+        state_map = cfg["flow_config"]["state_map"]
+        named = set(state_map) | set(state_map.values())
+        assert "tick_router_node" not in named
+        assert "work_node_wake_router_node" not in named
+        assert state_map["room::delegator"] == "intake_triage_prep_node"
+
+    def test_the_scheduler_opens_the_wake_manager(self, monkeypatch):
         ref = _ready_node(_store())
-        # What the manager actually hands a control node: the trigger's data is on the
-        # blackboard, the activation Message carries none of it.
+        inv = _Invoker(hold=0.0)
+        s, factory = _scheduler(monkeypatch, inv)
+        s._fire_work_node(*ref.partition("::")[::2])
+        assert factory.names == ["dayflow_wake_manager"]
+        assert inv.calls == [ref]
+
+
+class TestTheWakePrepStagesOneNode:
+
+    def test_a_ready_node_is_the_state_movers_only_candidate(self):
+        store = _store()
+        ref = _ready_node(store)
+        _ready_node(store, title="Some other ready node", nid="n2")     # a second WO, also ready
         bb = FakeBlackboard({"triggered_work_node": ref, "wake_reason": f"work_node_wake:{ref}"})
-        TickRouterNode(name="tick_router_node", blackboard=bb, agent_registry={}, tool_registry={}) \
-            .action_handler(Message(data_type="agent_activation"))
-        assert bb.get_state_value("next_agent") == "state_mover_prep_node", \
-            "a wake must skip intake / steward / architect"
+        _prep(bb).action_handler(_activation())
+        assert bb.get_state_value("next_agent") is None, "state_map carries on to the state_mover"
         assert bb.get_state_value("task").startswith("Notify at five")
-        assert bb.get_state_value("triggered_work_node") == ref
+        assert [c["task_id"] for c in bb.get_state_value("ready_work_nodes")] == [ref]
+        assert bb.get_state_value("waiting_work_nodes") == []
+        assert bb.get_state_value("node_status_legend")
+        assert bb.get_state_value("day_of_week")
 
-    def test_a_wake_only_in_message_data_is_not_a_wake(self):
-        """The old read. If this ever routes, someone put the data back on the Message and the
-        blackboard will disagree with it."""
-        ref = _ready_node(_store())
-        bb = FakeBlackboard()
-        TickRouterNode(name="tick_router_node", blackboard=bb, agent_registry={}, tool_registry={}) \
-            .action_handler(Message(data_type="agent_activation", data={"triggered_work_node": ref}))
-        assert bb.get_state_value("next_agent") is None      # state_map carries on: normal tick
-
-    def test_a_normal_tick_falls_through(self):
-        bb = FakeBlackboard({"wake_reason": "ceiling"})
-        TickRouterNode(name="tick_router_node", blackboard=bb, agent_registry={}, tool_registry={}) \
-            .action_handler(Message(data_type="agent_activation"))
-        assert bb.get_state_value("next_agent") is None
-
-    def test_a_wake_for_a_node_that_is_no_longer_ready_exits_cleanly(self):
+    def test_a_node_no_longer_ready_ends_the_pass(self):
         store = _store()
         ref = _ready_node(store)
         wid, _, nid = ref.partition("::")
         for st in ("actionable", "dispatched"):
             store.apply("set_status", {"work_id": wid, "node_id": nid, "status": st})
         bb = FakeBlackboard({"triggered_work_node": ref})
-        TickRouterNode(name="tick_router_node", blackboard=bb, agent_registry={}, tool_registry={}) \
-            .action_handler(Message(data_type="agent_activation"))
+        _prep(bb).action_handler(_activation())
         assert bb.get_state_value("next_agent") == "post_room_finalize_node"
+
+    def test_a_missing_work_object_ends_the_pass(self):
+        bb = FakeBlackboard({"triggered_work_node": "work_gone::n1"})
+        _prep(bb).action_handler(_activation())
+        assert bb.get_state_value("next_agent") == "post_room_finalize_node"
+
+    def test_a_wake_pass_without_a_trigger_is_an_error_not_a_quiet_tick(self):
+        with pytest.raises(ValueError, match="without a triggered_work_node"):
+            _prep(FakeBlackboard()).action_handler(_activation())
+
+
+class TestTheWakePassMovesOnlyItsNode:
+
+    def _persist(self, bb):
+        return StateMoverPersistNode(name="state_mover_persist_node", blackboard=bb,
+                                     agent_registry={}, tool_registry={})
+
+    def test_promotion_is_scoped_to_the_woken_node(self):
+        store = _store()
+        mine = _ready_node(store, title="Woken", nid="w")
+        other = _ready_node(store, title="Bystander", nid="b")
+        bb = FakeBlackboard({"triggered_work_node": mine, "held_work_nodes": []})
+        self._persist(bb).action_handler(message=None)
+        wid, _, nid = mine.partition("::")
+        assert store.load(wid).nodes[nid].status == "actionable"
+        owid, _, onid = other.partition("::")
+        assert store.load(owid).nodes[onid].status == "proposed", "a wake pass never touches the rest"
+
+    def test_a_planning_tick_still_promotes_everything_ready(self):
+        store = _store()
+        refs = [_ready_node(store, title=f"Ready {i}", nid=f"r{i}") for i in range(2)]
+        bb = FakeBlackboard({"held_work_nodes": []})
+        self._persist(bb).action_handler(message=None)
+        for ref in refs:
+            wid, _, nid = ref.partition("::")
+            assert store.load(wid).nodes[nid].status == "actionable"
 
 
 class _Invoker:
@@ -98,6 +171,15 @@ class _Invoker:
                 self.active -= 1
 
 
+class _Factory:
+    def __init__(self):
+        self.names = []
+
+    def create_manager(self, name):
+        self.names.append(name)
+        return object()
+
+
 def _scheduler(monkeypatch, invoker):
     @contextmanager
     def _ctx():
@@ -108,10 +190,10 @@ def _scheduler(monkeypatch, invoker):
     monkeypatch.setattr("app.assistant.dayflow_orchestrator.dayflow_scheduler.setup_complete", lambda: True)
     monkeypatch.setattr("app.assistant.scope.loader.load_scope_for_source", lambda **kw: None)
     from app.assistant.ServiceLocator.service_locator import DI
-    monkeypatch.setattr(DI, "multi_agent_manager_factory",
-                        SimpleNamespace(create_manager=lambda name: object()), raising=False)
+    factory = _Factory()
+    monkeypatch.setattr(DI, "multi_agent_manager_factory", factory, raising=False)
     monkeypatch.setattr(DI, "manager_invoker", invoker, raising=False)
-    return s
+    return s, factory
 
 
 class TestPassesRunOneAtATime:
@@ -120,7 +202,7 @@ class TestPassesRunOneAtATime:
         store = _store()
         refs = [_ready_node(store, title=f"Wake {i}", nid=f"w{i}") for i in range(3)]
         inv = _Invoker()
-        s = _scheduler(monkeypatch, inv)
+        s, _ = _scheduler(monkeypatch, inv)
         threads = [threading.Thread(target=s._fire_work_node, args=tuple(r.partition("::")[::2]))
                    for r in refs]
         for t in threads:
@@ -137,15 +219,14 @@ class TestPassesRunOneAtATime:
         ref = _ready_node(store)
         wid, _, nid = ref.partition("::")
         inv = _Invoker(hold=0.0)
-        s = _scheduler(monkeypatch, inv)
+        s, _ = _scheduler(monkeypatch, inv)
 
         s._run_gate.acquire()                        # the planning tick is running
         t = threading.Thread(target=s._fire_work_node, args=(wid, nid))
         t.start()
         time.sleep(0.2)
         assert inv.calls == [], "the wake must not run beside the tick"
-        # The tick claims the node before it finishes.
-        for st in ("actionable", "dispatched"):
+        for st in ("actionable", "dispatched"):      # the tick claims the node before it finishes
             store.apply("set_status", {"work_id": wid, "node_id": nid, "status": st})
         s._run_gate.release()
         t.join(timeout=5)

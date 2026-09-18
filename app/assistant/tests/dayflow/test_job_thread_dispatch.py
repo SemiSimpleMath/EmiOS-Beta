@@ -411,20 +411,16 @@ class TestRefCanonicalization:
 
 
 class TestTargetedWakeRouting:
-    """A scheduler time-wake becomes a targeted room invocation — same room, same dispatch, no
-    bespoke wake path. It routes through the STATE_MOVER first: no re-planning, but the moment is
-    always re-judged, because the world moved since the timer was set. work_node_wake_router_node
-    then dispatches the node, or lets the pass end if it was held.
-
-    The trigger's `triggered_work_node` reaches the router on the BLACKBOARD (the manager copies the
-    trigger's data there once); the activation Message a control node receives carries no data.
-    These tests used to hand it in via message.data, which the router read — and that is why the
-    router in production never saw a wake and ran every one as a full planning tick (2026-09-18)."""
+    """A scheduler time-wake opens dayflow_wake_manager — a manager with no planning stage. Its
+    prep stages the one due node; the STATE_MOVER re-judges the moment (no re-planning, but the
+    world moved since the timer was set); work_node_wake_router_node then dispatches the node, or
+    lets the pass end if it was held. The trigger reaches the prep on the BLACKBOARD (the manager
+    copies the trigger's data there once); the activation Message carries none of it."""
 
     def _router(self, bb):
-        from app.assistant.control_nodes.tick_router_node import TickRouterNode
-        return TickRouterNode(name="tick_router_node", blackboard=bb,
-                              agent_registry={}, tool_registry={})
+        from app.assistant.control_nodes.work_node_wake_prep_node import WorkNodeWakePrepNode
+        return WorkNodeWakePrepNode(name="work_node_wake_prep_node", blackboard=bb,
+                                    agent_registry={}, tool_registry={})
 
     def _wake_router(self, bb):
         from app.assistant.control_nodes.work_node_wake_router_node import WorkNodeWakeRouterNode
@@ -437,8 +433,8 @@ class TestTargetedWakeRouting:
         _sub(store, wid, gid, "n1", status="actionable")
         bb = FakeBlackboard({"triggered_work_node": f"{wid}::n1", "wake_reason": "t"})
         self._router(bb).action_handler(SimpleNamespace(data={}))
-        assert bb.get_state_value("next_agent") == "state_mover_prep_node"
-        assert bb.get_state_value("triggered_work_node") == f"{wid}::n1"
+        assert bb.get_state_value("next_agent") is None      # state_map: prep -> state_mover
+        assert [c["task_id"] for c in bb.get_state_value("ready_work_nodes")] == [f"{wid}::n1"]
         assert "step n1" in bb.get_state_value("task")
 
     def test_a_node_the_state_mover_left_alone_dispatches(self):
@@ -505,11 +501,10 @@ class TestTargetedWakeRouting:
         assert bb.get_state_value("next_agent") == "post_room_finalize_node"
         assert not bb.get_state_value("acted_on_item_ids", [])
 
-    def test_a_normal_tick_falls_through_to_the_materializer(self):
-        bb = FakeBlackboard({})
-        self._wake_router(bb).action_handler(message=None)
-        # next_agent untouched -> the state_map's default (the materializer) applies.
-        assert bb.get_state_value("next_agent") is None
+    def test_the_wake_router_refuses_to_run_without_a_trigger(self):
+        import pytest
+        with pytest.raises(ValueError, match="only runs inside a wake pass"):
+            self._wake_router(FakeBlackboard({})).action_handler(message=None)
 
     def test_stale_wake_exits_cleanly(self):
         store = _store()

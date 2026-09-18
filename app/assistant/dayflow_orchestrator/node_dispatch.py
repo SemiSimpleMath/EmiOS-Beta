@@ -1,6 +1,6 @@
 """Route + dispatch ONE work-object node — the shared core used by BOTH the pipeline's
 work_node_dispatch_node (per tick, delegate_to already decided by the switchboard) AND the scheduler's
-precise time-wake fire (a targeted room invocation routed by tick_router_node).
+precise time-wake fire (a wake pass in dayflow_wake_manager).
 
 A work node is anything DISPATCHABLE; the switchboard decides where by READING the node, not by a type:
   - create_dayflow_ticket -> surface a ticket to the user and await their response (which becomes the result).

@@ -45,12 +45,18 @@ class StateMoverPersistNode(ControlNode):
         PROMOTE is the safe default. The state_mover LLM may HOLD a few via ``held_work_nodes`` (quiet hours, a
         meeting, the user away) — those are parked until their ``reactivate_at`` instead of promoted. Anything
         the LLM does not list is promoted, so the worst failure mode is "promoted when it could have waited",
-        never a stuck node. External-event nodes are woken by ``_apply_node_wakes`` (node_wakes), not here."""
+        never a stuck node. External-event nodes are woken by ``_apply_node_wakes`` (node_wakes), not here.
+
+        On a WAKE PASS (dayflow_wake_manager; ``triggered_work_node`` set) only that one node is
+        considered: the state_mover was shown exactly one candidate, so it is the only node its
+        answer can be about. Promoting the rest of the graph from a wake pass would move nodes the
+        LLM never saw and could not have held."""
         from work_objects.model import utcnow
         from work_objects.store import FAMILY_BY_TYPE, TRANSITIONS
         from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
         store = get_dayflow_work_store()
         now = utcnow()
+        only = str(self.blackboard.get_state_value("triggered_work_node", "") or "").strip()
         holds = {}
         for h in (self.blackboard.get_state_value("held_work_nodes", []) or []):
             if isinstance(h, dict) and str(h.get("task_id") or "").strip():
@@ -58,6 +64,8 @@ class StateMoverPersistNode(ControlNode):
         promoted, held = [], []
         for s in store.list_work_objects():
             if str(s.get("status") or "").lower() in {"done", "abandoned"}:
+                continue
+            if only and not only.startswith(f"{s['id']}::"):
                 continue
             try:
                 wo = store.load(s["id"])
@@ -67,6 +75,8 @@ class StateMoverPersistNode(ControlNode):
             goal_id = wo.goal_node_id
             for n in wo.nodes.values():
                 if n.id == goal_id or n.status not in {"proposed", "waiting"}:
+                    continue
+                if only and f"{wo.id}::{n.id}" != only:
                     continue
                 if str(getattr(n, "wake_kind", None) or "") in {"event", "signal"}:
                     continue   # external waits are woken via node_wakes when the state_mover matches intake

@@ -1,18 +1,16 @@
 """Control node: after the state_mover, decide whether a precisely-woken node actually fires.
 
-A work node's time-wake fires a TARGETED pass (tick_router_node -> state_mover -> here). The
-state_mover has just made the one judgment that pass exists for: is now a good moment, or should
-this be held for quiet hours / a meeting / the user being away? This node reads the answer off the
-graph and either dispatches the node or lets the pass end.
+Lives in dayflow_wake_manager (work_node_wake_prep_node -> state_mover -> here). The state_mover
+has just made the one judgment that pass exists for: is now a good moment, or should this be held
+for quiet hours / a meeting / the user being away? This node reads the answer off the graph and
+either dispatches the node or lets the pass end.
 
   still `actionable`  -> stage it and go to the switchboard, the same dispatch every node gets
   held (`waiting`)    -> the pass ends; the hold's reactivate_at re-arms the wake on its own
   gone / ended        -> the pass ends
 
-On a NORMAL tick there is no triggered node and this falls straight through to the materializer,
-which lists every ready node as usual.
-
-Inert until the dayflow manager's state_map routes to it.
+Until 2026-09-18 it sat inside the orchestrator's state_map and fell through to the materializer
+on a normal tick; the wake pass is its own manager now and a missing trigger here is an error.
 """
 from app.assistant.control_nodes.control_node import ControlNode
 from app.assistant.utils.logging_config import get_logger
@@ -25,8 +23,8 @@ class WorkNodeWakeRouterNode(ControlNode):
         self.blackboard.update_state_value("next_agent", None)
         ref = str(self.blackboard.get_state_value("triggered_work_node", "") or "").strip()
         if "::" not in ref:
-            self.blackboard.update_state_value("last_agent", self.name)
-            return                      # normal tick — the state_map routes on to the materializer
+            raise ValueError(f"[{self.name}] no triggered_work_node on the blackboard — this node "
+                             f"only runs inside a wake pass")
 
         # Consume it: this pass is the only one that acts on the wake.
         self.blackboard.update_state_value("triggered_work_node", "")

@@ -41,14 +41,19 @@ DayflowScheduler (event-driven, debounced; precise per-node time wakes; work-pro
     -> run_dayflow_ingestion()          (chat / email / delegation / pods -> items table)
     -> three sweeps                     (dispatch_sweeper.py: stale / orphaned-dispatched / zombie-waiting)
     -> Invoke dayflow_orchestrator_manager (state_map order):
-         tick_router -> intake_triage -> triage_persist -> context_enricher
+         intake_triage -> triage_persist -> context_enricher
            -> strategic_planner_wo (EVALUATOR) -> strategic_planner_wo_persist
            -> work_architect_node
            -> state_mover -> state_mover_persist (node promotion + event wakes)
-           -> work_node_wake_router (a targeted time-wake dispatches here, or is held)
            -> work_node_materializer -> action_selector -> switchboard
            -> work_node_dispatch   (CLAIMS the node, opens the dispatch room, ENDS THE PASS)
            -> post_room_finalize -> final_answer
+
+  per fired time-wake (DayflowScheduler._fire_work_node), serialized with the tick by _run_gate:
+    -> Invoke dayflow_wake_manager   (THE WAKE PASS — no planning stage exists in it):
+         work_node_wake_prep (stage the ONE due node) -> state_mover -> state_mover_persist
+           -> work_node_wake_router (actionable -> dispatch; held/ended -> finalize)
+           -> switchboard -> work_node_dispatch -> post_room_finalize -> final_answer
 
   and, per claimed node, on its own thread (work_session.open_session):
     -> Invoke dayflow_dispatch_manager:
@@ -75,9 +80,11 @@ same email is a prompt telling the model to check. A dispatch room's input is ON
 exclusively: the claim is an atomic `set_status -> dispatched` through the store's lock, so a second
 room attempting the same node is refused. Exclusion lives on the work item, not on a global flag.
 
-Cadence ticks remain mutually exclusive. Targeted work-node wakes do NOT go through that gate —
-`_fire_work_node` invokes the orchestrator manager directly — which is safe because a targeted pass
-routes `tick_router -> state_mover -> wake_router -> dispatch` and never plans.
+Planning passes are mutually exclusive, and since 2026-09-18 so are wake passes: both hold the
+scheduler's `_run_gate` for the length of a manager invocation. A wake is its own manager
+(`dayflow_wake_manager`) precisely so that it cannot plan: it has no intake, steward or architect to
+fall into. (It used to be a routing hint inside the orchestrator that the router never saw, so every
+wake ran the full pipeline.)
 
 ## The work object lifecycle
 
@@ -203,14 +210,16 @@ the node failed loudly rather than silently retrying.
 - `DEBOUNCE_SECONDS=60`, `MIN_GAP_SECONDS=120` (mutual-exclusion floor), `POKE_MIN_INTERVAL_SECONDS=600`
   (delta pokes: chat/email/AFK/ticket), `MAX_CEILING_SECONDS=1800`, `STARTUP_TICK_DELAY_SECONDS=45`.
 - **Precise work-node wakes**: one APScheduler one-shot per time-gated node (`dayflow_work_wake::` jobs,
-  re-armed idempotently after every tick, restart-safe from the durable store). Firing invokes the
-  orchestrator manager directly (`_fire_work_node`) as a TARGETED pass — `tick_router_node` reads
-  `triggered_work_node` off the blackboard and routes state_mover → wake router → switchboard → dispatch,
-  skipping intake, the steward and the architect. **One pass at a time, ticks and wakes alike**: both
-  lanes hold `_run_gate` for the length of the manager invocation, and a wake re-checks `is_ready`
-  inside the gate so it sees what the pass before it wrote. (Until 2026-09-18 the wake lane was
-  ungated and, because the router read the activation Message instead of the blackboard, every wake
-  ran the full planning pipeline — three nodes sharing one `wake_at` were three architects on one graph.)
+  re-armed idempotently after every tick, restart-safe from the durable store). Firing opens
+  **`dayflow_wake_manager`** (`_fire_work_node`) — the WAKE PASS: `work_node_wake_prep_node` stages the
+  one due node as the state_mover's only candidate, the state_mover re-judges the moment, the persist
+  node promotes or parks THAT node only (`triggered_work_node` scopes it), and the wake router dispatches
+  it through the same switchboard → `work_node_dispatch_node` tail the tick uses. No intake, steward or
+  architect exists in that manager. **One pass at a time, ticks and wakes alike**: both lanes hold
+  `_run_gate` for the length of the manager invocation, and a wake re-checks `is_ready` inside the gate
+  so it sees what the pass before it wrote. (Until 2026-09-18 a wake was a routing hint inside the
+  orchestrator — one the router never saw, so every wake ran the full planning pipeline ungated: three
+  nodes sharing one `wake_at` were three architects on one graph.)
 - **Ask recovery at boot**: `start()` calls `work_session.re_arm_inflight_asks()` before the first tick,
   so a question in flight when the process died is settled from its ticket rather than left orphaned.
 - **Work-progress follow-up**: when a node reaches a result, a reply is recorded, or a dispatch leaves
@@ -363,15 +372,16 @@ node carries an unconsumed finalizer instruction, until the architect consumes i
 rollup defers: the steward's explicit `set_work_status` stays authoritative, because a person
 deciding a goal is over outranks a pending note about how to continue it.
 
-**No re-planning, but always re-judge the moment.** A work node's precise time-wake fires a targeted
-pass that skips intake, the evaluator, the architect and repair — the architect's decision about what
-to do, and roughly when, is not reopened. It does NOT skip the state_mover: whether right now is a
-good moment is a fresh judgment every time, because the world moved since the timer was set (the user
-went to bed early, the meeting ran long, they are away). `work_node_wake_router_node` then dispatches
-the node if the state_mover left it `actionable`, or ends the pass if it was held — in which case the
-hold's `reactivate_at` re-arms the wake on its own. Until 2026-09-16 the targeted pass went straight
-to the switchboard, so quiet-hours protection applied only to nodes that happened to arrive through a
-planning tick: a 10pm reminder fired regardless, purely because it came through the timed door.
+**No re-planning, but always re-judge the moment.** A work node's precise time-wake opens
+`dayflow_wake_manager`, a manager with no intake, evaluator or architect in its state_map — the
+architect's decision about what to do, and roughly when, is not reopened, and there is nothing for
+the pass to fall into if a routing step misfires. It does NOT skip the state_mover: whether right now
+is a good moment is a fresh judgment every time, because the world moved since the timer was set (the
+user went to bed early, the meeting ran long, they are away). The state_mover sees exactly that one
+node; `work_node_wake_router_node` then dispatches it if it was left `actionable`, or ends the pass if
+it was held — in which case the hold's `reactivate_at` re-arms the wake on its own. A timed node is
+ready BECAUSE its time came: the state_mover's prompt says a boundary announcement ("work hours are
+over") is never held for the boundary it announces, and a hold moves by minutes, never to the next day.
 
 **Crash recovery.** An ask is a tool call that outlives the process that made it: the thread waiting
 on the user dies at shutdown, the QUESTION does not — it is a ticket row that may already carry the

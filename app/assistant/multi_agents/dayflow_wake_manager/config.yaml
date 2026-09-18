@@ -1,0 +1,120 @@
+name: dayflow_wake_manager
+class_name: MultiAgentManager
+description: "One due work node: re-judge the moment, then dispatch it or hold it. Never plans."
+max_cycles: 12
+
+# THE WAKE PASS. One instance per fired time-wake, opened by DayflowScheduler._fire_work_node,
+# serialized with the planning tick by the scheduler's _run_gate.
+#
+# It exists so a timed node CANNOT be planned. Until 2026-09-18 a wake was a routing override
+# inside dayflow_orchestrator_manager: tick_router_node jumped the state_map to the state_mover
+# when it saw the trigger. It never saw the trigger (it read the activation Message; the trigger
+# was on the blackboard), so every wake silently took the default branch — a full planning tick,
+# architect included — and only the wake router at the tail knew. Three nodes sharing one wake_at
+# were three architects re-planning one goal, twenty milliseconds apart.
+#
+# This manager holds no planning stage, so there is nothing for a wake to degrade into. If the
+# trigger is missing, work_node_wake_prep_node raises; it does not fall through.
+#
+# The contract (unchanged): NO re-planning, but ALWAYS re-judge the moment. The architect's decision
+# about what to do and roughly when is not reopened — but whether RIGHT NOW is a good moment is a
+# fresh judgment, because the world moved since the timer was set. The state_mover sees exactly
+# one candidate (the due node); a hold parks it and its reactivate_at re-arms the wake on its own.
+#
+# The dispatch tail — switchboard -> work_node_dispatch_node -> post_room_finalize_node — is the
+# orchestrator's, verbatim. A change to that tail is a change here too.
+
+role_bindings:
+  delegator: room::delegator
+  tool_selector: shared::tool_selector
+
+agents:
+  - name: room::delegator
+    class: Delegator
+  - name: dayflow_orchestrator::state_mover
+    class: Agent
+  - name: dayflow_orchestrator::switchboard
+    class: Agent
+
+control_nodes:
+  - name: work_node_wake_prep_node
+    class: WorkNodeWakePrepNode
+  - name: state_mover_persist_node
+    class: StateMoverPersistNode
+  - name: work_node_wake_router_node
+    class: WorkNodeWakeRouterNode
+  - name: work_node_dispatch_node
+    class: WorkNodeDispatchNode
+  - name: post_room_finalize_node
+    class: PostRoomFinalizeNode
+  - name: return_control
+    class: ReturnControlNode
+  - name: tool_caller
+    class: ToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: final_answer_node
+    class: FinalAnswerNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+# The switchboard names a tool for the node; the set mirrors the orchestrator's so anything it may
+# name here is callable in the dispatch room that executes the choice.
+tools:
+  allowed_tools:
+    - emi_team_manager
+    - personal_admin_manager
+    - web_manager
+    - devices_manager
+    - one_shot_tool_runner
+    - create_dayflow_ticket
+    - work_emi_team_manager
+    - run_task
+    - find_tool
+    - ask_user
+    - set_ui_mute
+    - set_screen_capture_enabled
+    - ask_kg
+  except_tools: []
+
+scope_contract:
+  tools:
+    allowed_tools: ["all"]
+    blocked_tools:
+      - install_tool
+      - mcp::npm/playwright-mcp::browser_run_code
+    requires_approval_tools: []
+
+flow_config:
+  strict_routing: true
+  flow:
+    normal:
+      source_agent: "work_node_wake_prep_node"
+  action_selector:
+    switchboard_agent: "dayflow_orchestrator::switchboard"
+    final_node: "final_answer_node"
+    exit_flag_key: "handoff_tf"
+    no_chat_path: true
+    switchboard_task_key: "switchboard_task"
+    switchboard_information_key: "switchboard_information"
+  state_map:
+    "room::delegator": "work_node_wake_prep_node"
+    # The prep stages the ONE due node (task, information, ready_work_nodes=[it]) or, if it is
+    # no longer ready, overrides straight to post_room_finalize_node.
+    "work_node_wake_prep_node": "dayflow_orchestrator::state_mover"
+    "dayflow_orchestrator::state_mover": "state_mover_persist_node"
+    # The persist node promotes or parks that one node (triggered_work_node scopes it); the wake
+    # router then reads the answer off the graph: actionable -> switchboard, held/ended -> finalize
+    # (it sets next_agent itself; the entry below is the fallback).
+    "state_mover_persist_node": "work_node_wake_router_node"
+    "work_node_wake_router_node": "dayflow_orchestrator::switchboard"
+    # The dispatch tail, identical to dayflow_orchestrator_manager's: CLAIM, open the dispatch
+    # room on its own thread, end the pass.
+    "dayflow_orchestrator::switchboard": "work_node_dispatch_node"
+    "work_node_dispatch_node": "post_room_finalize_node"
+    "post_room_finalize_node": "final_answer_node"
+    "final_answer_node": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "final_answer_node"

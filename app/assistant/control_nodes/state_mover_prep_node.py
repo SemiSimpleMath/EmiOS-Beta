@@ -26,6 +26,41 @@ def _enrich_for_prompt(item: Dict[str, Any], now_utc: datetime) -> Dict[str, Any
     return enrich_item_for_prompt(item)
 
 
+def recent_user_context(all_items, now_utc: datetime):
+    """The state_mover's picture of the user lately: (recent chat, responded tickets).
+
+    Shared by the planning tick's prep (below) and the wake pass's prep
+    (work_node_wake_prep_node), so a hold is judged on the same facts whichever door the node
+    came through. Chat is the last _CHAT_HISTORY_HOURS of dayflow chat items, local-timed;
+    tickets are the last 2h of dayflow-orchestrator responses, categorized.
+    """
+    local_tz = get_local_timezone()
+    chat_cutoff = now_utc - timedelta(hours=_CHAT_HISTORY_HOURS)
+    chat_history: List[Dict[str, Any]] = []
+    for item in all_items:
+        meta = get_meta(item)
+        if str(meta.get("source_type") or "").strip().lower() != "chat":
+            continue
+        created = parse_iso_utc(str(meta.get("created_at") or ""))
+        if created is not None and created >= chat_cutoff:
+            chat_history.append({
+                "time_local": created.astimezone(local_tz).strftime("%I:%M %p"),
+                "summary": str(meta.get("summary") or "").strip(),
+            })
+
+    from app.assistant.pipelines.dayflow.utils.context_sources import (
+        get_responded_tickets_categorized,
+    )
+    # Scope to dayflow tickets at the DB layer — the formatted dict from
+    # get_responded_tickets_categorized() does not carry ticket_type, so a
+    # downstream filter on it would silently drop everything (and did).
+    responded = get_responded_tickets_categorized(
+        since_utc=now_utc - timedelta(hours=2),
+        ticket_type="dayflow_orchestrator",
+    )
+    return chat_history, responded
+
+
 class StateMoverPrepNode(ControlNode):
     """Pre-LLM node that prepares context for state_mover.
 
@@ -37,15 +72,11 @@ class StateMoverPrepNode(ControlNode):
     def action_handler(self, message):
         self.blackboard.update_state_value("next_agent", None)
         now_utc = datetime.now(timezone.utc)
-        local_tz = get_local_timezone()
 
         all_items = get_dayflow_items()
 
         active_items: List[Dict[str, Any]] = []
         plan_synopses: List[Dict[str, Any]] = []
-        chat_history: List[Dict[str, Any]] = []
-
-        chat_cutoff = now_utc - timedelta(hours=_CHAT_HISTORY_HOURS)
 
         for item in all_items:
             meta = get_meta(item)
@@ -58,20 +89,12 @@ class StateMoverPrepNode(ControlNode):
                     plan_synopses.append(meta)
                 continue
 
-            if source_type == "chat":
-                created = parse_iso_utc(str(meta.get("created_at") or ""))
-                if created is not None and created >= chat_cutoff:
-                    time_local = created.astimezone(local_tz).strftime("%I:%M %p")
-                    chat_history.append({
-                        "time_local": time_local,
-                        "summary": str(meta.get("summary") or "").strip(),
-                    })
-                continue
-
-            if source_type in ("action_log", "action_dispatch", "action_result"):
-                continue
+            if source_type in ("chat", "action_log", "action_dispatch", "action_result"):
+                continue   # chat is rendered by recent_user_context below
 
             active_items.append(_enrich_for_prompt(item, now_utc))
+
+        chat_history, responded_tickets = recent_user_context(all_items, now_utc)
 
         # Convert reactivate_at to local time in planned_tasks so the
         # state_mover and its prompts see local times, not UTC.
@@ -87,18 +110,6 @@ class StateMoverPrepNode(ControlNode):
                     if parsed is not None:
                         task["reactivate_at_local"] = parsed.astimezone(local_tz).strftime("%Y-%m-%d %I:%M %p")
             self.blackboard.update_state_value("planned_tasks", planned_tasks)
-
-        # Ticket responses for context.
-        from app.assistant.pipelines.dayflow.utils.context_sources import (
-            get_responded_tickets_categorized,
-        )
-        # Scope to dayflow tickets at the DB layer — the formatted dict from
-        # get_responded_tickets_categorized() does not carry ticket_type, so a
-        # downstream filter on it would silently drop everything (and did).
-        responded_tickets = get_responded_tickets_categorized(
-            since_utc=now_utc - timedelta(hours=2),
-            ticket_type="dayflow_orchestrator",
-        )
 
         self.blackboard.update_state_value("active_dayflow_items", active_items)
         self.blackboard.update_state_value("active_plan_synopses", plan_synopses)

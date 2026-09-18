@@ -70,7 +70,7 @@ and a sooner already-scheduled run is never clobbered by a later one. `_execute_
 Its `finally` block **always** re-arms the next wake: `_schedule_next_from_items` (earliest
 `reactivate_at_utc` among waiting/watching items, clamped 120s–1800s; items overdue > 24h are ignored as
 broken) and **`_arm_work_node_wakes`** (a *separate* one-shot APScheduler job per time-gated work-object
-node, cap 200). When a node-wake fires, `_fire_work_node` runs a **targeted room invocation** (`data.triggered_work_node` -> tick_router -> switchboard -> the same WorkSession dispatch as the planning pass) — but only if `is_ready` still holds.
+node, cap 200). When a node-wake fires, `_fire_work_node` opens **`dayflow_wake_manager`** (2026-09-18: its own manager, no planning stage — `work_node_wake_prep_node` -> state_mover -> wake router -> the same switchboard/WorkSession dispatch as the planning pass), under the same `_run_gate` as the tick — and only if `is_ready` still holds.
 
 ### The tick body — `dayflow_orchestrator/dayflow_tick.py :: dayflow_orchestrator_cadence_tick`
 Ordered: (1) **block check** — if `blocked_until_utc` is in the future (master-room chat is active),
@@ -403,7 +403,7 @@ path to `closed`, so it is what completes a work object — `done` alone never d
 `next_agent → post_room_finalize_node → final_answer_node → manager_exit_node`. (On the work-object lane
 there are no item-lane dispatch records for finalize to reconcile.)
 
-**P7 — Precise work-node wake (targeted dispatch pass).** The scheduler's `_arm_work_node_wakes` arms a per-node APScheduler job for each time-gated node (`wake_kind=time`, status `proposed/waiting`, `wake_at` set). When it fires, `_fire_work_node` invokes the ROOM with `data.triggered_work_node` — `tick_router_node` stages the due node straight to the switchboard, which flows into the SAME `work_node_dispatch -> WorkSession -> finalize` chain as the planning pass. One path; the trigger only changes what the message says. A stale wake exits cleanly (is_ready gated in the scheduler AND re-checked by the router).
+**P7 — Precise work-node wake (the WAKE PASS).** The scheduler's `_arm_work_node_wakes` arms a per-node APScheduler job for each time-gated node (`wake_kind=time`, status `proposed/waiting`, `wake_at` set). When it fires, `_fire_work_node` opens `dayflow_wake_manager` with `data.triggered_work_node` (copied onto the blackboard by the manager) — `work_node_wake_prep_node` stages the due node as the state_mover's only candidate, the state_mover re-judges the moment, `work_node_wake_router_node` sends it to the switchboard, which flows into the SAME `work_node_dispatch -> WorkSession -> finalize` chain as the planning pass. The wake manager has no intake / steward / architect, so it cannot plan (2026-09-18; it used to be a routing hint inside the orchestrator that never fired). A stale wake exits cleanly (is_ready gated in the scheduler AND re-checked by the prep, inside `_run_gate`).
 
 **P8 — Fast-tick path.** When the scheduler woke for one specific due *item* timer (`fast_tick` +
 `triggered_item_id`), `tick_router_node` routes `→ fast_tick_promoter_node` (atomically promotes that one

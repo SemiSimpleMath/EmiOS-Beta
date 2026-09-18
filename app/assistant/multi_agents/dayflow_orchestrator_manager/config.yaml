@@ -26,8 +26,6 @@ agents:
     class: Agent
 
 control_nodes:
-  - name: tick_router_node
-    class: TickRouterNode
   - name: intake_triage_prep_node
     class: IntakeTriagePrepNode
   - name: state_mover_prep_node
@@ -48,8 +46,6 @@ control_nodes:
     class: StrategicPlannerWoPersistNode
   - name: work_architect_node
     class: WorkArchitectNode
-  - name: work_node_wake_router_node
-    class: WorkNodeWakeRouterNode
   - name: work_node_materializer_node
     class: WorkNodeMaterializerNode
   - name: work_node_dispatch_node
@@ -109,7 +105,7 @@ flow_config:
   strict_routing: true
   flow:
     normal:
-      source_agent: "tick_router_node"
+      source_agent: "intake_triage_prep_node"
     planning_mode:
       source_agent: "dayflow_orchestrator::plan_mode"
   action_selector:
@@ -127,8 +123,11 @@ flow_config:
     planning_done_key: "planning_done_tf"
     plan_summary_key: "plan_summary"
   state_map:
-    "room::delegator": "tick_router_node"
-    "tick_router_node": "intake_triage_prep_node"
+    # THE PLANNING TICK, and only that. A work node's time-wake used to enter here too, as a
+    # routing hint (tick_router_node jumping to the state_mover) — a hint the router never saw,
+    # so every wake ran this whole map. Wakes now open dayflow_wake_manager, which has no
+    # planning stage to fall into (2026-09-18).
+    "room::delegator": "intake_triage_prep_node"
     "intake_triage_prep_node": "dayflow_orchestrator::intake_triage"
     "dayflow_orchestrator::intake_triage": "triage_spawn_guard_node"
     "triage_spawn_guard_node": "triage_persist_node"
@@ -162,11 +161,7 @@ flow_config:
     "work_architect_node": "state_mover_prep_node"
     "state_mover_prep_node": "dayflow_orchestrator::state_mover"
     "dayflow_orchestrator::state_mover": "state_mover_persist_node"
-    # A targeted time-wake pass rejoins here: the state_mover has judged the moment, and
-    # work_node_wake_router_node either dispatches that one node or ends the pass. On a normal
-    # tick it falls through to the materializer.
-    "state_mover_persist_node": "work_node_wake_router_node"
-    "work_node_wake_router_node": "work_node_materializer_node"
+    "state_mover_persist_node": "work_node_materializer_node"
     # relevance_cleaner was retired at the work-object cutover (it cleaned ITEMS; stale items now age
     # out via the freshness windows + tick sweeps). Its agent/node files remain under
     # agents/dayflow_orchestrator/relevance_cleaner + control_nodes/relevance_cleaner_*.py, unwired.
