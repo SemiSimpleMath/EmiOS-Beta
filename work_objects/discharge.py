@@ -13,8 +13,10 @@ Contract (work-session rewrite, 2026-08-04):
     The 2026-08-03 forward-email flounder came from this layer self-minting a
     scope whose pod policy had drifted from the room's.
   * ``session_id`` (when given) is stamped on the node at claim
-    (``payload.session_id``) — ownership is a graph fact the supervisor reads;
-    threads and registries are disposable.
+    (``payload.session_id``) and inherited by every node grown under it, so
+    ownership is a graph fact rather than a live thread. NOTE: nothing reads it
+    today — the supervisor it was written for (sweep_stuck_work_nodes) was
+    rewritten to a pure subtree-idle rule and consults no session at all.
   * The node's ``content`` is its DIRECTIVE and is never overwritten; the
     manager's final answer lands as an EVIDENCE child (the result), any
     surfaced research pod is attached, and the close is epoch-fenced so a

@@ -147,9 +147,10 @@ class WorkNodeDispatchNode(ControlNode):
             logger.warning("[%s] more-ready signal failed: %s", self.name, e)
 
     def _fail_node(self, work_id, node_id):
-        """Best-effort: mark a node failed after a dispatch error so it leaves the ready set (work_repair
-        adjudicates it) rather than silently re-dispatching every pass. No node to fail (unparseable ref)
-        or an already-terminal node -> the ERROR log above is the loud signal."""
+        """Best-effort: mark a node failed after a dispatch error so it leaves the ready set rather
+        than silently re-dispatching every pass. The architect picks it up next tick (work_repair,
+        named here originally, retired on 2026-09-16). No node to fail (unparseable ref) or an
+        already-terminal node -> the ERROR log above is the loud signal."""
         if not work_id or not node_id:
             return
         try:
@@ -157,7 +158,7 @@ class WorkNodeDispatchNode(ControlNode):
             store = get_dayflow_work_store()
             store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "failed"},
                         actor="node_dispatch")
-            logger.error("[%s] marked %s::%s failed after dispatch error -> work_repair",
-                         self.name, work_id, node_id)
+            logger.error("[%s] marked %s::%s failed after dispatch error — it leaves the ready set "
+                         "and the architect picks it up next tick", self.name, work_id, node_id)
         except Exception as e2:
             logger.error("[%s] could not mark %s::%s failed: %s", self.name, work_id, node_id, e2)

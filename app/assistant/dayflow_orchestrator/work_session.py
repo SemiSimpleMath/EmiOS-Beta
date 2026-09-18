@@ -24,11 +24,18 @@ exactly what every other consumer of the room gets), so a worker sees precisely
 what the orchestrator sees. The 2026-08-03 forward-email flounder — a worker
 blind to an email pod its goal referenced — is structurally impossible here.
 
-The session registry below is the in-flight liveness table the supervisor
-reads (``session_alive``); the graph carries the durable join
-(``payload.session_id``). Threads die with the process; the graph doesn't —
-after a restart no session is alive, the sweeper fails the orphans, and
-work_repair re-issues them.
+The session registry below is the in-flight liveness table, and the graph carries
+the durable join (``payload.session_id``). Both are now narrower than they look:
+``sweep_stuck_work_nodes`` was rewritten to a pure subtree-idle rule and reads
+NEITHER, so ``payload.session_id`` is written and never read, and the only live
+consumer of the registry is ``re_arm_inflight_asks`` below (via
+``session_alive_by_id``). ``session_alive`` and ``session_started_at`` have no
+production callers.
+
+Threads die with the process; the graph doesn't — after a restart no session is
+alive, so an in-flight ask is reconnected from its ticket (see
+``re_arm_inflight_asks``) and anything else is failed by the sweep for the
+architect to re-plan. (work_repair re-issued those until it retired 2026-09-16.)
 """
 from __future__ import annotations
 
@@ -246,9 +253,9 @@ def re_arm_inflight_asks() -> int:
 
     An ask is a tool call that can outlive the process running it: the thread waiting on the user
     is gone after a restart, but the QUESTION is not — it is a row in the ticket database, and it
-    may already carry the answer. Without this the node sits `dispatched` with a dead session, the
-    orphan sweep fails it, and repair re-asks — discarding an answer the user may have given
-    minutes earlier and putting the same question on screen a second time.
+    may already carry the answer. Without this the node sits `dispatched` with a dead session until
+    the sweep fails it, and the answer the user may have given minutes earlier is discarded — then
+    the architect plans the ask again and the same question goes on screen a second time.
 
     Driven from the TICKET side, because the ticket is the durable record and it carries the node
     ref (``trigger_context.work_node``) saying which call it belongs to. Three outcomes, one for

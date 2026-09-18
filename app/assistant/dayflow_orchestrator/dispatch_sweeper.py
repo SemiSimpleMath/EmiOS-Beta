@@ -344,7 +344,7 @@ _WORK_NODE_FROZEN_TIMEOUT_S = _LONGEST_TOOL_CALL_S + 20 * 60
 
 
 def sweep_stuck_work_nodes(now_utc: Optional[datetime] = None) -> int:
-    """Fail work nodes that have gone quiet, so work_repair can adjudicate them.
+    """Fail work nodes that have gone quiet, so the graph stops claiming they are in flight.
 
     A dispatched node is owned by the orchestrator run that is blocking inside its tool
     call. There is no liveness to consult — the run holds the call in its own thread and
@@ -388,7 +388,8 @@ def sweep_stuck_work_nodes(now_utc: Optional[datetime] = None) -> int:
                 # runs inside an orchestrator instance and blocks it, so there is no in-process
                 # liveness to consult — and none is needed. A crashed run and a wedged call look
                 # identical from the graph (nothing has been written), and the same remedy fits
-                # both: fail it and let work_repair adjudicate.
+                # both: fail it, and the architect re-plans it next tick. (work_repair adjudicated
+                # this until it retired on 2026-09-16.)
                 #
                 # The tolerance must exceed the longest a call may legitimately block, or a
                 # question the user has not answered yet would be failed out from under them.
@@ -401,8 +402,8 @@ def sweep_stuck_work_nodes(now_utc: Optional[datetime] = None) -> int:
                             actor="dispatch_sweeper")
                 failed += 1
                 logger.error(
-                    "dispatch_sweeper: work node %s marked failed — %s; work_repair adjudicates. (%r)",
-                    ref, reason, (node.title or "")[:80],
+                    "dispatch_sweeper: work node %s marked failed — %s; the architect re-plans it "
+                    "next tick. (%r)", ref, reason, (node.title or "")[:80],
                 )
             except Exception:
                 logger.error("dispatch_sweeper: supervision failed for %s", ref, exc_info=True)
@@ -414,9 +415,11 @@ def sweep_stuck_work_nodes(now_utc: Optional[datetime] = None) -> int:
 
 def _session_root_dispatched(wo, sid: str) -> bool:
     """True when the session's ROOT node (encoded in the session id,
-    work_session::<work_id>::<node_id>) is still ``dispatched``. Subtree coverage
-    requires it: once the sweeper fails a frozen root, its subtree orphan-fails on
-    the next pass even if the zombie thread is technically alive."""
+    work_session::<work_id>::<node_id>) is still ``dispatched``.
+
+    UNUSED — it has no callers. It belonged to the orphaned/frozen supervision that
+    sweep_stuck_work_nodes replaced with a single subtree-idle rule, which consults no
+    session at all. Kept rather than deleted; delete it deliberately, not by accident."""
     root_node_id = sid.rsplit("::", 1)[-1]
     root = wo.nodes.get(root_node_id)
     return root is not None and root.status == "dispatched"
