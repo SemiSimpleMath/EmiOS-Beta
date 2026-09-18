@@ -161,8 +161,7 @@ its output. Models and "no tools" noted where relevant.
 For each eligible artifact the agent emits `ADMIT` vs `REJECT_DUPLICATE / REJECT_NO_ACTION / REJECT_POLICY`
 (defaults to ADMIT unless clearly junk/duplicate; never rejects `[UPDATE]` items as dupes). It produces
 *decisions only* — admissions are written to `admitted_artifacts` by `triage_persist_node`. The prep node
-short-circuits to `plan_mode` when `room_mode=='planning_mode'`, and skips the LLM entirely when nothing
-is eligible.
+skips the LLM entirely when nothing is eligible.
 
 **strategic_planner_wo** (the work-object **EVALUATOR** / "steward", `gpt-5.6-luna`) — the **sole path from
 intake to action**. Driven by `strategic_planner_wo_prep_node` (builds `work_portfolio` from non-terminal
@@ -323,10 +322,6 @@ inside `post_room_finalize_node` — **so reachable only on the legacy item lane
 so nothing bound it. The **generic** `room_summary` (per-room chat compaction via `room_chat_summary` /
 `room_summary_service`, e.g. `master_room::room_summary`) is live and untouched.
 
-**plan_mode** (`gemini-3-flash-preview`, no tools) — interactive planning-mode chat; collaborates
-turn-by-turn and stays in planning mode until the user says they're done (`planning_done_tf`), never
-handing off to the switchboard. Entered via the manager's `planning_mode` flow.
-
 **post_room_finalize_node** — the legacy item-lane post-room hook: closes acted-on source items
 (`acted_on_item_ids` → `closed`), reconciles them against dispatch records (raises on mismatch), calls
 result_formatter to stamp `execution_result` onto plan steps, writes action-log rows, persists planned
@@ -415,11 +410,9 @@ directly through `work_on`, no manager tick at all. P8 is the item lane's wake �
 `reactivate_at_utc` timer that runs a full (abbreviated) manager tick through the item-lane view path.
 As the item dispatch lane retires, P8 shrinks toward legacy; P7 is the live precision-wake mechanism.
 
-**P9 — Planning-mode path (DEPRECATED — owner decision 2026-08).** When the room is in planning mode,
-`intake_triage_prep` (or the manager flow) routes to `dayflow_orchestrator::plan_mode →
-plan_mode_final_router_node → final_answer_node` — an interactive chat turn that stays in planning mode
-until the user signals done; no work is dispatched. The path is still wired in the live `state_map`
-(agent + router present) but is slated for removal, not maintenance.
+**P9 — Planning-mode path: RETIRED 2026-09-18.** `dayflow_orchestrator::plan_mode`, its `planning_mode`
+flow section and the `room_mode` short-circuit in `intake_triage_prep_node` are gone (never invoked in
+any log on disk). `plan_mode_final_router_node` remains — master_room's planning mode still uses it.
 
 **P10 — Graceful-exit path.** `graceful_exit → graceful_exit_control_node → final_answer_node` — a clean
 early termination of the manager loop.

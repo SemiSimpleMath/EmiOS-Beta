@@ -84,21 +84,6 @@ class IntakeTriagePrepNode(ControlNode):
         self.blackboard.update_state_value("next_agent", None)
         now_utc = datetime.now(timezone.utc)
 
-        # Planning mode bypass — skip the full pipeline.
-        room_mode = str(
-            self.blackboard.get_state_value("room_mode", "") or ""
-        ).strip().lower()
-        if room_mode == "planning_mode":
-            logger.info(
-                "[%s] room_mode=planning_mode — routing to plan_mode.",
-                self.name,
-            )
-            self.blackboard.update_state_value(
-                "next_agent", "dayflow_orchestrator::plan_mode",
-            )
-            self.blackboard.update_state_value("last_agent", self.name)
-            return
-
         # 1. Load all items — single DB query.
         all_items = get_dayflow_items()
 

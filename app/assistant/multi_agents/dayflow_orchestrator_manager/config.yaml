@@ -18,8 +18,6 @@ agents:
     class: Agent
   - name: dayflow_orchestrator::strategic_planner_wo
     class: Agent
-  - name: dayflow_orchestrator::plan_mode
-    class: Agent
   - name: dayflow_orchestrator::switchboard
     class: Agent
   - name: dayflow_orchestrator::work_finalizer
@@ -52,8 +50,6 @@ control_nodes:
     class: WorkNodeDispatchNode
   - name: action_selector_router_node
     class: ActionSelectorRouterNode
-  - name: plan_mode_final_router_node
-    class: PlanModeFinalRouterNode
   - name: post_room_finalize_node
     class: PostRoomFinalizeNode
   - name: return_control
@@ -106,8 +102,6 @@ flow_config:
   flow:
     normal:
       source_agent: "intake_triage_prep_node"
-    planning_mode:
-      source_agent: "dayflow_orchestrator::plan_mode"
   action_selector:
     source_agent: "dayflow_orchestrator::action_selector"
     switchboard_agent: "dayflow_orchestrator::switchboard"
@@ -116,12 +110,6 @@ flow_config:
     no_chat_path: true
     switchboard_task_key: "switchboard_task"
     switchboard_information_key: "switchboard_information"
-  planning_mode:
-    source_agent: "dayflow_orchestrator::plan_mode"
-    final_node: "final_answer_node"
-    chat_response_key: "chat_response"
-    planning_done_key: "planning_done_tf"
-    plan_summary_key: "plan_summary"
   state_map:
     # THE PLANNING TICK, and only that. A work node's time-wake used to enter here too, as a
     # routing hint (tick_router_node jumping to the state_mover) — a hint the router never saw,
@@ -168,8 +156,6 @@ flow_config:
     "work_node_materializer_node": "dayflow_orchestrator::action_selector"
     "dayflow_orchestrator::action_selector": "action_selector_router_node"
     "action_selector_router_node": "dayflow_orchestrator::switchboard"
-    "dayflow_orchestrator::plan_mode": "plan_mode_final_router_node"
-    "plan_mode_final_router_node": "final_answer_node"
     # The dispatch gate CLAIMS the node and the planning pass ends. The call itself — the
     # arguments node, the tool caller, and the finalizer that judges what comes back — runs in
     # dayflow_dispatch_manager, one room per claimed node on its own thread.

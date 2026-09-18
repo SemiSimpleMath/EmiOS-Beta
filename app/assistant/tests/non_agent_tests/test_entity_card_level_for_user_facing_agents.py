@@ -37,7 +37,6 @@ AGENTS = os.path.join(REPO, "app", "assistant", "agents")
 USER_FACING = {
     "master_room::chat_gate": "speaks to the user in the primary UI",
     "room::chat_gate": "speaks to the user in every other room",
-    "dayflow_orchestrator::plan_mode": "converses with the user in plan mode",
     "ticket_builder::composer": "writes the final user-facing ticket text",
     "emi_team::planner": "produces the answer itself when the goal is to give the user one",
     "work_emi_team::planner": "the work-graph twin of emi_team::planner; findings are results",
