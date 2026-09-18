@@ -127,9 +127,9 @@ _SUBTREE_CASCADE_STATUSES = {"done", "closed", "abandoned", "superseded"}
 def _satisfying_children(wo: WorkObject, goal) -> str:
     """The goal's own children and how each one was judged, as the epitaph of an auto-completion.
 
-    The finalizer's verdict is the part that carries meaning: `proceed` says the step achieved
-    its goal, `amend` says it did not. A reader seeing every child on `amend` is looking at a
-    goal that completed without doing anything, which is invisible from the status alone.
+    The finalizer's verdict is the part that carries meaning: `achieved` says the step met its
+    goal; anything else says it did not. A reader can tell a real completion from a hollow one
+    here, which is invisible from the status alone.
     """
     parts = []
     for cid in wo.children_of(goal.id):
@@ -152,17 +152,11 @@ def _count_unmet_attempt(wo: WorkObject, node, now: str) -> None:
     to stop the continuing. The goal node outlives every child, so it is the one anchor node
     churn cannot launder.
 
-    What counts is "an attempt did not achieve the goal", NOT "something crashed". A worker
-    that comes back having done some of the job is the common shape of getting nowhere, and it
-    never touches `failed`: the finalizer judges it `amend` and the node goes to `closed`.
-    2026-09-17: a picture-day goal ran four times and was judged `amend` every time — the date
-    and the clothing confirmed, the packet never found. Four attempts, four closes, nothing in
-    `failed`, every counter reading zero, and the goal re-minted as a fresh work object each
-    time. Counting only crashes would have seen a flawless day.
-
-    So both roads in are counted, at the one chokepoint every status write passes through, and
-    by id — never by comparing result text. `replan` and `blocked` arrive via `failed`; `amend`
-    arrives here as a verdict on a close.
+    What counts is "an attempt did not achieve the goal", NOT "something crashed". Every
+    not-achieved verdict the finalizer gives (`retry`, `unrecoverable`) passes the node through
+    `failed` on its way — even when the call itself returned cleanly — so this one chokepoint
+    counts them all, by id, never by comparing result text. An achieved verdict never enters
+    `failed`, so it is never counted.
     """
     goal = wo.nodes.get(wo.goal_node_id or "")
     if goal is None or goal.id == node.id:
@@ -202,11 +196,11 @@ TRANSITIONS: dict[str, dict[str, set[str]]] = {
         # and the only other road out of `done` was `superseded` — so the judgment became `amend`
         # ("continue"), and the continuation it prescribed needed the user's own credentials,
         # which sent a browser at the school's contact form instead. `failed` is how a step
-        # reaches the architect (work_repair retired into it), so this edge is what lets a
-        # returned-but-unachieved node ask for a person.
+        # reaches the architect, so this edge is what lets a returned-but-unachieved node ask
+        # for a person — every not-achieved verdict (retry / unrecoverable) passes through it.
         "done": {"closed", "superseded", "failed"},
         "closed": {"superseded"},
-        "failed": {"dispatched", "proposed", "abandoned"},   # proposed = re-open: the work_repair adjudicator re-issues a failed node
+        "failed": {"dispatched", "proposed", "abandoned"},   # proposed = re-open: the finalizer's `retry` puts it back in the architect's inbox
         "abandoned": set(), "superseded": set(),
     },
     "notify": {
@@ -477,19 +471,16 @@ class WorkStore:
                     f"for node {node.id!r} — a newer incarnation owns this node")
         # FAILED NODES ARE WORK_REPAIR'S (2026-09-02 spend-alert loop). The design
         # (ask redesign 2026-08-18) makes an expired ask a timed-out tool call: the
-        # sweeper fails the node and REPAIR adjudicates — escalate / retry / abandon
-        # is a repair decision. But the architect runs BEFORE repair in the tick and
-        # its prompt claimed failed nodes "come back to you", so it consumed each
-        # failure as a planning problem: abandon + mint a fresh identical ask,
-        # hourly, nine times — repair never saw one. The prompt now says failed
-        # nodes are repair's; this fence is the wall behind the words. A licensed
-        # replan (finalizer amend / user directive) still may prune a failed node.
+        # sweeper fails the node and the FINALIZER judges it. The architect's prompt once
+        # claimed failed nodes "come back to you", so it consumed each failure as a
+        # planning problem: abandon + mint a fresh identical ask, hourly, nine times.
+        # This fence is the wall behind the words: the architect acts on a failed node
+        # only when LICENSED — the finalizer's verdict on it, or a user directive.
         if node.status == "failed" and actor == "architect" and not data.get("licensed"):
             raise ValueError(
-                f"set_status: node {node.id!r} is 'failed' — failed nodes are "
-                f"work_repair's to adjudicate (retry / escalate / abandon). Plan "
-                f"around it and read repair's verdict; only a licensed replan may "
-                f"prune it.")
+                f"set_status: node {node.id!r} is 'failed' — the finalizer's verdict on it "
+                f"licenses what happens next (retry / new approach / stop / ask the user). "
+                f"Only a licensed replan may prune it.")
         if target != node.status:
             family = FAMILY_BY_TYPE.get(node.type, "spine")
             allowed = TRANSITIONS.get(family, {}).get(node.status, set())
@@ -587,17 +578,16 @@ class WorkStore:
             # of a tick is thrown away before the reader exists. The graph is the return channel for
             # results; it is the return channel for judgments too. Sits beside `terminal` rather
             # than in `content`, which is the node's immutable directive.
+            fin = data["finalizer"]
             node.payload["finalizer"] = {
-                "verdict": str(data["finalizer"].get("verdict") or ""),
-                "instruction": str(data["finalizer"].get("instruction") or ""),
-                "reasoning": str(data["finalizer"].get("reasoning") or ""),
+                "verdict": str(fin.get("verdict") or ""),
+                "outcome": str(fin.get("outcome") or ""),
+                "recommendation": str(fin.get("recommendation") or ""),
+                "next_step": str(fin.get("next_step") or ""),
+                "question_for_user": str(fin.get("question_for_user") or ""),
+                "escalated": bool(fin.get("escalated")),
                 "at": now,
             }
-            # `amend` is the finalizer saying this attempt did not achieve the node's goal. It is
-            # the ONLY such verdict that never passes through `failed` (replan and blocked both
-            # do), so it is counted here or not at all.
-            if node.payload["finalizer"]["verdict"].strip().lower() == "amend":
-                _count_unmet_attempt(wo, node, now)
         if data.get("note") is not None:
             # Append-only lifecycle note (e.g. the sweeper's timeout reason).
             # Lives in the payload so the node's `content` — its immutable
@@ -754,22 +744,19 @@ class WorkStore:
     def _unconsumed_finalizer_instruction(wo: WorkObject) -> Optional[str]:
         """The id of a node still asking the architect to change this plan, if any.
 
-        A finalizer `amend` or `replan` says the plan must change; the architect that acts on it
-        runs a LATER tick. Auto-completion must not win that race — an `amend` on the LAST node of
-        a goal would otherwise be destroyed by the completion it triggers, and the instruction
-        written for the architect becomes unreachable (the reader scans ACTIVE objects only).
-
-        2026-09-17: a lights goal closed as `done` carrying its own epitaph, "the result does not
-        show that the lights were actually turned off". The judgment was right and the rollup
-        overrode it. Only the automatic rollup defers — the steward's explicit
-        `set_work_status` stays authoritative, because a person deciding a goal is over outranks a
-        pending note about how to continue it.
+        A finalizer verdict with a `next_step` says the plan must change; the architect that acts
+        on it runs a LATER tick. Auto-completion must not win that race — a plan-changing verdict
+        on the LAST node of a goal would otherwise be destroyed by the completion it triggers, and
+        the recommendation written for the architect becomes unreachable (the reader scans ACTIVE
+        objects only). Only the automatic rollup defers — the steward's explicit `set_work_status`
+        stays authoritative: a person deciding a goal is over outranks a pending note about how to
+        continue it.
         """
         for node in wo.nodes.values():
             entry = (node.payload or {}).get("finalizer")
             if not isinstance(entry, dict) or entry.get("consumed_at"):
                 continue
-            if str(entry.get("instruction") or "").strip():
+            if str(entry.get("next_step") or "").strip():
                 return node.id
         return None
 

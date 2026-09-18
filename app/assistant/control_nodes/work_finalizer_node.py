@@ -15,18 +15,26 @@ decides whether trying again could possibly go differently. The steward and the 
 in top-level nodes; this is the one thing that reads what actually happened inside one.
 
 It invokes the work_finalizer adjudicator on {the WO projection + that node's FULL, un-truncated
-result} and applies the verdict it returns:
+result} and applies the verdict it returns. The verdict answers ONE question — was the node's goal
+achieved — and the tool's own status (returned / reported failure) is input to that judgment, never a
+constraint on it:
 
-  - PROCEED  -> close the node (`done` -> `closed`). It now counts toward the goal (is_satisfied keys on
-               `closed`), so its dependents unblock and, when all the goal's children are closed, the rollup
-               completes the WorkObject.
-  - AMEND    -> the same close, PLUS the revised intent recorded on the node; the architect
-               revises the graph from it on a later tick.
-  - REPLAN   -> re-open the failed node (`failed` -> `proposed`, the architect's inbox) with an
-               instruction naming what must be DIFFERENT. Rare: an unchanged retry reproduces the
-               error, which is how one bad argument became 22 identical attempts in two hours.
-  - BLOCKED  -> the failed node stays failed, with the reason recorded. Nothing can change; the
-               steward sees a goal it must decide about.
+  - ACHIEVED              -> `closed`. It now counts toward the goal (is_satisfied keys on `closed`),
+                             its dependents unblock, and when all the goal's children are closed the
+                             rollup completes the WorkObject.
+  - ACHIEVED_PLAN_CHANGES -> the same close, PLUS a recommendation on the node; the architect revises
+                             the graph from it next tick (the rollup holds the goal open meanwhile).
+  - RETRY                 -> `failed` (counted as an attempt that did not land) then `proposed` — back
+                             in the architect's inbox with a recommendation naming what will differ.
+  - UNRECOVERABLE         -> `failed`, with `next_step` typed: stop / new_approach / ask_user. The
+                             architect reads it next tick and prunes, re-plans, or plans the ask.
+
+Every verdict carries `outcome` — prose written for the planner — and it travels with the node.
+
+REPEATED FAILURE is the runtime's, not the finalizer's: once a goal has accumulated
+_REPEAT_FAILURE_LIMIT attempts that did not achieve it, a not-achieved verdict is escalated here to
+`ask_user` regardless of what the finalizer recommended, so the user is asked instead of the same
+thing being tried again under a new node id.
 
 The verdict is written to the NODE (nodes.payload.finalizer in emi.db), never handed on in
 memory: the architect that acts on an amend/replan runs on a LATER tick, and every tick builds a
@@ -69,17 +77,20 @@ _AWAITING_JUDGMENT = {"done", "failed"}
 # node wrote the same tool error onto its graph seventeen times with nothing counting.
 _REPEAT_FAILURE_LIMIT = 2
 
-# What each verdict writes. `blocked` maps to None on purpose: the node is already `failed` and
-# that is the truthful status — only the finalizer's account needs recording, which is why the
-# write still happens (with the status unchanged) rather than being skipped.
-# BLOCKED sends the node to `failed` rather than leaving its status alone. On a node that had
-# already failed this is the same outcome as before (a same-status write). What it adds is the
-# case the verdict set could not previously express: a call that RETURNED and did not achieve
-# the node's goal, with nothing we can do about it. `failed` is the channel to the architect —
-# work_repair retired into it — so a blocked step now reaches the agent that can plan an ask
-# instead of being either counted as satisfied (`closed`) or stranded at `done` forever.
-_STATUS_FOR = {"proceed": "closed", "amend": "closed", "replan": "proposed", "blocked": "failed"}
+# What each verdict writes, as the SEQUENCE of statuses the node passes through. A not-achieved
+# verdict always passes through `failed` — that is the one chokepoint that counts an attempt —
+# even when the call itself returned cleanly. `retry` then re-opens the node to the architect's
+# inbox; the architect may keep it, change it, or replace it, reading the recommendation.
+_STATUS_FOR = {
+    "achieved": ("closed",),
+    "achieved_plan_changes": ("closed",),
+    "retry": ("failed", "proposed"),
+    "unrecoverable": ("failed",),
+}
 _APPLICABLE = set(_STATUS_FOR)
+# The routing word the architect reads. For two verdicts it IS the verdict; for `unrecoverable`
+# it is the finalizer's `next_step`.
+_ROUTE_FOR = {"achieved_plan_changes": "plan_changes", "retry": "retry"}
 
 
 class WorkFinalizerNode(ControlNode):
@@ -130,28 +141,24 @@ class WorkFinalizerNode(ControlNode):
         projection = STATUS_LEGEND + "\n\n" + render_work_portfolio(wo)
         # The node's RESULT is the evidence it produced — `content` is its (immutable) directive.
         result_text = node_result(wo, node) or "(no result recorded)"
-        # Which verdicts are even available follows from the node's status, and the store enforces
-        # it anyway (`done` may only become `closed`; `failed` may only re-open or stay). Saying so
-        # here keeps the agent from returning one that cannot be written.
+        # The tool's status is stated as INPUT and nothing more. It must not name or narrow the
+        # verdicts: that is how a returned-but-empty call could only ever be judged a success.
         if node.status == "failed":
-            outcome = ("THE CALL FAILED — the tool reported it could not run. Your verdict is "
-                       "'replan' (only if you can name something that will genuinely be different) "
-                       "or 'blocked'.")
-            # Repetition is the thing the finalizer cannot see from one result: each failure looks
-            # like a first failure. The count is kept on the node, so say it plainly.
-            failures = int((node.payload or {}).get("failure_count") or 0)
-            if failures >= _REPEAT_FAILURE_LIMIT:
-                outcome += (
-                    f"\n\nTHIS STEP HAS NOW FAILED {failures} TIMES. It keeps failing at the same "
-                    f"thing, so trying it again is very unlikely to work. Unless the result below "
-                    f"names something concrete that has CHANGED since the last attempt, do not "
-                    f"replan it: either say 'blocked' and let the steward decide what becomes of "
-                    f"the goal, or — if a person could unblock it by answering something (a "
-                    f"credential, an account, a missing detail, a decision) — say 'blocked' and "
-                    f"name that question in your reasoning so the user can be asked.")
+            tool_status = "the tool reported it could not run"
         else:
-            outcome = ("THE CALL RETURNED. Your verdict is 'proceed' (the plan still fits) or "
-                       "'amend' (this result changes the plan).")
+            tool_status = "the call returned"
+        outcome = (f"TOOL STATUS: {tool_status}. That is input, not the verdict — judge whether "
+                   f"the node's GOAL was achieved from the result below.")
+        # Repetition is the thing the finalizer cannot see from one result. The count lives on the
+        # GOAL so it survives the architect re-planning the step under a new node id.
+        goal = wo.nodes.get(wo.goal_node_id or "")
+        unmet = int(((goal.payload or {}) if goal is not None else {}).get("goal_unmet_attempts") or 0)
+        if unmet >= _REPEAT_FAILURE_LIMIT:
+            outcome += (
+                f"\n\n{unmet} ATTEMPTS HAVE NOT ACHIEVED THIS GOAL, under one node id or another. "
+                f"Another try of the same shape will not help. If this result is not achieved, the "
+                f"runtime will escalate it to ask the user whatever would unblock it — so put that "
+                f"question in `question_for_user` yourself, precisely.")
         info = (f"JUST-COMPLETED NODE — id: {node.id} | title: {node.title}\n"
                 f"{outcome}\n"
                 f"ITS FULL RESULT:\n{result_text}")
@@ -162,18 +169,16 @@ class WorkFinalizerNode(ControlNode):
     def _apply(self, wo, node, data: dict) -> list:
         """Turn the agent's schema into graph state. The only thing that writes a finalizer verdict.
 
-        PROCEED -> `done` -> `closed`. `closed` is the satisfied terminal `is_satisfied` keys on, so
-                   the node now counts toward its goal, its dependents unblock, and when every child
-                   of the goal is closed the store's rollup completes the WorkObject.
-        AMEND   -> the same close, PLUS the revised intent on the node for the architect.
-        REPLAN  -> `failed` -> `proposed`: back to the architect's inbox carrying the instruction
-                   naming what must be DIFFERENT. The node is NOT simply re-run — re-running a step
-                   whose circumstances have not changed reproduces its error.
-        BLOCKED -> `failed`. Not "the call errored" — "the node's goal was not achieved and
-                   nothing we can do changes that". A call that RETURNED can land here: the
-                   worker searched everywhere it can reach and the thing is not there, or the
-                   next step needs the user's own credentials, permission, or knowledge. `failed`
-                   is the channel to the architect, which plans the node that asks them.
+        The verdict decides the status sequence (see _STATUS_FOR); the `outcome` prose and the
+        recommendation ride on the node as `payload.finalizer` for the planner that acts next tick.
+        The recommendation says what to do, the outcome says why — a recommendation without its
+        grounds can only be obeyed or ignored, never judged.
+
+        REPEATED FAILURE is escalated HERE, deterministically. When this verdict would be the
+        goal's _REPEAT_FAILURE_LIMIT-th attempt that did not achieve it, a `retry` or any other
+        not-achieved route becomes `ask_user`: the node stays `failed` rather than re-opening, and
+        the architect is told to plan the question. The finalizer judged one result; the runtime is
+        the thing that can see the pattern, so the runtime makes the call.
         """
         verdict = str(data.get("verdict") or "").strip().lower()
         if verdict not in _APPLICABLE:
@@ -181,30 +186,52 @@ class WorkFinalizerNode(ControlNode):
                          self.name, verdict, wo.id, node.id)
             return []
 
-        reason = str(data.get("reasoning") or "").strip()
-        # The architect replans FROM the instruction and gets the REASONING with it: the instruction
-        # says what to do, the reasoning says why, and the architect is deciding whether to keep this
-        # step, change it, or drop it and do something else. A recommendation without its grounds is
-        # one the architect can only obey or ignore.
-        instruction = str((data.get("amend_intent") if verdict == "amend"
-                           else data.get("replan_instruction")) or "")
-        target = _STATUS_FOR[verdict]
+        outcome = str(data.get("outcome") or "").strip()
+        recommendation = str(data.get("recommendation") or "").strip()
+        question = str(data.get("question_for_user") or "").strip()
+        route = _ROUTE_FOR.get(verdict) or str(data.get("next_step") or "").strip().lower()
+        sequence = list(_STATUS_FOR[verdict])
+        escalated = False
+
+        if sequence[0] == "failed":
+            # The store counts an attempt on ENTRY to failed; a node already there (the tool
+            # errored) was counted when it arrived, so this verdict adds nothing to the tally.
+            goal = wo.nodes.get(wo.goal_node_id or "")
+            attempts = (int(((goal.payload or {}) if goal is not None else {})
+                            .get("goal_unmet_attempts") or 0)
+                        + (0 if node.status == "failed" else 1))
+            if attempts >= _REPEAT_FAILURE_LIMIT and route != "ask_user":
+                escalated = True
+                route = "ask_user"
+                question = question or recommendation or outcome
+                sequence = ["failed"]          # never re-open: the same thing is not tried again
+                logger.warning("[%s] %s::%s — attempt %d did not achieve the goal; escalating to "
+                               "ask_user instead of %r", self.name, wo.id, node.id, attempts,
+                               data.get("next_step") or verdict)
+
+        payload = {"verdict": verdict, "outcome": outcome, "recommendation": recommendation,
+                   "next_step": route, "question_for_user": question, "escalated": escalated}
 
         from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+        store = get_dayflow_work_store()
         try:
-            get_dayflow_work_store().apply("set_status", {
-                "work_id": wo.id, "node_id": node.id, "status": target,
+            store.apply("set_status", {
+                "work_id": wo.id, "node_id": node.id, "status": sequence[0],
                 "verdict": verdict,
-                "reason": reason or "finalizer accepted the result",
-                "finalizer": {"verdict": verdict, "instruction": instruction, "reasoning": reason},
+                "reason": outcome or "finalizer accepted the result",
+                "finalizer": payload,
             }, actor="finalizer")
+            for status in sequence[1:]:
+                store.apply("set_status", {"work_id": wo.id, "node_id": node.id, "status": status},
+                            actor="finalizer")
         except Exception as e:
-            logger.error("[%s] could not set %s::%s to %r: %s",
-                         self.name, wo.id, node.id, target, e)
-            return []
+            logger.error("[%s] could not write verdict %r for %s::%s (sequence %s): %s",
+                         self.name, verdict, wo.id, node.id, sequence, e, exc_info=True)
+            raise
 
-        logger.info("[%s] %s::%s -> %s (%s)", self.name, wo.id, node.id, target, verdict)
-        return [{"work_id": wo.id, "node_id": node.id, "verdict": verdict}]
+        logger.info("[%s] %s::%s -> %s (%s%s)", self.name, wo.id, node.id, sequence[-1], verdict,
+                    f" -> {route}" if route else "")
+        return [{"work_id": wo.id, "node_id": node.id, "verdict": verdict, "next_step": route}]
 
     def _scope(self, message):
         scope = getattr(message, "scope_context", None)

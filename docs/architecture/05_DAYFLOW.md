@@ -24,14 +24,14 @@ Sharp role separation, one bounded LLM judgment per role, deterministic mechanic
 | work_architect | the STRUCTURE of one goal (DAG + wake gates + dedupe) | `work_architect_apply` projects the delta; a dedupe prune is licensed only after the named survivor is verified live |
 | state_mover | did the awaited event arrive; is now the wrong moment | promotion itself is deterministic `is_ready` (time + deps) |
 | switchboard | WHERE one ready node goes, by READING its goal | two routes only: ticket the user, or run the worker |
-| work_finalizer | what ONE call's outcome means (proceed / amend / replan / blocked) | sole producer of `closed`; `is_satisfied` keys on `closed`; `_STATUS_FOR` maps each verdict to one status |
+| work_finalizer | was ONE node's GOAL achieved (achieved / achieved_plan_changes / retry / unrecoverable) + an `outcome` account for the planner | sole producer of `closed`; `is_satisfied` keys on `closed`; `_STATUS_FOR` maps each verdict to a status sequence; repeated failure is escalated to `ask_user` deterministically |
 | worker (`work_emi_team_manager`) | HOW a node gets done | render-loop manager; results land as evidence children |
 
-`work_repair` was retired on 2026-09-16; its three dispositions moved to agents that see more than one
-failed step (retry -> the finalizer's `replan`, which must NAME what will differ; escalate -> an ask is
-just a node with a communicate goal, which the architect plans; abandon -> the steward's, which sees
-every work object each run). Its files remain on disk, unwired — including
-`work_repair_apply._MAX_ASK_TIMEOUTS`, so the 3-strike ask ceiling described below no longer fires.
+`work_repair` was retired on 2026-09-16; its three dispositions moved to the finalizer's verdicts
+(retry -> `retry`, which must NAME what will differ; escalate -> `unrecoverable` + `ask_user`, and the
+architect plans the ask; abandon -> `unrecoverable` + `stop` for a branch, the steward for a whole goal).
+Its files remain on disk, unwired. The repeated-failure bound is `work_finalizer_node._REPEAT_FAILURE_LIMIT`
+against the goal's `goal_unmet_attempts` (2026-09-17).
 
 ## Architecture
 
@@ -136,10 +136,11 @@ matched back by `trigger_context.work_node`, recorded as an EVIDENCE child (the 
 immutable directive), and the node completes -> the finalizer judges the reply like any result. An
 unanswered ticket expiring is a TIMED-OUT call: the sweeper fails the node (reason appended to
 `payload.status_notes` — never `content`, which is the immutable directive) and the finalizer judges
-the failure. **The 3-strike bound no longer fires:** `_MAX_ASK_TIMEOUTS` / `ask_unanswered_ceiling`
-live in `work_repair_apply`, which is unwired. `payload.failure_count` counts a node's failures and
-warns the finalizer, architect and steward at two — but it counts PER NODE, and the steward mints a
-fresh work object per occurrence, so an action that fails the same way every day never accumulates.
+the failure. The repeated-failure bound is on the GOAL: `goal_unmet_attempts` counts every entry of a
+child into `failed` (every not-achieved verdict passes through it, even on a call that returned), and at
+`_REPEAT_FAILURE_LIMIT` the finalizer node escalates the verdict to `ask_user` instead of re-opening the
+step. It survives the architect re-planning under a new node id; it does not survive the steward minting
+a fresh work object for the same action tomorrow.
 Ticket text is composed by `ticket_builder_manager`
 (multi_agents/): dispatch hands over ids and the goal (`work_id::node_id` + the node's directive),
 a read-only planner pulls the SUBSTANCE the goal promises — `read_work_object` on the graph,
@@ -154,23 +155,24 @@ state_mover, which may HOLD it (a held pre-surface ask parks `waiting` and keeps
 so a late reply to an earlier ticket still matches).
 
 **Completion.** A worker-`done` node is only a RESULT. The finalizer runs in the DISPATCH ROOM, in the
-same pass that made the call, and reads that node's full result. Four verdicts — two for a call that
-returned, two for one that failed:
+same pass that made the call, and reads that node's full result. It answers ONE question — was the
+node's goal achieved — and the tool's own status (returned / reported failure) is input to that
+judgment, never a limit on it. Every verdict carries `outcome`: prose written for the planner, the
+account of what was found and what was not. Then:
 
-| | verdict | writes |
+| verdict | meaning | writes |
 |---|---|---|
-| returned | `proceed` | `done -> closed` (only `closed` counts toward the goal) |
-| returned | `amend` | `done -> closed`, plus a revised intent for the architect |
-| failed | `replan` | `failed -> proposed`, plus an instruction NAMING what must differ |
-| failed | `blocked` | status unchanged; only the reason is recorded |
+| `achieved` | goal met (failed sub-steps are provenance in `outcome`) | `-> closed` (only `closed` counts toward the goal) |
+| `achieved_plan_changes` | goal met, and the result changes the plan | `-> closed` + `recommendation` (route `plan_changes`); rollup holds the goal until the architect consumes it |
+| `retry` | not met; minor; `recommendation` NAMES what will differ | `-> failed -> proposed` (counted once, back in the architect's inbox) |
+| `unrecoverable` | not met, no recovery on this path; `next_step` = stop / new_approach / ask_user (+ `question_for_user`) | `-> failed` + the route |
 
-`replan` is deliberately rare: re-running a step whose circumstances have not changed reproduces its
-error, so the contract refuses a `replan` that cannot name the difference. RESOLVE was removed on
-2026-09-16 — a single node's result must not end a whole work object; a finalizer that thinks the goal
-is finished or moot says so in `reasoning` and the steward rules next tick.
+`retry` must name the difference: re-running a step whose circumstances have not changed reproduces
+its error. A single node's result never ends a whole work object; a finalizer that thinks the goal is
+finished or moot says so in `outcome` and the steward rules next tick.
 
 **Verdicts persist on the NODE**, not in memory: `nodes.payload.finalizer`, beside the terminal
-epitaph. The architect that acts on an `amend` or `replan` runs on a LATER tick, and every tick builds
+epitaph. The architect that acts on a route runs on a LATER tick, and every tick builds
 a fresh manager with a fresh blackboard, so anything left in memory is discarded before its reader
 exists. `work_architect_node._pending_finalizer_instructions` reads them off the graph and
 `consume_finalizer_instruction` stamps each one, so a judgment made ticks ago stops arriving as fresh
@@ -187,10 +189,12 @@ the evaluator's `based_on`), the outcome — with the user's recorded words — 
 subconscious concerns register and triggers a cooldown-guarded noticer rerun
 (`subconscious/concern_feedback.py`, 2026-08-01).
 
-**Failure.** A failed node is judged by the finalizer in the room that made the call: `replan` re-opens
-it to the architect's inbox carrying what must be different, `blocked` leaves it failed with the reason
-recorded for the steward. A failed node still blocks its goal (`is_satisfied` requires `closed`), so
-the steward sees it loudly in the portfolio and decides what becomes of the goal. Dispatch errors mark
+**Failure.** A failed node carries the finalizer's verdict: `retry` re-opens it to the architect's
+inbox with what will be different; `unrecoverable` leaves it failed with a typed route the architect
+acts on next tick (prune the branch, plan a different approach, or plan the ONE node that asks the
+user the given question). The steward sees the same outcome/recommendation on the node in the
+portfolio (`FINALIZER (...)` / `RECOMMENDS` / `ASK THE USER` lines) and decides what becomes of the
+goal. A failed node still blocks its goal (`is_satisfied` requires `closed`). Dispatch errors mark
 the node failed loudly rather than silently retrying.
 
 ## DayflowScheduler
@@ -403,8 +407,7 @@ node gets its own blackboard; what it needs arrives through the Message or as a 
 - **`abandon_work_ids` has no reason field**, so `work_persist` writes a hardcoded tautology on every
   abandon (448 of 592 historic rows). `propagate_work_outcome` then finds no user words, the
   originating concern stays active, and the goal is re-minted the next morning.
-- **`work_repair` doctrine is still taught** in `work_architect/prompts/system.j2` ("Failed nodes are
-  work_repair's ... repair's verdict reaches you next pass"), pointing at a retired agent.
-- **The failure ceiling counts per node.** A recurring action that fails identically every day gets a
-  fresh node each time, so `failure_count` never accumulates. Catching that needs a counter keyed on
-  something more durable — the action and its target, roughly what the `actions` ledger records.
+- **The failure ceiling counts per goal, not per action.** `goal_unmet_attempts` survives a re-plan
+  but not the steward minting a fresh work object for the same action tomorrow. Catching that needs a
+  counter keyed on something more durable — the action and its target, roughly what the `actions`
+  ledger records.

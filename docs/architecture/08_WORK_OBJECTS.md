@@ -277,8 +277,8 @@ declare a DEV-ONLY `scenario_scope()` under `scenarios/`.
 | **state_mover** | `set_status` (`proposed/waiting → actionable`), wake clears | promotes ready nodes; LLM may only HOLD |
 | **dispatch** (`work_node_dispatch_node` -> `work_session.open_session` / `discharge_node`) | `set_status` (`→ dispatched`, `→ done/failed`), `defer_node` (asks), `attach_pod`, evidence children | one node per tick + the worker's own subtree |
 | **worker** (via `work_*` tools + reconcile hook) | subtasks, evidence, artifacts, questions, defers | inside the job thread |
-| **finalizer** (`work_finalizer_node`) | `set_status` (`done → closed`), `set_work_status` (resolve) | SOLE producer of `closed`; propagates concern outcomes |
-| **repair** (`work_repair_apply`) | — | RETIRED 2026-09-16; files remain, unwired. Failed nodes are the finalizer's (`replan` / `blocked`), and abandoning a goal is the steward's |
+| **finalizer** (`work_finalizer_node`) | `set_status` (`done → closed`; `→ failed`; `failed → proposed` on retry), `payload.finalizer` (verdict + outcome + route) | SOLE producer of `closed`; escalates repeated failure to `ask_user` |
+| **repair** (`work_repair_apply`) | — | RETIRED 2026-09-16; files remain, unwired. Failed nodes carry the finalizer's route (retry / stop / new_approach / ask_user); abandoning a goal is the steward's |
 | **sweeper** (`sweep_stuck_work_nodes`) | `set_status` (`→ failed`) | orphaned/frozen jobs (ancestor-liveness aware) |
 | **/work UI** | `edit_node`, `set_status`, `set_work_status`, node add/remove | owner's manual surface |
 

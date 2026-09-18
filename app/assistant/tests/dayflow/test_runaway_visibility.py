@@ -179,15 +179,24 @@ def test_the_signal_survives_a_goal_with_no_subtasks(store):
 # --------------------------------------------------------------------------- #
 # The failure tally the re-plan cannot launder
 # --------------------------------------------------------------------------- #
-# 2026-09-17. The per-node failure_count is reset by the very act of continuing: the architect
-# abandons a failing node and mints its replacement under a fresh slug, and the replacement
-# starts at zero. A picture-day goal walked around the >=2 ceiling all day this way — every
-# per-node counter read 0 or 1 while the goal had been failing at the same thing since morning.
-# The goal node outlives every child, so the goal's own tally lives there.
+# The per-node failure_count is reset by the very act of continuing: the architect abandons a
+# failing node and mints its replacement under a fresh slug, and the replacement starts at zero.
+# The goal node outlives every child, so the goal's own tally lives there. It counts entries into
+# `failed` — and every not-achieved finalizer verdict passes through `failed`, even on a call that
+# returned cleanly, so a goal that keeps "succeeding" at nothing is counted too.
 
 def _goal_fails(store, wo_id):
     wo = store.load(wo_id)
     return int((wo.nodes[wo.goal_node_id].payload or {}).get("goal_unmet_attempts") or 0)
+
+
+def _judge_not_achieved(store, wo_id, nid):
+    """What the finalizer writes for a returned call it judged not achieved: done -> failed."""
+    store.apply("set_status", {
+        "work_id": wo_id, "node_id": nid, "status": "failed",
+        "finalizer": {"verdict": "unrecoverable", "next_step": "new_approach",
+                      "outcome": "returned cleanly, found nothing", "recommendation": "try the API"},
+    }, actor="finalizer")
 
 
 def test_the_goal_counts_failures_its_nodes_do_not_survive(store):
@@ -196,17 +205,12 @@ def test_the_goal_counts_failures_its_nodes_do_not_survive(store):
     first = _child(store, wo.id, wo.goal_node_id, "Contact the school")
     _set(store, wo.id, first, "failed")
     assert _goal_fails(store, wo.id) == 1
-
-    # The architect abandons the failure and re-plans the same work under a new slug.
     _set(store, wo.id, first, "abandoned", actor="steward", reason="replaced")
     second = _child(store, wo.id, wo.goal_node_id, "Reach the school another way")
     _set(store, wo.id, second, "failed")
-
     wo2 = store.load(wo.id)
-    assert int((wo2.nodes[second].payload or {}).get("failure_count") or 0) == 1, (
-        "the replacement node has genuinely failed only once")
-    assert _goal_fails(store, wo.id) == 2, (
-        "but the GOAL has now failed twice — the count the re-plan cannot reset")
+    assert int((wo2.nodes[second].payload or {}).get("failure_count") or 0) == 1
+    assert _goal_fails(store, wo.id) == 2
 
 
 def test_the_architect_is_told_when_the_goal_keeps_failing(store):
@@ -215,7 +219,6 @@ def test_the_architect_is_told_when_the_goal_keeps_failing(store):
     for title in ("Contact the school", "Reach the school another way"):
         nid = _child(store, wo.id, wo.goal_node_id, title)
         _set(store, wo.id, nid, "failed")
-
     rendered = _render_existing_graph(store.load(wo.id))
     assert "2 ATTEMPTS HAVE NOT ACHIEVED THIS GOAL" in rendered
     assert "ask whether" in rendered
@@ -226,7 +229,6 @@ def test_one_failure_is_not_worth_shouting_about(store):
     wo = _goal(store, "Get the picture packet.")
     nid = _child(store, wo.id, wo.goal_node_id, "Contact the school")
     _set(store, wo.id, nid, "failed")
-
     assert "HAVE NOT ACHIEVED THIS GOAL" not in _render_existing_graph(store.load(wo.id))
 
 
@@ -238,7 +240,6 @@ def test_a_goal_that_never_fails_carries_no_tally(store):
 
 
 def test_re_entering_failed_does_not_double_count(store):
-    """The tally counts transitions INTO failed, like the per-node count it accompanies."""
     wo = _goal(store, "Get the picture packet.")
     nid = _child(store, wo.id, wo.goal_node_id, "Contact the school")
     _set(store, wo.id, nid, "failed")
@@ -246,94 +247,54 @@ def test_re_entering_failed_does_not_double_count(store):
     assert _goal_fails(store, wo.id) == 1
 
 
-def test_an_amend_counts_as_an_attempt_that_did_not_land(store):
+def test_a_returned_call_judged_not_achieved_counts(store):
     """The shape that got nowhere all day: the worker comes back having done PART of the job.
-
-    Nothing crashes. The finalizer judges `amend`, the node closes, and if only crashes were
-    counted the goal would look flawless while achieving nothing four times running.
-    """
+    Nothing crashes; the finalizer judges it not achieved; it passes through failed and counts."""
     wo = _goal(store, "Get the picture packet.")
     for title in ("Find the packet", "Find the packet another way"):
         nid = _child(store, wo.id, wo.goal_node_id, title)
         _set(store, wo.id, nid, "done")
-        store.apply("set_status", {
-            "work_id": wo.id, "node_id": nid, "status": "closed",
-            "reason": "judged", "finalizer": {"verdict": "amend", "instruction": "get the packet",
-                                              "reasoning": "date confirmed, packet not found"},
-        }, actor="finalizer")
-
-    assert _goal_fails(store, wo.id) == 2, "two attempts, neither achieved the goal"
-    for n in store.load(wo.id).nodes.values():
-        assert int((n.payload or {}).get("failure_count") or 0) == 0, "nothing ever crashed"
+        _judge_not_achieved(store, wo.id, nid)
+    assert _goal_fails(store, wo.id) == 2
 
 
-def test_proceed_is_not_an_unmet_attempt(store):
+def test_achieved_is_not_an_unmet_attempt(store):
     wo = _goal(store, "Get the picture packet.")
     nid = _child(store, wo.id, wo.goal_node_id, "Find the packet")
     _set(store, wo.id, nid, "done")
-    store.apply("set_status", {"work_id": wo.id, "node_id": nid, "status": "closed",
-                               "reason": "judged",
-                               "finalizer": {"verdict": "proceed", "instruction": "",
-                                             "reasoning": "found it"}}, actor="finalizer")
+    store.apply("set_status", {"work_id": wo.id, "node_id": nid, "status": "closed", "reason": "judged",
+                               "finalizer": {"verdict": "achieved", "outcome": "found it"}},
+                actor="finalizer")
     assert _goal_fails(store, wo.id) == 0
-
-
-def test_the_architect_is_told_to_stop_and_ask_after_two_amends(store):
-    from app.assistant.control_nodes.work_architect_node import _render_existing_graph
-    wo = _goal(store, "Get the picture packet.")
-    for title in ("Find the packet", "Find the packet another way"):
-        nid = _child(store, wo.id, wo.goal_node_id, title)
-        _set(store, wo.id, nid, "done")
-        store.apply("set_status", {"work_id": wo.id, "node_id": nid, "status": "closed",
-                                   "reason": "judged",
-                                   "finalizer": {"verdict": "amend", "instruction": "keep looking",
-                                                 "reasoning": "not found"}}, actor="finalizer")
-
-    rendered = _render_existing_graph(store.load(wo.id))
-    assert "2 ATTEMPTS HAVE NOT ACHIEVED THIS GOAL" in rendered
-    assert "Stop trying" in rendered
 
 
 # --------------------------------------------------------------------------- #
 # An automatic completion says what it achieved
 # --------------------------------------------------------------------------- #
 def test_a_rolled_up_goal_records_what_satisfied_it(store):
-    """Only set_work_status used to write `terminal`, so a goal that finished on its own left an
-    empty epitaph and rendered to the steward as a bare title with no evidence."""
     wo = _goal(store, "Get the picture packet.")
     nid = _child(store, wo.id, wo.goal_node_id, "Find the packet")
     _set(store, wo.id, nid, "done")
-    store.apply("set_status", {"work_id": wo.id, "node_id": nid, "status": "closed",
-                               "reason": "judged",
-                               "finalizer": {"verdict": "proceed", "instruction": "",
-                                             "reasoning": "found it"}}, actor="finalizer")
-
+    store.apply("set_status", {"work_id": wo.id, "node_id": nid, "status": "closed", "reason": "judged",
+                               "finalizer": {"verdict": "achieved", "outcome": "found it"}},
+                actor="finalizer")
     loaded = store.load(wo.id)
     assert loaded.status == "done"
     term = (loaded.nodes[loaded.goal_node_id].payload or {}).get("terminal") or {}
     assert term.get("verdict") == "rollup"
-    assert "Find the packet" in term.get("reason", ""), "names the step that satisfied it"
+    assert "Find the packet" in term.get("reason", "")
 
 
-def test_a_hollow_completion_is_legible_in_its_epitaph(store):
-    """Every child closed on `amend` = a goal that completed having achieved nothing. The
-    verdicts are in the epitaph so the next planning pass can see that."""
+def test_a_plan_changing_completion_is_legible_in_its_epitaph(store):
     from app.assistant.control_nodes.strategic_planner_wo_prep_node import _goal_epitaph
     wo = _goal(store, "Get the picture packet.")
     nid = _child(store, wo.id, wo.goal_node_id, "Find the packet")
     _set(store, wo.id, nid, "done")
-    store.apply("set_status", {"work_id": wo.id, "node_id": nid, "status": "closed",
-                               "reason": "judged",
-                               "finalizer": {"verdict": "amend", "instruction": "keep looking",
-                                             "reasoning": "packet not found"}}, actor="finalizer")
-    store.apply("consume_finalizer_instruction", {"work_id": wo.id, "node_id": nid},
-                actor="architect")
+    store.apply("set_status", {"work_id": wo.id, "node_id": nid, "status": "closed", "reason": "judged",
+                               "finalizer": {"verdict": "achieved_plan_changes", "next_step": "plan_changes",
+                                             "outcome": "found it, but the plan changes",
+                                             "recommendation": "drop the contractor branch"}},
+                actor="finalizer")
+    store.apply("consume_finalizer_instruction", {"work_id": wo.id, "node_id": nid}, actor="architect")
     store.apply("edit_node", {"work_id": wo.id, "node_id": nid, "title": "Find the packet"})
-
-    epitaph = _goal_epitaph(store.load(wo.id))
-    assert "amend" in epitaph, f"the hollow completion must show its verdicts: {epitaph!r}"
-
-
-# --------------------------------------------------------------------------- #
-# A concern that has already spent work objects says so
-# --------------------------------------------------------------------------- #
+    assert "achieved_plan_changes" in _goal_epitaph(store.load(wo.id))

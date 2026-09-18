@@ -14,13 +14,15 @@
 > **P4a–P4c**) describes a pipeline that no longer exists. `05_DAYFLOW.md` is authoritative; read the
 > deltas here first and correct as you go:
 >
-> - **`work_repair` is retired** (files on disk, unwired). Failed nodes are the finalizer's — `replan`
->   re-opens with a named difference, `blocked` leaves it for the steward. `_MAX_ASK_TIMEOUTS` went
->   with it, so the 3-strike ask ceiling no longer fires.
+> - **`work_repair` is retired** (files on disk, unwired). Failed nodes carry the finalizer's verdict
+>   and route — `retry` re-opens with a named difference; `unrecoverable` + stop / new_approach /
+>   ask_user is acted on by the architect. Repeated failure escalates to `ask_user` in
+>   `work_finalizer_node` (`_REPEAT_FAILURE_LIMIT` against the goal's `goal_unmet_attempts`).
 > - **The finalizer runs in the dispatch room, not the tick**, judges only the node that pass
->   dispatched, has FOUR verdicts (`proceed`/`amend`/`replan`/`blocked` — no `resolve`), and both
->   judges and writes (`work_finalizer_apply_node` was merged into it). Verdicts persist on the node
->   (`payload.finalizer`), not on a blackboard.
+>   dispatched, answers "was the node's goal achieved" with FOUR verdicts
+>   (`achieved`/`achieved_plan_changes`/`retry`/`unrecoverable`) plus an `outcome` prose account, and
+>   both judges and writes (`work_finalizer_apply_node` was merged into it). Verdicts persist on the
+>   node (`payload.finalizer`), not on a blackboard.
 > - **The planning tick ends at the CLAIM.** `arguments → tool call → finalizer` run in
 >   `dayflow_dispatch_manager`, one room per claimed node on its own thread, opened by
 >   `work_session.open_session`. So `dayflow_switchboard_arguments_node` and `dayflow_tool_caller` are
@@ -200,10 +202,11 @@ consistent with it being the legacy lane's cleaner.
 
 **work_architect** (`gpt-5.6-luna`, no tools) — the structure designer ("Part 2" of the split planner).
 Driven by `work_architect_node`, which fires only when the evaluator created objects this tick or flagged
-some for re-plan — `replan_work_ids`, set by the evaluator from intake OR by the **work_finalizer's AMEND**
-verdict, ≤ 3/tick. It is handed one goal + a shared situational `information` block (ticket replies, active
-tickets, portfolio, recent completions); for a re-plan it also gets the existing graph (and, on a finalizer
-AMEND, the revised intent from `finalizer_amend_intents`) and applies a **delta** — ADD the missing nodes
+some for re-plan — `replan_work_ids`, set by the evaluator from intake OR by any **work_finalizer verdict
+carrying a route** (read off the graph by `_pending_finalizer_instructions`), ≤ 3/tick. It is handed one
+goal + a shared situational `information` block (ticket replies, active tickets, portfolio, recent
+completions); for a re-plan it also gets the existing graph (and the finalizer's outcome, recommendation
+and route, rendered by `_finalizer_block`) and applies a **delta** — ADD the missing nodes
 and ABANDON (via `abandon_node_ids`) the ones the situation made moot, their un-finished subtree with them.
 The agent
 returns `nodes` (slug, title, detail, `kind` = work|notify, `depends_on`, `wake_kind`, `wake_at`/`wake_ref`),

@@ -148,10 +148,11 @@ flow_config:
     "strategic_planner_wo_persist_node": "work_architect_node"
     # work_repair_node was here, and is retired (2026-09-16). Its three dispositions each
     # belong to an agent that can see more than one failed step:
-    #   retry    -> the finalizer's `replan`, which must NAME what will be different (an
+    #   retry    -> the finalizer's `retry`, which must NAME what will be different (an
     #               unchanged retry reproduces its error — 22 identical attempts in two hours)
-    #   escalate -> asking the user is just a node with a communicate goal; the architect plans it
-    #   abandon  -> the steward's, which sees every work object every run
+    #   escalate -> the finalizer's `unrecoverable` + `ask_user`; the architect plans the ask.
+    #               Repeated failure escalates to this deterministically (work_finalizer_node).
+    #   abandon  -> `unrecoverable` + `stop` for a branch; the whole goal is the steward's
     # A failure reached outside a dispatch (sweeper, claim error) is not stranded either: it
     # sits `failed`, the steward sees it in the projection and flags the work object into
     # replan_work_ids, and the architect re-plans it. Keeping repair alongside the finalizer

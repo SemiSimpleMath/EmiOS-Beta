@@ -32,8 +32,9 @@ STATUS_LEGEND = (
     "waiting: held ON PURPOSE on a time / event / dependency gate until its wake; held is NOT stalled. "
     "done: it produced a RESULT and the work_finalizer has not judged it yet — a top-level node counts "
     "toward its goal only once the finalizer closes it. closed: judged and counted — the satisfied "
-    "terminal, and the only one that completes a goal. failed: the step broke and is awaiting "
-    "work_repair. abandoned: dropped. superseded: replaced by newer work."
+    "terminal, and the only one that completes a goal. failed: judged NOT ACHIEVED — the finalizer's "
+    "outcome and recommendation are on the node (retry / new approach / stop / ask the user) and the "
+    "architect acts on them next tick. abandoned: dropped. superseded: replaced by newer work."
 )
 
 
@@ -214,6 +215,17 @@ def render_work_portfolio(wo, now=None) -> str:
             why = node_result(wo, n)
             if why:
                 L.append(f"    WHY/RESULT: {why}")
+            # The finalizer's judgment of that result — the part the steward could not see before,
+            # so a step needing the user rendered as a bare failure with the worker's evidence only.
+            fin = (n.payload or {}).get("finalizer")
+            if isinstance(fin, dict) and str(fin.get("outcome") or "").strip():
+                route = str(fin.get("next_step") or "").strip()
+                L.append(f"    FINALIZER ({fin.get('verdict')}{' -> ' + route if route else ''}): "
+                         f"{fin.get('outcome')}")
+                if str(fin.get("recommendation") or "").strip():
+                    L.append(f"    RECOMMENDS: {fin.get('recommendation')}")
+                if str(fin.get("question_for_user") or "").strip():
+                    L.append(f"    ASK THE USER: {fin.get('question_for_user')}")
 
     # RECENT OUTCOMES — the delta: goal -> agent-facing result, newest first. Lets the steward judge whether
     # each finished node ADVANCED the work object's goal (toward / sideways / wall).

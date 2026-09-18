@@ -1,26 +1,26 @@
 """The work finalizer: what it judges, and what each verdict writes to the graph.
 
-One agent call per pass, on the ONE node that pass dispatched, and the verdict is written to
-emi.db in the same control node — the agent's schema is already in hand there, so nothing is
-handed to a second node through a blackboard. (It was two nodes until 2026-09-16.)
+One agent call per dispatch, on the ONE node that dispatch ran, and the verdict is written to
+emi.db in the same control node. The verdict answers one question — was the node's goal achieved —
+and the tool's own status (returned / reported failure) is input to that judgment, never a limit on
+it. Every verdict carries `outcome` prose for the planner; every verdict except `achieved` carries a
+recommendation with a route the architect acts on next tick.
 
-The part worth guarding hardest is the handoff to the architect. An `amend` or `replan` is advice
-for a planner that runs on a LATER tick, and every tick builds a fresh manager with a fresh
-Blackboard — so the instruction has to be on the node, in the database, or it is gone before its
-reader exists. It was gone, silently, and both halves had passing tests.
-
-Its reach is the node it judged. Until 2026-09-16 a third verdict, RESOLVE, let it set the whole
-WorkObject done or abandoned from one node's result — that belongs to the steward, which sees
-every work object's outcomes each tick.
+Two things are guarded hardest here, because both were broken by tests that passed:
+  * the handoff to the architect crosses a tick boundary and must live on the NODE;
+  * the prompt the finalizer actually receives must not narrow its verdicts by tool status —
+    which it did, in three places the previous tests never rendered.
 """
 from __future__ import annotations
 
 import pytest
 
 from app.assistant.control_nodes.work_architect_node import (
-    _finalizer_block, _pending_finalizer_instructions,
+    _finalizer_block, _pending_finalizer_instructions, _render_existing_graph,
 )
-from app.assistant.control_nodes.work_finalizer_node import WorkFinalizerNode
+from app.assistant.control_nodes.work_finalizer_node import (
+    WorkFinalizerNode, _REPEAT_FAILURE_LIMIT,
+)
 from app.assistant.tests.dayflow.conftest import FakeBlackboard
 
 
@@ -29,7 +29,7 @@ def _store():
     return get_dayflow_work_store()
 
 
-def _wo_with_judged_node(store, title="Finalizer WO"):
+def _returned_wo(store, title="Finalizer WO"):
     """A top-level node whose call RETURNED — sitting at `done`, awaiting judgment."""
     wo = store.apply("create_work_object", {"title": title, "goal_content": title,
                                             "satisfied_when_kind": "all_owned_children_done"})
@@ -40,12 +40,12 @@ def _wo_with_judged_node(store, title="Finalizer WO"):
     return wo.id
 
 
-def _failed_wo(store, title="Failed WO"):
-    """A top-level node whose call FAILED — the tool reported it could not run."""
+def _errored_wo(store, title="Errored WO"):
+    """A top-level node whose TOOL reported it could not run — sitting at `failed`."""
     wo = store.apply("create_work_object", {"title": title, "goal_content": title,
                                             "satisfied_when_kind": "all_owned_children_done"})
     store.apply("add_node", {"work_id": wo.id, "id": "nf1", "type": "subtask",
-                             "parent_id": wo.goal_node_id, "title": "Call that failed"})
+                             "parent_id": wo.goal_node_id, "title": "Call that errored"})
     for st in ("actionable", "dispatched", "failed"):
         store.apply("set_status", {"work_id": wo.id, "node_id": "nf1", "status": st})
     return wo.id
@@ -54,23 +54,57 @@ def _failed_wo(store, title="Failed WO"):
 def _run(monkeypatch, work_id, node_id, verdict_data):
     """Drive the finalizer over one node with the agent call stubbed to `verdict_data`."""
     monkeypatch.setattr(WorkFinalizerNode, "_scope", lambda self, message: None)
-    monkeypatch.setattr(WorkFinalizerNode, "_judge",
-                        lambda self, wo, node, scope: verdict_data)
+    monkeypatch.setattr(WorkFinalizerNode, "_judge", lambda self, wo, node, scope: verdict_data)
     bb = FakeBlackboard({"work_node_ref": f"{work_id}::{node_id}"})
     WorkFinalizerNode(name="work_finalizer_node", blackboard=bb,
                       agent_registry={}, tool_registry={}).action_handler(message=None)
     return bb
 
 
+def _capture_prompt(monkeypatch, work_id, node_id, reply):
+    """Run the REAL _judge with a spy in place of the agent; return the `information` it received."""
+    seen = {}
+    monkeypatch.setattr(WorkFinalizerNode, "_scope", lambda self, message: None)
+    import app.assistant.control_nodes.work_finalizer_node as mod
+
+    class _Spy:
+        def action_handler(_s, message):
+            seen["information"] = message.information
+            seen["task"] = message.task
+            class _R: data = reply
+            return _R()
+
+    monkeypatch.setattr(mod.DI, "agent_factory",
+                        type("F", (), {"create_agent": staticmethod(lambda *a, **k: _Spy())})())
+    bb = FakeBlackboard({"work_node_ref": f"{work_id}::{node_id}"})
+    WorkFinalizerNode(name="work_finalizer_node", blackboard=bb,
+                      agent_registry={}, tool_registry={}).action_handler(message=None)
+    return seen
+
+
+ACHIEVED = {"verdict": "achieved", "outcome": "the deadline is confirmed as October 9"}
+PLAN_CHANGES = {"verdict": "achieved_plan_changes",
+                "outcome": "the unit is under warranty, so a contractor is the wrong route",
+                "recommendation": "drop finding a contractor; contact the manufacturer instead"}
+RETRY = {"verdict": "retry", "outcome": "the account token had expired before the lookup ran",
+         "recommendation": "re-authorise the account first, then the same lookup works"}
+STOP = {"verdict": "unrecoverable", "next_step": "stop",
+        "outcome": "the user replied 'drop it' — this line is not wanted",
+        "recommendation": "stop this branch"}
+NEW_APPROACH = {"verdict": "unrecoverable", "next_step": "new_approach",
+                "outcome": "the public site has no such page; scraping it cannot work",
+                "recommendation": "ask the vendor's API instead of the website"}
+ASK = {"verdict": "unrecoverable", "next_step": "ask_user",
+       "outcome": "searched pods and mail thoroughly; the packet is in nothing we can reach",
+       "recommendation": "the user holds the school account",
+       "question_for_user": "Did the picture-day packet arrive through ParentSquare?"}
+
+
 class TestWhatGetsJudged:
 
     def test_it_judges_only_the_node_that_ran(self, monkeypatch):
-        """Not a sweep. Another work object sitting at `done` is none of this pass's
-        business — a run makes one call, so one result can have appeared."""
         store = _store()
-        mine = _wo_with_judged_node(store, title="The one that ran")
-
-        # A second work object, also at `done`. Node ids are globally unique, so it gets its own.
+        mine = _returned_wo(store, title="The one that ran")
         other = store.apply("create_work_object", {"title": "Someone else's finished node",
                                                    "goal_content": "other",
                                                    "satisfied_when_kind": "all_owned_children_done"})
@@ -79,476 +113,318 @@ class TestWhatGetsJudged:
         for st in ("actionable", "dispatched", "done"):
             store.apply("set_status", {"work_id": other.id, "node_id": "other_n1", "status": st})
 
-        _run(monkeypatch, mine, "n1", {"verdict": "proceed", "reasoning": "done"})
+        _run(monkeypatch, mine, "n1", ACHIEVED)
 
         assert store.load(mine).nodes["n1"].status == "closed"
         assert store.load(other.id).nodes["other_n1"].status == "done", "untouched"
 
     def test_a_pass_that_ran_nothing_judges_nothing(self, monkeypatch):
         store = _store()
-        wid = _wo_with_judged_node(store)
+        wid = _returned_wo(store)
         monkeypatch.setattr(WorkFinalizerNode, "_scope", lambda self, message: None)
-        bb = FakeBlackboard()          # no work_node_ref — nothing was dispatched
+        bb = FakeBlackboard()
         WorkFinalizerNode(name="work_finalizer_node", blackboard=bb,
                           agent_registry={}, tool_registry={}).action_handler(message=None)
-
         assert bb.get_state_value("work_finalizer_result", []) == []
         assert store.load(wid).nodes["n1"].status == "done"
 
-    def test_a_failed_node_IS_judged(self, monkeypatch):
-        """Judging the failure is the point: the result text is the only account of the failure
-        MODE, and the mode is what decides whether trying again could go differently."""
+    def test_an_errored_node_IS_judged(self, monkeypatch):
+        """The result text is the only account of the failure MODE, and the mode decides."""
         store = _store()
-        wid = _failed_wo(store)
-        seen = {}
-
-        monkeypatch.setattr(WorkFinalizerNode, "_scope", lambda self, message: None)
-
-        def _judge(self, wo, node, scope):
-            seen["status"] = node.status
-            return {"verdict": "blocked", "reasoning": "the account cannot be reached at all"}
-
-        monkeypatch.setattr(WorkFinalizerNode, "_judge", _judge)
-        bb = FakeBlackboard({"work_node_ref": f"{wid}::nf1"})
-        WorkFinalizerNode(name="work_finalizer_node", blackboard=bb,
-                          agent_registry={}, tool_registry={}).action_handler(message=None)
-
-        assert seen["status"] == "failed", "the finalizer must see the failed node"
+        wid = _errored_wo(store)
+        seen = _capture_prompt(monkeypatch, wid, "nf1", ASK)
+        assert "nf1" in seen["information"]
 
     def test_a_worker_internal_node_is_not_judged(self, monkeypatch):
-        """Only the architect's own units count toward the goal. A worker's nested checklist step
-        is internal to the call that grew it."""
         store = _store()
-        wid = _wo_with_judged_node(store)
+        wid = _returned_wo(store)
         store.apply("add_node", {"work_id": wid, "id": "n1_child", "type": "subtask",
                                  "parent_id": "n1", "title": "the worker's own step"})
         for st in ("actionable", "dispatched", "done"):
             store.apply("set_status", {"work_id": wid, "node_id": "n1_child", "status": st})
-
-        _run(monkeypatch, wid, "n1_child", {"verdict": "proceed", "reasoning": "nope"})
-
+        _run(monkeypatch, wid, "n1_child", ACHIEVED)
         assert store.load(wid).nodes["n1_child"].status == "done", "not the finalizer's to close"
+
+
+class TestThePromptDoesNotNarrowTheVerdict:
+    """The bug the previous tests could not see, because every one of them stubbed _judge.
+
+    The system prompt said 'judge the goal'; the per-call injection, the user prompt, and the
+    schema all said a returned call gets proceed or amend. Three-to-one, and the three were nearer
+    the decision. So this renders the REAL per-call text and asserts it names no verdict at all.
+    """
+
+    def test_a_returned_call_is_not_told_which_verdicts_it_may_give(self, monkeypatch):
+        store = _store()
+        wid = _returned_wo(store)
+        info = _capture_prompt(monkeypatch, wid, "n1", ACHIEVED)["information"]
+        assert "the call returned" in info
+        for word in ("proceed", "amend", "'achieved'", "Your verdict is"):
+            assert word not in info, f"the per-call text narrows the verdict: {word!r}"
+
+    def test_an_errored_call_is_not_told_either(self, monkeypatch):
+        store = _store()
+        wid = _errored_wo(store)
+        info = _capture_prompt(monkeypatch, wid, "nf1", ASK)["information"]
+        assert "could not run" in info
+        for word in ("replan", "blocked", "'retry'", "Your verdict is"):
+            assert word not in info, f"the per-call text narrows the verdict: {word!r}"
+
+    def test_the_user_prompt_and_schema_carry_no_status_based_limit(self):
+        from pathlib import Path
+        import app.assistant.agents.dayflow_orchestrator.work_finalizer.agent_form as form_mod
+        root = Path(form_mod.__file__).parent
+        user = (root / "prompts" / "user.j2").read_text(encoding="utf-8")
+        for stale in ("proceed / amend", "(proceed", "AMEND"):
+            assert stale not in user
+        schema = "\n".join(f.description or "" for f in form_mod.AgentForm.model_fields.values())
+        assert "the call FAILED" not in schema, "the schema ties a verdict to tool status"
 
 
 class TestTheVerdictsWrite:
 
-    def test_proceed_closes_the_node_and_completes_the_goal(self, monkeypatch):
+    def test_achieved_closes_the_node_and_completes_the_goal(self, monkeypatch):
         store = _store()
-        wid = _wo_with_judged_node(store)
-
-        _run(monkeypatch, wid, "n1",
-             {"verdict": "proceed", "reasoning": "the deadline is confirmed"})
-
+        wid = _returned_wo(store)
+        _run(monkeypatch, wid, "n1", ACHIEVED)
         wo = store.load(wid)
-        assert wo.nodes["n1"].status == "closed"   # the satisfied terminal is_satisfied keys on
-        assert wo.status == "done"                 # rollup completes the goal on the last close
+        assert wo.nodes["n1"].status == "closed"
+        assert wo.status == "done"
+        assert wo.nodes["n1"].payload["finalizer"]["outcome"] == ACHIEVED["outcome"]
+        assert wo.nodes["n1"].payload["finalizer"]["next_step"] == ""
 
-    def test_amend_closes_the_node_and_records_the_revised_intent(self, monkeypatch):
+    def test_plan_changes_closes_the_node_and_holds_the_goal_for_the_architect(self, monkeypatch):
         store = _store()
-        wid = _wo_with_judged_node(store)
+        wid = _returned_wo(store)
+        _run(monkeypatch, wid, "n1", PLAN_CHANGES)
+        wo = store.load(wid)
+        assert wo.nodes["n1"].status == "closed"
+        assert wo.status == "active", "held until the architect consumes the recommendation"
+        fin = wo.nodes["n1"].payload["finalizer"]
+        assert fin["next_step"] == "plan_changes"
+        assert fin["recommendation"] == PLAN_CHANGES["recommendation"]
 
-        _run(monkeypatch, wid, "n1", {
-            "verdict": "amend", "reasoning": "the packet details were never found",
-            "amend_intent": "ask the school directly instead of searching",
-        })
-
-        node = store.load(wid).nodes["n1"]
-        assert node.status == "closed"
-        handed = node.payload["finalizer"]
-        assert handed["instruction"] == "ask the school directly instead of searching"
-        assert handed["verdict"] == "amend"
-        # Closing writes the epitaph; the instruction sits beside it, not instead of it.
-        assert node.payload["terminal"]["status"] == "closed"
-
-    def test_replan_reopens_the_node_to_the_architects_inbox(self, monkeypatch):
+    def test_retry_on_a_returned_call_counts_the_attempt_and_reopens_the_node(self, monkeypatch):
+        """The case that used to raise 'illegal transition done->proposed' and be swallowed."""
         store = _store()
-        wid = _failed_wo(store)
+        wid = _returned_wo(store)
+        _run(monkeypatch, wid, "n1", RETRY)
+        wo = store.load(wid)
+        assert wo.nodes["n1"].status == "proposed", "back in the architect's inbox"
+        assert wo.nodes["n1"].payload["failure_count"] == 1, "it passed through failed"
+        assert wo.nodes[wo.goal_node_id].payload["goal_unmet_attempts"] == 1
+        assert wo.nodes["n1"].payload["finalizer"]["next_step"] == "retry"
 
-        _run(monkeypatch, wid, "nf1", {
-            "verdict": "replan", "reasoning": "auth expired",
-            "replan_instruction": "re-authorise, then repeat the same lookup",
-        })
-
-        node = store.load(wid).nodes["nf1"]
-        assert node.status == "proposed"
-        handed = node.payload["finalizer"]
-        assert handed["verdict"] == "replan"
-        assert "re-authorise" in handed["instruction"]
-        assert handed["reasoning"] == "auth expired"
-
-    def test_blocked_leaves_the_node_failed_but_records_why(self, monkeypatch):
-        """`blocked` changes no status — `failed` is already the truth — but the finalizer's
-        account of WHY still has to reach the graph, or the steward inherits a mute failure.
-        It used to reach nothing at all: no status change meant no write of any kind."""
+    def test_retry_on_an_errored_call_reopens_it_too(self, monkeypatch):
         store = _store()
-        wid = _failed_wo(store)
+        wid = _errored_wo(store)
+        _run(monkeypatch, wid, "nf1", RETRY)
+        assert store.load(wid).nodes["nf1"].status == "proposed"
 
-        _run(monkeypatch, wid, "nf1",
-             {"verdict": "blocked", "reasoning": "there is no route to that account"})
+    @pytest.mark.parametrize("data", [STOP, NEW_APPROACH, ASK], ids=["stop", "new_approach", "ask_user"])
+    def test_unrecoverable_fails_a_returned_call_and_carries_its_route(self, monkeypatch, data):
+        store = _store()
+        wid = _returned_wo(store)
+        _run(monkeypatch, wid, "n1", data)
+        wo = store.load(wid)
+        assert wo.nodes["n1"].status == "failed", "a returned call that achieved nothing is not satisfied"
+        assert wo.status == "active"
+        fin = wo.nodes["n1"].payload["finalizer"]
+        assert fin["next_step"] == data["next_step"]
+        assert fin["outcome"] == data["outcome"]
+        if data is ASK:
+            assert fin["question_for_user"] == ASK["question_for_user"]
 
-        node = store.load(wid).nodes["nf1"]
-        assert node.status == "failed", "nothing pretends it succeeded"
-        assert node.payload["finalizer"]["reasoning"] == "there is no route to that account"
+    def test_unrecoverable_on_an_already_failed_node_records_without_double_counting(self, monkeypatch):
+        store = _store()
+        wid = _errored_wo(store)                       # failed once already
+        _run(monkeypatch, wid, "nf1", ASK)
+        wo = store.load(wid)
+        assert wo.nodes["nf1"].status == "failed"
+        assert wo.nodes["nf1"].payload["failure_count"] == 1
+        assert wo.nodes["nf1"].payload["finalizer"]["question_for_user"]
 
     def test_it_never_ends_a_work_object(self, monkeypatch):
-        """A goal that has become moot is the steward's call. No verdict reaches set_work_status."""
         store = _store()
-        wid = _wo_with_judged_node(store)
+        wid = _returned_wo(store)
         store.apply("add_node", {"work_id": wid, "id": "n2", "type": "subtask",
                                  "parent_id": store.load(wid).goal_node_id, "title": "Still to do"})
-
-        _run(monkeypatch, wid, "n1", {
-            "verdict": "amend", "reasoning": "the restaurant is closed; this goal may be moot",
-            "amend_intent": "nothing further is possible here",
-        })
-
+        _run(monkeypatch, wid, "n1", STOP)
         wo = store.load(wid)
         assert wo.status == "active", "only the steward ends a work object"
-        assert wo.nodes["n2"].status == "proposed", "the rest of the plan is untouched"
+        assert wo.nodes["n2"].status == "proposed"
 
     def test_an_unusable_verdict_is_refused_loudly(self, monkeypatch):
         store = _store()
-        wid = _wo_with_judged_node(store)
-
-        bb = _run(monkeypatch, wid, "n1",
-                  {"verdict": "resolve", "reasoning": "retired verdict"})
-
-        assert store.load(wid).nodes["n1"].status == "done"   # nothing applied
+        wid = _returned_wo(store)
+        bb = _run(monkeypatch, wid, "n1", {"verdict": "blocked", "outcome": "retired verdict"})
+        assert store.load(wid).nodes["n1"].status == "done"
         assert bb.get_state_value("work_finalizer_result") == []
 
 
 class TestTheContract:
-    """A replan must name what will be DIFFERENT. An unchanged retry reproduces the error —
-    which is how one bad argument became 22 identical attempts in two hours."""
 
-    def test_replan_without_an_instruction_is_refused_by_the_contract(self):
+    def test_outcome_is_required_on_every_verdict(self):
         from app.assistant.agents.dayflow_orchestrator.work_finalizer.agent_form import AgentForm
+        with pytest.raises(ValueError, match="outcome is required"):
+            AgentForm(verdict="achieved", outcome="")
 
-        with pytest.raises(ValueError, match="replan_instruction is required"):
-            AgentForm(reasoning="it failed", verdict="replan")
-
-    def test_replan_with_an_instruction_is_accepted(self):
+    def test_recommendation_is_required_unless_achieved(self):
         from app.assistant.agents.dayflow_orchestrator.work_finalizer.agent_form import AgentForm
+        AgentForm(verdict="achieved", outcome="done")
+        for v in ("achieved_plan_changes", "retry"):
+            with pytest.raises(ValueError, match="recommendation is required"):
+                AgentForm(verdict=v, outcome="x")
 
-        form = AgentForm(reasoning="the account was not authorised", verdict="replan",
-                         replan_instruction="re-authorise the Google account first, then the "
-                                            "same lookup works")
-        assert form.verdict == "replan"
-
-    def test_blocked_needs_no_extra_field(self):
+    def test_unrecoverable_needs_a_typed_next_step(self):
         from app.assistant.agents.dayflow_orchestrator.work_finalizer.agent_form import AgentForm
+        with pytest.raises(ValueError, match="next_step must be one of"):
+            AgentForm(verdict="unrecoverable", outcome="x", recommendation="y")
+        with pytest.raises(ValueError, match="question_for_user is required"):
+            AgentForm(verdict="unrecoverable", next_step="ask_user", outcome="x", recommendation="y")
+        assert AgentForm(**ASK).next_step == "ask_user"
 
-        assert AgentForm(reasoning="no route exists", verdict="blocked").verdict == "blocked"
+    def test_next_step_is_refused_on_other_verdicts(self):
+        from app.assistant.agents.dayflow_orchestrator.work_finalizer.agent_form import AgentForm
+        with pytest.raises(ValueError, match="only for verdict='unrecoverable'"):
+            AgentForm(verdict="retry", next_step="stop", outcome="x", recommendation="y")
 
 
-class TestRepeatedFailure:
-    """Two failures at the same step means the step is wrong, not the luck.
+class TestRepeatedFailureIsEscalated:
+    """Once a goal has accumulated the limit of attempts that did not achieve it, the runtime — not
+    the finalizer — decides: the user is asked, and the same thing is not tried again."""
 
-    Nothing counted failures, so every failure looked like a first failure to every agent that saw
-    one: a delivery node wrote the SAME tool error onto its graph seventeen times, and the only
-    thing that grew was a count the projections read back as progress.
-    """
+    def _exhaust(self, store, wid, node_id):
+        for _ in range(_REPEAT_FAILURE_LIMIT - 1):
+            store.apply("set_status", {"work_id": wid, "node_id": node_id, "status": "dispatched"})
+            store.apply("set_status", {"work_id": wid, "node_id": node_id, "status": "failed"})
 
-    def test_each_failure_is_counted_on_the_node(self):
+    def test_a_retry_at_the_limit_becomes_ask_user_and_does_not_reopen(self, monkeypatch):
         store = _store()
-        wid = _failed_wo(store)                      # already failed once
-        assert store.load(wid).nodes["nf1"].payload["failure_count"] == 1
+        wid = _errored_wo(store)                       # attempt 1
+        self._exhaust(store, wid, "nf1")               # attempts up to limit-1 ... this verdict is the limit-th
+        # Re-dispatch so the finalizer sees a fresh result to judge.
+        store.apply("set_status", {"work_id": wid, "node_id": "nf1", "status": "dispatched"})
+        store.apply("set_status", {"work_id": wid, "node_id": "nf1", "status": "done"})
 
-        for _ in range(2):                           # failed -> dispatched -> failed
-            store.apply("set_status", {"work_id": wid, "node_id": "nf1", "status": "dispatched"})
-            store.apply("set_status", {"work_id": wid, "node_id": "nf1", "status": "failed"})
-        assert store.load(wid).nodes["nf1"].payload["failure_count"] == 3
+        _run(monkeypatch, wid, "nf1", RETRY)
 
-    def test_re_entering_failed_is_what_counts_not_every_write(self):
-        """A status write that leaves the node `failed` (the finalizer's `blocked` verdict does
-        exactly this) must not inflate the count — otherwise judging a failure looks like one."""
+        wo = store.load(wid)
+        assert wo.nodes["nf1"].status == "failed", "not re-opened — the same thing is not tried again"
+        fin = wo.nodes["nf1"].payload["finalizer"]
+        assert fin["next_step"] == "ask_user"
+        assert fin["escalated"] is True
+        assert fin["question_for_user"], "an escalation carries a question, taken from the recommendation"
+
+    def test_below_the_limit_a_retry_is_honoured(self, monkeypatch):
         store = _store()
-        wid = _failed_wo(store)
-        store.apply("set_status", {"work_id": wid, "node_id": "nf1", "status": "failed",
-                                   "reason": "still failed"})
-        assert store.load(wid).nodes["nf1"].payload["failure_count"] == 1
+        wid = _returned_wo(store)
+        _run(monkeypatch, wid, "n1", RETRY)
+        fin = store.load(wid).nodes["n1"].payload["finalizer"]
+        assert fin["next_step"] == "retry" and fin["escalated"] is False
 
-    def test_the_finalizer_is_told_when_a_step_keeps_failing(self, monkeypatch):
-        """The finalizer judges ONE result, so repetition is invisible to it unless stated."""
-        from app.assistant.control_nodes.work_finalizer_node import _REPEAT_FAILURE_LIMIT
-
+    def test_the_finalizer_is_told_the_goal_keeps_failing(self, monkeypatch):
         store = _store()
-        wid = _failed_wo(store)
+        wid = _errored_wo(store)
         for _ in range(_REPEAT_FAILURE_LIMIT):
             store.apply("set_status", {"work_id": wid, "node_id": "nf1", "status": "dispatched"})
             store.apply("set_status", {"work_id": wid, "node_id": "nf1", "status": "failed"})
-
-        seen = {}
-        monkeypatch.setattr(WorkFinalizerNode, "_scope", lambda self, message: None)
-
-        real_judge = WorkFinalizerNode._judge
-
-        def _capture(self, wo, node, scope):
-            # Intercept the prompt the agent would receive.
-            import app.assistant.control_nodes.work_finalizer_node as mod
-
-            class _Spy:
-                def action_handler(_s, message):
-                    seen["information"] = message.information
-                    class _R: data = {"verdict": "blocked", "reasoning": "cannot be made to work"}
-                    return _R()
-
-            monkeypatch.setattr(mod.DI, "agent_factory",
-                                type("F", (), {"create_agent": staticmethod(lambda *a, **k: _Spy())})())
-            return real_judge(self, wo, node, scope)
-
-        monkeypatch.setattr(WorkFinalizerNode, "_judge", _capture)
-        bb = FakeBlackboard({"work_node_ref": f"{wid}::nf1"})
-        WorkFinalizerNode(name="work_finalizer_node", blackboard=bb,
-                          agent_registry={}, tool_registry={}).action_handler(message=None)
-
-        info = seen.get("information", "")
-        assert "HAS NOW FAILED" in info, "the finalizer was not told the step keeps failing"
-        assert "ask" in info.lower(), "it must be offered the ask-the-user route, not only 'stop'"
+        info = _capture_prompt(monkeypatch, wid, "nf1", ASK)["information"]
+        assert "HAVE NOT ACHIEVED THIS GOAL" in info
+        assert "question_for_user" in info
 
     def test_a_first_failure_gets_no_such_warning(self, monkeypatch):
-        """One failure is ordinary. Crying wolf on it would make the real signal worthless."""
         store = _store()
-        wid = _failed_wo(store)                      # exactly one failure
-        seen = {}
-        monkeypatch.setattr(WorkFinalizerNode, "_scope", lambda self, message: None)
-        real_judge = WorkFinalizerNode._judge
+        wid = _errored_wo(store)
+        info = _capture_prompt(monkeypatch, wid, "nf1", ASK)["information"]
+        assert "HAVE NOT ACHIEVED THIS GOAL" not in info
 
-        def _capture(self, wo, node, scope):
-            import app.assistant.control_nodes.work_finalizer_node as mod
-
-            class _Spy:
-                def action_handler(_s, message):
-                    seen["information"] = message.information
-                    class _R: data = {"verdict": "blocked", "reasoning": "no"}
-                    return _R()
-
-            monkeypatch.setattr(mod.DI, "agent_factory",
-                                type("F", (), {"create_agent": staticmethod(lambda *a, **k: _Spy())})())
-            return real_judge(self, wo, node, scope)
-
-        monkeypatch.setattr(WorkFinalizerNode, "_judge", _capture)
-        bb = FakeBlackboard({"work_node_ref": f"{wid}::nf1"})
-        WorkFinalizerNode(name="work_finalizer_node", blackboard=bb,
-                          agent_registry={}, tool_registry={}).action_handler(message=None)
-
-        assert "HAS NOW FAILED" not in seen.get("information", "")
-
-    def test_the_steward_sees_the_repeat_count_in_its_portfolio(self):
+    def test_the_steward_sees_the_verdict_on_a_failed_node(self, monkeypatch):
+        """Before: the steward saw the worker's evidence and a bare 'failed'. The finalizer's own
+        judgment — the part that says 'this needs the user' — reached nobody."""
         from app.assistant.dayflow_orchestrator.work_portfolio import render_work_portfolio
-
         store = _store()
-        wid = _failed_wo(store)
-        for _ in range(2):
-            store.apply("set_status", {"work_id": wid, "node_id": "nf1", "status": "dispatched"})
-            store.apply("set_status", {"work_id": wid, "node_id": "nf1", "status": "failed"})
-
+        wid = _returned_wo(store)
+        _run(monkeypatch, wid, "n1", ASK)
         rendered = render_work_portfolio(store.load(wid))
-        assert "HAS FAILED 3 TIMES" in rendered
-        assert "Retrying it will not help" in rendered
+        assert "FINALIZER (unrecoverable -> ask_user)" in rendered
+        assert ASK["question_for_user"] in rendered
 
 
 class TestTheHandoffToTheArchitect:
-    """The instruction has to outlive the tick that produced it. This is where it didn't."""
+    """The recommendation has to outlive the dispatch that produced it, on the node."""
 
-    def test_the_instruction_survives_into_the_next_tick(self, monkeypatch):
-        """The bug every other test here missed, for both of the reasons it was missable.
-
-        The contract refused a replan with no instruction, and the writer handed one on
-        correctly — but the writer's tests fed it a verdict dict built BY HAND with the field
-        already present, while the real producer never copied it out of the agent's schema. And
-        the handoff itself lived on the manager's Blackboard, which does not exist by the time
-        the architect runs. So this drives the real producer and then reads the way the next
-        tick reads: from the database, with nothing in memory carried across.
-        """
+    @pytest.mark.parametrize("data,route", [(PLAN_CHANGES, "plan_changes"), (RETRY, "retry"),
+                                            (STOP, "stop"), (NEW_APPROACH, "new_approach"), (ASK, "ask_user")])
+    def test_every_non_achieved_verdict_reaches_the_architect(self, monkeypatch, data, route):
         store = _store()
-        wid = _failed_wo(store)
+        wid = _returned_wo(store)
+        _run(monkeypatch, wid, "n1", data)
 
-        _run(monkeypatch, wid, "nf1", {
-            "verdict": "replan", "reasoning": "the token had expired",
-            "replan_instruction": "re-authorise the Google account first, then the same lookup works",
-        })
-
-        # THE NEXT TICK: a fresh manager, a fresh blackboard, nothing shared but emi.db.
-        pending = _pending_finalizer_instructions(store)
-        assert wid in pending, (
-            "the finalizer's instruction did not outlive its tick — the architect that reads it "
-            "runs later, with a fresh blackboard, and would find nothing")
+        pending = _pending_finalizer_instructions(store)        # THE NEXT TICK: fresh everything
+        assert wid in pending, f"{route} did not outlive its dispatch"
         entry = pending[wid][0]
-        assert entry["node_id"] == "nf1"
-        assert "re-authorise" in entry["instruction"]
-        assert entry["reasoning"] == "the token had expired"
+        assert entry["node_id"] == "n1" and entry["next_step"] == route
+        assert entry["outcome"] == data["outcome"]
 
-        # And the architect reads it as a licence to prune, which an empty instruction is not.
-        block, instruction = _finalizer_block(pending[wid])
-        assert instruction, "no instruction means no prune licence"
-        assert "nf1" in block and "re-authorise" in block
+        block, licence = _finalizer_block(pending[wid])
+        assert "n1" in block and data["outcome"] in block
+        assert licence, "a recommendation is the prune licence"
+        if route == "ask_user":
+            assert ASK["question_for_user"] in block and "exactly ONE node" in block
 
-    def test_an_instruction_is_read_once_and_not_re_applied_every_tick(self, monkeypatch):
-        """Consumed after the architect acts, or the same judgment is re-applied for the life of
-        the work object — a step dealt with ticks ago keeps re-arriving as fresh advice."""
+    def test_achieved_asks_the_architect_for_nothing(self, monkeypatch):
         store = _store()
-        wid = _failed_wo(store)
+        wid = _returned_wo(store)
+        _run(monkeypatch, wid, "n1", ACHIEVED)
+        assert wid not in _pending_finalizer_instructions(store)
 
-        _run(monkeypatch, wid, "nf1", {
-            "verdict": "replan", "reasoning": "the token had expired",
-            "replan_instruction": "re-authorise the Google account first",
-        })
-
+    def test_a_recommendation_is_read_once(self, monkeypatch):
+        store = _store()
+        wid = _returned_wo(store)
+        _run(monkeypatch, wid, "n1", RETRY)
         assert wid in _pending_finalizer_instructions(store)
-        store.apply("consume_finalizer_instruction", {"work_id": wid, "node_id": "nf1"},
-                    actor="architect")
+        store.apply("consume_finalizer_instruction", {"work_id": wid, "node_id": "n1"}, actor="architect")
         assert wid not in _pending_finalizer_instructions(store)
+        assert store.load(wid).nodes["n1"].payload["finalizer"]["consumed_at"]
 
-        # Stamped, not deleted: the node keeps the record of what was decided.
-        entry = store.load(wid).nodes["nf1"].payload["finalizer"]
-        assert "re-authorise" in entry["instruction"] and entry["consumed_at"]
-
-    def test_proceed_asks_the_architect_for_nothing(self, monkeypatch):
-        """A verdict that carries no instruction must not drag its work object into the replan
-        set — that would re-plan every goal on every successful step."""
+    def test_a_failed_node_shows_its_outcome_in_the_replan_view(self, monkeypatch):
         store = _store()
-        wid = _wo_with_judged_node(store)
-
-        _run(monkeypatch, wid, "n1",
-             {"verdict": "proceed", "reasoning": "the deadline is confirmed"})
-
-        assert wid not in _pending_finalizer_instructions(store)
+        wid = _returned_wo(store)
+        _run(monkeypatch, wid, "n1", ASK)
+        rendered = _render_existing_graph(store.load(wid))
+        assert "status=failed" in rendered
+        assert "why (ask_user)" in rendered and ASK["outcome"] in rendered
 
 
 class TestTheRollupDoesNotRaceTheArchitect:
-    """A goal must not auto-complete while a verdict is still asking to change its plan.
 
-    2026-09-17, observed live: a lights node was judged `amend` — the finalizer's own words were
-    "the result does not show that the lights were actually turned off" — and `amend` maps to
-    `closed`. Closing the only child triggered the rollup, the work object went `done`, and the
-    instruction written for the architect became unreachable, because
-    _pending_finalizer_instructions scans ACTIVE objects only. The judgment was right and the
-    rollup overrode it: the goal reported success while the lights were still on.
-    """
-
-    def test_an_unconsumed_amend_holds_the_goal_open(self, monkeypatch):
+    def test_a_pending_plan_change_holds_the_goal_open(self, monkeypatch):
         store = _store()
-        wid = _wo_with_judged_node(store)          # a single top-level node, at `done`
-
-        _run(monkeypatch, wid, "n1", {
-            "verdict": "amend", "reasoning": "the result does not show the work happened",
-            "amend_intent": "try the other route before calling this finished",
-        })
-
-        wo = store.load(wid)
-        assert wo.nodes["n1"].status == "closed", "the node is still judged and closed"
-        assert wo.status == "active", (
-            "the goal completed while a verdict was still asking the architect to change it — "
-            "the instruction is now unreachable")
-        assert wid in _pending_finalizer_instructions(store)
-
-    def test_it_completes_once_the_architect_has_consumed(self, monkeypatch):
-        """The hold is temporary: it lasts until the instruction is acted on, not forever."""
-        store = _store()
-        wid = _wo_with_judged_node(store)
-
-        _run(monkeypatch, wid, "n1", {
-            "verdict": "amend", "reasoning": "changes the plan",
-            "amend_intent": "do the other thing",
-        })
+        wid = _returned_wo(store)
+        _run(monkeypatch, wid, "n1", PLAN_CHANGES)
+        assert store.load(wid).nodes["n1"].status == "closed"
         assert store.load(wid).status == "active"
 
-        store.apply("consume_finalizer_instruction", {"work_id": wid, "node_id": "n1"},
-                    actor="architect")
-        # Any subsequent write re-runs the rollup; nothing is pending now.
+    def test_it_completes_once_consumed(self, monkeypatch):
+        store = _store()
+        wid = _returned_wo(store)
+        _run(monkeypatch, wid, "n1", PLAN_CHANGES)
+        store.apply("consume_finalizer_instruction", {"work_id": wid, "node_id": "n1"}, actor="architect")
         store.apply("edit_node", {"work_id": wid, "node_id": "n1", "title": "Research the deadline"})
         assert store.load(wid).status == "done"
 
-    def test_proceed_still_completes_immediately(self, monkeypatch):
-        """`proceed` asks for nothing, so it must not hold the goal open."""
+    def test_achieved_completes_immediately(self, monkeypatch):
         store = _store()
-        wid = _wo_with_judged_node(store)
-
-        _run(monkeypatch, wid, "n1", {"verdict": "proceed", "reasoning": "on plan"})
-
+        wid = _returned_wo(store)
+        _run(monkeypatch, wid, "n1", ACHIEVED)
         assert store.load(wid).status == "done"
 
     def test_the_steward_can_still_close_it_explicitly(self, monkeypatch):
-        """Only the automatic rollup defers. A person deciding the goal is over outranks a pending
-        note about how to continue it."""
         store = _store()
-        wid = _wo_with_judged_node(store)
-
-        _run(monkeypatch, wid, "n1", {
-            "verdict": "amend", "reasoning": "changes the plan", "amend_intent": "do X instead",
-        })
+        wid = _returned_wo(store)
+        _run(monkeypatch, wid, "n1", PLAN_CHANGES)
         assert store.load(wid).status == "active"
-
-        store.apply("set_work_status",
-                    {"work_id": wid, "status": "done", "reason": "steward: objective met"},
+        store.apply("set_work_status", {"work_id": wid, "status": "done", "reason": "steward: met"},
                     actor="steward")
         assert store.load(wid).status == "done"
-
-
-class TestACallCanReturnAndAchieveNothing:
-    """BLOCKED on a call that RETURNED — the case the verdict set could not express.
-
-    2026-09-17: a worker ran four pod searches and two Gmail searches for a school picture
-    packet and returned an accurate account of finding none. The node sat at `done`, whose only
-    exits were `closed` (which counts as SATISFYING the goal) and `superseded`. So the verdict
-    became `amend` — continue — and the continuation it prescribed needed the user's own
-    credentials, which sent a browser at the school's public contact form instead.
-    """
-
-    def test_blocked_fails_a_node_whose_call_returned(self, monkeypatch):
-        store = _store()
-        wid = _wo_with_judged_node(store)          # node sits at `done`
-
-        _run(monkeypatch, wid, "n1", {
-            "verdict": "blocked",
-            "reasoning": "searched pods and mail thoroughly; the packet is not in anything we "
-                         "can reach, and the remaining routes need the user's own account",
-        })
-
-        node = store.load(wid).nodes["n1"]
-        assert node.status == "failed", "a returned call that achieved nothing is not satisfied"
-        assert node.payload["finalizer"]["verdict"] == "blocked"
-
-    def test_a_blocked_node_does_not_complete_its_goal(self, monkeypatch):
-        """`closed` is what is_satisfied keys on. Blocked must not look like success."""
-        store = _store()
-        wid = _wo_with_judged_node(store)
-
-        _run(monkeypatch, wid, "n1", {"verdict": "blocked", "reasoning": "needs the user"})
-
-        assert store.load(wid).status == "active", "the goal cannot report done on a blocked step"
-
-    def test_blocked_counts_as_an_attempt_that_did_not_land(self, monkeypatch):
-        """It reaches the goal tally through `failed`, like replan does."""
-        store = _store()
-        wid = _wo_with_judged_node(store)
-
-        _run(monkeypatch, wid, "n1", {"verdict": "blocked", "reasoning": "needs the user"})
-
-        wo = store.load(wid)
-        assert int((wo.nodes[wo.goal_node_id].payload or {}).get("goal_unmet_attempts") or 0) == 1
-
-    def test_the_architect_sees_it_as_failed_work_to_plan_around(self, monkeypatch):
-        """`failed` is the channel to the architect — work_repair retired into it. A blocked
-        node has to be visible there, or asking the user never gets planned."""
-        from app.assistant.control_nodes.work_architect_node import _render_existing_graph
-        store = _store()
-        wid = _wo_with_judged_node(store)
-
-        _run(monkeypatch, wid, "n1", {
-            "verdict": "blocked", "reasoning": "the packet needs the user's ParentSquare account",
-        })
-
-        rendered = _render_existing_graph(store.load(wid))
-        assert "status=failed" in rendered
-        assert "ParentSquare" in rendered, "the WHY has to travel with it"
-
-    def test_blocked_on_an_already_failed_node_is_unchanged(self, monkeypatch):
-        """The original case still behaves exactly as before."""
-        store = _store()
-        wid = _failed_wo(store)
-
-        _run(monkeypatch, wid, "nf1", {"verdict": "blocked", "reasoning": "no route"})
-
-        assert store.load(wid).nodes["nf1"].status == "failed"

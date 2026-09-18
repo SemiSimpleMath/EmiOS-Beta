@@ -5,7 +5,7 @@ Runs right after strategic_planner_wo_persist_node. Per tick, for ONE work objec
   on its objective and lay the resulting DAG (subtask nodes, depends_on edges, wait-gates) into the graph
   via apply_architect_dag.
 - RE-PLAN: for each work object flagged in `replan_work_ids` (by the evaluator from intake, OR by the
-  work_finalizer's AMEND verdict — its revised intent rides in `finalizer_amend_intents`), re-invoke the
+  work_finalizer's verdicts — each rides on its node as `payload.finalizer` with a route), re-invoke the
   architect with the goal + the existing graph and apply the DELTA: ADD the missing steps and ABANDON the
   nodes the situation made moot.
 
@@ -26,15 +26,16 @@ _TERMINAL_WO_STATES = {"done", "abandoned"}
 
 
 def _pending_finalizer_instructions(store) -> dict[str, list[dict]]:
-    """Every unconsumed finalizer instruction, per work object, read off the GRAPH.
+    """Every unconsumed finalizer verdict that asks for something, per work object, off the GRAPH.
 
-    The finalizer judges a result at the tail of a tick; the architect acts on it at the head of
-    a LATER one. Nothing in memory bridges that gap — each tick builds its own manager and its own
-    Blackboard (MultiAgentManager.__init__), so the handoff has to be persisted. It is, on the
-    node the verdict was about (nodes.payload.finalizer in emi.db), which also puts the judgment
-    next to the step it judged instead of in a side channel.
+    The finalizer judges a result at the tail of a dispatch; the architect acts on it at the head
+    of a LATER tick. Nothing in memory bridges that gap — each tick builds its own manager and its
+    own Blackboard — so the handoff is persisted on the node the verdict was about
+    (nodes.payload.finalizer), next to the step it judged.
 
-    Active work objects only, and only nodes still carrying an unconsumed entry.
+    A verdict asks for something when it carries a `next_step`: plan_changes, retry, stop,
+    new_approach, or ask_user. `achieved` carries none and is never here. Active work objects
+    only; consumed entries are skipped.
     """
     out: dict[str, list[dict]] = {}
     for summary in store.list_work_objects():
@@ -45,49 +46,66 @@ def _pending_finalizer_instructions(store) -> dict[str, list[dict]]:
             entry = (node.payload or {}).get("finalizer")
             if not isinstance(entry, dict) or entry.get("consumed_at"):
                 continue
-            if not str(entry.get("instruction") or "").strip():
-                continue          # proceed/blocked record a verdict but ask for nothing
+            if not str(entry.get("next_step") or "").strip():
+                continue
             out.setdefault(wo.id, []).append({**entry, "node_id": node.id})
     for entries in out.values():
         entries.sort(key=lambda e: str(e.get("at") or ""))
     return out
 
 
+_LEAD_FOR = {
+    "plan_changes": "The step {n} ran and ACHIEVED its goal, but what came back changes the plan.",
+    "retry": "The step {n} did NOT achieve its goal. The finalizer judged it worth another attempt, "
+             "differently or later — it is back in your inbox as `proposed`. Keep it, change it, "
+             "or replace it, and set its wake if the recommendation names a time.",
+    "stop": "The step {n} did NOT achieve its goal, and this line of work should STOP. Prune the "
+            "branch; if the outcome says the whole goal is moot, add nothing and say so in "
+            "architect_summary for the steward.",
+    "new_approach": "The step {n} did NOT achieve its goal, and this way of reaching it is wrong. "
+                    "Plan a genuinely different route; do not re-lay the same chain.",
+    "ask_user": "The step {n} did NOT achieve its goal and needs the USER. Plan exactly ONE node whose "
+                "goal is to ask them the question below, and make the rest depend on its answer. "
+                "Do not plan any other attempt.",
+}
+
+
 def _finalizer_block(entries) -> tuple[str, str]:
     """The finalizer's outstanding verdicts for one work object, as the architect reads them.
 
-    Returns ``(prompt_block, instruction)``. The instruction is also the PRUNE LICENCE (see
-    `licensed` at the call site), so it is returned separately rather than only rendered.
+    Returns ``(prompt_block, licence)``. The licence — the joined recommendations — is also the
+    PRUNE LICENCE (see `licensed` at the call site), so it is returned separately.
 
-    Both the instruction and the REASONING go in: the instruction says what should happen, the
-    reasoning says why, and a recommendation without its grounds can only be obeyed or ignored,
-    never judged. What the architect then DOES about it is its own business — it has the
-    primitives and does not need them listed. The wording follows the verdict, because 'a
-    just-completed step' is the wrong thing to say about one that failed.
-
-    Normally there is exactly one. Several accumulate only when re-planning failed for a few
-    ticks, and then they are all still live — each is about a different step.
+    The outcome and the recommendation both go in: the recommendation says what should happen,
+    the outcome says why, and a recommendation without its grounds can only be obeyed or ignored,
+    never judged. The lead sentence follows the route, because the right framing for an achieved
+    step is the wrong one for a failed one.
     """
-    blocks, instructions = [], []
+    blocks, licences = [], []
     for entry in entries or []:
-        instruction = str(entry.get("instruction") or "").strip()
-        if not instruction:
+        route = str(entry.get("next_step") or "").strip()
+        if not route:
             continue
-        reasoning = str(entry.get("reasoning") or "").strip()
         node_id = str(entry.get("node_id") or "").strip()
-        if str(entry.get("verdict") or "") == "replan":
-            lead = f"The step {node_id} FAILED and is back in your inbox."
-        else:
-            lead = f"The step {node_id} ran, and its result changed the plan."
+        outcome = str(entry.get("outcome") or "").strip()
+        recommendation = str(entry.get("recommendation") or "").strip()
+        question = str(entry.get("question_for_user") or "").strip()
+        lead = _LEAD_FOR.get(route, "The step {n} needs your attention.").format(n=node_id)
         block = f"{lead}\n"
-        if reasoning:
-            block += f"WHY (the finalizer, having read the full result): {reasoning}\n"
-        block += f"WHAT SHOULD NOW HAPPEN: {instruction}\n"
+        if entry.get("escalated"):
+            block += ("THE RUNTIME ESCALATED THIS: repeated attempts have not achieved the goal, so "
+                      "the user is asked rather than the same thing tried again.\n")
+        if outcome:
+            block += f"OUTCOME (the finalizer, having read the full result): {outcome}\n"
+        if recommendation:
+            block += f"RECOMMENDATION: {recommendation}\n"
+        if question:
+            block += f"QUESTION FOR THE USER: {question}\n"
         blocks.append(block)
-        instructions.append(instruction)
+        licences.append(recommendation or outcome)
     if not blocks:
         return "", ""
-    return "\n".join(blocks) + "\n", " ".join(instructions)
+    return "\n".join(blocks) + "\n", " ".join(licences)
 
 
 def _duplicate_pairs(data: dict) -> dict[str, str]:
@@ -166,9 +184,11 @@ def _render_existing_graph(wo) -> str:
                 # order to plan the node that asks them. A mute failure gets planned around
                 # instead, which is how a dead end turns into another attempt.
                 fin = (n.payload or {}).get("finalizer")
-                if isinstance(fin, dict) and str(fin.get("reasoning") or "").strip():
-                    why = (f"\n    why ({fin.get('verdict') or 'judged'}): "
-                           f"{fin.get('reasoning')}")
+                if isinstance(fin, dict) and str(fin.get("outcome") or "").strip():
+                    tag = fin.get("next_step") or fin.get("verdict") or "judged"
+                    why = f"\n    why ({tag}): {fin.get('outcome')}"
+                    if str(fin.get("recommendation") or "").strip():
+                        why += f"\n    recommended: {fin.get('recommendation')}"
             finished.append(f"  - {n.id} | {n.title} | status={n.status}{sub}{why}")
         else:
             detail = " ".join((n.content or "").split())
@@ -246,14 +266,14 @@ class WorkArchitectNode(ControlNode):
                        if isinstance(c, dict) and c.get("work_id") and c.get("objective")]
             replan_ids = [str(w).strip() for w in (self.blackboard.get_state_value("replan_work_ids", []) or [])
                           if str(w or "").strip()]
-            # The finalizer's outstanding instructions, read off the graph — the authoritative
+            # The finalizer's outstanding verdicts, read off the graph — the authoritative
             # "why re-plan". A work object carrying one needs re-planning whether or not the
             # steward also flagged it: the verdict is a deterministic signal and must not depend
             # on an agent happening to notice the node in the portfolio.
-            amend_intents = _pending_finalizer_instructions(store)
-            replan_ids = list(dict.fromkeys([*replan_ids, *amend_intents]))
+            pending = _pending_finalizer_instructions(store)
+            replan_ids = list(dict.fromkeys([*replan_ids, *pending]))
             # Steward-classed user directives: replans that carry out something the USER said. Together
-            # with a finalizer amend these LICENSE the replan to prune queued/held nodes; an unlicensed
+            # with a finalizer verdict these LICENSE the replan to prune queued/held nodes; an unlicensed
             # replan (the steward's own read of progress) may add but not kill — the store's churn
             # fence refuses those prunes. The judgment is the model's; only its transport is typed.
             user_directed = {str(w).strip()
@@ -308,11 +328,11 @@ class WorkArchitectNode(ControlNode):
                     try:
                         goal = wo.nodes.get(wo.goal_node_id)
                         objective = (getattr(goal, "content", "") or getattr(goal, "title", "")) if goal else ""
-                        amend_block, amend = _finalizer_block(amend_intents.get(work_id))
-                        licensed = bool(amend) or (work_id in user_directed)
+                        finalizer_block, licence = _finalizer_block(pending.get(work_id))
+                        licensed = bool(licence) or (work_id in user_directed)
                         task = (
-                            f"{objective}\n\n{amend_block}This goal ALREADY has a work graph (below). Revise it "
-                            f"as a DELTA per the intent above and the CONTEXT: ADD the steps still missing, and "
+                            f"{objective}\n\n{finalizer_block}This goal ALREADY has a work graph (below). Revise it "
+                            f"as a DELTA per the verdict above and the CONTEXT: ADD the steps still missing, and "
                             f"ABANDON (list their node_ids in abandon_node_ids) only nodes the EVIDENCE — "
                             f"epitaphs, recorded results, user directives — makes moot or wrong; un-finished "
                             f"sub-steps go with them. Queued (actionable) and held (future-wake) nodes are the "
@@ -333,10 +353,10 @@ class WorkArchitectNode(ControlNode):
                         logger.info("[%s] re-planned %s: +%d node(s), -%d abandoned (%d duplicate)",
                                     self.name, work_id, len(res.get("added", [])),
                                     len(res.get("abandoned", [])), len(res.get("deduplicated", [])))
-                        # Acted on — stamp each instruction so the next re-plan of this object does
+                        # Acted on — stamp each verdict so the next re-plan of this object does
                         # not re-apply a judgment about a step already dealt with. Only after the
                         # graph write succeeded: a replan that raised must be able to run again.
-                        for entry in amend_intents.get(work_id, []):
+                        for entry in pending.get(work_id, []):
                             try:
                                 store.apply("consume_finalizer_instruction",
                                             {"work_id": work_id, "node_id": entry["node_id"]},

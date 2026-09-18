@@ -1,15 +1,16 @@
-"""Failed nodes are work_repair's — the architect cannot dispose of them (2026-09-02).
+"""The architect cannot dispose of a failed node on its own (2026-09-02).
 
 The spend-alert loop: an ask timed out, the sweeper failed it, and the architect —
-which runs BEFORE repair in the tick and whose prompt claimed failed nodes "come
-back to you" — abandoned it and minted a fresh identical ask. Hourly. Nine times.
-work_repair, the component the ask redesign made the SOLE owner of the re-ask
-decision, never saw a single case: the architect consumed each failure first.
+whose prompt claimed failed nodes "come back to you" — abandoned it and minted a
+fresh identical ask. Hourly. Nine times. The component that owned the re-ask
+decision never saw a single case: the architect consumed each failure first.
 
-The store now refuses a set_status on a `failed` node when the actor is the
-architect and the replan is not LICENSED (finalizer amend / user directive).
-Repair's own writes — retry (failed->dispatched), re-open (failed->proposed),
-abandon with epitaph — pass untouched, as does everyone else's legal traffic.
+The store refuses a set_status on a `failed` node when the actor is the architect
+and the replan is not LICENSED (the finalizer's verdict on that node / a user
+directive). work_repair is retired (2026-09-16), but the fence outlives it: the
+finalizer's route is now what licenses the architect. Other actors' legal traffic —
+retry (failed->dispatched), re-open (failed->proposed), abandon with epitaph —
+passes untouched.
 """
 from __future__ import annotations
 
@@ -39,13 +40,13 @@ class TestFailedNodesAreRepairs:
     def test_architect_cannot_abandon_a_failed_node(self):
         store = _store()
         wid = _failed_ask(store, nid="ask_a")
-        with pytest.raises(ValueError, match="work_repair"):
+        with pytest.raises(ValueError, match="licensed replan"):
             store.apply("set_status", {"work_id": wid, "node_id": "ask_a",
                                        "status": "abandoned", "verdict": "pruned_by_replan",
                                        "reason": "replace with a fresh identical ask"},
                         actor="architect")
         assert store.load(wid).nodes["ask_a"].status == "failed", \
-            "the failed node must still be sitting there for repair to adjudicate"
+            "the failed node must still be sitting there carrying its verdict"
 
     def test_licensed_replan_may_still_prune_a_failed_branch(self):
         store = _store()
