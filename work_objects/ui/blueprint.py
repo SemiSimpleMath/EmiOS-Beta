@@ -1,12 +1,24 @@
-"""work_objects.ui — a local, read-only viewer for the WorkObject graph.
+"""work_objects.ui — the owner's local editor for the WorkObject graph.
 
-A Flask blueprint (mounted by the main app) that reads the LOCAL work.db + pod store, so you
-can watch a work graph: the goal -> subtask tree, what remains (ready / blocked / waiting),
-evidence + artifact outcomes, the event log, and the pods a node references.
+A Flask blueprint (mounted by the main app) for watching a work graph: the goal -> subtask
+tree, what remains (ready / blocked / waiting), evidence + artifact outcomes, the event log,
+and the pods a node references.
 
-Read-only and lazy: it never mutates the graph, and the store is opened on the first request
-(importing this module is free, and no empty db is created at boot). The work.db it reads is
-gitignored (private) — only this code ships.
+It reads the LIVE dayflow store (emi.db, the shared singleton) so /work shows real work
+objects; the local work.db dev file is used only when the app isn't importable.
+
+NOT read-only. The bottom section of this file mutates that live store — abandon a work
+object, set/edit/add/remove a node — through the same validated `store.apply()` every other
+writer uses, so edits serialize with the dayflow tick on the store's write lock and an
+illegal one comes back as 400 carrying the store's own message. This docstring claimed
+"read-only ... it never mutates the graph" until 2026-09-18, long after those routes landed.
+
+Known wart: `/api/work` reports `db: _WORK_DB`, the dev-file constant, even when the live
+dayflow store is the one actually being read.
+
+Lazy: the store is opened on the first request, so importing this module is free and no
+empty db is created at boot. The work.db it can drop back to is gitignored (private) — only
+this code ships.
 """
 from __future__ import annotations
 
