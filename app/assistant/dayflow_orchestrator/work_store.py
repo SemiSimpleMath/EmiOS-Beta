@@ -1,9 +1,9 @@
 """dayflow_orchestrator.work_store — the dayflow WorkObject store.
 
-Per decision #56, dayflow's work objects live in **emi.db**: the WorkStore's four tables
-(work_objects / nodes / edges / events) sit alongside unified_log_2026, so the planner's portfolio
-projection and the item-state lifecycle are transactional joins in one DB (no two-store coordination).
-Verified: no name collision with emi.db's existing tables.
+Per decision #56, dayflow's work objects live in **emi.db**: the WorkStore's five tables
+(work_objects / nodes / actions / edges / events) sit alongside unified_log_2026, so the planner's
+portfolio projection and the item-state lifecycle are transactional joins in one DB (no two-store
+coordination). Verified: no name collision with emi.db's existing tables.
 
 The WorkStore is single-writer by design; on the shared emi.db it coexists with the main db_manager
 writer via WAL (already enabled on emi.db) + a busy_timeout so a write waits politely instead of
@@ -45,7 +45,8 @@ def _migrate_parked_asks_to_dispatched(conn) -> None:
     status must say so. Old rows parked surfaced asks as 'waiting' + wake_kind=user_reply with
     a re-ask timer; the re-ask timer is retired — flip them to 'dispatched' and clear wake_at
     so nothing re-promotes them. Their tickets resolve them (reply -> done) or the sweeper
-    times them out (expired ticket -> failed, work_repair adjudicates).
+    times them out (expired ticket -> failed, which the work_finalizer then adjudicates —
+    work_repair, named here originally, retired on 2026-09-16).
 
     Guarded by a marker (work_store_meta) because it must run EXACTLY once: under the new
     model 'waiting' + user_reply legitimately reappears for PRE-surface asks parked by a
@@ -79,7 +80,7 @@ def dayflow_work_db_path() -> str:
 
 
 def get_dayflow_work_store():
-    """The (singleton, per-path) dayflow WorkStore. Creates the four work tables IF NOT EXISTS on the
+    """The (singleton, per-path) dayflow WorkStore. Creates the five work tables IF NOT EXISTS on the
     target DB (additive — no collision with emi.db's schema); the busy_timeout rides the WorkStore
     constructor so it coexists with the main writer.
 
