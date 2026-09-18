@@ -269,10 +269,30 @@ The ticket composer is a separate namespace and a separate manager — see **tic
 **intake_triage** (`gpt-5-mini`) — the intake gate; first agent in the tick. Driven by
 `intake_triage_prep_node`, which loads all items and buckets them: brand-new (not cooldown-blocked) →
 `eligible_items_now`, plan synopses, recently-resolved (< 6 h), everything else → `active_dayflow_items`.
-For each eligible artifact the agent emits `ADMIT` vs `REJECT_DUPLICATE / REJECT_NO_ACTION / REJECT_POLICY`
-(defaults to ADMIT unless clearly junk/duplicate; never rejects `[UPDATE]` items as dupes). It produces
-*decisions only* — admissions are written to `admitted_artifacts` by `triage_persist_node`. The prep node
-skips the LLM entirely when nothing is eligible.
+Four source types never reach triage: `plan_synopsis` (context only), `chat` (context, and kept out of
+the active list too), and the `action_dispatch` / `action_result` / `action_log` rows, which are
+represented in the action log instead.
+
+For each eligible artifact the agent emits `ADMIT` vs `REJECT_DUPLICATE / REJECT_NO_ACTION /
+REJECT_POLICY` (defaults to ADMIT unless clearly junk or *wholly* a duplicate; never rejects
+`[UPDATE]` items as dupes). The axis is **coverage, and it is partial by default**: every part already
+covered → `REJECT_DUPLICATE`; ANY part uncovered → `ADMIT` plus a **required `uncovered`** field
+naming what remains. That field exists because the evaluator otherwise sees a whole artifact with no
+hint which part is new, and would either redo the covered part or drop the uncovered one — on
+2026-09-11 a relay request died inside an artifact whose facts were already being tracked.
+
+**Three nodes, three distinct jobs** — the agent produces decisions only:
+
+1. `intake_triage_prep_node` buckets and gates, skipping the LLM entirely when nothing is eligible.
+2. **`triage_spawn_guard_node` builds `admitted_artifacts` / `rejected_artifacts`** — it validates the
+   decisions against their contract, resolves each `artifact_id` (raw → eligible item_id → `short_id`
+   → a DB lookup for items from prior ticks), drops duplicates and unmatched ids with a warning,
+   merges `auto_admitted_artifacts`, and mutates the metadata **in memory only** (`state=artifact` for
+   ADMIT, `suppressed` for REJECT). A decision-count mismatch warns and processes what it has rather
+   than raising.
+3. `triage_persist_node` then writes both to the DB — **immediately**, not at end of tick, so the
+   evaluator reads authoritative state instead of stale state. Admissions go through
+   `write_dayflow_items_batch`, which is the path that performs no transition validation (§2).
 
 **strategic_planner_wo** (the work-object **EVALUATOR** / "steward", `gpt-5.6-luna`) — the **sole path from
 intake to action**. Driven by `strategic_planner_wo_prep_node` (builds `work_portfolio` from non-terminal
