@@ -38,8 +38,9 @@ user_context_items:
 # The node-authoring doctrine lives here. resource_orchestrator_user_prefs carries the
 # notification rule ("If both communication and action are needed, create separate tasks"), the
 # device-control rule, and the escalation policy — all of which are instructions about how to
-# shape NODES, and none of which reached the agent that shapes them. The prompt had a
-# hand-written paragraph re-deriving the notify/action split instead.
+# shape NODES. Declaring them here is not enough: a system item is a template VARIABLE, and until
+# 2026-09-18 system.j2 referenced none of these three, so the prefs the user wrote for the
+# orchestrator reached the steward and never the architect. system.j2 renders all three now.
 system_context_items:
   - resource_user_data
   - resource_assistant_data

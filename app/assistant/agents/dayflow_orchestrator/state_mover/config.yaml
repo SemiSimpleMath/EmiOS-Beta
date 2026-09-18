@@ -15,7 +15,6 @@ entity_card_level: 0
 user_context_items:
   - date_time
   - day_of_week
-  - node_status_legend
   - ready_work_nodes
   - waiting_work_nodes
   - work_wait_intake
@@ -29,4 +28,9 @@ user_context_items:
   - health_status_summary
   - entity_card
 
-system_context_items: []
+# The status legend is rendered by system.j2, so it is a SYSTEM item. It sat under
+# user_context_items until 2026-09-18, which made the system prompt's `{{ node_status_legend }}`
+# render as a blank line — the state_mover had never once seen the legend. The boot validator
+# said so at every start.
+system_context_items:
+  - node_status_legend

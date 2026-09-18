@@ -36,14 +36,6 @@ Health: {{ health_status_summary }}
 ## ROUTINE (today's cadence — judge the goal's timing and appropriateness against this)
 {{ resource_dayflow_routine }}
 {%- endif %}
-{% if admitted_artifacts %}
-
-## NEW INTAKE (the source items this tick — the goal below likely came from one of these)
-{% for m in admitted_artifacts %}
-{%- set meta = m.get("metadata", {}) %}
-- [{{ meta.get("short_id", meta.get("item_id","")) }}] {% if meta.get("source_type","") == "email" %}Email from {{ meta.get("email_sender","Unknown") }}: "{{ meta.get("email_subject", meta.get("summary","")) }}"{% else %}{{ meta.get("summary","(no summary)") }} ({{ meta.get("source_type","") }}){% endif %}
-{% endfor %}
-{% endif %}
 {% if entity_card %}
 
 ## PEOPLE & THINGS (entity cards for what is referenced)

@@ -272,8 +272,11 @@ def render_work_portfolio(wo, now=None) -> str:
             why = f"  — why: {term.get('reason')}" if isinstance(term, dict) else ""
             L.append(f"  - [{n.status}]{roll}{blk}{flag} {_t(n)}{why}")
 
+    # Live nodes only. A future wake_at on an abandoned node is a leftover, not a plan — it read
+    # as "WAITING (parked)" to the steward until 2026-09-18.
     waiting = [n for n in wo.nodes.values()
-               if n.status == "waiting" or (n.wake_at is not None and n.wake_at > now)]
+               if n.status == "waiting"
+               or (n.status in ("proposed", "actionable") and n.wake_at is not None and n.wake_at > now)]
     if waiting:
         L.append("\nWAITING (parked):")
         for n in waiting:

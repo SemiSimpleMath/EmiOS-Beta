@@ -298,3 +298,23 @@ def test_a_plan_changing_completion_is_legible_in_its_epitaph(store):
     store.apply("consume_finalizer_instruction", {"work_id": wo.id, "node_id": nid}, actor="architect")
     store.apply("edit_node", {"work_id": wo.id, "node_id": nid, "title": "Find the packet"})
     assert "achieved_plan_changes" in _goal_epitaph(store.load(wo.id))
+
+
+# --------------------------------------------------------------------------- #
+# WAITING lists live nodes only
+# --------------------------------------------------------------------------- #
+def test_an_abandoned_node_with_a_future_wake_is_not_waiting(store):
+    """A leftover wake_at on an abandoned node read as 'WAITING (parked)' to the steward — the
+    2026-09-18 morning prompt listed a 9:00 AM wake for a node that had been replaced."""
+    wo = _goal(store, "Notify at the start of the workday.")
+    dead = _child(store, wo.id, wo.goal_node_id, "Notify work start")
+    live = _child(store, wo.id, wo.goal_node_id, "Notify workday and standup transition")
+    soon = utcnow() + timedelta(hours=2)
+    for nid in (dead, live):
+        store.apply("defer_node", {"work_id": wo.id, "node_id": nid, "wake_kind": "time", "wake_at": soon},
+                    actor="architect")
+    _set(store, wo.id, dead, "abandoned", actor="architect", reason="replaced")
+    rendered = render_work_portfolio(store.load(wo.id))
+    waiting = rendered.split("WAITING (parked):", 1)[1].split("\n\n", 1)[0]
+    assert "Notify workday and standup transition" in waiting
+    assert "Notify work start" not in waiting

@@ -20,8 +20,6 @@ agents:
     class: Agent
   - name: dayflow_orchestrator::switchboard
     class: Agent
-  - name: dayflow_orchestrator::work_finalizer
-    class: Agent
 
 control_nodes:
   - name: intake_triage_prep_node
