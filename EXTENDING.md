@@ -15,7 +15,7 @@ triggers so it auto-loads when relevant.
 |---|---|---|
 | Agent | [`extending-emi-agents`](skills/extending-emi-agents/SKILL.md) | `app/assistant/agents/<ns>/<name>/{config.yaml, prompts/, agent_form.py?}` |
 | Tool | [`extending-emi-tools`](skills/extending-emi-tools/SKILL.md) | `app/assistant/lib/tools/<name>/{tool_contract.json, <name>.py}` |
-| Manager | [`extending-emi-managers`](skills/extending-emi-managers/SKILL.md) | `app/assistant/multi_agents/<name>/manager_config.yaml` |
+| Manager | [`extending-emi-managers`](skills/extending-emi-managers/SKILL.md) | `app/assistant/multi_agents/<name>/config.yaml` |
 | Routine | [`extending-emi-routines`](skills/extending-emi-routines/SKILL.md) | drop a JSON file in `configs/routines/{public,private}/<id>.json` (+ optional `@routine_handler()`-decorated handler in `app/assistant/routine_handlers/`) |
 | Skill | [`extending-emi-skills`](skills/extending-emi-skills/SKILL.md) | `skills/<name>/SKILL.md` |
 | Camera | [`extending-emi-cameras`](skills/extending-emi-cameras/SKILL.md) | append to `configs/cameras.json` (+ analyzer agent) |
