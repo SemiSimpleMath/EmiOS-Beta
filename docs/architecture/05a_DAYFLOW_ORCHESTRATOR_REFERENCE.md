@@ -241,7 +241,28 @@ so item state and the work portfolio are one transactional store.
 ## 3. Agent modules
 
 Each entry is the **LLM agent** plus the **control node(s)** that prep its context, invoke it, and persist
-its output. Models and "no tools" noted where relevant.
+its output.
+
+**Models, read off `llm_params.engine` in each `config.yaml` (verified 2026-09-18).** Model names in
+prose drift silently — the 2026-08-07 switch moved 37 Gemini agents to `gpt-5.6-luna` and this
+document still carried a pre-switch name for `action_selector` until today. Check here, not in the
+paragraphs:
+
+| agent (`dayflow_orchestrator::`) | engine | tools | wiring |
+|---|---|---|---|
+| `intake_triage` | `gpt-5-mini` | none | live |
+| `strategic_planner_wo` | `gpt-5.6-luna` | none | live |
+| `work_architect` | `gpt-5.6-luna` | none | live |
+| `state_mover` | `gpt-5-mini` | none | live |
+| `action_selector` | `gpt-5.6-luna` | none | live |
+| `switchboard` | `gpt-5-mini` | `all` except `ask_user` | live |
+| `work_finalizer` | `gpt-5.6-luna` | none | live (dispatch room) |
+| `result_formatter` | `gpt-5.6-luna` | none | dormant |
+| `strategic_planner` | `gpt-5.6-luna` | none | retired, unwired |
+| `relevance_cleaner` | `gpt-5-mini` | none | retired, unwired |
+| `work_repair` | `gpt-5.6-luna` | none | retired, unwired |
+
+The ticket composer is a separate namespace and a separate manager — see **ticket_builder** below.
 
 ### Intake & evaluation
 
@@ -329,7 +350,7 @@ LLM was never shown.
 
 ### Dispatch & execution (the live engine)
 
-**action_selector** (`gemini-3-flash-preview`) — handed the actionable list, it picks **exactly one**
+**action_selector** (`gpt-5.6-luna`, no tools, `action_required: false`) — handed the actionable list, it picks **exactly one**
 node to act on this tick (or `no_op_tf`), never bundling two. Driven by `action_selector_router_node`
 (a thin `ChatTaskRouterNode` subclass) which routes **everything to the switchboard** — it copies
 `switchboard_task`→`task`/`switchboard_information`→`information`, sends an "On it." ack, and hands off.
@@ -453,18 +474,64 @@ ad887863) — resolved/declined/failed each update the concern, and a user decli
 
 ### Surface, comms & finalization
 
-**ticket_builder** (`gemini-3-flash-preview`, no tools) — phrases a raw `ticket_brief` into natural
-user-facing copy (preserving all specifics, never inventing ownership) and classifies it `notify` (FYI) /
-`advice` (gentle nudge) / `decision` (reply required). Invoked **inline** (not in the tick loop) by the
-`create_dayflow_ticket` tool's `_format_brief`, and by `work_node_dispatch_node._surface_ask`.
+**ticket_builder** — **a MANAGER, not an agent.** `ticket_builder_manager` (`max_cycles: 14`) with
+three agents under the `ticket_builder::` namespace: a read-only **`planner`** (`Planner` class,
+`gpt-5.6-luna`) that pulls the SUBSTANCE the communicate-goal promises — the work graph via
+`read_work_object`, pods by id via `pod_fetch` — an optional **`summary`** (`gpt-5-mini`) on the tool
+-return loop, and a **`composer`** (`gpt-5.6-luna`, no tools) that writes the final
+`{title, message}`. **The message IS the delivery.** A self-contained brief costs one planner step
+plus the compose: the planner simply returns control at action 0, which routes
+`ticket_builder::planner_return_control → ticket_builder::composer`.
+
+It replaced a single-shot `ticket_builder` agent on **2026-08-19**, because that agent's starved brief
+produced content-free tickets — it was told to phrase a brief it could not look anything up for.
+
+Invoked **inline** (not in the tick loop) by `create_dayflow_ticket._format_brief`, under the dayflow
+room's scope with `scope_id=ticket_builder_inline`. The composer's structured output is read back off
+the manager's blackboard by sender suffix, and `ticket_kind` is unwrapped via `.value` because
+`TicketKind` subclasses `(str, Enum)` and plain `str()` yields `"TicketKind.notify"`, which the UI
+policy check then rejects. If the manager fails, `_format_brief` falls through to a mechanical
+extraction — keyword sniff for ask/decide/choice/confirm/whether → `decision`, title = first 60
+characters of the brief.
+
+> `work_node_dispatch_node._surface_ask` was the other caller in an earlier revision. That method no
+> longer exists; the dispatch node is the claim gate and calls nothing.
 
 **create_dayflow_ticket** (tool) — creates a UI ticket and **blocks** until the user responds. It marks
 the ticket `proposed`, publishes a `proactive_suggestion` event (+ optional TTS to master_room), then
 listens on `dayflow_ticket_responded` for its `ticket_id`. **Expiry:** it waits `wait_timeout_seconds`
-(default 600s) then marks the ticket expired (`reason="wait_timeout"`) and returns `action="timeout"`;
-on reply it returns the action (done/willdo/acknowledge/skip/dismiss/later) + `user_text`. Separately,
-`valid_hours` (default 4) is the ticket's DB validity window. (Note: `EXPIRED` is terminal in the ticket
-state machine, so a reply after the wait-timeout cannot be accepted — a known sharp edge.)
+(default 600s) then marks the ticket expired (`reason="wait_timeout"`), publishes a
+`proactive_suggestion_update` so the UI refreshes instead of waiting for its poll, and returns
+`action="timeout"`. Separately, `valid_hours` (default 4) is the ticket's DB validity window. (Note:
+`EXPIRED` is terminal in the ticket state machine, so a reply after the wait-timeout cannot be
+accepted — a known sharp edge. That claim is about `ticket_manager`, which this section has not
+been checked against.)
+
+On reply it returns `action` + `user_text`, and the result TEXT is built by `format_response_result`
+as *answer first, question second*: the answer must survive a projection's cap, and "No I will do it
+later" is unreadable without the question it answers. There is deliberately **no** action-token →
+prose table any more — the same token reads differently on different button layouts, and inventing
+prose about intent is how a response gets misquoted, so `user_text` (built by TicketService from the
+button's own label) is used verbatim. An expiry is likewise phrased as a RESULT, not a failure:
+"Notify expired, user not reached" — the finalizer judges it.
+
+Four behaviours worth knowing that the paragraph above leaves out:
+
+- **ONE LIVE QUESTION PER WORK OBJECT.** `_supersede_open_asks` expires every still-open ask bound to
+  the same work object before the new one appears, so the old question vanishes as the new one
+  arrives rather than stacking in the UI. Joined purely on `trigger_context.work_node` ids, never on
+  wording — which is why it lives in the tool and not the dispatcher. Origin: the 2026-08-18 ask storm.
+- **It accepts the generic dispatcher shape.** `task` + `information` are honoured on equal footing
+  with `ticket_brief`, so a ticket is not a special case at the dispatcher layer.
+- **`append_links` is appended AFTER the composed message**, deterministically. A pod id must reach
+  the user exactly or not at all, never through LLM transcription.
+- **UI policy is derived, and faking it raises.** `ticket_kind` must be `notify` / `decision` /
+  `advice`; passing `button_layout` or `plan_mode_available` explicitly is a `ValueError`.
+
+`result_for_ticket` is the companion classmethod: given a ticket row it returns what that row's
+current state says as a `ToolResult`, or `None` while the question is genuinely still live. That is
+what lets `work_session.re_arm_inflight_asks` rebuild an ask that outlived its process instead of
+asking again.
 
 **result_formatter** (`gpt-5.6-luna`, no tools) — condenses a dispatched manager's full result into a
 compact 1–3 line task-update (verdict-first, specifics verbatim, no "I" voice). Invoked synchronously
