@@ -26,8 +26,8 @@ orchestrator + worker managers import `work_objects.*`).
 | `store.py` | `WorkStore` — the validated event-sourced writer (`apply()`), transition machine, closure cascade, boot repair |
 | `discharge.py` | `discharge_node` / `drive_work` — drive one node through a worker manager; scope REQUIRED (caller-derived), session stamp at claim, result-as-evidence convention |
 | `runtime.py` | The work **contextvar** (`set_work_context` / `get_work_context`) binding graph tools to the active node |
-| `runtime_setup.py` | Runtime wiring for the package's tool/context registration |
-| `result_recorder.py` | Records a tool/manager result onto the node as an evidence child — the ONE result writer |
+| `runtime_setup.py` | `ensure_manager_services()` — a TEST/scenario shim, not production wiring: loads `.env` and registers `mam_instance_manager` (the one service the minimal test bootstrap omits), then preloads manager configs, so scenario runs take the standard `manager_invoker → scope_adapter → sub-manager` path. The full app does this in `initialize_system.py` |
+| `result_recorder.py` | **The ONE place a tool result becomes graph state.** Attaches the result as an evidence child, attaches a surfaced research pod first (so the node is never briefly complete-without-its-deliverable), and takes the node OUT OF FLIGHT: `done`, or `failed` when the tool reported an error/abort **or returned nothing** (with a stated reason, so a blocked goal never renders a blank WHY). Epoch-fenced, and it refuses to overwrite a node that already ended. It does NOT judge — meaning is the finalizer's, read from the result text |
 | `work_tools.py` | The `work_*` graph tools registered into the live tool registry + `register_manager_as_tool` |
 | `tools.py` | `WorkGraphTools` — the underlying op wrappers the tools call |
 | `scenarios/_scenario_scope.py` | DEV-ONLY harness scope — production authority always derives from the caller (room / task run) |
