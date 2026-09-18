@@ -20,7 +20,10 @@ def _to_dt(s):
     if s is None:
         return None
     if isinstance(s, datetime):
-        return s if s.tzinfo is not None else s.replace(tzinfo=timezone.utc)
+        if s.tzinfo is not None:
+            return s
+        from app.assistant.utils.time_utils import get_local_timezone
+        return s.replace(tzinfo=get_local_timezone())
     txt = str(s).strip()
     if not txt:
         return None
@@ -34,9 +37,12 @@ def _to_dt(s):
     if dt.tzinfo is None:
         # The architect's prompt asks for an offset, but the LLM can omit one. A NAIVE datetime
         # in the store poisons every aware comparison downstream — the soonest-first wake sort
-        # raised TypeError and armed ZERO wakes that tick (verification finding). Naive -> UTC.
-        logger.warning("apply_architect_dag: wake_at %r has no offset — assuming UTC", s)
-        dt = dt.replace(tzinfo=timezone.utc)
+        # raised TypeError and armed ZERO wakes that tick (verification finding). The architect
+        # reads and writes the user's LOCAL clock ("Current time" in its prompt is local), so a
+        # naive value is a local one; taking it as UTC shifted every such wake by the offset.
+        from app.assistant.utils.time_utils import get_local_timezone
+        logger.warning("apply_architect_dag: wake_at %r has no offset — taking it as local time", s)
+        dt = dt.replace(tzinfo=get_local_timezone())
     return dt
 
 

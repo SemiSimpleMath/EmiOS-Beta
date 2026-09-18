@@ -246,9 +246,23 @@ _NODE_COLUMNS = [
 
 
 def _iso(dt) -> Optional[str]:
-    if dt is None or isinstance(dt, str):
-        return dt
-    return dt.isoformat()
+    """Serialize a datetime for the DB — always UTC, offset +00:00.
+
+    The store is the UTC boundary: whatever offset a writer hands in (the architect's local
+    `-07:00` wake, a naive value someone forgot to zone) lands in the row as UTC, so every row
+    reads the same and a `wake_at` sort never compares apples to oranges. Naive is taken as UTC.
+    A string is parsed and normalized the same way; one that will not parse is stored as given.
+    """
+    if dt is None:
+        return None
+    if isinstance(dt, str):
+        try:
+            dt = datetime.fromisoformat(dt.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return dt
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat()
 
 
 class WorkStore:

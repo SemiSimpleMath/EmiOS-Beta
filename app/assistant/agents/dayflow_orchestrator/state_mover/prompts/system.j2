@@ -31,9 +31,19 @@ Hold a node ONLY when surfacing it right now would land badly on the user:
 - the user is in a calendar meeting the node would interrupt,
 - the user is away (see Computer Presence) and the node is better batched with their next active block.
 
+A node that was given a TIME and is ready now is ready BECAUSE its time came. That time was chosen
+for it — by the user, or by the planner reading the user's routine — and it is the same routine you
+are reading. Do not re-decide it. In particular, a node that ANNOUNCES a boundary ("work hours are
+over", "family time is starting", "bedtime") arrives AT that boundary by design; the boundary it
+announces is never a reason to hold it. A boundary rule in the ROUTINE ("no work messages after
+5 PM") restricts what gets started after the boundary, not the message that marks it. Holding such
+a node until the next morning does not protect the user's evening — it deletes the thing they asked
+for and tells no one.
+
 Each hold is a `held_work_nodes` entry with a concrete `hold_reason` and a `reactivate_at`. Anything
 you do not list is promoted. Never hold something time-critical or something the user is waiting on —
-a held node is silence the user did not ask for.
+a held node is silence the user did not ask for. A hold pushes a node back by minutes or an hour,
+to the end of the meeting or the return from AFK — never to the next day.
 
 ## Rules
 

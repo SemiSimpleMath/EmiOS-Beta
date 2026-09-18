@@ -67,6 +67,22 @@ def node_result(wo, node, *, limit: int | None = None) -> str:
     return joined[:limit] if limit else joined
 
 
+def local_stamp(dt) -> str:
+    """A stored (UTC) datetime as the reader's local wall-clock, with the day, e.g. 'Thu 09-17 05:02 PM'.
+
+    Every timestamp an agent reads is local; the store keeps UTC. Rendering the raw value put
+    '09-15 05:02' in front of planners and the auditor for an action taken at 10:02 PM the night
+    before — which every one of them read as local and reported as a future-dated send.
+    """
+    if dt is None:
+        return ""
+    from app.assistant.utils.time_utils import utc_to_local
+    try:
+        return utc_to_local(dt).strftime("%a %m-%d %I:%M %p")
+    except (TypeError, ValueError):
+        return str(dt)
+
+
 def _ago(dt, now) -> str:
     """Compact 'Nm ago' / 'Nh ago' if within the last 6h, else '' (stale/unknown). Tolerates bad input."""
     if dt is None:
@@ -261,7 +277,7 @@ def render_work_portfolio(wo, now=None) -> str:
     if waiting:
         L.append("\nWAITING (parked):")
         for n in waiting:
-            when = f"  (wakes {n.wake_at.isoformat()})" if n.wake_at else ""
+            when = f"  (wakes {local_stamp(n.wake_at)})" if n.wake_at else ""
             L.append(f"  - {_t(n)}{when}")
 
     questions = [n for n in wo.nodes.values() if n.type == "question" and n.status == "open"]
@@ -282,8 +298,7 @@ def render_work_portfolio(wo, now=None) -> str:
         L.append(f"\nACTIONS TAKEN ({len(acts)}) — what this goal has already DONE to the "
                  "outside world. Do not repeat one of these without a reason that names it:")
         for a in acts:
-            ts = getattr(a, "ts", None)
-            when = ts.strftime("%m-%d %H:%M") if hasattr(ts, "strftime") else str(ts)[:16]
+            when = local_stamp(getattr(a, "ts", None))
             L.append(f"  {when}  {a.channel} -> {a.target or '?'}  [{a.outcome}]  {a.summary}")
         hot = [(c, t, n) for (c, t), n in repeats.items() if n >= 3]
         for channel, target, n in sorted(hot, key=lambda x: -x[2]):

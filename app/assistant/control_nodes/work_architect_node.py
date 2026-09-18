@@ -16,6 +16,7 @@ Inert until the dayflow manager's state_map routes to it.
 """
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.control_nodes.control_node import ControlNode
+from app.assistant.dayflow_orchestrator.work_portfolio import local_stamp
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message
 
@@ -168,7 +169,7 @@ def _render_existing_graph(wo) -> str:
         wake = ""
         if getattr(n, "wake_kind", None):
             when = getattr(n, "wake_at", None)
-            wake = f" | wake={n.wake_kind}" + (f" at {when.isoformat()}" if when else "")
+            wake = f" | wake={n.wake_kind}" + (f" at {local_stamp(when)}" if when else "")
         failed_n = int((n.payload or {}).get("failure_count") or 0)
         if failed_n >= 2:
             sub += (f" | HAS FAILED {failed_n} TIMES — re-adding this work in any form will most "
