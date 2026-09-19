@@ -30,6 +30,11 @@ class TicketResponse:
     success: bool
     error: Optional[str] = None
     snooze_until: Optional[datetime] = None
+    # The ticket reached a state that accepts no response (expired / dismissed /
+    # completed / failed). A TYPED flag, not something a caller infers from the error
+    # text — surfaces need to tell "your answer arrived too late" apart from "the
+    # request failed, retry", and identity must never be recovered from wording.
+    not_answerable: bool = False
 
 
 class TicketService:
@@ -141,6 +146,36 @@ class TicketService:
                 error="ticket not found",
             )
 
+        # REFUSE BEFORE WRITING. A ticket in a terminal state cannot accept a response —
+        # _ALLOWED_TRANSITIONS gives `expired`, `dismissed`, `completed` and `failed` no
+        # outgoing edges at all. This check used to be absent, and the order of operations
+        # made that a silent data loss: the user's words were stamped onto the row, the
+        # transition was then refused with a warning, and `respond` returned success=False
+        # with no error. The answer sat in the database on an expired ticket, where
+        # `result_for_ticket` never looks, and the API reported HTTP 200.
+        #
+        # The most common way in: create_dayflow_ticket expires its ticket the moment its
+        # wait times out, so a reply racing that timeout lands here. Telling the user their
+        # answer did not register is the honest outcome — the call it belonged to has
+        # already returned "user not reached", the node has been judged, and nothing
+        # downstream can still consume a late reply.
+        from app.assistant.ticket_manager.ticket import TicketState
+
+        target_state = self.ACTION_TO_STATE[action]
+        if not manager.can_transition(ticket.state, TicketState(target_state)):
+            logger.warning(
+                "TicketService.respond: REFUSING %s on ticket %s — it is %r, which accepts "
+                "no response. The user's reply is NOT recorded.",
+                action, ticket_id, ticket.state,
+            )
+            return TicketResponse(
+                ticket_id=ticket_id,
+                action=action,
+                success=False,
+                error=f"this ticket is {ticket.state} and can no longer be answered",
+                not_answerable=True,
+            )
+
         # Build the effective text: what the user pressed, and what they typed.
         # Both verbatim. This replaced a table of canned descriptions that guessed at
         # intent from the action token — on 2026-09-15 that table recorded "User has
@@ -167,7 +202,6 @@ class TicketService:
         # Transition based on action
         success = False
         snooze_until = None
-        target_state = self.ACTION_TO_STATE[action]
 
         if target_state == "accepted":
             success = manager.mark_accepted(ticket_id, user_text=effective_text)

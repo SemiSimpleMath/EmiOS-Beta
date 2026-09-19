@@ -515,6 +515,24 @@ class TicketManager:
     # State Transition Operations
     # =========================================================================
 
+    @staticmethod
+    def can_transition(current_state: str, new_state: TicketState) -> bool:
+        """Would this transition be accepted? The read-only half of the state machine.
+
+        Exists so a caller can find out BEFORE it writes anything. TicketService used to
+        stamp the user's answer onto the ticket row and only then attempt the transition,
+        so a reply to an already-expired ask was persisted and then orphaned: the row
+        carried `user_text`, the state stayed `expired`, and `result_for_ticket` only reads
+        `user_text` for a responded state. The answer was in the database and unreachable.
+
+        Same source of truth as the write path (_ALLOWED_TRANSITIONS), including the
+        same-state no-op that _transition_state_in_session treats as success.
+        """
+        current = str(current_state or "").strip()
+        if current == new_state.value:
+            return True
+        return new_state.value in _ALLOWED_TRANSITIONS.get(current, frozenset())
+
     def _transition_state_in_session(
             self,
             session,

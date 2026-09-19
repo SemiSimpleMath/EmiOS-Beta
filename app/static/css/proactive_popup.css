@@ -508,3 +508,27 @@
     background: rgba(245, 101, 101, 0.18);
     color: #fc8181;
 }
+
+/* Transient notice — shown when a response could NOT be recorded (an expired ask).
+   The card is removed optimistically on click, so without this the user sees their
+   answer vanish and reads that as success. Styles live here, never inline. */
+.proactive-notice {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: min(520px, calc(100vw - 32px));
+    padding: 12px 16px;
+    border-radius: 8px;
+    background: rgba(45, 55, 72, 0.97);
+    color: #fbd38d;
+    border: 1px solid rgba(251, 211, 141, 0.35);
+    font-size: 13px;
+    line-height: 1.45;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+    z-index: 10001;
+}
+
+.proactive-notice.hidden {
+    display: none;
+}

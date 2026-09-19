@@ -580,7 +580,19 @@ class ProactiveSuggestionPopup {
                 })
             });
             
-            if (!response.ok) {
+            if (response.status === 409) {
+                // The ticket is no longer answerable — it expired (usually because the
+                // call that asked gave up waiting) or was already resolved elsewhere.
+                // Do NOT roll back: the question really is gone, and putting it back
+                // would invite the user to answer into the void a second time. Tell them
+                // instead, because their answer was not recorded.
+                let detail = '';
+                try { detail = (await response.json()).error || ''; } catch (e) { detail = ''; }
+                console.warn('Suggestion no longer answerable:', detail);
+                this.showTransientNotice(
+                    'That question expired before your answer reached it, so it was not recorded.'
+                );
+            } else if (!response.ok) {
                 console.error('Error responding to suggestion:', await response.text());
                 // Re-add on error (rollback optimistic update)
                 this.suggestions.splice(idx, 0, suggestion);
@@ -643,6 +655,26 @@ class ProactiveSuggestionPopup {
         }
         const escaped = this.escapeHtml(display);
         return escaped;
+    }
+
+    showTransientNotice(text, ttlMs = 6000) {
+        // Used when an answer could not be recorded. The user pressed a button and the
+        // optimistic update already removed the card, so saying nothing would read as
+        // "answered" — which is exactly the silence this replaces.
+        let host = document.getElementById('proactive-notice');
+        if (!host) {
+            host = document.createElement('div');
+            host.id = 'proactive-notice';
+            host.className = 'proactive-notice hidden';
+            document.body.appendChild(host);
+        }
+        host.textContent = text;
+        host.classList.remove('hidden');
+        if (this._noticeTimer) clearTimeout(this._noticeTimer);
+        this._noticeTimer = setTimeout(() => {
+            const el = document.getElementById('proactive-notice');
+            if (el) el.classList.add('hidden');
+        }, ttlMs);
     }
 }
 

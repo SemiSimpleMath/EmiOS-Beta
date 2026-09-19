@@ -126,6 +126,18 @@ def respond_to_ticket():
             "success": response.success,
         }
 
+        if response.not_answerable:
+            # 409, not 400: the request was well-formed and the ticket exists — it simply
+            # reached a state that accepts no response (usually create_dayflow_ticket
+            # expiring its own ticket when its wait timed out). The surface needs to tell
+            # this apart from a transport failure, because retrying will never help and
+            # the reply is genuinely lost.
+            return jsonify({
+                "error": response.error,
+                "not_answerable": True,
+                "ticket_id": response.ticket_id,
+            }), 409
+
         if response.error:
             return jsonify({"error": response.error}), 400
 
