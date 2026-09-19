@@ -6,11 +6,11 @@ subclasses `(str, Enum)` — so `str()` on it returns "TicketKind.notify"
 (Enum.__str__) rather than "notify". Lowercased downstream that becomes
 'ticketkind.notify', which `_ui_policy_for_ticket_kind` refuses.
 
-The failure only appears when the composer SUCCEEDS: the exception path returns
-plain strings and the `or "advice"` default returns a plain string, so both of
-those work. That is why it ran 66 times in one session before anyone saw it —
-every iteration paid for a full ticket_builder_manager run, got a correct
-answer, and threw it away on the last hop.
+The failure only appears when the composer SUCCEEDS, because only that path carries
+an enum — which is why it ran 66 times in one session before anyone saw it: every
+iteration paid for a full ticket_builder_manager run, got a correct answer, and threw
+it away on the last hop. (Until 2026-09-18 the failing paths synthesised a ticket from
+the brief instead of raising, which is a second reason this stayed quiet. They raise now.)
 
 Run:
     .venv\\Scripts\\python.exe -m pytest \\

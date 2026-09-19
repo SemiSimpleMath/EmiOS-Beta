@@ -234,17 +234,29 @@ class CreateDayflowTicketTool(BaseTool):
                     }
                 break
         except Exception as e:
-            logger.warning("create_dayflow_ticket: ticket_builder_manager failed: %s", e)
+            logger.error("create_dayflow_ticket: ticket_builder_manager failed: %s", e)
             logger.debug("create_dayflow_ticket: ticket_builder_manager exception details", exc_info=True)
+            raise
 
-        # Fallback: mechanical extraction if agent fails.
-        is_decision = any(w in brief.lower() for w in ("ask", "decide", "choice", "confirm", "whether"))
-        return {
-            "ticket_kind": "decision" if is_decision else "advice",
-            "suggestion_type": "general",
-            "title": brief[:60].strip(),
-            "message": brief.strip(),
-        }
+        # Reached when the manager returned but no composer output was found on its
+        # blackboard. RAISE rather than invent a ticket.
+        #
+        # This used to mechanically synthesise one: the first 60 characters of the brief as
+        # the title, and `decision` if the brief happened to contain "ask", "decide",
+        # "choice", "confirm" or "whether". Both halves are wrong in the way this repo bans.
+        # The title reached the USER as a mid-sentence fragment, and the kind decides whether
+        # a reply is even possible — chosen by substring match, so "I will ask the school"
+        # became a question demanding an answer. Deciding identity from wording is exactly
+        # what ticket_builder_manager exists to avoid.
+        #
+        # `execute` turns this into an error ToolResult, so the node fails and the finalizer
+        # judges it. A failed ask the architect can re-plan beats a malformed one the user
+        # has to interpret.
+        raise ValueError(
+            "create_dayflow_ticket: ticket_builder_manager produced no composer output, so "
+            "there is no title or message to show the user. Refusing to synthesise one from "
+            "the brief."
+        )
 
     # A responded ticket: the user dealt with it, whichever button they pressed.
     _RESPONDED_STATES = frozenset({"accepted", "dismissed", "completed"})

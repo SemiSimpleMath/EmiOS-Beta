@@ -125,51 +125,59 @@ def _format_compact_outcome(*, task: str, action: str, full_result: str) -> str:
     The agent receives the full untruncated full_result. NEVER slice
     it before this call. See feedback_no_truncated_tool_results.md.
 
-    Failure modes:
-      - Agent unavailable / errors → fall back to a hedged stub like
-        "(formatter unavailable; see action_log)" so downstream consumers
-        don't get a 3KB blast.
-      - full_result is empty → return empty (caller handles).
+    Failure modes: RAISE. An empty ``full_result`` returns "" (there is genuinely nothing
+    to summarise, and the caller handles that), but a formatter that is missing, crashes or
+    answers with the wrong shape raises.
+
+    It used to return a hedged sentence instead — "(formatter unavailable; see action_log)",
+    "(formatter errored; see action_log)", "(formatter returned no data; see action_log)" —
+    and the caller wrote that string into the item's ``execution_result``, where the planner
+    reads it as the outcome of the work. A sentence about our own plumbing, in the field that
+    says what happened to the user's task. The stated reason was to avoid blasting 3KB
+    downstream, which raising also avoids.
+
+    Both callers already handle a raise: master_room's marker close wraps this in a
+    try/except and the stale-dispatch sweep closes anything it leaves open, and post_room's
+    own path is dead code.
     """
     if not full_result or not full_result.strip():
         return ""
 
-    try:
-        from app.assistant.ServiceLocator.service_locator import DI
-        from app.assistant.utils.pydantic_classes import Message
-    except Exception as e:
-        logger.warning("[post_room_finalize] result_formatter dependencies unavailable: %s", e)
-        return "(formatter unavailable; see action_log)"
+    from app.assistant.ServiceLocator.service_locator import DI
+    from app.assistant.utils.pydantic_classes import Message
 
     agent = DI.agent_factory.create_agent("dayflow_orchestrator::result_formatter")
     if agent is None:
-        logger.warning("[post_room_finalize] dayflow_orchestrator::result_formatter not registered")
-        return "(formatter unavailable; see action_log)"
+        raise RuntimeError(
+            "[post_room_finalize] dayflow_orchestrator::result_formatter is not registered — "
+            "refusing to write a sentence about the formatter into execution_result"
+        )
 
     agent_input = {
         "task": task or "",
         "action": action or "",
         "full_result": full_result,
     }
-    try:
-        result = agent.action_handler(Message(agent_input=agent_input))
-    except Exception as e:
-        logger.error(
-            "[post_room_finalize] result_formatter agent crashed: %s", e,
-            exc_info=True,
-        )
-        return "(formatter errored; see action_log)"
+    result = agent.action_handler(Message(agent_input=agent_input))
 
     data = getattr(result, "data", None)
     if not isinstance(data, dict):
-        return "(formatter returned no data; see action_log)"
+        raise RuntimeError(
+            f"[post_room_finalize] result_formatter returned {type(data).__name__}, not a "
+            f"dict — there is no outcome to record"
+        )
 
     outcome = str(data.get("outcome") or "").strip()
     open_qs = data.get("open_questions") or []
     needs_followup = bool(data.get("needs_followup"))
     followup_hint = str(data.get("followup_hint") or "").strip()
 
-    parts = [outcome] if outcome else ["(formatter returned no outcome)"]
+    if not outcome:
+        raise RuntimeError(
+            "[post_room_finalize] result_formatter returned no outcome text — the one field "
+            "this call exists to produce"
+        )
+    parts = [outcome]
     if open_qs and isinstance(open_qs, list):
         for q in open_qs[:3]:
             qs = str(q or "").strip()
