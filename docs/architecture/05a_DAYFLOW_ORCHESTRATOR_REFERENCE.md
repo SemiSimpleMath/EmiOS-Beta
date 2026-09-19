@@ -635,9 +635,12 @@ set — so a reply arriving after the wait-timeout is **refused with a warning a
 discarded**, and `result_for_ticket` then reports "user not reached". Verified against
 `ticket_manager`. On this lane the exposure is only the race between the timeout and the UI
 refresh, because `valid_hours` and `wait_timeout_seconds` are both driven from
-`ASK_WINDOW_HOURS` and end together. A caller using the tool's own defaults, 4 hours of
-validity against a 600 s block, leaves the question answerable-looking on screen for nearly
-four hours after the reply stops being accepted.)
+`ASK_WINDOW_HOURS` and end together. The web popup lists `pending`/`proposed` only and re-fetches
+on the `proactive_suggestion_update` the timeout publishes, so an expired ticket leaves the
+screen on the next refresh rather than lingering to `valid_until`. The sharper problem is for a
+caller on the tool's own defaults, 4 hours of validity against a 600 s block: its four-hour
+question is silently withdrawn after ten minutes. And the tool form has no
+`wait_timeout_seconds` field, so a switchboard-routed call cannot ask for anything else.)
 
 On reply it returns `action` + `user_text`, and the result TEXT is built by `format_response_result`
 as *answer first, question second*: the answer must survive a projection's cap, and "No I will do it
