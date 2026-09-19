@@ -157,6 +157,29 @@ class CreateDayflowTicketTool(BaseTool):
                 tts_message.event_topic = "socket_emit"
                 DI.event_hub.publish(tts_message)
 
+            # FIRE AND FORGET. The ticket is created, on screen and spoken by this point —
+            # everything above already happened. A caller that never reads the reply has no
+            # reason to hold a thread open for it, and holding one does active harm: the
+            # camera's emergency escalation runs inside an event routine, so a 600s block
+            # tripped the routine watchdog's 120s soft limit (a spurious "this routine is
+            # stuck" ticket, at the worst possible moment) and then EXPIRED the emergency
+            # ticket at ten minutes despite it asking for four hours.
+            if not bool(args.get("wait", True)):
+                logger.info(
+                    "[create_dayflow_ticket] %s surfaced without waiting — it lives out its "
+                    "%sh validity", ticket.ticket_id, valid_hours,
+                )
+                return ToolResult(
+                    result_type="success",
+                    content=f"Ticket surfaced to the user: {title}",
+                    data={
+                        "ticket_id": ticket.ticket_id,
+                        "title": title,
+                        "action": "surfaced",
+                        "user_text": "",
+                    },
+                )
+
             # Wait for the user's response to the ticket.
             timeout = float(args.get("wait_timeout_seconds", 600))
             # These two are one decision wearing two names, and disagreeing about them is

@@ -60,7 +60,13 @@
       "name": "wait_timeout_seconds",
       "type": "integer",
       "required": false,
-      "description": "How long this call blocks waiting for the user's answer. Should equal valid_hours in seconds. Default 600, which withdraws a 4-hour ticket after ten minutes."
+      "description": "How long this call blocks waiting for the user's answer. Should equal valid_hours in seconds. Default 600, which withdraws a 4-hour ticket after ten minutes. Ignored when wait is false."
+    },
+    {
+      "name": "wait",
+      "type": "boolean",
+      "required": false,
+      "description": "Default true: block until the user answers, and return their reply as the result. Set false to surface the ticket and return at once, leaving it to live out valid_hours. Use false only when nothing is waiting on the answer."
     },
     {
       "name": "status_effect",

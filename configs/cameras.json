@@ -18,6 +18,9 @@
       "pod_policy": {
         "skip_if_category_in": ["car_by", "wind"],
         "source_kind": "ring_doorbell_event",
+        "source_kind_by_category": {
+          "emergency": "ring_doorbell_significant"
+        },
         "one_liner_field": "caption",
         "body_field": "caption"
       },

@@ -25,6 +25,12 @@ class create_dayflow_ticket_args(BaseModel):
     # valid_hours; the dayflow lane drives both from ASK_WINDOW_HOURS for exactly this
     # reason. The tool logs a warning when they disagree.
     wait_timeout_seconds: int = 600
+    # False = surface the ticket and return immediately, leaving it to live out its
+    # valid_hours. For callers that do not tie a work node to the reply and never read it
+    # (the camera escalation, the scheduler-conflict ask): they only need the ticket on
+    # screen. Waiting is the DEFAULT because the dayflow lane depends on it — there the
+    # user's reply IS the result of the work node, so the call must stay open for it.
+    wait: bool = True
     status_effect: list[str] | None = None
     speak_tts: bool = True
 

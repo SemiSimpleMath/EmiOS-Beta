@@ -231,6 +231,10 @@ def _surface_user_conflict_ticket(
                     },
                     "trigger_reason": "scheduler_arbiter_user_conflict",
                     "valid_hours": 48,
+                    # Surface it and return. This caller keeps only the ticket_id and never
+                    # reads the reply, so blocking would hold a thread while expiring a
+                    # 48-hour question after ten minutes.
+                    "wait": False,
                 },
             },
         )

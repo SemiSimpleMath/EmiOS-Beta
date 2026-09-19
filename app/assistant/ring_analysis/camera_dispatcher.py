@@ -348,6 +348,39 @@ def _pod_policy_matches(policy: Dict[str, Any], data: Dict[str, Any]) -> bool:
     return True
 
 
+def _pod_source_kind(
+    policy: Dict[str, Any], data: Dict[str, Any], *, camera_id: Any = None,
+) -> str:
+    """Which ``source_kind`` this frame's pod is minted under.
+
+    ``pod_policy.source_kind_by_category`` lets an escalation-worthy category mint under a
+    different kind from the camera's everyday one. That exists because the dayflow
+    orchestrator ingests pods by an ALLOWLIST of (kind, source_kind) pairs, declared in the
+    dayflow_orchestrator room's ROOM.md under ``access.ingestion_pod_kinds`` — and that
+    allowlist asked for ``ring_doorbell_significant`` while no camera produced that name.
+    Every front-door pod was therefore minted and then ignored by dayflow.
+
+    One pod under the right kind, rather than a second pod for the same frame: the everyday
+    kind stays out of dayflow's working set (a pod per doorbell event would be intake for
+    every passing delivery), and the rare escalating category opts in.
+    """
+    base = str(policy.get("source_kind") or f"camera_{camera_id or 'unknown'}")
+    by_category = policy.get("source_kind_by_category") or {}
+    if not isinstance(by_category, dict):
+        return base
+    category = str((data or {}).get("category") or "").strip()
+    if not category:
+        return base
+    override = str(by_category.get(category) or "").strip()
+    if not override:
+        return base
+    logger.info(
+        "[camera_dispatcher] category=%r escalates the pod kind: %s -> %s",
+        category, base, override,
+    )
+    return override
+
+
 def _mint_camera_pod(
     camera: Dict[str, Any], jpeg: Path, data: Dict[str, Any],
     captured_at_utc: str, analyzer: str,
@@ -357,7 +390,7 @@ def _mint_camera_pod(
         from app.assistant.pod_store.pod_store import PodStore
 
         policy = camera.get("pod_policy") or {}
-        source_kind = str(policy.get("source_kind") or f"camera_{camera.get('id', 'unknown')}")
+        source_kind = _pod_source_kind(policy, data, camera_id=camera.get("id"))
         body_field = str(policy.get("body_field") or "")
         one_liner_field = str(policy.get("one_liner_field") or body_field)
         body = str(data.get(body_field) or "").strip() if body_field else ""
@@ -559,6 +592,13 @@ def _fire_dayflow_ticket(
                     },
                     "trigger_reason": f"camera_event_{category}",
                     "valid_hours": 4,
+                    # Surface it and return. This runs inside an event routine whose soft
+                    # watchdog is 120s, and nothing here reads the user's reply — the
+                    # follow-up path is the significant pod that dayflow ingests (see
+                    # _mint_camera_pod's source_kind_by_category). Blocking for the default
+                    # 600s tripped the watchdog and then expired this ticket at ten minutes
+                    # despite the 4h validity above.
+                    "wait": False,
                 },
             },
         )

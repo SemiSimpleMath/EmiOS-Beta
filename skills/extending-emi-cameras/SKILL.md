@@ -72,8 +72,21 @@ the registry on startup and routes every snapshot event by
   `min`, `max`.
 - `pod_policy.source_kind` — tag stamped onto the minted pod.
   Pods with this `source_kind` can be opted into dayflow ingest
-  via `app/assistant/rooms/dayflow_orchestrator/access.json`'s
-  `ingestion_pod_kinds` allowlist.
+  via the `ingestion_pod_kinds` allowlist in the **YAML frontmatter
+  of `app/assistant/rooms/dayflow_orchestrator/ROOM.md`**, under
+  `access:`. (There is no `access.json`; the block lives in ROOM.md
+  and is read by `load_room_access`.) The allowlist matches on the
+  PAIR `(kind, source_kind)`, and `kind` is `image` for camera pods —
+  a `source_kind` it does not name is minted and then ignored.
+- `pod_policy.source_kind_by_category` — optional
+  `{category: source_kind}` override, applied when the analyzer's
+  `category` matches. This is how one category escalates into
+  dayflow's working set while the rest stay out of it: the front door
+  mints `ring_doorbell_event` normally and
+  `ring_doorbell_significant` for `emergency`, and only the second is
+  in the allowlist. Prefer this over a second pod for the same frame,
+  and over allowlisting the everyday kind — which would make every
+  passing delivery dayflow intake, at one triage LLM call each.
 - `pod_policy.body_field` / `one_liner_field` — which
   analyzer-output fields become the pod body / one_liner.
 
