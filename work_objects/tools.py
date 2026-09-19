@@ -7,10 +7,14 @@ mutation authority). The agent runs its normal loop on the blackboard and calls
 these like any other tool.
 
   READ (progressive disclosure — see little by default, drill down on demand):
-    graph_summary / graph_peek / graph_neighbors / graph_search
+    graph_summary / graph_peek / graph_search
   WRITE (the mutation vocabulary):
     add_subtask / add_dependency / record_finding / produce_artifact /
     ask_question / defer
+
+``graph_neighbors`` is a READ method here but is deliberately NOT in that list: it has no
+entry in work_tools._SPECS, so no agent can call it. Python callers (scenarios, a scripted
+driver) can. Listing it above implied a tool that does not exist.
 
 A real WorkAgent gets these as registered LLM tools in its allowed_tools; here
 they are plain methods so a scripted agent can drive them without an LLM. The
@@ -56,7 +60,11 @@ class WorkGraphTools:
         }
 
     def graph_neighbors(self, node_id: str, relation: Optional[str] = None) -> list[dict]:
-        """Walk the DAG from a node (deps in, produces out, …)."""
+        """Walk the DAG from a node (deps in, produces out, …).
+
+        NOT exposed as a `work_*` tool — there is no `work_graph_neighbors` in
+        work_tools._SPECS, so an agent cannot reach this. Python-only today.
+        """
         wo = self.store.load(self.work_id)
         out = []
         for e in wo.edges:
