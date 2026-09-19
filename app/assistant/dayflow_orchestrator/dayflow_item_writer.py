@@ -326,20 +326,35 @@ def write_dayflow_items_batch(
     *,
     caller: str = "",
 ) -> int:
-    """Create multiple new dayflow items in a single transaction.
+    """Write multiple dayflow items in a single transaction.
 
     Each dict in ``items`` must have at least ``item_id``, ``source_type``,
     and ``summary``.  State defaults to the value in the dict or
     ``important_open`` if not specified.
 
     Returns the count of items written.
+
+    SAME CONTRACT AS ``write_dayflow_item``, for rows that already exist: metadata is
+    read-merge-written and a state change is validated against ALLOWED_TRANSITIONS. It
+    did neither until 2026-09-18 — it was a blind upsert, so it (a) replaced
+    ``metadata_json`` wholesale, silently dropping every key the caller did not resend,
+    and (b) moved an item between states with no check at all. Both mattered: triage
+    admissions come through here and UPDATE existing rows (``new -> artifact``), so the
+    one enforcement point the item lane has was bypassed by its own busiest writer, while
+    CLAUDE.md said transitions were "enforced by write_dayflow_item" — true, and read as
+    though it covered all writes.
+
+    New rows are unchanged: there is no prior state to validate against and nothing to
+    merge.
     """
     if not items:
         return 0
 
     now_utc = datetime.now(timezone.utc)
-    records = []
 
+    # Normalize and validate the payloads BEFORE opening the transaction, so a bad batch
+    # fails without having written part of itself.
+    staged: List[tuple] = []          # (item_id, caller-supplied meta)
     for item in items:
         if not isinstance(item, dict):
             raise ValueError(f"write_dayflow_items_batch: expected dict, got {type(item).__name__}")
@@ -362,21 +377,48 @@ def write_dayflow_items_batch(
             raise ValueError(
                 f"write_dayflow_items_batch: item '{item_id}' missing summary (caller={caller})"
             )
+        staged.append((item_id, meta))
 
-        records.append({
-            "id": item_id,
-            "timestamp": now_utc,
-            "role": "system",
-            "message": str(meta.get("summary") or ""),
-            "source": DAYFLOW_ITEM_SOURCE,
-            "processed": False,
-            "room_id": DAYFLOW_ROOM_ID,
-            "metadata_json": meta,
-            "data_json": {"data_type": meta.get("data_type", "dayflow_input_item")},
-            "content_type": "text",
-        })
-
+    records = []
     with get_db_manager().transaction(op=f"dayflow.write_items_batch:{caller}") as session:
+        # One query for every row this batch touches, rather than one per item.
+        wanted = [item_id for item_id, _ in staged]
+        existing_rows = session.execute(
+            select(UnifiedLog2026)
+            .where(UnifiedLog2026.id.in_(wanted))
+            .where(UnifiedLog2026.source == DAYFLOW_ITEM_SOURCE)
+        ).scalars().all()
+        existing_meta = {row.id: _read_metadata(row) for row in existing_rows}
+
+        for item_id, incoming in staged:
+            prior = existing_meta.get(item_id)
+            if prior is None:
+                meta = incoming          # a genuinely new row
+            else:
+                # Read-merge-write, and validate the move if this changes the state.
+                new_state = str(incoming.get("state") or "").strip().lower()
+                current_state = str(prior.get("state") or "").strip().lower()
+                if new_state and new_state != current_state:
+                    _validate_transition(item_id, current_state, new_state, caller)
+                    incoming["state_reason"] = (
+                        incoming.get("state_reason")
+                        or f"{caller}:{current_state}_to_{new_state}"
+                    )
+                meta = {**prior, **incoming}
+
+            records.append({
+                "id": item_id,
+                "timestamp": now_utc,
+                "role": "system",
+                "message": str(meta.get("summary") or ""),
+                "source": DAYFLOW_ITEM_SOURCE,
+                "processed": False,
+                "room_id": DAYFLOW_ROOM_ID,
+                "metadata_json": meta,
+                "data_json": {"data_type": meta.get("data_type", "dayflow_input_item")},
+                "content_type": "text",
+            })
+
         from sqlalchemy.dialects.sqlite import insert as sqlite_insert
         stmt = sqlite_insert(UnifiedLog2026).values(records)
         stmt = stmt.on_conflict_do_update(
@@ -391,7 +433,7 @@ def write_dayflow_items_batch(
         session.execute(stmt)
 
     logger.info(
-        "write_dayflow_items_batch: wrote %d item(s) (caller=%s)",
-        len(records), caller,
+        "write_dayflow_items_batch: wrote %d item(s), %d of them updates (caller=%s)",
+        len(records), len(existing_meta), caller,
     )
     return len(records)

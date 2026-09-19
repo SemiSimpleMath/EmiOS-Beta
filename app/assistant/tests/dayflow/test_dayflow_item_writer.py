@@ -256,6 +256,114 @@ class TestBatchWrite:
         item = load_item_by_id("task:upsert1")
         assert get_meta(item)["summary"] == "V2"
 
+    # ----------------------------------------------------------------------- #
+    # The batch path was a BLIND upsert until 2026-09-18: it replaced
+    # metadata_json wholesale and validated no state change. Triage admissions
+    # come through here and update existing rows, so the item lane's only
+    # enforcement point was bypassed by its busiest writer.
+    # ----------------------------------------------------------------------- #
+
+    def test_batch_update_keeps_keys_the_caller_did_not_resend(self):
+        """A partial payload must not erase the rest of the row."""
+        write_dayflow_items_batch([{
+            "item_id": "task:merge1",
+            "source_type": "plan_task",
+            "summary": "V1",
+            "state": "important_open",
+            "plan_id": "plan_7",
+            "short_id": "42",
+            "based_on": ["artifact:1"],
+        }], caller="test")
+
+        # A later write that mentions only the summary.
+        write_dayflow_items_batch([{
+            "item_id": "task:merge1",
+            "source_type": "plan_task",
+            "summary": "V2",
+        }], caller="test")
+
+        meta = get_meta(load_item_by_id("task:merge1"))
+        assert meta["summary"] == "V2", "the update must land"
+        assert meta["plan_id"] == "plan_7", "an unmentioned key must survive"
+        assert meta["short_id"] == "42", "an unmentioned key must survive"
+        assert meta["based_on"] == ["artifact:1"], "provenance must survive"
+
+    def test_batch_validates_a_state_change_on_an_existing_row(self):
+        """The transition table now governs this path too."""
+        write_dayflow_items_batch([{
+            "item_id": "task:trans1",
+            "source_type": "plan_task",
+            "summary": "S",
+            "state": "closed",
+        }], caller="test")
+
+        # closed -> dispatched is not in ALLOWED_TRANSITIONS.
+        assert "dispatched" not in ALLOWED_TRANSITIONS["closed"]
+        with pytest.raises(ValueError, match="invalid transition"):
+            write_dayflow_items_batch([{
+                "item_id": "task:trans1",
+                "source_type": "plan_task",
+                "summary": "S",
+                "state": "dispatched",
+            }], caller="test")
+
+        # Refused, and the row is untouched.
+        assert get_meta(load_item_by_id("task:trans1"))["state"] == "closed"
+
+    def test_batch_allows_the_transition_triage_actually_makes(self):
+        """new -> artifact is what triage_persist_node does on an ADMIT."""
+        write_dayflow_items_batch([{
+            "item_id": "task:triage1",
+            "source_type": "email",
+            "summary": "an inbound thing",
+            "state": "new",
+        }], caller="test")
+
+        write_dayflow_items_batch([{
+            "item_id": "task:triage1",
+            "source_type": "email",
+            "summary": "an inbound thing",
+            "state": "artifact",
+            "state_reason": "triage_admit",
+        }], caller="test")
+
+        meta = get_meta(load_item_by_id("task:triage1"))
+        assert meta["state"] == "artifact"
+        assert meta["state_reason"] == "triage_admit"
+
+    def test_batch_rejects_the_whole_payload_before_writing_any_of_it(self):
+        """Validation runs before the transaction opens, so a bad batch is atomic."""
+        with pytest.raises(ValueError, match="source_type"):
+            write_dayflow_items_batch([
+                {"item_id": "task:ok1", "source_type": "plan_task", "summary": "fine"},
+                {"item_id": "task:bad1", "summary": "no source_type"},
+            ], caller="test")
+
+        assert load_item_by_id("task:ok1") is None, (
+            "the good item must not have been written when a later one was invalid"
+        )
+
+    def test_batch_same_state_write_updates_fields_without_a_transition(self):
+        """The idempotent no-op the state_mover relies on, on this path too."""
+        write_dayflow_items_batch([{
+            "item_id": "task:same1",
+            "source_type": "plan_task",
+            "summary": "S",
+            "state": "waiting",
+        }], caller="test")
+
+        write_dayflow_items_batch([{
+            "item_id": "task:same1",
+            "source_type": "plan_task",
+            "summary": "S",
+            "state": "waiting",
+            "reactivate_at_utc": "2026-09-19T08:00:00+00:00",
+        }], caller="test")
+
+        meta = get_meta(load_item_by_id("task:same1"))
+        assert meta["state"] == "waiting"
+        assert meta["reactivate_at_utc"] == "2026-09-19T08:00:00+00:00"
+
 
 class TestDoubleEncodingDefense:
 
