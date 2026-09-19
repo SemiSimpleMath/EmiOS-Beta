@@ -159,6 +159,18 @@ class CreateDayflowTicketTool(BaseTool):
 
             # Wait for the user's response to the ticket.
             timeout = float(args.get("wait_timeout_seconds", 600))
+            # These two are one decision wearing two names, and disagreeing about them is
+            # not a harmless inconsistency: the wait ending EXPIRES the ticket, so a block
+            # shorter than the validity window silently withdraws a question the caller
+            # asked to keep open. A 4-hour ticket on the default block lives ten minutes.
+            # The dayflow lane drives both from ASK_WINDOW_HOURS so they end together.
+            if timeout < valid_hours * 3600:
+                logger.warning(
+                    "[create_dayflow_ticket] %s: valid_hours=%s (%ss) but the call blocks only "
+                    "%ss — the ticket is expired when the wait ends, so its stated validity is "
+                    "cut to the block. Pass wait_timeout_seconds to match.",
+                    ticket.ticket_id, valid_hours, valid_hours * 3600, int(timeout),
+                )
             response = self._wait_for_ticket_response(ticket.ticket_id, title, timeout)
             return response
         except Exception as e:

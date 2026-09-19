@@ -18,6 +18,13 @@ class create_dayflow_ticket_args(BaseModel):
     trigger_context: dict[str, Any] | None = None
     trigger_reason: str | None = None
     valid_hours: int = 4
+    # How long this call BLOCKS waiting for the answer. It was absent from this form
+    # entirely, so an LLM-routed call could not set it and was locked to the 600s default
+    # while asking for a 4-hour ticket — the tool expires the ticket when the wait ends, so
+    # the stated validity was silently cut to ten minutes. Keep it consistent with
+    # valid_hours; the dayflow lane drives both from ASK_WINDOW_HOURS for exactly this
+    # reason. The tool logs a warning when they disagree.
+    wait_timeout_seconds: int = 600
     status_effect: list[str] | None = None
     speak_tts: bool = True
 

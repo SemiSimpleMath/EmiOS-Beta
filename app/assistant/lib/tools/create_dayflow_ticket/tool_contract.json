@@ -54,7 +54,13 @@
       "name": "valid_hours",
       "type": "integer",
       "required": false,
-      "description": "How long the ticket remains valid."
+      "description": "How long the ticket stays on screen and answerable. Set this and wait_timeout_seconds to the same span: the call expires the ticket when its wait ends, so a longer validity than the wait is silently cut to the wait."
+    },
+    {
+      "name": "wait_timeout_seconds",
+      "type": "integer",
+      "required": false,
+      "description": "How long this call blocks waiting for the user's answer. Should equal valid_hours in seconds. Default 600, which withdraws a 4-hour ticket after ten minutes."
     },
     {
       "name": "status_effect",
