@@ -217,7 +217,11 @@ def _surface_user_conflict_ticket(
             tool_name="create_dayflow_ticket",
             tool_data={
                 "arguments": {
-                    "ticket_kind": "info",
+                    # decision = the user must choose; this ticket exists because the arbiter
+                    # punted. "info" is NOT a valid kind: _ui_policy_for_ticket_kind accepts
+                    # notify/decision/advice and RAISES on anything else, before the ticket is
+                    # created — so every conflict ask from here failed silently (2026-09-18).
+                    "ticket_kind": "decision",
                     "suggestion_type": "scheduler_conflict",
                     "title": title,
                     "message": "\n".join(body_lines)[:1200],

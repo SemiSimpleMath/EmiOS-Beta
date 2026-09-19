@@ -542,7 +542,11 @@ def _fire_dayflow_ticket(
             tool_name="create_dayflow_ticket",
             tool_data={
                 "arguments": {
-                    "ticket_kind": "info",
+                    # notify = an FYI with no reply expected. "info" is NOT a valid kind:
+                    # _ui_policy_for_ticket_kind accepts notify/decision/advice and RAISES on
+                    # anything else, before the ticket is created — so every escalation from
+                    # here failed and returned an error result (2026-09-18).
+                    "ticket_kind": "notify",
                     "suggestion_type": "camera_event",
                     "title": title[:120],
                     "message": "\n".join(message_lines)[:600],
@@ -559,10 +563,15 @@ def _fire_dayflow_ticket(
             },
         )
         result = tool.execute(tm)
-        ok = getattr(result, "result_type", "") in {"create_dayflow_ticket", "tool_result"} or (
-            isinstance(getattr(result, "data", None), dict) and not getattr(result, "data").get("error_code")
-        )
-        return bool(ok)
+        # An error from this tool is `ToolResult(result_type="error", ..., data={})`. The old test
+        # accepted it twice over: neither name in its result_type set is what the tool returns on
+        # success ("ticket_response"), and `not data.get("error_code")` is TRUE for the empty dict
+        # an error carries — so a failed escalation reported success. Read the result_type.
+        if str(getattr(result, "result_type", "") or "").lower() == "error":
+            logger.error("[camera_dispatcher] dayflow ticket REFUSED: %s",
+                         getattr(result, "content", "") or "(no reason given)")
+            return False
+        return True
     except Exception as e:
         logger.error("[camera_dispatcher] dayflow_ticket failed: %s", e, exc_info=True)
         return False
