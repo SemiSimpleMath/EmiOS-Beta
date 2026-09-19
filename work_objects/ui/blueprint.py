@@ -93,7 +93,10 @@ def api_work_list():
         except Exception as e:
             logger.debug("[work_ui] summary for %s failed: %s", s["id"], e)
         out.append(s)
-    return jsonify({"work_objects": out, "db": _WORK_DB})
+    # The store's OWN path, not the dev-file constant. _get_store prefers the live dayflow
+    # store (emi.db) and only drops back to _WORK_DB, so reporting the constant told you the
+    # wrong database in exactly the case that matters — looking at real work objects.
+    return jsonify({"work_objects": out, "db": store.path})
 
 
 @work_ui_bp.route("/api/work/<work_id>")
