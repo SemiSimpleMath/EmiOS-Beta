@@ -100,3 +100,35 @@ def test_undecomposed_goals_survive_lost_tick_blackboard():
         assert found[0]["objective"] == "Recover this objective"
     finally:
         store.close()
+
+
+def test_legacy_admission_is_not_pending_but_old_explicit_handoff_survives():
+    from datetime import timedelta
+    old = datetime.now(timezone.utc) - timedelta(days=90)
+    items = []
+    for name, state, marker in [
+        ("legacy", "artifact", None),
+        ("cleared", "artifact", False),
+        ("pending", "artifact", True),
+        ("transferred", "closed", True),
+    ]:
+        meta = {"state_reason": "triage_admit"}
+        if marker is not None:
+            meta["evaluator_pending"] = marker
+        items.append(make_dayflow_message(item_id=name, source_type="email",
+            state=state, created_at=old, last_reviewed_at=old, extra_meta=meta))
+    seed_items(items)
+    assert [i["metadata"]["item_id"] for i in state_store.load_admitted_intake()] == ["pending"]
+
+
+def test_pending_intake_render_exposes_original_date_and_historical_deadlines():
+    from pathlib import Path
+    from jinja2 import Environment
+    template = Path("app/assistant/agents/dayflow_orchestrator/strategic_planner_wo/prompts/user.j2").read_text(encoding="utf-8")
+    rendered = Environment().from_string(template).render(admitted_artifacts=[{
+        "metadata": {"source_type": "email", "created_at": "2026-04-09T22:03:26+00:00",
+                     "email_subject": "Request", "email_summary": "Please answer today"}}])
+    assert "source date: 2026-04-09T22:03:26+00:00" in rendered
+    assert "## PENDING INTAKE" in rendered
+    assert "## NEW INTAKE" not in rendered
+    assert "against the source date" in rendered

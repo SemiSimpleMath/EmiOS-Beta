@@ -77,10 +77,12 @@ Health: {{ health_status_summary }}
 {%- endif %}
 
 {% if admitted_artifacts %}
-## NEW INTAKE (items that may need attention — cite an item's [id] in based_on when you turn it into a work object)
+## PENDING INTAKE (items awaiting evaluation that may need attention — cite an item's [id] in based_on when you turn it into a work object)
+Source dates below are the original dates, not the time this item entered this prompt. Interpret relative deadlines such as "today" against the source date; an old request is not renewed urgency or renewed authorization.
 {% for m in admitted_artifacts %}
 {%- set meta = m.get("metadata", {}) %}
 - [{{ meta.get("short_id", meta.get("item_id","")) }}] {% if meta.get("source_type","") == "email" %}Email from {{ meta.get("email_sender","Unknown") }}: "{{ meta.get("email_subject", meta.get("summary","")) }}"{% if meta.get("email_summary") %} — {{ meta.get("email_summary") }}{% endif %}{% else %}{{ meta.get("summary","(no summary)") }} ({{ meta.get("source_type","") }}){% endif %}
+  source date: {{ meta.get("created_at") or m.get("timestamp") or "unknown; do not assume current" }}
 {%- if meta.get("source_type","") == "email" and meta.get("email_body_excerpt") %}
   body:
     {{ meta.get("email_body_excerpt") | replace("\n", "\n    ") }}
@@ -93,8 +95,8 @@ Health: {{ health_status_summary }}
 {%- endif %}
 {% endfor %}
 {% else %}
-## NEW INTAKE
-(nothing new this cycle)
+## PENDING INTAKE
+(nothing pending this cycle)
 {% endif %}
 
 ## YOUR PORTFOLIO (active work objects)

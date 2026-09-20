@@ -443,7 +443,7 @@ node gets its own blackboard; what it needs arrives through the Message or as a 
 
 ## Current durability and prompt contracts (2026-09-19)
 
-Admission persists an evaluator inbox across ticks. New goals contain their source
+Admission persists an evaluator inbox across ticks using explicit `evaluator_pending=true` metadata. Legacy `triage_admit` classification alone does not enter this inbox. Pending admissions survive regardless of age; prompts display original source dates and do not treat historical deadlines as current urgency. New goals contain their source
 summaries, pod handles and success criteria in the creation write; changes retain
 those sources. Interrupted acknowledgments and empty-goal decomposition resume from
 the durable store. Ingestion saves destination items before cursor updates, scans

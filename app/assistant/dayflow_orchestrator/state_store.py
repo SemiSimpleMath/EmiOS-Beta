@@ -522,15 +522,17 @@ def reload_active_items_onto_blackboard(blackboard, *, now_utc: datetime, caller
 
 
 def load_admitted_intake() -> List[Dict[str, Any]]:
-    """Durable evaluator inbox; admitted artifacts do not age out before handoff."""
+    """Load explicitly pending admissions without aging out unfinished handoffs.
+
+    Legacy triage_admit describes historical classification, not a pending
+    evaluator handoff. Only TriagePersistNode's explicit marker opts a row in.
+    """
     with get_db_manager().read_session() as session:
         stmt = (select(UnifiedLog2026)
                 .where(UnifiedLog2026.source == DAYFLOW_ITEM_SOURCE)
                 .where(UnifiedLog2026.room_id == DAYFLOW_ROOM_ID)
                 .where(func.json_extract(UnifiedLog2026.metadata_json, "$.state") == "artifact")
-                .where(or_(
-                    func.json_extract(UnifiedLog2026.metadata_json, "$.evaluator_pending") == 1,
-                    func.json_extract(UnifiedLog2026.metadata_json, "$.state_reason") == "triage_admit"))
+                .where(func.json_extract(UnifiedLog2026.metadata_json, "$.evaluator_pending") == 1)
                 .order_by(UnifiedLog2026.timestamp.asc()))
         return [_row_to_dict(row) for row in session.execute(stmt).scalars().all()]
 
