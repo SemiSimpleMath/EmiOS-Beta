@@ -1,10 +1,10 @@
 """Structured graph views. Agent-facing text belongs in shared/work Jinja templates."""
-from pathlib import Path
+from app.assistant.utils.path_utils import get_repo_root
 from collections import Counter
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 from work_objects.model import utcnow
 
-_TEMPLATE_ROOT = Path(__file__).resolve().parents[1] / "agents"
+_TEMPLATE_ROOT = get_repo_root() / "app" / "assistant" / "agents"
 _ENV = Environment(loader=FileSystemLoader(str(_TEMPLATE_ROOT)), undefined=StrictUndefined,
                    keep_trailing_newline=True, finalize=lambda value: "" if value is None else value)
 
