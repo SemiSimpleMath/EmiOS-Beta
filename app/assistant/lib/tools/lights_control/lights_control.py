@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from jinja2 import Environment, FileSystemLoader, StrictUndefined
+from app.assistant.utils.path_utils import get_repo_root
+
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
 from app.assistant.lib.core_tools.tool_error_protocol import make_tool_error
 from app.assistant.lib.tools.smart_home_gateway import send_smart_home_command
@@ -9,6 +12,11 @@ from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
 
 logger = get_logger(__name__)
+
+_RESULT_TEMPLATES = Environment(
+    loader=FileSystemLoader(str(get_repo_root() / "app/assistant/lib/tools/lights_control/prompts")),
+    undefined=StrictUndefined,
+)
 
 _ALLOWED_COMMANDS = {
     "list_lights",
@@ -62,16 +70,18 @@ class LightsControlTool(BaseTool):
                 arguments=arguments,
                 request_id=tool_message.request_id,
             )
-            content = f"Lights command '{command}' executed successfully."
-            unreachable = (response_data or {}).get("unreachable") if isinstance(response_data, dict) else None
-            if unreachable:
-                names = ", ".join(
-                    str(u.get("alias") or u.get("host") or "unknown") for u in unreachable)
-                changed = (response_data or {}).get("changed")
-                done = f" on {len(changed)} device(s)" if isinstance(changed, list) else ""
-                content = (f"Lights command '{command}' executed{done}. "
-                           f"Unreachable (skipped): {names}. The job is done for every "
-                           f"reachable light — report the unreachable device, do not retry.")
+            # The gateway returns the bridge envelope; device outcomes live in result.
+            outcome = response_data.get("result")
+            if not isinstance(outcome, dict):
+                raise ValueError("Lights bridge response is missing its result object.")
+            unreachable = outcome.get("unreachable") or []
+            devices = outcome.get("changed" if command == "set_light_power" else "lights")
+            if not isinstance(devices, list) or not isinstance(unreachable, list):
+                raise ValueError("Lights bridge response has invalid device outcome lists.")
+            content = _RESULT_TEMPLATES.get_template("result.j2").render(
+                command=command, state=outcome.get("state"), devices=devices,
+                unreachable=unreachable,
+            ).strip()
             return ToolResult(
                 result_type="smart_home",
                 content=content,

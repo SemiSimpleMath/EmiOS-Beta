@@ -457,3 +457,23 @@ See the [context contract and rendered example](../design/dayflow_prompt_context
 Ticket recovery requires an exact dispatch epoch. Historical tickets without one
 are not guessed into a current attempt. Scheduler stop removes all owned jobs;
 callbacks recheck stopped state and failed wakes delay retries by at least 120 seconds.
+
+### Failure escalation and explicit denial
+
+Finalization retains lifetime failure counts as history. Automatic repeated-failure
+escalation uses `goal_unmet_since_progress`, reset by a successful main-task verdict
+(including an answered question). Legacy objects without this counter begin at zero;
+no history is erased or migrated. A finalizer STOP is never overridden by escalation.
+Consumed questions are labeled as historical in prompts.
+
+An `abort_task` policy is carried through nested manager-aborted results, so parents
+stop instead of planning another permission request. Result recording preserves the
+error code on the dispatched attempt. Explicit approval denial requires finalization
+to stop the action even if a model suggests retrying. Ordinary recoverable child
+failures remain available to the parent for replanning.
+
+External wake persistence clears the waiting condition and appends the arrival
+evidence in one version-checked store batch. Either both changes commit or neither
+does; failures leave the task gated. This currently retains evidence in task content.
+The version check covers the post-node load-to-save interval, not the earlier LLM
+matching snapshot or external-message identity.

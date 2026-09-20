@@ -499,17 +499,25 @@ class WorkStore:
         if not str(fin.get("outcome") or "").strip():
             raise ValueError("finalizer outcome is required")
         fin["escalated"] = False
+        goal = wo.nodes[wo.goal_node_id]
+        # Explicit denial is terminal for this action, including across nested managers.
+        if node.payload.get("result_error_code") in {"approval_rejected", "approval_denied"}:
+            verdict = fin["verdict"] = "unrecoverable"
+            fin.update(next_step="stop", question_for_user="", recommendation="")
         if verdict in {"retry", "unrecoverable"}:
             node.payload["failure_count"] = int(node.payload.get("failure_count") or 0) + 1
             _count_unmet_attempt(wo, node, now)
-            attempts = int(wo.nodes[wo.goal_node_id].payload.get("goal_unmet_attempts") or 0)
-            if attempts >= int(data.get("repeat_failure_limit", 2)):
+            attempts = int(goal.payload.get("goal_unmet_since_progress") or 0) + 1
+            goal.payload["goal_unmet_since_progress"] = attempts
+            if attempts >= int(data.get("repeat_failure_limit", 2)) and fin.get("next_step") != "stop":
                 fin["next_step"] = "ask_user"
                 fin["escalated"] = True
                 fin["question_for_user"] = fin.get("question_for_user") or fin.get("recommendation") or fin["outcome"]
             self._op_set_status(wo, {"node_id": node.id, "status": "failed"}, now, "finalizer")
             target = "proposed" if verdict == "retry" and not fin["escalated"] else "failed"
         else:
+            # Preserve the lifetime tally; successful progress starts a new failure episode.
+            goal.payload["goal_unmet_since_progress"] = 0
             target = "closed"
             if node.status == "failed":
                 # The finalizer may accept a result despite an execution error.
@@ -548,6 +556,8 @@ class WorkStore:
             "content": data["answer"], "payload": {"dispatch_epoch": epoch},
         }, now, actor)
         self._op_set_status(wo, {"node_id": node.id, "status": data["status"]}, now, actor)
+        node.payload["result_abort_policy"] = data.get("abort_policy")
+        node.payload["result_error_code"] = data.get("error_code")
         node.payload["result_epoch"] = epoch
         node.payload["result_actor"] = actor
 

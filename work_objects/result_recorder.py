@@ -71,6 +71,7 @@ def record_tool_result(store, work_id: str, node_id: str, result, *, actor: str,
             "expected_dispatch_epoch": expected_epoch, "idle_before": idle_before,
             "evidence_id": new_id("result"), "answer": answer,
             "status": "failed" if failed else "done", "pod_ref": pod_id,
+            "abort_policy": data.get("abort_policy"), "error_code": data.get("error_code"),
             "title": evidence_title or ("tool failure (why)" if failed else "tool result"),
         }, actor=actor)
     except StaleResult as exc:

@@ -2,7 +2,7 @@
 FINALIZER: {{ finalizer.get('verdict', '') }}{% if finalizer.get('dispatch_epoch') is not none %} | attempt {{ finalizer.dispatch_epoch }}{% endif %}
   OUTCOME: {{ finalizer.get('outcome', '') }}
 {% if finalizer.get('recommendation') %}  RECOMMENDS: {{ finalizer.recommendation }}
-{% endif %}{% if finalizer.get('question_for_user') %}  ASK THE USER: {{ finalizer.question_for_user }}
+{% endif %}{% if finalizer.get('question_for_user') %}  {% if finalizer.get("consumed_at") %}PRIOR QUESTION (instruction applied; consult subsequent answers):{% else %}ASK THE USER:{% endif %} {{ finalizer.question_for_user }}
 {% endif %}{% if finalizer.get('next_step') %}  NEXT: {{ finalizer.next_step }} | instruction {% if finalizer.get('consumed_at') %}applied{% else %}pending architect revision{% endif %}
 {% endif %}{% else %}(awaiting finalizer summary)
 {% endif %}

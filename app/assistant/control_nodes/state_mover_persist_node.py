@@ -146,15 +146,22 @@ class StateMoverPersistNode(ControlNode):
                 node = wo.nodes.get(node_id)
                 if node is None or not wo.is_work_unit(node) or getattr(node, "wake_kind", None) not in _EVENT_WAKES:
                     continue  # already woken, or not an event-wait
-                status, content = node.status, (node.content or "")
-                store.apply("defer_node", {"work_id": work_id, "node_id": node_id, "wake_kind": None},
-                            actor="state_mover")
+                if wo.status in {"done", "abandoned"} or node.status not in {"proposed", "waiting"}:
+                    continue
                 evidence = str(m.get("evidence") or "").strip()
-                if evidence:
-                    new_content = content.rstrip() + f"\n\n[Awaited event arrived] {evidence}"
-                    store.apply("set_status", {"work_id": work_id, "node_id": node_id,
-                                               "status": status, "content": new_content},
-                                actor="state_mover")
+                if not evidence:
+                    raise ValueError("External wake requires arrival evidence")
+                new_content = (node.content or "").rstrip() + f"\n\n[Awaited event arrived] {evidence}"
+                # WorkStore.batch commits both mutations and the audit event together.
+                # The version fence also rejects changes since this node was loaded.
+                store.apply("batch", {
+                    "work_id": work_id, "expected_updated_at": wo.updated_at.isoformat(),
+                    "operations": [
+                        {"op": "defer_node", "data": {"node_id": node_id, "wake_kind": None}},
+                        {"op": "set_status", "data": {"node_id": node_id,
+                            "status": node.status, "content": new_content}},
+                    ],
+                }, actor="state_mover")
                 woken.append(tid)
                 logger.info("[%s] woke work-object node %s", self.name, tid)
             except Exception as e:

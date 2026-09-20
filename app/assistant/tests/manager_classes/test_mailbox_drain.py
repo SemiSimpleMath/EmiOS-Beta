@@ -173,7 +173,7 @@ class TestUnknownType:
 
 class TestDrainTo:
 
-    def test_drain_to_applies_all_messages(self, dispatcher, role_resolver):
+    def test_drain_to_counts_only_applied_messages(self, dispatcher, role_resolver):
         bb = _FakeBlackboard()
         bb.update_state_value("_invocation_id", "inv-A")
 
@@ -189,7 +189,7 @@ class TestDrainTo:
                 role_resolver=role_resolver,
             )
 
-        assert applied == 2
+        assert applied == 1
         assert _injected_texts(bb) == {
             "fake::planner": ["first"],
         }
@@ -210,3 +210,22 @@ class TestDrainTo:
                 blackboard=bb, invocation_id="inv-A", role_resolver=role_resolver,
             )
         assert applied == 0
+
+
+@pytest.mark.parametrize("payload", [{}, {"planner": " "}, {"": "ignored"}, {"planner": None}])
+def test_empty_injections_do_not_count(dispatcher, payload):
+    bb = _FakeBlackboard()
+    mailbox = MagicMock()
+    mailbox.drain.return_value = [_make_msg(mtype="agent_inject", payload=payload)]
+    with patch.object(dispatcher, "_resolve_mailbox", return_value=mailbox):
+        assert dispatcher.drain_to(blackboard=bb, invocation_id="test") == 0
+    assert bb.get_state_value(_RUNTIME_INJECTIONS_BB_KEY) is None
+
+
+def test_multiple_targets_count_as_one_applied_message(dispatcher):
+    bb = _FakeBlackboard()
+    mailbox = MagicMock()
+    mailbox.drain.return_value = [_make_msg(mtype="agent_inject", payload={"planner": "one", "reviewer": "two"})]
+    with patch.object(dispatcher, "_resolve_mailbox", return_value=mailbox):
+        assert dispatcher.drain_to(blackboard=bb, invocation_id="test") == 1
+    assert _injected_texts(bb) == {"planner": ["one"], "reviewer": ["two"]}

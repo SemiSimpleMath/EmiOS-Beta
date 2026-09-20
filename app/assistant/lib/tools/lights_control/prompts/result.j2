@@ -1,0 +1,14 @@
+{% if command == 'set_light_power' %}
+{% if unreachable %}Partial completion: {% endif %}Lights command '{{ command }}' set {{ devices|length }} device(s) {{ state }}.
+{% else %}
+Lights listing returned {{ devices|length }} reachable device(s).
+{% endif %}
+{% if unreachable %}
+Unreachable (skipped; current state unknown):
+{% for device in unreachable %}
+- {{ device.get('alias') or device.get('host') or 'Unknown device' }}: {{ device.get('error') or 'unreachable' }}
+{% endfor %}
+Do not claim that every requested light was changed. Preserve these exceptions in the result summary.
+Stop this attempt. Do not automatically retry, ask for approval, or request user intervention for unreachable devices. Do not create a follow-up task or extra reminder. Allow the next normally scheduled lights command to try normally; do not schedule a new retry.
+{% if command == 'set_light_power' %}For finalization of a whole-house goal, record partial completion and stop this attempt; the unreachable devices were not confirmed changed.{% endif %}
+{% endif %}

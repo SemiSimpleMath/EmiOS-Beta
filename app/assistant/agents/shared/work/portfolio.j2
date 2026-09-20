@@ -3,8 +3,8 @@ goal: {{ work.objective }}
 status: {{ work.status }} | progress: {{ work.completed }}/{{ work.tasks|length }} top-level tasks complete
 {% if work.success_criteria %}success criteria: {{ work.success_criteria }}
 {% endif %}goal failures judged by finalizer: {{ work.failure_count }}
-{% if work.failure_count >= 2 %}{{ work.failure_count }} ATTEMPTS HAVE NOT ACHIEVED THIS GOAL — counted across tasks. Follow the finalizer escalation: explain what blocked progress and ask whether to keep going; do not silently repeat the same approach.
-{% endif %}{% if work.pending_replan %}PENDING ARCHITECT REVISION: apply the finalizer instruction before further dispatch.
+Historical failure totals do not request another user decision. Follow current finalizer instructions and the user's recorded answers; do not re-ask a resolved question because of this tally.
+{% if work.pending_replan %}PENDING ARCHITECT REVISION: apply the finalizer instruction before further dispatch.
 {% endif %}{% if work.unrun %}STILL UNRUN ({{ work.unrun }}): completing this work object would DISCARD these outstanding tasks.
 {% endif %}
 TASKS (main assignments only)

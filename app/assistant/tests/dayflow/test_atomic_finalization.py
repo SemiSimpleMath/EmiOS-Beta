@@ -59,3 +59,50 @@ def test_second_judged_failure_escalates_atomically(task):
     assert wo.nodes["main"].status == "failed"
     assert wo.nodes["main"].payload["finalizer"]["next_step"] == "ask_user"
     assert wo.nodes[gid].payload["goal_unmet_attempts"] == 2
+
+
+def test_success_resets_escalation_episode_without_erasing_history(task):
+    s, wid, gid = task
+    s.apply("add_node", {"work_id": wid, "id": "later", "type": "subtask", "parent_id": gid})
+    for epoch in (1, 2):
+        s.apply("set_status", {"work_id": wid, "node_id": "main", "status": "failed"})
+        judge(s, wid, epoch=epoch)
+        if epoch == 1:
+            s.apply("set_status", {"work_id": wid, "node_id": "main", "status": "dispatched"})
+    s.apply("set_status", {"work_id": wid, "node_id": "main", "status": "dispatched"})
+    s.apply("set_status", {"work_id": wid, "node_id": "main", "status": "done"})
+    wo = judge(s, wid, "achieved_plan_changes", epoch=3)
+    assert wo.nodes[gid].payload["goal_unmet_attempts"] == 2
+    assert wo.nodes[gid].payload["goal_unmet_since_progress"] == 0
+    s.apply("set_status", {"work_id": wid, "node_id": "later", "status": "dispatched"})
+    s.apply("set_status", {"work_id": wid, "node_id": "later", "status": "failed"})
+    wo = s.apply("finalize_task", {"work_id": wid, "node_id": "later", "expected_dispatch_epoch": 1,
+        "finalizer": {"verdict": "retry", "outcome": "Temporary failure", "next_step": "retry"}})
+    assert wo.nodes["later"].payload["finalizer"]["escalated"] is False
+    assert wo.nodes[gid].payload["goal_unmet_attempts"] == 3
+
+
+def test_stop_is_never_overridden_by_repeat_failure(task):
+    s, wid, gid = task
+    s.apply("set_status", {"work_id": wid, "node_id": "main", "status": "failed"})
+    judge(s, wid)
+    s.apply("set_status", {"work_id": wid, "node_id": "main", "status": "dispatched"})
+    s.apply("set_status", {"work_id": wid, "node_id": "main", "status": "failed"})
+    wo = s.apply("finalize_task", {"work_id": wid, "node_id": "main", "expected_dispatch_epoch": 2,
+        "finalizer": {"verdict": "unrecoverable", "outcome": "User stopped the task", "next_step": "stop"}})
+    assert wo.nodes["main"].payload["finalizer"]["next_step"] == "stop"
+    assert not wo.nodes["main"].payload["finalizer"]["escalated"]
+
+
+def test_portfolio_history_does_not_reissue_consumed_question(task):
+    from app.assistant.dayflow_orchestrator.work_context import render_view, work_data
+    s, wid, gid = task
+    wo = s.load(wid)
+    wo.nodes[gid].payload["goal_unmet_attempts"] = 5
+    wo.nodes["main"].payload["finalizer"] = {"verdict": "unrecoverable",
+        "next_step": "ask_user", "question_for_user": "Continue?", "consumed_at": "2026-09-19"}
+    rendered = render_view("portfolio", work=work_data(wo))
+    assert "goal failures judged by finalizer: 5" in rendered
+    assert "PRIOR QUESTION" in rendered
+    assert "ASK THE USER:" not in rendered
+    assert "ATTEMPTS HAVE NOT ACHIEVED" not in rendered

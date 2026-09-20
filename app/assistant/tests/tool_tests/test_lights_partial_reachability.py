@@ -108,3 +108,51 @@ class TestPartialReachability:
             hosts=_HOSTS, timeout_seconds=1, host_alias_map=_ALIASES))
         assert len(result["lights"]) == 2
         assert result["unreachable"][0]["alias"] == "Living room light"
+
+
+@pytest.mark.parametrize("command", ["set_light_power", "list_lights"])
+def test_tool_reports_nested_bridge_outcome_without_retry(monkeypatch, command):
+    from app.assistant.lib.tools.lights_control import lights_control as tool_mod
+    from app.assistant.utils.pydantic_classes import ToolMessage
+    devices = _patch_discovery(monkeypatch, dead_hosts={"192.168.4.21"})
+    if command == "set_light_power":
+        outcome = asyncio.run(bridge._kasa_set_light_power(
+            hosts=_HOSTS, timeout_seconds=1, state="off", light_id="", room="", host_alias_map=_ALIASES))
+    else:
+        outcome = asyncio.run(bridge._kasa_list_lights(
+            hosts=_HOSTS, timeout_seconds=1, host_alias_map=_ALIASES))
+    envelope = {"ok": True, "integration": "lights", "command": command, "result": outcome}
+    calls = []
+    def send(**kwargs):
+        calls.append(kwargs)
+        return envelope
+    monkeypatch.setattr(tool_mod, "send_smart_home_command", send)
+    result = tool_mod.LightsControlTool().execute(ToolMessage(tool_name="lights_control",
+        tool_data={"arguments": {"command": command, "state": "off"}}))
+    assert result.data == envelope
+    assert "Living room light" in result.content
+    assert "discovery timed out" in result.content
+    assert "current state unknown" in result.content
+    assert "Do not automatically retry" in result.content
+    assert "next normally scheduled" in result.content
+    assert "executed successfully" not in result.content
+    assert len(calls) == 1
+    if command == "set_light_power":
+        assert "Partial completion" in result.content
+        assert "2 device(s) off" in result.content
+        assert all(d.calls.count("turn_off") == 1 for d in devices.values())
+
+
+def test_tool_full_success_and_invalid_envelope(monkeypatch):
+    from app.assistant.lib.tools.lights_control import lights_control as tool_mod
+    from app.assistant.utils.pydantic_classes import ToolMessage
+    msg = ToolMessage(tool_name="lights_control", tool_data={"arguments": {"command": "set_light_power", "state": "off"}})
+    envelope = {"ok": True, "result": {"changed": [{"alias": "Test light"}], "state": "off", "unreachable": []}}
+    monkeypatch.setattr(tool_mod, "send_smart_home_command", lambda **kwargs: envelope)
+    result = tool_mod.LightsControlTool().execute(msg)
+    assert "1 device(s) off" in result.content
+    assert "Partial completion" not in result.content
+    monkeypatch.setattr(tool_mod, "send_smart_home_command", lambda **kwargs: {"ok": True})
+    result = tool_mod.LightsControlTool().execute(msg)
+    assert result.result_type == "error"
+    assert result.data["retryable"] is False

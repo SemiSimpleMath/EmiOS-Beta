@@ -559,16 +559,22 @@ class ToolResultHandler(ControlNode):
         return "\n".join(lines)
 
     def _maybe_abort_task_for_clearance_error(self, *, selected_tool: str | None, tool_result) -> bool:
-        if getattr(tool_result, "result_type", None) != "error":
+        if getattr(tool_result, "result_type", None) not in {"error", "manager_aborted"}:
             return False
 
         data = getattr(tool_result, "data", None)
         if not isinstance(data, dict):
+            if getattr(tool_result, "result_type", None) == "manager_aborted":
+                return False
             raise ValueError("Tool error contract violation: tool_result.data must be a dict for result_type='error'.")
 
         # First-class policy marker from the tool itself.
         if str(data.get("abort_policy") or "").strip().lower() == "abort_task":
             reason = str(data.get("error_code") or "clearance_required_error")
+            self.blackboard.update_state_value("task_abort_policy", {
+                key: data[key] for key in ("abort_policy", "error_code", "retryable", "user_visible")
+                if key in data
+            })
             self.blackboard.update_state_value("error", True)
             self.blackboard.update_state_value(
                 "error_message",

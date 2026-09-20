@@ -223,7 +223,8 @@ class MailboxDispatcher:
         role_resolver=None,
     ) -> int:
         """Drain everything queued for ``invocation_id`` and apply to
-        ``blackboard``. Returns the number of messages dispatched.
+        ``blackboard``. Returns the number of messages that applied at least one
+        runtime injection; unsupported and empty messages do not count.
 
         Never raises into the caller — failures are logged and the
         offending message dropped so a bad payload can't break the
@@ -248,8 +249,8 @@ class MailboxDispatcher:
         applied = 0
         for msg in messages:
             try:
-                self._dispatch_one(msg, blackboard, role_resolver)
-                applied += 1
+                if self._dispatch_one(msg, blackboard, role_resolver):
+                    applied += 1
             except Exception:
                 logger.error(
                     "MailboxDispatcher: dispatch failed for type=%s — dropped",
@@ -265,27 +266,28 @@ class MailboxDispatcher:
         except Exception:
             return None
 
-    def _dispatch_one(self, msg: MailboxMessage, blackboard, role_resolver) -> None:
+    def _dispatch_one(self, msg: MailboxMessage, blackboard, role_resolver) -> bool:
         mtype = getattr(msg, "message_type", "")
         payload = getattr(msg, "payload", None)
         if not isinstance(payload, dict):
-            return
+            return False
 
         if mtype == "agent_inject":
-            self._apply_agent_inject(
+            return self._apply_agent_inject(
                 payload, blackboard, role_resolver,
                 posted_at_utc=getattr(msg, "posted_at_utc", None),
                 from_who=getattr(msg, "from_who", "system"),
             )
-            return
 
         logger.warning("MailboxDispatcher: unknown message_type=%r — dropped", mtype)
+        return False
 
     @staticmethod
     def _apply_agent_inject(
         payload: dict, blackboard, role_resolver,
         *, posted_at_utc=None, from_who: str = "system",
-    ) -> None:
+    ) -> bool:
+        applied = False
         for role_or_name, content in payload.items():
             target = role_or_name
             if callable(role_resolver):
@@ -306,6 +308,8 @@ class MailboxDispatcher:
                 blackboard, target.strip(), content.strip(),
                 posted_at_utc=posted_at_utc, from_who=from_who,
             )
+            applied = True
+        return applied
 
     @staticmethod
     def _append_runtime_injection(

@@ -1142,6 +1142,20 @@ footer.shrink:hover {
   color: var(--button-text-color);
 }
 
+/* Each vertical-header control needs its own slot; the shared base is
+   positioned at the left for the main hamburger button. */
+#quick-settings-toggle-btn {
+  left: auto;
+  right: 1rem;
+  font-size: var(--font-md);
+}
+
+.dash-menu-toggle-btn {
+  left: auto;
+  right: 8.5rem;
+  font-size: var(--font-md);
+}
+
 .dev-menu-toggle-btn {
   position: absolute;
   right: 3.5rem;

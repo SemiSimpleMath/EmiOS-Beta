@@ -720,6 +720,11 @@ class MultiAgentManager:
                 final_data = dict(final_data)
                 final_data["final_answer_raw"] = raw_payload
 
+        abort_policy = self.blackboard.get_state_value("task_abort_policy")
+        if is_aborted and isinstance(abort_policy, dict):
+            final_data = {**(final_data if isinstance(final_data, dict) else {}),
+                          **abort_policy, "aborted": True}
+
         return ToolResult(
             result_type="manager_aborted" if is_aborted else "final_answer",
             content=content,
@@ -840,5 +845,6 @@ class MultiAgentManager:
         return ToolResult(
             result_type="manager_aborted",
             content=final,
-            data={"aborted": True, "exit_state": "error_exit", "error_message": error_message or "unknown"}
+            data={**(self.blackboard.get_state_value("task_abort_policy") or {}),
+                  "aborted": True, "exit_state": "error_exit", "error_message": error_message or "unknown"}
         )

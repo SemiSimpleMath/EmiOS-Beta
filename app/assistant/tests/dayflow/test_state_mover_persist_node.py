@@ -103,3 +103,68 @@ class TestStateMoverPersistNode:
 
         item = load_item_by_id("task:before")
         assert get_meta(item)["state"] == "dispatched"
+
+
+class TestAtomicExternalWake:
+    def test_evidence_failure_keeps_gate_and_does_not_promote(self, monkeypatch):
+        store = _store()
+        wid = _wo_with_node(store, node_id="atomic", wake_kind="event", wake_ref="approval arrives")
+        before = store.load(wid).model_dump(mode="json")
+        events_before = store.events(wid)
+        original = store._HANDLERS["set_status"]
+        def fail_evidence(self, wo, data, now, actor=None):
+            if data.get("node_id") == "atomic" and "content" in data:
+                raise RuntimeError("simulated evidence write failure")
+            return original(self, wo, data, now, actor)
+        monkeypatch.setitem(store._HANDLERS, "set_status", fail_evidence)
+        bb = FakeBlackboard({"node_wakes": [{"task_id": f"{wid}::atomic", "evidence": "Approval received"}]})
+        _make_node(bb).action_handler(None)
+        assert store.load(wid).model_dump(mode="json") == before
+        assert store.events(wid) == events_before
+        assert not bb.get_state_value("woken_work_nodes")
+        assert not bb.get_state_value("promoted_work_nodes")
+        monkeypatch.setitem(store._HANDLERS, "set_status", original)
+        _make_node(bb).action_handler(None)
+        node = store.load(wid).nodes["atomic"]
+        assert node.wake_kind is None
+        assert "Approval received" in node.content
+        assert node.status == "actionable"
+
+    def test_storage_failure_rolls_back_both_changes(self, monkeypatch):
+        store = _store()
+        wid = _wo_with_node(store, node_id="storage", wake_kind="signal", wake_ref="reply")
+        before = store.load(wid).model_dump(mode="json")
+        events_before = store.events(wid)
+        original = store._persist
+        def fail_after_write(wo, now):
+            original(wo, now)
+            raise RuntimeError("simulated commit failure")
+        monkeypatch.setattr(store, "_persist", fail_after_write)
+        bb = FakeBlackboard({"node_wakes": [{"task_id": f"{wid}::storage", "evidence": "Reply received"}]})
+        _make_node(bb)._apply_node_wakes()
+        assert store.load(wid).model_dump(mode="json") == before
+        assert store.events(wid) == events_before
+
+    def test_concurrent_gate_change_rejects_stale_batch(self, monkeypatch):
+        store = _store()
+        wid = _wo_with_node(store, node_id="changed", wake_kind="event", wake_ref="old condition")
+        original = store.apply
+        def change_before_batch(op, data, **kwargs):
+            if op == "batch":
+                original("defer_node", {"work_id": wid, "node_id": "changed", "wake_kind": "event", "wake_ref": "new condition"})
+            return original(op, data, **kwargs)
+        monkeypatch.setattr(store, "apply", change_before_batch)
+        bb = FakeBlackboard({"node_wakes": [{"task_id": f"{wid}::changed", "evidence": "Old condition matched"}]})
+        _make_node(bb).action_handler(None)
+        node = store.load(wid).nodes["changed"]
+        assert node.wake_ref == "new condition"
+        assert node.content == "Do the thing"
+        assert node.status == "proposed"
+
+    def test_missing_evidence_keeps_task_waiting(self):
+        store = _store()
+        wid = _wo_with_node(store, node_id="empty", wake_kind="event", wake_ref="reply")
+        bb = FakeBlackboard({"node_wakes": [{"task_id": f"{wid}::empty", "evidence": " "}]})
+        _make_node(bb).action_handler(None)
+        assert store.load(wid).nodes["empty"].wake_kind == "event"
+        assert not bb.get_state_value("woken_work_nodes")

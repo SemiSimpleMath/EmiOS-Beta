@@ -157,8 +157,8 @@ class WorkFinalizerNode(ControlNode):
         grounds can only be obeyed or ignored, never judged.
 
         REPEATED FAILURE is escalated HERE, deterministically. When this verdict would be the
-        goal's _REPEAT_FAILURE_LIMIT-th attempt that did not achieve it, a `retry` or any other
-        not-achieved route becomes `ask_user`: the node stays `failed` rather than re-opening, and
+        goal's _REPEAT_FAILURE_LIMIT-th unmet attempt since successful progress, a `retry` or any other
+        not-achieved route other than `stop` becomes `ask_user`: the node stays `failed` rather than re-opening, and
         the architect is told to plan the question. The finalizer judged one result; the runtime is
         the thing that can see the pattern, so the runtime makes the call.
         """
@@ -181,7 +181,7 @@ class WorkFinalizerNode(ControlNode):
         except StaleResult:
             return []
         fin = updated.nodes[node.id].payload["finalizer"]
-        return [{"work_id": wo.id, "node_id": node.id, "verdict": verdict, "next_step": fin["next_step"]}]
+        return [{"work_id": wo.id, "node_id": node.id, "verdict": fin["verdict"], "next_step": fin["next_step"]}]
 
     def _scope(self, message):
         scope = getattr(message, "scope_context", None)
