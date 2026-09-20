@@ -46,7 +46,7 @@ class WorkNodeWakePrepNode(ControlNode):
         except KeyError:
             wo = None
         node = wo.nodes.get(node_id) if wo is not None else None
-        if node is None or not wo.is_ready(node, utcnow()):
+        if node is None or not wo.is_work_unit(node) or not wo.is_ready(node, utcnow()):
             logger.info("[%s] wake %s no longer dispatchable (%s) — clean exit.", self.name, ref,
                         "missing" if node is None else f"status={node.status}")
             self.blackboard.update_state_value("next_agent", "post_room_finalize_node")
@@ -65,11 +65,8 @@ class WorkNodeWakePrepNode(ControlNode):
 
         now_utc = datetime.now(timezone.utc)
         chat_history, responded = recent_user_context(get_dayflow_items(), now_utc)
-        self.blackboard.update_state_value("ready_work_nodes", [{
-            "task_id": ref,
-            "context": (node.title or node.content or "").strip().replace("\n", " ")[:140],
-            "kind": str(getattr(node, "type", "") or ""),
-        }])
+        from app.assistant.dayflow_orchestrator.work_context import state_mover_candidate
+        self.blackboard.update_state_value("ready_work_nodes", [state_mover_candidate(wo, node)])
         self.blackboard.update_state_value("waiting_work_nodes", [])
         self.blackboard.update_state_value("work_wait_intake", [])
         self.blackboard.update_state_value("node_status_legend", STATUS_LEGEND)

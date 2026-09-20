@@ -1,0 +1,7 @@
+{{ objective }}
+{% if mode == 'replan' %}
+{{ finalizer_block }}
+This goal ALREADY has a work graph (below). Revise it as a DELTA per the verdict above and the CONTEXT: ADD the steps still missing, and ABANDON (list their node_ids in abandon_node_ids) only nodes the EVIDENCE — epitaphs, recorded results, user directives — makes moot or wrong; unfinished internal records go with them. Queued (actionable) and held (future-wake) nodes remain planned: never prune one for slowness. Do NOT recreate existing nodes (reference their node_ids in depends_on). Output the delta only.
+Existing nodes:
+{{ graph }}
+{% endif %}

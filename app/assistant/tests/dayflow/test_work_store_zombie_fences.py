@@ -127,8 +127,10 @@ class TestClaimGuard:
 
     def _fake_store(self, status: str):
         applies = []
-        node = SimpleNamespace(status=status, payload={"dispatch_epoch": 1})
-        wo = SimpleNamespace(nodes={"n1": node})
+        from work_objects.model import WorkObject, WorkNode
+        node = WorkNode(id="n1", work_id="wo", type="subtask", parent_id="goal",
+                        status=status, payload={"dispatch_epoch": 1})
+        wo = WorkObject(id="wo", title="claim", goal_node_id="goal", nodes={"n1": node})
         return SimpleNamespace(load=lambda wid: wo,
                                apply=lambda *a, **k: applies.append((a, k))), applies
 
@@ -165,7 +167,7 @@ class TestClaimGuard:
 
         ran = []
         monkeypatch.setattr(ws, "_run_dispatch_room",
-                            lambda store, wid, nid, sid, delegate_to: ran.append(delegate_to))
+                            lambda store, wid, nid, sid, delegate_to, epoch: ran.append(delegate_to))
         for tool in ("create_dayflow_ticket", "work_emi_team_manager"):
             store, _ = self._fake_store("dispatched")
             ws.open_session(store, f"work_{tool}", "n1", tool)

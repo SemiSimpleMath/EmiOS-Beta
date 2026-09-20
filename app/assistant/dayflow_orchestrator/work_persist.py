@@ -21,10 +21,13 @@ from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 
-def persist_steward_output(store, output: Dict[str, Any]) -> Dict[str, Any]:
+def persist_steward_output(store, output: Dict[str, Any], *, admitted_artifacts=()) -> Dict[str, Any]:
     """Mint new work objects from `new_or_changed`, update changed objectives, and close
     complete/abandon ids. Returns a summary {created, changed, completed, abandoned}."""
+    from app.assistant.dayflow_orchestrator.work_intake import source_records, goal_update
+    from app.assistant.dayflow_orchestrator.work_context import render_view
     created: List[Dict[str, str]] = []
+    changed_records = []
     changed: List[str] = []
     for spec in output.get("new_or_changed", []) or []:
         if not isinstance(spec, dict):
@@ -34,17 +37,21 @@ def persist_steward_output(store, output: Dict[str, Any]) -> Dict[str, Any]:
         rationale = str(spec.get("rationale") or "").strip()
         if not objective:
             continue
+        sources = source_records(admitted_artifacts, spec.get("based_on") or [])
         if not work_id:
-            # CREATE a new work object — just the goal; the worker decomposes it when advanced.
+            # CREATE just the goal; the architect decomposes it in the planning pipeline.
             # Concern provenance rides constraints so closure can back-propagate the
             # outcome to the register (concern_feedback.propagate_work_outcome).
             concern_refs = [str(b).strip() for b in (spec.get("based_on") or [])
                             if str(b).strip().startswith("concern:")]
             wo = store.apply("create_work_object", {
                 "title": objective[:80],
-                "goal_content": objective,
+                "goal_content": render_view("goal_content", objective=objective, sources=sources,
+                                            success_criteria=str(spec.get("success_criteria") or "").strip()),
                 "satisfied_when_kind": "all_owned_children_done",
-                "constraints": {"concern_refs": concern_refs} if concern_refs else {},
+                "constraints": {"concern_refs": concern_refs, "objective": objective,
+                                "source_intake": sources, "rationale": rationale,
+                                "success_criteria": str(spec.get("success_criteria") or "").strip()},
             }, actor="steward")
             store.apply("set_status", {
                 "work_id": wo.id, "node_id": wo.goal_node_id, "status": "dispatched",
@@ -52,16 +59,12 @@ def persist_steward_output(store, output: Dict[str, Any]) -> Dict[str, Any]:
             created.append({"objective": objective, "work_id": wo.id, "rationale": rationale,
                             "based_on": list(spec.get("based_on") or [])})
         else:
-            # CHANGE — update the goal's objective text in place.
-            try:
-                wo = store.load(work_id)
-                store.apply("set_status", {
-                    "work_id": work_id, "node_id": wo.goal_node_id,
-                    "status": wo.nodes[wo.goal_node_id].status, "content": objective,
-                }, actor="steward")
-                changed.append(work_id)
-            except Exception as e:
-                logger.warning("persist: could not change work object %s: %s", work_id, e)
+            wo = store.load(work_id)
+            update = goal_update(wo, objective=objective, sources=sources,
+                                 success_criteria=spec.get("success_criteria"))
+            store.apply("revise_goal", update, actor="steward")
+            changed.append(work_id)
+            changed_records.append({"work_id": work_id, "based_on": list(spec.get("based_on") or [])})
 
     from app.assistant.subconscious.concern_feedback import propagate_work_outcome
 
@@ -89,4 +92,4 @@ def persist_steward_output(store, output: Dict[str, Any]) -> Dict[str, Any]:
         except Exception as e:
             logger.warning("persist: could not abandon work object %s: %s", work_id, e)
 
-    return {"created": created, "changed": changed, "completed": completed, "abandoned": abandoned}
+    return {"created": created, "changed": changed, "changed_records": changed_records, "completed": completed, "abandoned": abandoned}

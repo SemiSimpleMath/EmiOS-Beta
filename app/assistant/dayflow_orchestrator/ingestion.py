@@ -32,7 +32,7 @@ from app.assistant.dayflow_orchestrator.orchestrator_status import (
     persist_orchestrator_status,
 )
 from app.assistant.dayflow_orchestrator.state_store import (
-    _load_latest_dayflow_item_map,
+    load_ingestion_identity_index,
 )
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message
@@ -40,7 +40,6 @@ from app.assistant.utils.time_utils import day_reset_cutoff_utc, parse_iso_utc_s
 
 logger = get_logger(__name__)
 
-_SHORT_ID_RESET_THRESHOLD = 10_000
 
 
 
@@ -67,7 +66,7 @@ def _load_chat_entitled_rooms() -> list[str]:
 
 def _ingest_chat(
     existing_ids: set[str], now_utc: datetime,
-) -> list[Message]:
+) -> tuple[list[Message], datetime | None]:
     """Ingest new cross-room chat as dayflow items."""
     entitled = _load_chat_entitled_rooms()
 
@@ -90,13 +89,7 @@ def _ingest_chat(
         if str(getattr(m, "id", "") or "").strip() not in existing_ids
     ]
 
-    # Advance watermark even if all messages were dupes — the source
-    # rows have been seen and should not be re-queried next tick.
-    if new_watermark is not None:
-        status[CHAT_WATERMARK_KEY] = new_watermark.isoformat()
-        persist_orchestrator_status(status)
-
-    return new_only
+    return new_only, new_watermark
 
 
 def _load_dayflow_pod_kinds_filter() -> list[Dict[str, Any]]:
@@ -149,7 +142,7 @@ def _pod_matches_filter(pod: Any, filters: list[Dict[str, Any]]) -> bool:
 
 def _ingest_pods(
     existing_ids: set[str], now_utc: datetime,
-) -> list[Message]:
+) -> tuple[list[Message], datetime | None]:
     """Ingest new pods from pod_store as dayflow items.
 
     Filters by the `ingestion_pod_kinds` allowlist in the dayflow room's `access`
@@ -160,7 +153,7 @@ def _ingest_pods(
     """
     filters = _load_dayflow_pod_kinds_filter()
     if not filters:
-        return []  # pod ingestion disabled
+        return [], None  # pod ingestion disabled
 
     from app.assistant.pod_store.pod_store import PodStore
 
@@ -168,11 +161,7 @@ def _ingest_pods(
     raw_watermark = status.get(POD_WATERMARK_KEY)
     since_utc: datetime | None = None
     if raw_watermark:
-        try:
-            since_utc = parse_iso_utc_strict(raw_watermark, label=POD_WATERMARK_KEY)
-        except Exception as e:
-            logger.warning("[pod_ingest] bad watermark %r, ignoring: %s", raw_watermark, e)
-            since_utc = None
+        since_utc = parse_iso_utc_strict(raw_watermark, label=POD_WATERMARK_KEY)
     if since_utc is None:
         # First run: cap at start-of-day so we don't replay history.
         since_utc = day_reset_cutoff_utc(now_utc)
@@ -180,36 +169,24 @@ def _ingest_pods(
     store = PodStore()
     # Query without kind filter — we may have multiple kinds in the
     # allowlist; filter post-fetch by the (kind, source_kind) tuple.
-    pods = store.query(since_utc=since_utc, limit=200)
+    pods = store.query(since_utc=since_utc, limit=None)
 
     new: list[Message] = []
     max_seen_ts = since_utc
     for pod in pods:
+        ts = pod.created_at
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        max_seen_ts = max(max_seen_ts, ts)
         if not _pod_matches_filter(pod, filters):
             continue
-        try:
-            msg = _build_pod_message(pod=pod, now_utc=now_utc)
-        except Exception as e:
-            logger.error("[pod_ingest] failed to build message for pod %s: %s", pod.pod_id, e)
-            continue
+        # A conversion failure aborts ingestion without acknowledging any cursor.
+        msg = _build_pod_message(pod=pod, now_utc=now_utc)
         item_id = str(getattr(msg, "id", "") or "").strip()
         if item_id and item_id not in existing_ids:
             new.append(msg)
-        # Advance watermark even on dedup so we don't re-query the row.
-        try:
-            ts = pod.created_at
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
-            if ts > max_seen_ts:
-                max_seen_ts = ts
-        except Exception:
-            pass
 
-    if max_seen_ts > since_utc:
-        status[POD_WATERMARK_KEY] = max_seen_ts.isoformat()
-        persist_orchestrator_status(status)
-
-    return new
+    return new, max_seen_ts if max_seen_ts > since_utc else None
 
 
 def _ingest_emails(
@@ -242,7 +219,7 @@ def _ingest_delegation_requests(
         item_id = str(getattr(msg, "id", "") or "").strip()
         if item_id not in existing_ids:
             new.append(msg)
-            ingested_requests.append(req)
+        ingested_requests.append(req)
     return new, ingested_requests
 
 
@@ -260,22 +237,19 @@ def run_dayflow_ingestion(
     now = now_utc or datetime.now(timezone.utc)
 
     # 1. Load existing item IDs for deduplication.
-    existing_map = _load_latest_dayflow_item_map(include_terminal=True)
+    existing_map = load_ingestion_identity_index()
     existing_ids = set(existing_map.keys())
 
     # 2. Collect new items from each source.
-    chat_items = _ingest_chat(existing_ids, now)
+    chat_items, chat_watermark = _ingest_chat(existing_ids, now)
     email_items = _ingest_emails(existing_ids, now)
     delegation_items, delegation_requests = _ingest_delegation_requests(existing_ids, now)
-    pod_items = _ingest_pods(existing_ids, now)
+    pod_items, pod_watermark = _ingest_pods(existing_ids, now)
 
     all_new = chat_items + email_items + delegation_items + pod_items
 
     if not all_new:
         logger.info("run_dayflow_ingestion: no new items to ingest.")
-        return {
-            "chat": 0, "email": 0, "delegation": 0, "pod": 0, "total": 0,
-        }
 
     # 3. Assign short_ids.
     #    Find max existing short_id across all items (including terminal).
@@ -293,8 +267,6 @@ def run_dayflow_ingestion(
                 pass
 
     counter_start = max_short_id + 1
-    if counter_start >= _SHORT_ID_RESET_THRESHOLD:
-        counter_start = 1
 
     # Convert Messages to dicts for assign_short_ids.
     new_dicts = []
@@ -328,6 +300,15 @@ def run_dayflow_ingestion(
     # 5. Mark delegation requests as ingested.
     if delegation_requests:
         mark_dayflow_requests_ingested(delegation_requests)
+
+    # Commit cursors only after destination persistence and source acknowledgement.
+    cursor_changes = {}
+    if chat_watermark is not None:
+        cursor_changes[CHAT_WATERMARK_KEY] = chat_watermark.isoformat()
+    if pod_watermark is not None:
+        cursor_changes[POD_WATERMARK_KEY] = pod_watermark.isoformat()
+    if cursor_changes:
+        persist_orchestrator_status(cursor_changes)
 
     summary = {
         "chat": len(chat_items),

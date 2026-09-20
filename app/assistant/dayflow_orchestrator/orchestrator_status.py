@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
+from threading import RLock
 
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.logging_config import get_logger
@@ -19,6 +20,7 @@ DAYFLOW_ORCHESTRATOR_STATUS_RESOURCE_ID = "resource_dayflow_orchestrator_status"
 DAYFLOW_ORCHESTRATOR_INPUT_RESOURCE_ID = "resource_dayflow_orchestrator_input_messages"
 HEALTH_INFERENCE_OUTPUT_RESOURCE_ID = "resource_health_inference_output"
 MASTER_ROOM_BLOCK_SECONDS = 180
+_STATUS_WRITE_LOCK = RLock()
 CHAT_WATERMARK_KEY = "chat_ingested_up_to_utc"
 POD_WATERMARK_KEY = "pods_ingested_up_to_utc"
 
@@ -69,14 +71,18 @@ def persist_orchestrator_status(status: Dict[str, Any]) -> None:
     resource_manager = getattr(DI, "resource_manager", None)
     if resource_manager is None:
         raise RuntimeError("resource_manager service is not registered.")
-    payload = dict(status)
-    payload["schema_version"] = 1
-    payload["updated_at_utc"] = datetime.now(timezone.utc).isoformat()
-    resource_manager.update_resource(
-        DAYFLOW_ORCHESTRATOR_STATUS_RESOURCE_ID,
-        payload,
-        persist=True,
-    )
+    # Callers supply only fields they own, never a previously loaded snapshot.
+    with _STATUS_WRITE_LOCK:
+        payload = load_orchestrator_status()
+        payload.update(status)
+        payload["schema_version"] = 1
+        payload["updated_at_utc"] = datetime.now(timezone.utc).isoformat()
+        resource_manager.update_resource(
+            DAYFLOW_ORCHESTRATOR_STATUS_RESOURCE_ID,
+            payload,
+            persist=True,
+        )
+
 
 
 def load_health_status_summary() -> str:
@@ -102,7 +108,7 @@ def load_health_status_summary() -> str:
 def block_dayflow_orchestrator_for_master_chat(*, request_id: str) -> Dict[str, Any]:
     now_utc = datetime.now(timezone.utc)
     blocked_until_utc = now_utc + timedelta(seconds=MASTER_ROOM_BLOCK_SECONDS)
-    status = load_orchestrator_status()
+    status = {}
     status["blocked_until_utc"] = blocked_until_utc.isoformat()
     status["block_source_room_id"] = "master_room"
     status["block_source_request_id"] = str(request_id or "").strip()

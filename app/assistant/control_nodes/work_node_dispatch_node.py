@@ -4,12 +4,9 @@ The gate, and only the gate. It canonicalizes the selector's pick, marks that no
 `dispatched` so every other consumer sees it as taken, and publishes `work_node_ref`
 for the two stages that follow. It does not call anything.
 
-The call is the state_map's next two nodes — dayflow_switchboard_arguments_node then
-dayflow_tool_caller — which is the same shape master_room and the chat rooms use
-(switchboard names a tool, an arguments node builds that tool's arguments, a tool
-caller executes it). The tool blocks this orchestrator run until it returns, exactly
-as `emi_team_manager` blocks master_room; each run already owns its own thread and the
-scheduler can open another instance alongside it.
+The claim opens dayflow_dispatch_manager on a session thread: its arguments node builds
+the call, dayflow_tool_caller executes and records it, and work_finalizer_node judges the
+result. The planning pass ends at the claim; a blocking call occupies its dispatch room.
 
 ONE dispatch per tick: each planning pass commits one call, and `dispatched` nodes are
 structurally excluded from the ready list so a later pass cannot pick the same one.
@@ -69,15 +66,12 @@ class WorkNodeDispatchNode(ControlNode):
             # node that did not yet say it was asking.
             #
             # The CALL is not made here, and not on this thread — see the hand-off below.
-            self._claim(store, work_id, node_id)
+            claimed = self._claim(store, work_id, node_id)
+            epoch = int(claimed.nodes[node_id].payload["dispatch_epoch"])
         except Exception:
-            # Fail the node before re-raising, so it leaves the ready set instead of being
-            # re-picked every pass (the mechanism that turned the notify transition bug into
-            # duplicate-notification spam). Then let it out: an unclaimable node the selector
-            # just offered means the ready set and the graph disagree, and that ends the run
-            # loudly rather than continuing into a call that has nothing to run.
+            # A rejected claimant owns nothing. In particular it must not fail the winner.
             logger.error("[%s] claim failed for %s::%s", self.name, work_id, node_id, exc_info=True)
-            self._fail_node(work_id, node_id)
+            self.blackboard.update_state_value("work_node_ref", "")
             raise
 
         # HAND OFF AND END THE TICK. The node is claimed, so the graph is stable: every other
@@ -93,23 +87,21 @@ class WorkNodeDispatchNode(ControlNode):
         # else planned, woke, or dispatched.
         try:
             from app.assistant.dayflow_orchestrator.work_session import open_session
-            open_session(store, work_id, node_id, delegate_to)
+            open_session(store, work_id, node_id, delegate_to, expected_epoch=epoch)
         except Exception:
             logger.error("[%s] could not open the dispatch room for %s::%s",
                          self.name, work_id, node_id, exc_info=True)
-            self._fail_node(work_id, node_id)
+            self._fail_node(work_id, node_id, expected_epoch=epoch)
             raise
 
         self._signal_if_more_ready(ref)
         self.blackboard.update_state_value("last_agent", self.name)
 
     def _claim(self, store, work_id, node_id):
-        """Mark the picked node `dispatched` (bumping its dispatch_epoch). Raises if the node is
-        not claimable — a node the selector offered that is already in flight or already finished
-        means the ready set and the graph disagree, which must be loud, not silently re-dispatched."""
-        store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "dispatched"},
-                    actor="dispatch_gate")
+        """Acquire one current ready assignment in the store's write transaction."""
+        wo = store.apply("claim_task", {"work_id": work_id, "node_id": node_id}, actor="dispatch_gate")
         logger.info("[%s] claimed %s::%s -> dispatched", self.name, work_id, node_id)
+        return wo
 
     def _canonicalize_ref(self, ref):
         """The selector ECHOES an id from its rendered list, and echoes arrive decorated —
@@ -146,7 +138,7 @@ class WorkNodeDispatchNode(ControlNode):
         except Exception as e:
             logger.warning("[%s] more-ready signal failed: %s", self.name, e)
 
-    def _fail_node(self, work_id, node_id):
+    def _fail_node(self, work_id, node_id, *, expected_epoch=None):
         """Best-effort: mark a node failed after a dispatch error so it leaves the ready set rather
         than silently re-dispatching every pass. The architect picks it up next tick (work_repair,
         named here originally, retired on 2026-09-16). No node to fail (unparseable ref) or an
@@ -156,8 +148,14 @@ class WorkNodeDispatchNode(ControlNode):
         try:
             from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
             store = get_dayflow_work_store()
-            store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "failed"},
-                        actor="node_dispatch")
+            wo = store.load(work_id)
+            node = wo.nodes.get(node_id)
+            if node is None or not wo.is_work_unit(node):
+                return  # A rejected helper reference must not mutate the worker's provenance.
+            if expected_epoch is None and node.status == "dispatched":
+                return  # No ownership proof: never fail somebody else's call.
+            store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "failed",
+                        "expected_dispatch_epoch": expected_epoch}, actor="node_dispatch")
             logger.error("[%s] marked %s::%s failed after dispatch error — it leaves the ready set "
                          "and the architect picks it up next tick", self.name, work_id, node_id)
         except Exception as e2:

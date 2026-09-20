@@ -142,13 +142,13 @@ class TestChildDoneSatisfies:
 
 class TestApplierLicenseFlow:
 
-    def test_unlicensed_replan_prune_is_skipped_not_fatal(self):
+    def test_unlicensed_replan_prune_aborts_the_revision(self):
         store = _store()
         wid, gid = _mk_wo(store)
         _node(store, wid, gid, "queued", status="actionable")
-        res = apply_architect_dag(store, wid, [], abandon_node_ids=["queued"],
-                                  abandon_reason="graph feels stale")
-        assert res["abandoned"] == []
+        with pytest.raises(ValueError, match="licensed replan"):
+            apply_architect_dag(store, wid, [], abandon_node_ids=["queued"],
+                                abandon_reason="graph feels stale")
         assert store.load(wid).nodes["queued"].status == "actionable"
 
     def test_licensed_replan_prunes(self):

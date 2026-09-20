@@ -357,8 +357,8 @@ def sweep_stuck_work_nodes(now_utc: Optional[datetime] = None) -> int:
     legitimately block so that a question still waiting on the user is never failed out
     from under them.
 
-    A late write from a call that was given up on is harmless: the transition machine
-    rejects ``failed -> done``, so no torn state. Goal nodes are skipped — a goal sits
+    The result transaction rechecks both dispatch epoch and subtree inactivity.
+    Recorded timeout evidence enters ordinary pending finalization; late results are rejected. Goal nodes are skipped — a goal sits
     ``dispatched`` by design while its work runs.
 
     Returns count failed.
@@ -378,9 +378,8 @@ def sweep_stuck_work_nodes(now_utc: Optional[datetime] = None) -> int:
             logger.error("dispatch_sweeper: work object %s not loadable during supervision",
                          summary.get("id"), exc_info=True)
             continue
-        goal_id = wo.goal_node_id
         for node in wo.nodes.values():
-            if node.id == goal_id or node.status != "dispatched":
+            if not wo.is_work_unit(node) or node.status != "dispatched":
                 continue
             ref = f"{wo.id}::{node.id}"
             try:
@@ -398,12 +397,18 @@ def sweep_stuck_work_nodes(now_utc: Optional[datetime] = None) -> int:
                     continue
                 reason = (f"stuck (no activity for {int(idle) // 60} min; a call may block up to "
                           f"{_WORK_NODE_FROZEN_TIMEOUT_S // 60} min)")
-                store.apply("set_status", {"work_id": wo.id, "node_id": node.id, "status": "failed"},
-                            actor="dispatch_sweeper")
+                from work_objects.result_recorder import record_tool_result
+                from app.assistant.utils.pydantic_classes import ToolResult
+                accepted = record_tool_result(store, wo.id, node.id,
+                    ToolResult(result_type="error", content=reason, data={"aborted": True}),
+                    actor="dispatch_sweeper", expected_epoch=int(node.payload.get("dispatch_epoch") or 0),
+                    idle_before=now - timedelta(seconds=_WORK_NODE_FROZEN_TIMEOUT_S))
+                if not accepted:
+                    continue
                 failed += 1
                 logger.error(
                     "dispatch_sweeper: work node %s marked failed — %s; the architect re-plans it "
-                    "next tick. (%r)", ref, reason, (node.title or "")[:80],
+                    "after finalizer judgment. (%r)", ref, reason, (node.title or "")[:80],
                 )
             except Exception:
                 logger.error("dispatch_sweeper: supervision failed for %s", ref, exc_info=True)

@@ -10,7 +10,7 @@ logger = get_logger(__name__)
 
 class FinalAnswerNode(ControlNode):
     """
-    Finalizes manager output from the current scope `result` and exits manager.
+    Prefer populated final_answer_* fields, otherwise normalize `result`, and exit.
 
     This enables planner-first flows where the planner emits a direct message
     payload and no additional formatting LLM pass is needed.
@@ -37,7 +37,7 @@ class FinalAnswerNode(ControlNode):
         # Carry-through fields (pod_references/result_summary) must not flip has_state_final — else a
         # pod-bearing dispatch with no final_answer_* set would drop the dispatched manager's answer.
         has_state_final = any(v not in (None, "", [], {}) for v in final_fields.values())
-        raw_result = final_fields if has_state_final else self.blackboard.get_state_value("result")
+        raw_result = FinalAnswerNormalizer.full_terminal_payload(final_fields, self.blackboard) if has_state_final else self.blackboard.get_state_value("result")
         raw_result = FinalAnswerNormalizer.attach_carry_through(raw_result, self.blackboard)
         normalized = FinalAnswerNormalizer.normalize(raw_result)
 

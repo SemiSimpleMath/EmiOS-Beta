@@ -62,13 +62,13 @@ def test_every_tool_gets_the_same_node_facts(delegate_to):
     args = bb.get_state_value("tool_arguments")["arguments"]
     assert args["work_id"] == wid
     assert args["node_id"] == nid
-    assert args["trigger_context"] == {"work_node": f"{wid}::{nid}"}
+    assert args["trigger_context"] == {"work_node": f"{wid}::{nid}", "dispatch_epoch": 0}
     assert args["task"] == "Confirm the evening"
     assert args["information"] == "ask them which evening suits"
 
 
 def test_the_two_tools_get_identical_payloads():
-    """Same node, two targets, one payload — the only difference is the tool name."""
+    """Same node, two targets, one payload â€” the only difference is the tool name."""
     store, wid, nid = _wo_with_node()
     ticket = _run_arguments_node("create_dayflow_ticket", f"{wid}::{nid}")
     worker = _run_arguments_node("work_emi_team_manager", f"{wid}::{nid}")
@@ -95,7 +95,7 @@ def test_links_are_absent_when_the_node_hands_over_no_research():
 
 
 def test_links_are_built_from_pod_ids_not_prose():
-    """A pod id must reach the user exactly or not at all — never via transcription."""
+    """A pod id must reach the user exactly or not at all â€” never via transcription."""
     store, wid, nid = _wo_with_node()
     store.apply("attach_pod", {"work_id": wid, "node_id": nid,
                                "pod_ref": "datapod:research_finding:abc123"})

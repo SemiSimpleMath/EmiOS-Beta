@@ -128,8 +128,8 @@ def test_a_small_quiet_goal_gets_no_warnings(store):
     _child(store, wo.id, wo.goal_node_id, "Do the thing")
     _child(store, wo.id, wo.goal_node_id, "Tell the user")
     rendered = render_work_portfolio(store.load(wo.id))
-    assert "WORK SIGNAL" in rendered
-    assert "⚠" not in rendered.split("WORK SIGNAL")[1]
+    assert "WORK SIGNAL" not in rendered  # Internal growth diagnostics are not strategic tasks.
+    assert "⚠" not in rendered
 
 
 def test_depth_is_reported_and_warned_on(store):
@@ -181,9 +181,7 @@ def test_the_signal_survives_a_goal_with_no_subtasks(store):
 # --------------------------------------------------------------------------- #
 # The per-node failure_count is reset by the very act of continuing: the architect abandons a
 # failing node and mints its replacement under a fresh slug, and the replacement starts at zero.
-# The goal node outlives every child, so the goal's own tally lives there. It counts entries into
-# `failed` — and every not-achieved finalizer verdict passes through `failed`, even on a call that
-# returned cleanly, so a goal that keeps "succeeding" at nothing is counted too.
+# The goal node outlives every child, so the goal's own tally lives there. It counts not-achieved finalizer judgments, including calls that returned cleanly.
 
 def _goal_fails(store, wo_id):
     wo = store.load(wo_id)
@@ -191,9 +189,10 @@ def _goal_fails(store, wo_id):
 
 
 def _judge_not_achieved(store, wo_id, nid):
-    """What the finalizer writes for a returned call it judged not achieved: done -> failed."""
-    store.apply("set_status", {
-        "work_id": wo_id, "node_id": nid, "status": "failed",
+    """Exercise the finalizer judgment transaction for this exact dispatch attempt."""
+    epoch = store.load(wo_id).nodes[nid].payload.get("dispatch_epoch", 0)
+    store.apply("finalize_task", {
+        "work_id": wo_id, "node_id": nid, "expected_dispatch_epoch": epoch,
         "finalizer": {"verdict": "unrecoverable", "next_step": "new_approach",
                       "outcome": "returned cleanly, found nothing", "recommendation": "try the API"},
     }, actor="finalizer")
@@ -204,10 +203,12 @@ def test_the_goal_counts_failures_its_nodes_do_not_survive(store):
     wo = _goal(store, "Get the picture packet.")
     first = _child(store, wo.id, wo.goal_node_id, "Contact the school")
     _set(store, wo.id, first, "failed")
+    _judge_not_achieved(store, wo.id, first)
     assert _goal_fails(store, wo.id) == 1
     _set(store, wo.id, first, "abandoned", actor="steward", reason="replaced")
     second = _child(store, wo.id, wo.goal_node_id, "Reach the school another way")
     _set(store, wo.id, second, "failed")
+    _judge_not_achieved(store, wo.id, second)
     wo2 = store.load(wo.id)
     assert int((wo2.nodes[second].payload or {}).get("failure_count") or 0) == 1
     assert _goal_fails(store, wo.id) == 2
@@ -219,6 +220,7 @@ def test_the_architect_is_told_when_the_goal_keeps_failing(store):
     for title in ("Contact the school", "Reach the school another way"):
         nid = _child(store, wo.id, wo.goal_node_id, title)
         _set(store, wo.id, nid, "failed")
+        _judge_not_achieved(store, wo.id, nid)
     rendered = _render_existing_graph(store.load(wo.id))
     assert "2 ATTEMPTS HAVE NOT ACHIEVED THIS GOAL" in rendered
     assert "ask whether" in rendered
@@ -243,6 +245,7 @@ def test_re_entering_failed_does_not_double_count(store):
     wo = _goal(store, "Get the picture packet.")
     nid = _child(store, wo.id, wo.goal_node_id, "Contact the school")
     _set(store, wo.id, nid, "failed")
+    _judge_not_achieved(store, wo.id, nid)
     store.apply("set_status", {"work_id": wo.id, "node_id": nid, "status": "failed"}, actor="worker")
     assert _goal_fails(store, wo.id) == 1
 
@@ -295,7 +298,7 @@ def test_a_plan_changing_completion_is_legible_in_its_epitaph(store):
                                              "outcome": "found it, but the plan changes",
                                              "recommendation": "drop the contractor branch"}},
                 actor="finalizer")
-    store.apply("consume_finalizer_instruction", {"work_id": wo.id, "node_id": nid}, actor="architect")
+    store.apply("consume_finalizer_instruction", {"work_id": wo.id, "node_id": nid, "expected_finalizer": store.load(wo.id).nodes[nid].payload["finalizer"]}, actor="architect")
     store.apply("edit_node", {"work_id": wo.id, "node_id": nid, "title": "Find the packet"})
     assert "achieved_plan_changes" in _goal_epitaph(store.load(wo.id))
 
@@ -315,6 +318,7 @@ def test_an_abandoned_node_with_a_future_wake_is_not_waiting(store):
                     actor="architect")
     _set(store, wo.id, dead, "abandoned", actor="architect", reason="replaced")
     rendered = render_work_portfolio(store.load(wo.id))
-    waiting = rendered.split("WAITING (parked):", 1)[1].split("\n\n", 1)[0]
-    assert "Notify workday and standup transition" in waiting
-    assert "Notify work start" not in waiting
+    dead_view = rendered.split(f"] {dead} |", 1)[1].split("\n- [", 1)[0]
+    live_view = rendered.split(f"] {live} |", 1)[1].split("\n- [", 1)[0]
+    assert "WAIT: time" not in dead_view
+    assert "WAIT: time" in live_view

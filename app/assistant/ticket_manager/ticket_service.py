@@ -195,31 +195,23 @@ class TicketService:
         # Closing is a response like any other: the ask was surfaced and the user
         # dealt with it. Recording it is what lets the node that asked receive a
         # result instead of waiting out its whole timeout.
-        ticket.user_text = effective_text
-        ticket.user_action = action
-        manager.save_ticket(ticket)
-
-        # Transition based on action
-        success = False
+        # Persist response fields and the validated transition in the same write
+        # transaction. Saving the detached snapshot here could resurrect expiry.
         snooze_until = None
-
-        if target_state == "accepted":
-            success = manager.mark_accepted(ticket_id, user_text=effective_text)
-
-        elif target_state == "snoozed":
-            success = manager.mark_snoozed(
-                ticket_id,
-                snooze_minutes=snooze_minutes,
-                user_text=effective_text,
-            )
+        if target_state == "snoozed":
+            success = manager.mark_snoozed(ticket_id, snooze_minutes=snooze_minutes,
+                                          user_text=effective_text, user_action=action)
             if success:
                 snooze_until = datetime.now(timezone.utc) + timedelta(minutes=snooze_minutes)
-
-        elif target_state == "dismissed":
-            success = manager.mark_dismissed(ticket_id, user_text=effective_text)
-
-        elif target_state == "expired":
-            success = manager.mark_expired(ticket_id, reason="User closed ticket (no opinion)")
+        else:
+            decision = {"accepted": "accept", "dismissed": "dismiss", "expired": "close"}[target_state]
+            success = manager.transition_state(ticket_id, TicketState(target_state),
+                reason="User response", user_text=effective_text, user_action=action,
+                user_response_parsed={"decision": decision})
+        if not success:
+            return TicketResponse(ticket_id=ticket_id, action=action, success=False,
+                                  error="This ticket changed and can no longer accept this response",
+                                  not_answerable=True)
 
         logger.info(
             "TicketService.respond: %s -> %s [%s] (success=%s)",

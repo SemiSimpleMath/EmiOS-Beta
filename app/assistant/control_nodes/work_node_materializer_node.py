@@ -6,7 +6,8 @@ action_selector consumes. The switchboard reads the ONE picked node and routes i
 (communicate-with-the-user -> create_dayflow_ticket, work -> work_emi_team_manager); one dispatch per tick, and
 the dispatch signals a prompt follow-up tick when more ready nodes remain.
 
-Lists every state_mover-promoted (actionable) node: plain work, tell-the-user goals, and asks due for
+Lists only architect-authored direct task children of the goal that are actionable:
+worker-owned provenance is excluded, including old records marked actionable. Tasks include plain work, tell-the-user goals, and asks due for
 their first surface or a re-ask. Everything else stays out — the goal node, event/signal waits (the
 state_mover wakes those), and in-flight nodes (future wake_at, e.g. an ask surfaced within the hour).
 
@@ -60,11 +61,10 @@ class WorkNodeMaterializerNode(ControlNode):
         sits parked in the architect's inbox and is NOT listed here. (External-event nodes are never promoted
         — the state_mover wakes them via node_wakes — so they never reach actionable.)"""
         out = []
-        goal_id = wo.goal_node_id
         for n in wo.nodes.values():
-            if n.id == goal_id:
+            if not wo.is_work_unit(n):
                 continue
-            if n.status != "actionable":
+            if n.status != "actionable" or not wo.is_ready(n, now) or n.wake_kind in {"event", "signal"}:
                 continue
             task = (f"{n.title}. {n.content}" if n.content else (n.title or "")).strip()
             out.append({

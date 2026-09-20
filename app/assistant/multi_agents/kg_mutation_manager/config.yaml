@@ -5,7 +5,6 @@ max_cycles: 16
 
 role_bindings:
   delegator: emi_team::delegator
-  tool_selector: shared::tool_selector
 
 agents:
   - name: emi_team::delegator

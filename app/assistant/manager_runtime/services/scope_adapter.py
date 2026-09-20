@@ -177,13 +177,9 @@ class ScopeAdapter:
     3) Apply manager-level narrowing contract (if configured).
     4) Return a normalized Message with scope_context attached.
 
-    Factory methods (``for_sub_manager``, ``for_courier_call``) are
-    call-site seams introduced in the scope-audit
-    migration (see ``docs/architecture/SCOPE_AUDIT.md``). They centralize
-    scope construction so the semantic shift in Step 5 (authority-cap +
-    local tools, replacing tool-list intersection) lands in one place
-    instead of 40+. Today these factories preserve current behavior; the
-    only thing they change is WHERE scope construction lives.
+    Factory methods centralize scope construction. ``for_sub_manager`` passes
+    the parent scope through; receiving-side ``apply`` resolves manager tool
+    grants, per-manager restrictions, authority and write limits.
     """
 
     # ------------------------------------------------------------------
@@ -199,21 +195,11 @@ class ScopeAdapter:
         """Construct the ScopeContext to attach to a Message bound for a child
         sub-manager (i.e. the manager-as-tool delegation pattern).
 
-        Today: returns ``parent_scope`` verbatim. Manager-level narrowing
-        still happens on the receiving side via ``apply()`` →
-        ``_apply_manager_narrowing()`` (which contains the May 5 fix's
-        REPLACE-when-declared logic + the related gap when the child's
-        scope_contract.tools.allowed_tools is undeclared).
-
-        Future (Step 5 of the migration): builds a fresh scope where
-            child.authority = min(parent.authority, child.declared)
-            child.tools.allowed_tools is LOCAL (read from child manager
-                                                config at use-time)
-            child.tools.blocked_tools = parent.blocked ∪ child.blocked
-            child identity fields (acting_as, owner_id, room_id, reply_to,
-                ...) inherited from parent verbatim
-
-        See docs/architecture/SCOPE_AUDIT.md section 7 for the principle.
+        Returns ``parent_scope`` verbatim. The receiving side applies the
+        child manager's policy: parent all/manager grants admit the child's own
+        tool surface (scope_contract tools, otherwise config tools), other
+        allow-lists intersect, and denials accumulate. Authority and write
+        expansion is rejected by ``_apply_manager_narrowing``.
         """
         return parent_scope
 

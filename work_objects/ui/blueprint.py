@@ -5,7 +5,7 @@ tree, what remains (ready / blocked / waiting), evidence + artifact outcomes, th
 and the pods a node references.
 
 It reads the LIVE dayflow store (emi.db, the shared singleton) so /work shows real work
-objects; the local work.db dev file is used only when the app isn't importable.
+objects; failures obtaining that store propagate to the caller.
 
 NOT read-only. The bottom section of this file mutates that live store — abandon a work
 object, set/edit/add/remove a node — through the same validated `store.apply()` every other
@@ -13,16 +13,13 @@ writer uses, so edits serialize with the dayflow tick on the store's write lock 
 illegal one comes back as 400 carrying the store's own message. This docstring claimed
 "read-only ... it never mutates the graph" until 2026-09-18, long after those routes landed.
 
-Known wart: `/api/work` reports `db: _WORK_DB`, the dev-file constant, even when the live
-dayflow store is the one actually being read.
+`/api/work` reports the selected store.path. Object abandonment supplies an explicit
+manual-action reason. Closure does not cancel running workers or tickets.
 
 Lazy: the store is opened on the first request, so importing this module is free and no
-empty db is created at boot. The work.db it can drop back to is gitignored (private) — only
-this code ships.
+empty db is created at boot.
 """
 from __future__ import annotations
-
-import os
 
 from flask import Blueprint, jsonify, render_template, request
 
@@ -32,7 +29,6 @@ logger = get_logger(__name__)
 
 work_ui_bp = Blueprint("work_ui", __name__, template_folder="templates")
 
-_WORK_DB = os.environ.get("WORK_DB", "work_objects/work.db")
 _store = None
 
 # Non-terminal nodes on the WORK spine (not knowledge/evidence) = "what remains to do".
@@ -42,14 +38,8 @@ _WORK_TYPES = {"goal", "plan", "subtask", "tool", "question", "verification"}
 def _get_store():
     global _store
     if _store is None:
-        # Prefer the LIVE dayflow work store (emi.db, shared singleton) so /work shows real work
-        # objects; fall back to the local work.db dev file if the app isn't available.
-        try:
-            from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
-            _store = get_dayflow_work_store()
-        except Exception:
-            from work_objects.store import WorkStore
-            _store = WorkStore(_WORK_DB)
+        from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+        _store = get_dayflow_work_store()
     return _store
 
 
@@ -83,7 +73,7 @@ def api_work_list():
     for s in store.list_work_objects():
         try:
             wo = store.load(s["id"])
-            nodes = list(wo.nodes.values())
+            nodes = [n for n in wo.nodes.values() if wo.is_work_unit(n)]
             s["total_nodes"] = len(nodes)
             s["done_nodes"] = sum(1 for n in nodes if n.is_terminal)
             s["remaining_nodes"] = sum(
@@ -111,8 +101,9 @@ def api_work_detail(work_id):
     nodes = []
     for n in wo.nodes.values():
         d = _node_dict(n)
-        d["ready"] = n.id in ready
-        d["blocked"] = n.id in blocked
+        d["record_role"] = "task" if wo.is_work_unit(n) else ("goal" if n.id == wo.goal_node_id else "provenance")
+        d["ready"] = wo.is_work_unit(n) and n.id in ready
+        d["blocked"] = wo.is_work_unit(n) and n.id in blocked
         nodes.append(d)
     edges = [{"id": e.id, "src": e.src, "dst": e.dst, "relation": e.relation,
               "payload": e.payload or {}} for e in wo.edges]
@@ -178,8 +169,9 @@ def _apply(op: str, data: dict, actor: str = "work_ui"):
 
 @work_ui_bp.route("/api/work/<work_id>/abandon", methods=["POST"])
 def api_work_abandon(work_id):
-    """Soft-delete: abandon the whole work object (terminal; the worker stops, it drops from active views)."""
-    return _apply("set_work_status", {"work_id": work_id, "status": "abandoned"})
+    """Abandon the object and unstarted work; running threads are not cancelled here."""
+    return _apply("set_work_status", {"work_id": work_id, "status": "abandoned",
+                                      "reason": "owner abandoned via /work"})
 
 
 @work_ui_bp.route("/api/work/<work_id>/node/<node_id>/status", methods=["POST"])

@@ -39,7 +39,7 @@ against the goal's `goal_unmet_attempts` (2026-09-17).
 DayflowScheduler (event-driven, debounced; precise per-node time wakes; work-progress follow-ups)
   -> dayflow_orchestrator_cadence_tick()
     -> run_dayflow_ingestion()          (chat / email / delegation / pods -> items table)
-    -> three sweeps                     (dispatch_sweeper.py: stale / orphaned-dispatched / zombie-waiting)
+    -> four sweeps                      (legacy stale / orphaned / zombie items, then stuck work nodes)
     -> Invoke dayflow_orchestrator_manager (state_map order):
          intake_triage -> triage_persist -> context_enricher
            -> strategic_planner_wo (EVALUATOR) -> strategic_planner_wo_persist
@@ -77,7 +77,7 @@ tick's FINISH, a single unanswered notify was an hour in which nothing planned, 
 Concurrency is safe in the dispatch room and not in planning, because the inputs differ. Two planning
 passes read the same portfolio and the same intake, and their only defence against both converting the
 same email is a prompt telling the model to check. A dispatch room's input is ONE node held
-exclusively: the claim is an atomic `set_status -> dispatched` through the store's lock, so a second
+exclusively: the claim is an exclusive `claim_task` operation under the store transaction, so a second
 room attempting the same node is refused. Exclusion lives on the work item, not on a global flag.
 
 Planning passes are mutually exclusive, and since 2026-09-18 so are wake passes: both hold the
@@ -99,6 +99,12 @@ done; user willdo") — the tracker copies verbatim ticket ids into schedule-ite
 prep node does the joins deterministically; the model judges, it never does record linkage.
 Subconscious concerns render with `[concern:<prefix>]` ids for citation in `based_on`.
 
+**Worker provenance.** Descendants created inside an assigned task are execution-history
+records, not independently schedulable nodes. Only direct subtask children of the goal
+are orchestrator assignments. A takeover worker and the finalizer read the full owned
+history; the architect and steward receive finalizer summaries. Internal failures do
+not independently increment the goal's failure count. See 08_WORK_OBJECTS.md.
+
 **Decomposition.** The architect turns one goal into 1-5 subtask nodes under the goal node, with
 `depends_on` edges and at most one wake primitive per node:
 - `wake_at` — a deterministic time (absolute ISO datetime; elapsed time is always this),
@@ -108,7 +114,7 @@ decides delivery, the architect never picks channels. On re-plan the architect e
 plus `abandon_node_ids` for moot branches (pruned recursively, finished nodes kept as a record).
 
 **Readiness and promotion.** `is_ready` (substrate, deterministic) = status in
-proposed/waiting/actionable + `wake_at` passed + all `depends_on` satisfied. The state_mover persist node promotes every ready node to
+proposed/waiting/actionable + `wake_at` passed + all `depends_on` satisfied. The state_mover persist node promotes every ready main task (direct subtask child of the goal) to
 `actionable`; the state_mover LLM may HOLD a few (`held_work_nodes` with `reactivate_at`) for quiet
 hours / meetings / user-away — the worst LLM failure is "acted when it could have waited", never a stuck
 node. External-event (`wake_ref`) nodes are never promoted; the state_mover wakes them via `node_wakes`
@@ -126,11 +132,11 @@ node, `open_session` opens a dispatch room on its own thread, and inside that ro
 carries `work_id`, `node_id`, `task`, `information`), `dayflow_tool_caller` executes it, and
 `work_finalizer_node` judges what comes back. Adding a third tool needs no dispatch code.
 
-Ownership is a graph fact: the session stamps `payload.session_id` on the node, registry-first, so a
-`dispatched` node with no live session is definitively orphaned rather than racing its own
-registration. Each tick supervises the in-flight set (`sweep_stuck_work_nodes`): a node quiet for
-longer than the longest legitimate call is failed, and the transition machine rejects a zombie thread's
-late writes (`failed -> done` is illegal), so no torn state.
+The session registers before its thread starts and stamps `payload.session_id` on the node.
+Ask recovery consults the registry to avoid starting a second waiter; the sweeper does not read it.
+Each tick supervises the in-flight set (`sweep_stuck_work_nodes`) using the newest write anywhere in
+a node's subtree. More than 80 minutes of inactivity (the one-hour ask window plus 20 minutes)
+fails the node. The result recorder rejects ended nodes and stale dispatch epochs.
 
 `node_dispatch.dispatch_node` still exists but is no longer on any path; the state_map plus
 `open_session` is the dispatch core.
@@ -139,12 +145,13 @@ late writes (`failed -> done` is illegal), so no torn state.
 ticket (validity window = the call's timeout, currently 1h; a new ask ticket expires prior open asks of
 the same work object) and marks the node `dispatched + wake_kind=user_reply` — in flight, exactly like a
 worker job; one live ask per work object (a second ask node queues behind it). The reply/dismissal is
-matched back by `trigger_context.work_node`, recorded as an EVIDENCE child (the node's `content` is its
+matched back by `trigger_context.work_node` plus `dispatch_epoch`, recorded as an EVIDENCE child (the node's `content` is its
 immutable directive), and the node completes -> the finalizer judges the reply like any result. An
-unanswered ticket expiring is a TIMED-OUT call: the sweeper fails the node (reason appended to
-`payload.status_notes` — never `content`, which is the immutable directive) and the finalizer judges
-the failure. The repeated-failure bound is on the GOAL: `goal_unmet_attempts` counts every entry of a
-child into `failed` (every not-achieved verdict passes through it, even on a call that returned), and at
+unanswered ticket expiring returns a ToolResult saying "user not reached". The recorder saves that
+result as evidence and marks the node `done`; the dispatch finalizer judges whether the goal was
+achieved. The sweeper records a failed timeout result with an epoch and inactivity fence. Cadence resumes the ordinary finalizer for that saved result.
+
+The repeated-failure bound is on the GOAL: `goal_unmet_attempts` counts not-achieved finalizer judgments once per main-task dispatch attempt, and at
 `_REPEAT_FAILURE_LIMIT` the finalizer node escalates the verdict to `ask_user` instead of re-opening the
 step. It survives the architect re-planning under a new node id; it does not survive the steward minting
 a fresh work object for the same action tomorrow.
@@ -157,7 +164,7 @@ the produced result itself, and if the graph provably lacks it, the ticket says 
 (loud failure reveals broken work). Self-contained briefs return_control at action 0, so the
 common case costs one planner step. The store fence refuses terminal writes on an in-flight ask
 (replan cannot prune a question that is out).
-A repair-escalated ask (`proposed + user_reply`, no wake_at) promotes for its first surface via the
+A pre-surface ask (`proposed + user_reply`, no wake_at) promotes for its first surface via the
 state_mover, which may HOLD it (a held pre-surface ask parks `waiting` and keeps `wake_kind=user_reply`
 so a late reply to an earlier ticket still matches).
 
@@ -182,11 +189,11 @@ finished or moot says so in `outcome` and the steward rules next tick.
 epitaph. The architect that acts on a route runs on a LATER tick, and every tick builds
 a fresh manager with a fresh blackboard, so anything left in memory is discarded before its reader
 exists. `work_architect_node._pending_finalizer_instructions` reads them off the graph and
-`consume_finalizer_instruction` stamps each one, so a judgment made ticks ago stops arriving as fresh
+the atomic architect batch stamps the exact instruction it consumed, so a judgment made ticks ago stops arriving as fresh
 advice. When all of the goal's children are closed, the store's rollup completes the work object.
 
 **Closure is a transition with obligations (2026-07-31).** Entering `done`/`abandoned` — via the
-steward, finalizer, or repair — cascade-abandons every still-startable node
+steward or automatic rollup — cascade-abandons every still-startable node
 (proposed/actionable/waiting/failed) and clears its wakes, so a closed object can never fire again;
 `WorkObject.validate()` enforces the invariant (a terminal object holding a startable node is a
 write-time error), and `repair_terminal_zombies()` healed pre-cascade rows at boot. Motivation: a
@@ -196,13 +203,14 @@ the evaluator's `based_on`), the outcome — with the user's recorded words — 
 subconscious concerns register and triggers a cooldown-guarded noticer rerun
 (`subconscious/concern_feedback.py`, 2026-08-01).
 
-**Failure.** A failed node carries the finalizer's verdict: `retry` re-opens it to the architect's
+**Failure.** A node judged not-achieved carries the finalizer's verdict: `retry` re-opens it to the architect's
 inbox with what will be different; `unrecoverable` leaves it failed with a typed route the architect
 acts on next tick (prune the branch, plan a different approach, or plan the ONE node that asks the
 user the given question). The steward sees the same outcome/recommendation on the node in the
 portfolio (`FINALIZER (...)` / `RECOMMENDS` / `ASK THE USER` lines) and decides what becomes of the
-goal. A failed node still blocks its goal (`is_satisfied` requires `closed`). Dispatch errors mark
-the node failed loudly rather than silently retrying.
+goal. A failed node still blocks its goal (`is_satisfied` requires `closed`).
+
+Dispatch-manager aborts/exceptions and inactivity timeouts use the common result recorder. Cadence resumes unjudged results without rerunning their tools. A swept timeout is eligible even if the old worker thread remains alive; stale results cannot overwrite it.
 
 ## DayflowScheduler
 
@@ -210,7 +218,7 @@ the node failed loudly rather than silently retrying.
 - `DEBOUNCE_SECONDS=60`, `MIN_GAP_SECONDS=120` (mutual-exclusion floor), `POKE_MIN_INTERVAL_SECONDS=600`
   (delta pokes: chat/email/AFK/ticket), `MAX_CEILING_SECONDS=1800`, `STARTUP_TICK_DELAY_SECONDS=45`.
 - **Precise work-node wakes**: one APScheduler one-shot per time-gated node (`dayflow_work_wake::` jobs,
-  re-armed idempotently after every tick, restart-safe from the durable store). Firing opens
+  re-armed after ticks and wake passes, restart-safe from the durable store; obsolete jobs are removed). Firing opens
   **`dayflow_wake_manager`** (`_fire_work_node`) — the WAKE PASS: `work_node_wake_prep_node` stages the
   one due node as the state_mover's only candidate, the state_mover re-judges the moment, the persist
   node promotes or parks THAT node only (`triggered_work_node` scopes it), and the wake router dispatches
@@ -232,8 +240,8 @@ the node failed loudly rather than silently retrying.
 
 ## Persistent state — two substrates
 
-**Work objects** (`work_objects/` substrate): four tables in emi.db (`work_objects`, `nodes`, `edges`,
-`events`), opened via `dayflow_orchestrator/work_store.py`. The append-only event log is the source of
+**Work objects** (`work_objects/` substrate): five tables in emi.db (`work_objects`, `nodes`, `edges`,
+`events`, `actions`), opened via `dayflow_orchestrator/work_store.py`. The append-only event log is the source of
 truth; nodes/edges are the rebuildable projection; every mutation is one short atomic transaction through
 `WorkStore.apply` (allowed transitions per node family, authority ceilings, structural validation,
 derived rollup). `DAYFLOW_WORK_DB` overrides the path for tests.
@@ -271,7 +279,7 @@ could have waited", never a stuck node.
 
 ## Tickets
 
-`create_dayflow_ticket` is a tool; ticket phrasing goes through the `ticket_builder` agent
+`create_dayflow_ticket` is a tool; ticket phrasing goes through `ticket_builder_manager`
 (`CreateDayflowTicketTool._format_brief`) so the user sees a warm, first-person message rather than raw
 node text. Ask tickets carry `trigger_context.work_node` for reply matching. Ticket state lives in the
 ticket manager, not in dayflow items.
@@ -345,10 +353,11 @@ already terminal when the manager returned and the recorder wrote nothing at all
 not the epoch fence, not the result.
 
 **Supervision and long calls.** A session blocked inside one tool writes nothing meanwhile, so
-silence cannot be the signal that a job died. `_WORK_NODE_FROZEN_TIMEOUT_S` is therefore DERIVED from
+the inactivity threshold must exceed a legitimate wait. `_WORK_NODE_FROZEN_TIMEOUT_S` is DERIVED from
 the longest legitimate tool call (the ask window) plus a grace, rather than guessed — it cannot drift
-if either number moves. Crashes and restarts are caught by ORPHAN detection (no live thread), which
-is immediate and does not wait for that timeout.
+if either number moves. Both a lost thread and a wedged call are detected by the same subtree
+inactivity rule; there is no immediate session-liveness check. The threshold is 80 minutes today,
+and failure is applied by the next planning tick that observes it exceeded.
 
 **The finalizer judges and writes, in one node.** It was briefly two — one emitting a verdict onto the
 blackboard, one reading it back and writing the graph. The agent call happens in that node, so its
@@ -362,13 +371,14 @@ an illegal transition.
 WorkObject done or abandoned from a single node's result. That belongs to the STEWARD, which already
 owns `complete_work_ids` / `abandon_work_ids` and sees every work object's outcomes each tick;
 ordinary completion needs nobody, since the store's rollup completes a goal once `is_satisfied`. A
-finalizer that thinks the goal is finished or moot says so in `reasoning`, and the steward rules on
+finalizer that thinks the goal is finished or moot says so in `outcome`, and the steward rules on
 it next tick.
 
-**The rollup yields to a pending instruction.** `amend` and `replan` both close the node, and closing
-the last one would otherwise complete the goal — destroying the instruction they just wrote, since
-`_pending_finalizer_instructions` scans ACTIVE work objects only. So a satisfied goal holds while any
-node carries an unconsumed finalizer instruction, until the architect consumes it. Only the automatic
+**The rollup yields to a pending instruction.** `achieved_plan_changes` closes the node with a
+`plan_changes` route. Closing the last node would otherwise complete the goal before the architect
+could read that instruction, since `_pending_finalizer_instructions` scans ACTIVE work objects only.
+A satisfied goal therefore holds while any node carries an unconsumed finalizer instruction with a
+`next_step`, until the architect consumes it. Only the automatic
 rollup defers: the steward's explicit `set_work_status` stays authoritative, because a person
 deciding a goal is over outranks a pending note about how to continue it.
 
@@ -379,7 +389,8 @@ the pass to fall into if a routing step misfires. It does NOT skip the state_mov
 is a good moment is a fresh judgment every time, because the world moved since the timer was set (the
 user went to bed early, the meeting ran long, they are away). The state_mover sees exactly that one
 node; `work_node_wake_router_node` then dispatches it if it was left `actionable`, or ends the pass if
-it was held — in which case the hold's `reactivate_at` re-arms the wake on its own. A timed node is
+it was held. The hold persists `reactivate_at` as `wake_at`, but the next ordinary planning tick
+must re-arm the timer: the wake pass currently performs no re-arm itself. A timed node is
 ready BECAUSE its time came: the state_mover's prompt says a boundary announcement ("work hours are
 over") is never held for the boundary it announces, and a hold moves by minutes, never to the next day.
 
@@ -391,6 +402,12 @@ gone: a recorded answer is landed as the result, a lapsed window lands "user not
 question still live is waited on for the REMAINDER of its window — never re-asked, because it is
 still on screen. The newest ticket per node wins, a live session is never disturbed, and a timeout is
 re-checked against the row before it is believed.
+
+Every recovered result rejoins the normal completion path: `record_tool_result` saves the evidence
+and result status, then the same `WorkFinalizerNode` used by the dispatch room judges it and persists
+its verdict. Recovery supplies a fresh blackboard containing that work-node reference and passes the
+dayflow room's scope to the finalizer. It signals planning after finalization; planning has no finalizer stage of its
+own. If the recorder rejects a stale/ended call, recovery does not finalize its successor's result.
 
 **Agents do not share a blackboard.** An agent's context items resolve from the blackboard it was
 constructed with, so handing it one owned by something else silently rebinds every key they both use —
@@ -407,11 +424,8 @@ node gets its own blackboard; what it needs arrives through the Message or as a 
 - **`ManagerInterface._run_on_child_node`** still puts a work-graph special case inside the generic
   manager-as-tool wrapper. Removing it requires retiring the `node_aware` sub-manager variants
   (`work_web_manager`) in favour of plain ones, which changes what every run records in the graph.
-- **The verdict set cannot say "the call returned but the goal did not happen."** `amend` is the
-  closest fit and it maps to `closed`. Observed 2026-09-17: a lights goal whose own epitaph read
-  "the result does not show that the lights were actually turned off". The goal no longer completes
-  under an unconsumed instruction (below), so the architect now gets its say — but the node itself
-  is still recorded as satisfied work.
+- **A held wake needs the next planning tick to re-arm its timer.** `_fire_work_node` does not call
+  `_arm_work_node_wakes`; a short hold can therefore run later than its requested `reactivate_at`.
 - **The steward re-mints actions that already ran.** Its only defence against duplicate goals is a
   prompt telling it to check the portfolio. Routine actions that ran this morning were minted again
   as fresh work objects the same day.
@@ -425,3 +439,21 @@ node gets its own blackboard; what it needs arrives through the Message or as a 
   but not the steward minting a fresh work object for the same action tomorrow. Catching that needs a
   counter keyed on something more durable — the action and its target, roughly what the `actions`
   ledger records.
+
+
+## Current durability and prompt contracts (2026-09-19)
+
+Admission persists an evaluator inbox across ticks. New goals contain their source
+summaries, pod handles and success criteria in the creation write; changes retain
+those sources. Interrupted acknowledgments and empty-goal decomposition resume from
+the durable store. Ingestion saves destination items before cursor updates, scans
+inclusive source windows, and reserves identities across all retained intake.
+
+Pending finalizer instructions block further main-task dispatch until the architect
+commits its complete revision. Architect and steward share Jinja views of main tasks
+and finalizer summaries. Worker/finalizer views include the owned provenance history.
+See the [context contract and rendered example](../design/dayflow_prompt_context_standard_2026-09-19.md).
+
+Ticket recovery requires an exact dispatch epoch. Historical tickets without one
+are not guessed into a current attempt. Scheduler stop removes all owned jobs;
+callbacks recheck stopped state and failed wakes delay retries by at least 120 seconds.

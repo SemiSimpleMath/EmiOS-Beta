@@ -1,22 +1,15 @@
 """
 work_objects.store — own SQLite persistence + the validated writer.
 
-The **event log is the record of truth**; the `nodes`/`edges` tables are the
-live **projection** (a materialized cache you read from, rebuildable from events).
+The graph tables hold current state; `events` records mutation inputs, not a
+complete replay stream (generated IDs are not fully captured).
 
-Every mutation goes through `WorkStore.apply(op, data, actor)`:
-    1. load the current projection
-    2. validate the patch  — allowed status transitions + authority ceiling +
-       structural invariants (WorkObject.validate)
-    3. append the event
-    4. update the projection
-    5. recompute the derived rollup (WorkObject.status)
-  Steps 3-5 are ONE atomic sqlite transaction: the event and the projection
-  commit together or not at all — they can never diverge.
-
-Writers serialize on the store's in-process RLock — the dayflow pipeline
-nodes, the scheduler's wake threads, the worker, and the /work UI all write
-through here — and each apply() is one short atomic transaction.
+WorkStore.apply loads the graph, runs the op handler, rolls up the container,
+validates structure, then commits the event and graph together. Each apply is
+one SQLite write transaction acquired before reading the graph. The instance RLock
+protects its connection; SQLite serializes other connections. Multiple apply calls
+are not one transaction.
+Boot migrations and closure repair also write state outside apply.
 """
 from __future__ import annotations
 
@@ -57,9 +50,9 @@ def _cascade_abandon_startable(wo: WorkObject, now: str, reason: str) -> int:
     start again. Abandon every startable node and clear its wake so no timer or promotion
     path can resurrect it (validate() enforces the invariant). In-flight ``dispatched``
     WORKER nodes are left to land their result — inert in a terminal object, and the sweep
-    skips terminal work objects. A dispatched ASK (wake_kind=user_reply) has no thread and
-    no result to land — the object's closure moots the question, so it cascades too (its
-    ticket dies on its own valid_until). Idempotent; returns the number of nodes cascaded."""
+    skips terminal work objects. A dispatched ASK (wake_kind=user_reply) cascades too:
+    closure moots the question. This does not cancel its waiting thread or ticket;
+    a later result is skipped by the recorder after abandonment. Idempotent; returns the number of nodes cascaded."""
     count = 0
     for node in wo.nodes.values():
         if node.status in _STARTABLE_STATUSES or (
@@ -99,8 +92,8 @@ def _cascade_abandon_subtree(wo: WorkObject, node_id: str, now: str, reason: str
 
     Same shape as `_cascade_abandon_startable` but scoped to one subtree, and with the same
     exemption: an in-flight ``dispatched`` WORKER node is left to land its result rather
-    than being orphaned mid-call. A dispatched ASK (wake_kind=user_reply) has no thread and
-    no result to land, so the parent's completion moots it and it cascades.
+    than being orphaned mid-call. A dispatched ASK (wake_kind=user_reply) cascades
+    because the parent's completion moots it; its waiting thread is not cancelled.
     """
     count = 0
     for node in _descendants(wo, node_id):
@@ -159,8 +152,8 @@ def _count_unmet_attempt(wo: WorkObject, node, now: str) -> None:
     `failed`, so it is never counted.
     """
     goal = wo.nodes.get(wo.goal_node_id or "")
-    if goal is None or goal.id == node.id:
-        return
+    if goal is None or not wo.is_work_unit(node):
+        return  # Internal helper failures are provenance, not failed main-task attempts.
     goal.payload["goal_unmet_attempts"] = int(goal.payload.get("goal_unmet_attempts") or 0) + 1
     goal.updated_at = now
 
@@ -263,6 +256,10 @@ def _iso(dt) -> Optional[str]:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc).isoformat()
+
+
+class StaleResult(ValueError):
+    """This result belongs to an ended or superseded attempt."""
 
 
 class WorkStore:
@@ -387,6 +384,7 @@ class WorkStore:
             raise ValueError(f"unknown op {op!r}")
         now = utcnow().isoformat()
         with self._lock, self._conn:  # serialize writers; atomic event + projection
+            self._conn.execute("BEGIN IMMEDIATE")  # fence the read, not only the later write
             if op == "create_work_object":
                 wo = handler(self, None, data, now, actor)
             else:
@@ -403,6 +401,155 @@ class WorkStore:
             )
             self._persist(wo, now)
         return wo
+
+    def _op_batch(self, wo, data, now, actor=None):
+        """Apply a graph revision without publishing any intermediate projection."""
+        expected = data.get("expected_updated_at")
+        if expected is not None and wo.updated_at != datetime.fromisoformat(str(expected)):
+            raise ValueError("graph changed while the revision was being prepared")
+        allowed = {"add_node", "add_edge", "set_status", "edit_node", "defer_node",
+                   "consume_finalizer_instruction", "redirect_dependencies"}
+        for change in data.get("operations", []):
+            op = change.get("op")
+            if op not in allowed or op not in self._HANDLERS:
+                raise ValueError(f"unknown batch operation {op!r}")
+            self._HANDLERS[op](self, wo, change["data"], now, actor)
+
+    def _op_redirect_dependencies(self, wo, data, now, actor=None):
+        """Transfer a duplicate's prerequisites and consumers to its retained task."""
+        replacements = dict(data["replacements"])
+        def canonical(nid):
+            seen = set()
+            while nid in replacements:
+                if nid in seen:
+                    raise ValueError("cyclic duplicate mapping")
+                seen.add(nid)
+                nid = replacements[nid]
+            return nid
+        for duplicate, kept in replacements.items():
+            if any(nid not in wo.nodes or not wo.is_work_unit(wo.nodes[nid]) for nid in (duplicate, kept)):
+                raise ValueError("deduplication must name existing main tasks")
+            if wo.nodes[canonical(kept)].status in {"abandoned", "superseded"}:
+                raise ValueError("deduplication cannot retain an abandoned task")
+        edges, seen, removed = [], set(), []
+        for edge in wo.edges:
+            if edge.relation == "depends_on":
+                edge.src, edge.dst = canonical(edge.src), canonical(edge.dst)
+                key = (edge.src, edge.dst)
+                if edge.src == edge.dst or key in seen:
+                    removed.append(edge.id)
+                    continue
+                seen.add(key)
+            edges.append(edge)
+        # Reject dependency cycles introduced by merging two task identities.
+        for edge in edges:
+            if edge.relation != "depends_on":
+                continue
+            visited, pending = set(), [edge.dst]
+            while pending:
+                nid = pending.pop()
+                if nid == edge.src:
+                    raise ValueError("deduplication would create a dependency cycle")
+                if nid in visited:
+                    continue
+                visited.add(nid)
+                pending.extend(e.dst for e in edges if e.relation == "depends_on" and e.src == nid)
+        wo.edges = edges
+        for eid in removed:
+            self._conn.execute("DELETE FROM edges WHERE work_id=? AND id=?", (wo.id, eid))
+
+    def _op_bind_ticket(self, wo, data, now, actor=None):
+        """Bind the surfaced question to its exact in-flight main-task attempt."""
+        node = wo.nodes.get(data["node_id"])
+        if (node is None or not wo.is_work_unit(node) or node.status != "dispatched"
+                or wo.status != "active"
+                or int(node.payload.get("dispatch_epoch") or 0) != int(data["expected_dispatch_epoch"])):
+            raise StaleResult("ticket belongs to a stale dispatch attempt")
+        ticket_id = str(data.get("ticket_id") or "").strip()
+        if not ticket_id:
+            raise ValueError("ticket id is required")
+        self._op_defer_node(wo, {"node_id": node.id, "wake_kind": "user_reply", "wake_ref": ticket_id}, now, actor)
+        node.payload["ticket_id"] = ticket_id
+        node.payload["ticket_epoch"] = int(data["expected_dispatch_epoch"])
+
+    def _op_claim_task(self, wo, data, now, actor=None):
+        """Exclusive main-task claim, checking current gates under the write transaction."""
+        node = wo.nodes.get(data["node_id"])
+        if node is None or not wo.is_work_unit(node):
+            raise ValueError("dispatch: worker provenance is not an orchestrator assignment")
+        if node.status != "actionable" or not wo.is_ready(node, datetime.fromisoformat(now)):
+            raise ValueError("dispatch: task is no longer actionable and ready")
+        if node.wake_kind in {"event", "signal"}:
+            raise ValueError("dispatch: external wake has not been satisfied")
+        self._op_set_status(wo, {"node_id": node.id, "status": "dispatched"}, now, actor)
+
+    def _op_finalize_task(self, wo, data, now, actor=None):
+        """Apply one finalizer judgment and its counters atomically for one incarnation."""
+        node = wo.nodes.get(data["node_id"])
+        if (node is None or not wo.is_work_unit(node) or wo.status in {"done", "abandoned"}
+                or node.status not in {"done", "failed"}):
+            raise StaleResult("task no longer awaits this judgment")
+        epoch = int(node.payload.get("dispatch_epoch") or 0)
+        if int(data["expected_dispatch_epoch"]) != epoch or node.payload.get("finalized_epoch") == epoch:
+            raise StaleResult("stale or duplicate judgment")
+        fin = dict(data["finalizer"])
+        verdict = fin.get("verdict")
+        if verdict not in {"achieved", "achieved_plan_changes", "retry", "unrecoverable"}:
+            raise ValueError("invalid finalizer verdict")
+        if not str(fin.get("outcome") or "").strip():
+            raise ValueError("finalizer outcome is required")
+        fin["escalated"] = False
+        if verdict in {"retry", "unrecoverable"}:
+            node.payload["failure_count"] = int(node.payload.get("failure_count") or 0) + 1
+            _count_unmet_attempt(wo, node, now)
+            attempts = int(wo.nodes[wo.goal_node_id].payload.get("goal_unmet_attempts") or 0)
+            if attempts >= int(data.get("repeat_failure_limit", 2)):
+                fin["next_step"] = "ask_user"
+                fin["escalated"] = True
+                fin["question_for_user"] = fin.get("question_for_user") or fin.get("recommendation") or fin["outcome"]
+            self._op_set_status(wo, {"node_id": node.id, "status": "failed"}, now, "finalizer")
+            target = "proposed" if verdict == "retry" and not fin["escalated"] else "failed"
+        else:
+            target = "closed"
+            if node.status == "failed":
+                # The finalizer may accept a result despite an execution error.
+                # Normalize inside this transaction; no intermediate state is published.
+                node.status = "done"
+        self._op_set_status(wo, {"node_id": node.id, "status": target, "reason": fin["outcome"],
+                                 "verdict": verdict, "finalizer": fin}, now, "finalizer")
+        node.payload["finalizer"]["dispatch_epoch"] = epoch
+        node.payload["finalized_epoch"] = epoch
+
+    def _op_record_result(self, wo, data, now, actor=None):
+        """One transaction for the attempt check, pod, evidence and result status."""
+        node = wo.nodes.get(data["node_id"])
+        if (node is None or wo.status in {"done", "abandoned"}
+                or node.status not in {"dispatched", "proposed", "actionable", "waiting"}):
+            raise StaleResult("result already recorded or task ended")
+        epoch = int(node.payload.get("dispatch_epoch") or 0)
+        expected = data.get("expected_dispatch_epoch")
+        if expected is not None and int(expected) != epoch:
+            raise StaleResult(f"stale dispatch epoch {expected}; current {epoch}")
+        idle_before = data.get("idle_before")
+        if idle_before is not None:
+            if isinstance(idle_before, str):
+                idle_before = datetime.fromisoformat(idle_before)
+            if node.status != "dispatched" or any(
+                    n.updated_at >= idle_before for n in [node, *wo.provenance_for(node.id)]):
+                raise StaleResult("task is no longer idle at the observed timeout")
+        if node.status in {"proposed", "actionable"}:
+            self._op_set_status(wo, {"node_id": node.id, "status": "dispatched"}, now, actor)
+            epoch = int(node.payload.get("dispatch_epoch") or 0)
+        if data.get("pod_ref"):
+            node.pod_ref = data["pod_ref"]
+        self._op_add_node(wo, {
+            "id": data["evidence_id"], "type": "evidence", "parent_id": node.id,
+            "status": "assumed", "created_by": actor, "title": data["title"],
+            "content": data["answer"], "payload": {"dispatch_epoch": epoch},
+        }, now, actor)
+        self._op_set_status(wo, {"node_id": node.id, "status": data["status"]}, now, actor)
+        node.payload["result_epoch"] = epoch
+        node.payload["result_actor"] = actor
 
     # ----------------------------- op handlers ----------------------------- #
     # Each mutates the in-memory wo (validation inline); persistence is shared.
@@ -440,26 +587,51 @@ class WorkStore:
         if parent_id is not None and parent_id not in wo.nodes:
             raise ValueError(f"add_node: parent {parent_id!r} not found")
         authority = data.get("authority")
-        if parent_id is not None and authority is not None:
-            ceiling = wo.nodes[parent_id].authority
-            if ceiling is not None and authority > ceiling:
-                raise ValueError(f"add_node: authority {authority} exceeds parent ceiling {ceiling}")
+        if authority is not None:
+            ancestor_id = parent_id
+            while ancestor_id is not None:
+                ancestor = wo.nodes[ancestor_id]
+                if ancestor.authority is not None and authority > ancestor.authority:
+                    raise ValueError(f"add_node: authority {authority} exceeds ancestor ceiling {ancestor.authority}")
+                ancestor_id = ancestor.parent_id
+        family = FAMILY_BY_TYPE.get(data.get("type"), "spine")
+        lifecycle = TRANSITIONS[family]
+        valid_statuses = set(lifecycle).union(*lifecycle.values())
+        if data.get("status", "proposed") not in valid_statuses:
+            raise ValueError(f"add_node: invalid initial status for {family}")
         fields = {k: v for k, v in data.items()
                   if k in WorkNode.model_fields and k not in {"work_id", "created_at", "updated_at"}}
         node = WorkNode(work_id=wo.id, created_at=now, updated_at=now, **fields)
         # Ownership inherits down the parent_id spine BY CONSTRUCTION: a node grown
         # under a session-owned parent carries the same payload.session_id, so the
-        # supervisor's liveness join is one lookup — no ancestor walk (work-session
+        # old supervisor could join liveness without an ancestor walk (work-session
         # rewrite; replaces the 2026-08-04 ancestor-liveness patch class entirely).
         if parent_id is not None and "session_id" not in node.payload:
             parent_sid = wo.nodes[parent_id].payload.get("session_id")
             if parent_sid:
                 node.payload["session_id"] = parent_sid
+        if node.wake_kind == "time" and node.wake_at is None:
+            raise ValueError("add_node: a time wake requires wake_at")
+        if node.wake_kind in {"event", "signal"} and not str(node.wake_ref or "").strip():
+            raise ValueError("add_node: an external wake requires wake_ref")
         wo.add_node(node)
 
     def _op_add_edge(self, wo, data, now, actor=None) -> None:
         if data["src"] not in wo.nodes or data["dst"] not in wo.nodes:
             raise ValueError(f"add_edge: endpoints {data['src']!r}->{data['dst']!r} must exist")
+        src, dst, relation = data["src"], data["dst"], data["relation"]
+        if relation == "depends_on":
+            if src == dst or any(e.src == src and e.dst == dst and e.relation == relation for e in wo.edges):
+                raise ValueError("add_edge: self or duplicate dependency")
+            # Following prerequisites from src must never lead back to dst.
+            frontier, seen = [src], set()
+            while frontier:
+                current = frontier.pop()
+                if current == dst:
+                    raise ValueError("add_edge: dependency cycle")
+                if current not in seen:
+                    seen.add(current)
+                    frontier.extend(wo.deps_of(current))
         wo.edges.append(Edge(work_id=wo.id, src=data["src"], dst=data["dst"],
                              relation=data["relation"], payload=data.get("payload", {}),
                              created_at=now))
@@ -553,22 +725,6 @@ class WorkStore:
         node.status = target
         if target == "dispatched" and prev != "dispatched":
             node.payload["dispatch_epoch"] = int(node.payload.get("dispatch_epoch") or 0) + 1
-        if target == "failed" and prev != "failed":
-            # HOW MANY TIMES THIS STEP HAS NOW FAILED. Nothing counted failures, so nothing could
-            # notice a step failing the same way forever: one delivery node recorded the SAME tool
-            # error seventeen times and every projection read it as seventeen sub-nodes of
-            # progress. Counted here, on the node, because this is the one chokepoint every
-            # failure passes through — and counted by id, never by comparing error text.
-            node.payload["failure_count"] = int(node.payload.get("failure_count") or 0) + 1
-            # AND ON THE GOAL, because the per-node count is reset by the very act of continuing.
-            # A count on the node measures one incarnation: the architect abandons a node and mints
-            # its replacement under a fresh slug, and the replacement starts at zero. The work has
-            # failed twice; nothing in the graph says so. 2026-09-17: a picture-day goal walked
-            # around the >=2 ceiling all day because every re-plan handed it a clean counter.
-            # The goal node is the one anchor node churn cannot launder — it outlives every
-            # child — so the tally of "how many times has THIS GOAL failed at something" lives
-            # here. Still counted by id at the one chokepoint; never by comparing text.
-            _count_unmet_attempt(wo, node, now)
         if data.get("session_id") is not None:
             # Ownership is a graph fact (work-session rewrite): the discharging session
             # stamps itself on the node; the supervisor reads this, not a registry.
@@ -612,6 +768,18 @@ class WorkStore:
                 {"note": str(data["note"]), "at": now})
         node.updated_at = now
 
+    def _op_revise_goal(self, wo, data, now, actor=None) -> None:
+        if data.get("expected_updated_at") != wo.updated_at:
+            raise ValueError("revise_goal: work object changed since preparation")
+        if wo.status not in {"active", "blocked"}:
+            raise ValueError("revise_goal: cannot change a terminal work object")
+        goal = wo.nodes[wo.goal_node_id]
+        goal.content = data["content"]
+        goal.title = str(data["objective"])[:80]
+        goal.updated_at = now
+        wo.title = goal.title
+        wo.constraints = dict(data["constraints"])
+
     def _op_edit_node(self, wo, data, now, actor=None) -> None:
         """Manual UI edit of a node's title and/or content — no status change, no transition check. For the
         /work editor; only mutates the fields explicitly provided (a missing key leaves that field alone)."""
@@ -625,7 +793,10 @@ class WorkStore:
         node.updated_at = now
 
     def _op_consume_finalizer_instruction(self, wo, data, now, actor=None) -> None:
-        """Mark a finalizer instruction as acted on, so the architect reads it exactly once.
+        """Mark a finalizer instruction as acted on so later reads can skip it.
+
+        The caller supplies the exact instruction it read. Architect revisions include this
+        operation in their graph batch, so the plan and acknowledgement commit together.
 
         Without this the instruction sits on the node forever and every later re-plan of the
         same work object re-applies a judgment about a step that was dealt with ticks ago.
@@ -637,6 +808,8 @@ class WorkStore:
         if not isinstance(entry, dict):
             raise ValueError(
                 f"consume_finalizer_instruction: node {node.id!r} carries no finalizer instruction")
+        if entry != data.get("expected_finalizer") or entry.get("consumed_at"):
+            raise ValueError("finalizer instruction changed or was already consumed")
         entry["consumed_at"] = now
         node.updated_at = now
 
@@ -654,8 +827,27 @@ class WorkStore:
         wake_kind = data.get("wake_kind")
         if wake_kind is not None and wake_kind not in WAKE_KINDS:
             raise ValueError(f"defer_node: unknown wake_kind {wake_kind!r}")
+        # Validate before committing: assignment on an existing WorkNode does not run
+        # Pydantic validation, so an invalid string would make the next load fail.
+        wake_at = data.get("wake_at")
+        if isinstance(wake_at, str):
+            try:
+                wake_at = datetime.fromisoformat(wake_at.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ValueError("defer_node: wake_at must be an ISO datetime or null") from exc
+        if wake_at is not None:
+            if not isinstance(wake_at, datetime):
+                raise ValueError("defer_node: wake_at must be a datetime, ISO string or null")
+            if wake_at.tzinfo is None:
+                wake_at = wake_at.replace(tzinfo=timezone.utc)
+        if wake_kind == "time" and wake_at is None:
+            raise ValueError("defer_node: a time wake requires wake_at")
+        if wake_kind in {"event", "signal"} and not str(data.get("wake_ref") or "").strip():
+            raise ValueError("defer_node: an external wake requires wake_ref")
+        if wake_kind is None and (wake_at is not None or data.get("wake_ref")):
+            raise ValueError("defer_node: wake fields require wake_kind")
         node.wake_kind = wake_kind
-        node.wake_at = data.get("wake_at")
+        node.wake_at = wake_at
         node.wake_ref = data.get("wake_ref")
         # A worker deferring its in-flight node parks it (dispatched -> waiting).
         # A user_reply wake is the exception: it marks an in-flight ASK — the
@@ -804,8 +996,7 @@ class WorkStore:
             # recreated the goal. Naming the children and their verdicts makes a hollow
             # completion legible: a goal whose every child closed on `amend` achieved nothing,
             # and now says so where the next planning pass reads it.
-            if goal.status == "dispatched":      # close the goal node (dispatched->done is legal)
-                goal.status = "done"
+            goal.status = "done"  # The satisfied goal must not be cascade-abandoned.
             _cascade_abandon_startable(wo, now, reason="work_object_done")
             # AFTER the cascade, which writes its own `terminal` on every node it sweeps and would
             # otherwise overwrite this one with a cascade epitaph.
@@ -820,6 +1011,13 @@ class WorkStore:
 
 
 WorkStore._HANDLERS = {
+    "revise_goal": WorkStore._op_revise_goal,
+    "bind_ticket": WorkStore._op_bind_ticket,
+    "redirect_dependencies": WorkStore._op_redirect_dependencies,
+    "batch": WorkStore._op_batch,
+    "claim_task": WorkStore._op_claim_task,
+    "finalize_task": WorkStore._op_finalize_task,
+    "record_result": WorkStore._op_record_result,
     "create_work_object": WorkStore._op_create_work_object,
     "add_node": WorkStore._op_add_node,
     "add_edge": WorkStore._op_add_edge,

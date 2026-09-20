@@ -50,10 +50,11 @@ class ManagerInterface:
           - A manager already working gives it a SUB-NODE it just created for a piece of its own
             work — scratch, run immediately, answering straight back to its caller.
 
-        It deliberately asserts NOTHING about the node's status. The gate's claim protects work
-        handed out across ticks so two runs cannot take the same node; a sub-node is created and
-        executed in one breath with nothing able to race for it, so there is no gap to protect.
-        Requiring `dispatched` here is what made delegation refuse the very node it had created.
+        Nested records are worker-owned provenance, not orchestrator assignments. The
+        orchestrator's ownership filter excludes them from promotion, wakes and dispatch.
+        The worker executes its delegation synchronously; its result is kept for takeover
+        and finalizer judgment. This shared entry therefore does not require a prior claim
+        for a provenance record. Top-level dispatch claims remain a separate concern.
 
         Returns the manager's ToolResult verbatim. It does NOT record the result — the caller
         records, the same as for every other tool. work_objects imports stay lazy and guarded:
@@ -136,8 +137,8 @@ class ManagerInterface:
         # identical either way, and the only difference is who decided the node exists.
         #
         # It used to go through discharge_node, which refuses any node that is not already
-        # `dispatched`. Nothing claims a child: it is created and run in one breath with nothing
-        # able to race it. So every delegation raised on the node it had just created, from the day
+        # `dispatched`. A child is an internal provenance record, excluded from orchestrator
+        # scheduling by its ownership relationship. So every delegation raised on the node it had just created, from the day
         # that assertion landed (2026-08-04) — one node-handoff has succeeded since, in June.
         result = self._run_on_given_node(ctx.work_id, child_id, tool_message)
 

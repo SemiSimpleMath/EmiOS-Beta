@@ -16,6 +16,9 @@ from app.assistant.dayflow_orchestrator.dayflow_scheduler import DayflowSchedule
 
 
 class FakeAPScheduler:
+    def get_jobs(self):
+        return []
+
     def __init__(self):
         self.add_calls = []
 
@@ -33,9 +36,18 @@ class FakeNode:
         self.wake_at = wake_at
         self.wake_kind = wake_kind
         self.status = status
+        self.type = "subtask"
+        self.parent_id = "goal"
 
 
 class FakeWO:
+    def is_ready(self, node, now=None):
+        return True
+
+    from work_objects.model import WorkObject
+    is_work_unit = WorkObject.is_work_unit
+    goal_node_id = "goal"
+
     def __init__(self, wo_id, nodes):
         self.id = wo_id
         self.nodes = {n.id: n for n in nodes}

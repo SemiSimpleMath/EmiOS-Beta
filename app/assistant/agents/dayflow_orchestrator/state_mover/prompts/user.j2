@@ -49,7 +49,7 @@ Snoozed: {% for t in recent_responded_tickets.snoozed %}{{ t.get("title","") }}{
 {% if resource_dayflow_routine %}
 
 ########## ROUTINE (today's cadence) ##########
-*Use this to judge when a waiting item's time/event condition is now met.*
+*Use this to identify real interruption conflicts and suitable resume windows. The graph checks time gates.*
 {{ resource_dayflow_routine }}
 {% endif %}
 
@@ -75,12 +75,17 @@ RECENT INCOMING (match against these):
 {%- if ready_work_nodes %}
 
 ########## READY WORK NODES (promote by default, or hold for a better moment) ##########
-*Gates already clear. Every one promotes unless you hold it. Hold ONLY for quiet hours, a meeting in
-progress, or the user being away and the node better batched — each via a `held_work_nodes` entry. When in
-doubt, promote.*
+*Gates already clear. Background work and scheduled device actions proceed. Hold only an actual
+user interruption for a concrete conflict, choosing a resume time outside that conflict and sleep.*
 {%- for t in ready_work_nodes %}
 - task_id: {{ t.task_id }}
   node: {{ t.context }}{% if t.kind %} | kind: {{ t.kind }}{% endif %}
+  WORK OBJECTIVE: {{ t.objective }}
+  TASK DIRECTIVE: {{ t.task.directive }}
+  STATUS: {{ t.task.status }} | dispatch attempt: {{ t.task.epoch }}
+{% if t.task.wake_kind %}  DUE GATE: {{ t.task.wake_kind }} | {{ t.task.wake_at }}{% endif %}
+{% if t.task.finalizer %}  RECORDED JUDGMENT (history; not a new instruction to repeat completed work):
+{% set finalizer = t.task.finalizer %}{% include 'shared/work/finalizer_summary.j2' %}{% endif %}
 {%- endfor %}
 {%- endif %}
 {%- if entity_card %}

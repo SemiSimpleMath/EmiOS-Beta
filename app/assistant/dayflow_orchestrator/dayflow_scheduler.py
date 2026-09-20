@@ -69,12 +69,13 @@ class DayflowScheduler:
         self._pending_poke_reason: Optional[str] = None
         self._followup_requested = False
         self._started = False
+        self._subscribed_event_hub = None
 
     def start(self) -> None:
         if self._started:
             return
-        self._started = True
         self._subscribe_events()
+        self._started = True
 
         # Reconnect asks whose session died with this process, BEFORE the first tick plans
         # around them. A question outlives the process that asked it: the thread waiting on the
@@ -96,13 +97,15 @@ class DayflowScheduler:
         logger.info("[DayflowScheduler] Started — initial tick in %ss", STARTUP_TICK_DELAY_SECONDS)
 
     def stop(self) -> None:
-        self._started = False
-        try:
-            self._scheduler.remove_job(JOB_ID)
-        except Exception as e:
-            logger.error("[DayflowScheduler] Failed to remove scheduled job during stop: %s", e)
-            logger.debug("[DayflowScheduler] stop exception details", exc_info=True)
-            raise
+        from apscheduler.jobstores.base import JobLookupError
+        with self._lock:
+            self._started = False
+            for job in self._scheduler.get_jobs():
+                if job.id == JOB_ID or job.id.startswith(_WORK_WAKE_JOB_PREFIX):
+                    try:
+                        self._scheduler.remove_job(job.id)
+                    except JobLookupError:
+                        pass  # A one-shot callback may already have been dequeued.
         logger.info("[DayflowScheduler] Stopped")
 
     def poke(self, reason: str = "unknown") -> None:
@@ -160,15 +163,18 @@ class DayflowScheduler:
             pass  # if we can't read the existing job, just schedule normally
 
         try:
-            self._scheduler.add_job(
-                func=self._execute_tick,
-                trigger="date",
-                run_date=run_date,
-                args=[reason],
-                id=JOB_ID,
-                replace_existing=True,
-                misfire_grace_time=300,
-            )
+            with self._lock:
+                if not self._started:
+                    return
+                self._scheduler.add_job(
+                    func=self._execute_tick,
+                    trigger="date",
+                    run_date=run_date,
+                    args=[reason],
+                    id=JOB_ID,
+                    replace_existing=True,
+                    misfire_grace_time=300,
+                )
             delta = (run_date - now_utc).total_seconds()
             logger.info(
                 "[DayflowScheduler] Scheduled tick in %.0fs (reason=%s, run_date=%s)",
@@ -224,6 +230,8 @@ class DayflowScheduler:
             logger.debug("[DayflowScheduler] repeated-failure notify exception details", exc_info=True)
 
     def _execute_tick(self, reason: str) -> None:
+        if not self._started:
+            return
         if not setup_complete():
             logger.info("[DayflowScheduler] Setup not complete; skipping tick.")
             return
@@ -265,6 +273,8 @@ class DayflowScheduler:
         logger.info("[DayflowScheduler] === TICK START === run_id=%s reason=%s", run_id, reason)
         try:
             with self._run_gate, self._app.app_context():
+                if not self._started:
+                    return
                 from app.assistant.dayflow_orchestrator.dayflow_tick import (
                     dayflow_orchestrator_cadence_tick,
                 )
@@ -303,7 +313,7 @@ class DayflowScheduler:
             self._arm_work_node_wakes()
             if followup:
                 # Work progressed during this tick (a node reached a result / a reply landed). Follow up
-                # promptly — the next tick's finalizer/repair judge it and dependents dispatch — so a
+                # promptly — the next tick applies finalizer instructions and dispatches dependents — so a
                 # sequential chain advances in minutes, not one step per ceiling tick. Non-poke: only the
                 # MIN_GAP floor applies, and the sooner-run guard still keeps any earlier due job.
                 logger.info("[DayflowScheduler] Work progressed during run; scheduling follow-up tick.")
@@ -319,10 +329,26 @@ class DayflowScheduler:
 
         event_hub = DI.event_hub
 
-        event_hub.register_event("repo_update", self._on_repo_update)
-        event_hub.register_event("afk_state_changed", self._on_afk_state_changed)
-        event_hub.register_event("dayflow_ticket_responded", self._on_ticket_responded)
-        event_hub.register_event("dayflow_work_progress", self._on_work_progress)
+        if self._subscribed_event_hub is event_hub:
+            return
+        handlers = [("repo_update", self._on_repo_update),
+                    ("afk_state_changed", self._on_afk_state_changed),
+                    ("dayflow_ticket_responded", self._on_ticket_responded),
+                    ("dayflow_work_progress", self._on_work_progress)]
+        registered = []
+        try:
+            for topic, handler in handlers:
+                event_hub.register_event(topic, handler)
+                registered.append((topic, handler))
+        except Exception:
+            for topic, handler in registered:
+                event_hub.unregister_event(topic, handler)
+            raise
+        previous = self._subscribed_event_hub
+        self._subscribed_event_hub = event_hub
+        if previous is not None:
+            for topic, handler in handlers:
+                previous.unregister_event(topic, handler)
 
         logger.info("[DayflowScheduler] Subscribed to event hub topics")
 
@@ -347,18 +373,21 @@ class DayflowScheduler:
             logger.error("[DayflowScheduler] Failed to arm the ceiling tick: %s", e)
             logger.debug("[DayflowScheduler] ceiling arm exception details", exc_info=True)
 
-    def _arm_work_node_wakes(self) -> None:
+    def _arm_work_node_wakes(self, *, min_due_delay_seconds: int = 2) -> None:
         """Arm a precise one-shot per time-gated work-object node, keyed to its wake_at. When it fires,
         _fire_work_node runs THAT node via work_emi_team — independent of the planning tick. Idempotent
         (replace_existing) and re-run after every tick, so newly-planned nodes are picked up and a
         restart re-arms from the durable store. Stale jobs self-no-op (is_ready gate at fire time).
         Candidates are armed soonest-wake_at first, so if there are more than _MAX_WORK_WAKES the
         most-imminent wakes win the cap and the rest are armed on the next tick's scan."""
+        if not self._started:
+            return
         try:
             from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
             store = get_dayflow_work_store()
             now_utc = datetime.now(timezone.utc)
 
+            unreadable = set()
             candidates = []  # (wake_at, wo_id, node_id)
             for summary in store.list_work_objects():
                 if str(summary.get("status") or "").lower() in ("done", "abandoned"):
@@ -370,11 +399,14 @@ class DayflowScheduler:
                     # log it (its nodes' time-wakes simply don't arm this scan)
                     logger.error("[DayflowScheduler] wake scan cannot load work object %s — "
                                  "skipping it this scan: %s", summary.get("id"), e)
+                    unreadable.add(summary["id"])
                     continue
                 for node in wo.nodes.values():
-                    if node.wake_kind != "time" or node.status not in ("proposed", "waiting"):
+                    if not wo.is_work_unit(node) or node.wake_kind != "time" or node.status not in ("proposed", "waiting"):
                         continue
                     if node.wake_at is None:
+                        continue
+                    if node.wake_at <= now_utc and not wo.is_ready(node, now_utc):
                         continue
                     candidates.append((node.wake_at, wo.id, node.id))
 
@@ -387,18 +419,31 @@ class DayflowScheduler:
                 candidates = candidates[:_MAX_WORK_WAKES]
 
             armed = 0
-            for wake_at, wo_id, node_id in candidates:
-                run_date = wake_at if wake_at > now_utc else now_utc + timedelta(seconds=2)
-                job_id = f"{_WORK_WAKE_JOB_PREFIX}{wo_id}::{node_id}"
-                try:
-                    self._scheduler.add_job(
-                        func=self._fire_work_node, trigger="date", run_date=run_date,
-                        args=[wo_id, node_id], id=job_id, replace_existing=True,
-                        misfire_grace_time=600,
-                    )
-                    armed += 1
-                except Exception as e:
-                    logger.error("[DayflowScheduler] failed to arm work-wake %s: %s", job_id, e)
+            with self._lock:
+                if not self._started:
+                    return
+                desired = {f"{_WORK_WAKE_JOB_PREFIX}{wid}::{nid}" for _, wid, nid in candidates}
+                for job in self._scheduler.get_jobs():
+                    if job.id.startswith(_WORK_WAKE_JOB_PREFIX) and job.id not in desired:
+                        wid = job.id[len(_WORK_WAKE_JOB_PREFIX):].split("::", 1)[0]
+                        if wid not in unreadable:
+                            from apscheduler.jobstores.base import JobLookupError
+                            try:
+                                self._scheduler.remove_job(job.id)
+                            except JobLookupError:
+                                pass
+                for wake_at, wo_id, node_id in candidates:
+                    run_date = wake_at if wake_at > now_utc else now_utc + timedelta(seconds=min_due_delay_seconds)
+                    job_id = f"{_WORK_WAKE_JOB_PREFIX}{wo_id}::{node_id}"
+                    try:
+                        self._scheduler.add_job(
+                            func=self._fire_work_node, trigger="date", run_date=run_date,
+                            args=[wo_id, node_id], id=job_id, replace_existing=True,
+                            misfire_grace_time=600,
+                        )
+                        armed += 1
+                    except Exception as e:
+                        logger.error("[DayflowScheduler] failed to arm work-wake %s: %s", job_id, e)
             if armed:
                 logger.info("[DayflowScheduler] armed %d work-object time-wake(s).", armed)
         except Exception as e:
@@ -419,10 +464,13 @@ class DayflowScheduler:
         is_ready check happens INSIDE the gate, so a wake queued behind another pass sees that
         pass's writes — a node the earlier pass just held or dispatched no-ops here instead of
         being judged a second time on stale state."""
-        if not setup_complete():
+        if not self._started or not setup_complete():
             return
+        failed = False
         try:
             with self._run_gate, self._app.app_context():
+                if not self._started:
+                    return
                 import uuid as _uuid
                 from app.assistant.ServiceLocator.service_locator import DI
                 from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
@@ -431,9 +479,9 @@ class DayflowScheduler:
                 store = get_dayflow_work_store()
                 wo = store.load(work_id)
                 node = wo.nodes.get(node_id)
-                if node is None:
+                if node is None or node.wake_kind != "time" or node.wake_at is None:
                     return
-                if not wo.is_ready(node, utcnow()):
+                if not wo.is_work_unit(node) or not wo.is_ready(node, utcnow()):
                     logger.info(
                         "[DayflowScheduler] work-wake %s::%s fired but node not ready (status=%s) — "
                         "skipping.", work_id, node_id, node.status)
@@ -461,10 +509,20 @@ class DayflowScheduler:
                 )
                 logger.info("[DayflowScheduler] work-wake %s -> wake pass.", ref)
                 manager = DI.multi_agent_manager_factory.create_manager("dayflow_wake_manager")
-                DI.manager_invoker.invoke(manager, msg)
+                result = DI.manager_invoker.invoke(manager, msg)
+                from work_objects.result_recorder import _is_failure, _answer_text
+                if _is_failure(result):
+                    raise RuntimeError(_answer_text(result) or "Dayflow wake manager aborted")
         except Exception as e:
+            failed = True
             logger.error("[DayflowScheduler] _fire_work_node(%s::%s) failed: %s", work_id, node_id, e)
             logger.debug("[DayflowScheduler] fire work-node exception details", exc_info=True)
+
+        finally:
+            if failed:
+                self._arm_work_node_wakes(min_due_delay_seconds=MIN_GAP_SECONDS)
+            else:
+                self._arm_work_node_wakes()
 
     # Data types that justify waking the orchestrator.
     _ACTIONABLE_REPO_TYPES = {"email", "calendar", "todo_task", "scheduler_events"}
@@ -484,10 +542,9 @@ class DayflowScheduler:
         self.poke(reason="ticket_responded")
 
     def _on_work_progress(self, message: Message) -> None:
-        """A work node reached a result (or a reply was recorded). Follow up promptly so the finalizer/
-        repair judge it and its dependents dispatch — a sequential chain advances in minutes instead of
-        one step per ceiling tick. Usually fires mid-tick (the dispatch loop runs inside the tick), so
-        the common path is just flagging the follow-up consumed at tick end. Non-poke wake: the small
+        """A work node progressed. Follow up so the planner applies finalizer instructions and
+        dispatches dependents. Dispatch rooms run on separate threads and can signal during or
+        between planning ticks; a signal during a tick sets the follow-up flag. Non-poke wake: the small
         MIN_GAP floor applies, not the 10-minute poke throttle."""
         if not self._started:
             return

@@ -4,7 +4,6 @@ description: "Life-domain research manager for entertainment, leisure, dining, a
 max_cycles: 80
 role_bindings:
   delegator: emi_team::delegator
-  tool_selector: shared::tool_selector
 
 agents:
   - name: emi_team::delegator

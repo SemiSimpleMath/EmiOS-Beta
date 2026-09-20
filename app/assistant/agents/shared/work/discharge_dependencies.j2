@@ -1,0 +1,3 @@
+{% if dependencies %}You can build directly on these already-completed upstream results:
+{% for dependency in dependencies %}- {{ dependency.title }}: {{ dependency.results | join(" | ") }}
+{% endfor %}{% endif %}

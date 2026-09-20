@@ -40,6 +40,15 @@ class _Manager:
         self.saved = True
         return True
 
+    def transition_state(self, ticket_id, target, reason=None, **kwargs):
+        if not self.can_transition(self.ticket.state, target):
+            return False
+        self.ticket.state = target.value
+        for key, value in kwargs.items():
+            setattr(self.ticket, key, value)
+        self.transitions.append((target.value, kwargs.get("user_text")))
+        return True
+
     def mark_accepted(self, ticket_id, user_text=""):
         self.transitions.append(("accepted", user_text))
         return True
@@ -52,7 +61,9 @@ class _Manager:
         self.transitions.append(("expired", reason))
         return True
 
-    def mark_snoozed(self, ticket_id, snooze_minutes=30, user_text=""):
+    def mark_snoozed(self, ticket_id, snooze_minutes=30, user_text="", user_action=None):
+        self.ticket.user_text = user_text
+        self.ticket.user_action = user_action
         self.transitions.append(("snoozed", user_text))
         return True
 

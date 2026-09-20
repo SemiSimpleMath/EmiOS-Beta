@@ -2,13 +2,13 @@
 
 Per decision #56, dayflow's work objects live in **emi.db**: the WorkStore's five tables
 (work_objects / nodes / actions / edges / events) sit alongside unified_log_2026, so the planner's
-portfolio projection and the item-state lifecycle are transactional joins in one DB (no two-store
-coordination). Verified: no name collision with emi.db's existing tables.
+portfolio and item state can be joined in one DB. Co-location does not make separate
+WorkStore and item-writer calls a shared transaction.
 
 The WorkStore is single-writer by design; on the shared emi.db it coexists with the main db_manager
 writer via WAL (already enabled on emi.db) + a busy_timeout so a write waits politely instead of
-failing with "database is locked". Dayflow advances work objects sequentially per tick, so write
-contention is low.
+immediately failing with "database is locked"; the timeout can still expire. Each
+WorkStore instance has its own lock; this accessor shares one instance per path string.
 
 DAYFLOW_WORK_DB overrides the path (tests / a copy).
 """
@@ -27,7 +27,7 @@ _stores_lock = threading.Lock()
 
 
 def _migrate_node_active_to_dispatched(conn) -> None:
-    """One-time, idempotent: rename spine/notify node status 'active' -> 'dispatched' (the in-flight marker).
+    """One-time, idempotent: rename every non-verification node status 'active' -> 'dispatched' (the in-flight marker).
     A no-op once migrated. Verification nodes keep 'active' (a verification run in progress)."""
     try:
         with conn:
@@ -38,15 +38,15 @@ def _migrate_node_active_to_dispatched(conn) -> None:
             logger.info("[work_store] migrated %d node(s) status 'active' -> 'dispatched'", n)
     except Exception as e:
         logger.error("[work_store] active->dispatched migration failed: %s", e)
+        raise
 
 
 def _migrate_parked_asks_to_dispatched(conn) -> None:
     """One-time (2026-08-18 owner ruling): a surfaced ask is an IN-FLIGHT tool call and its
     status must say so. Old rows parked surfaced asks as 'waiting' + wake_kind=user_reply with
     a re-ask timer; the re-ask timer is retired — flip them to 'dispatched' and clear wake_at
-    so nothing re-promotes them. Their tickets resolve them (reply -> done) or the sweeper
-    times them out (expired ticket -> failed, which the work_finalizer then adjudicates —
-    work_repair, named here originally, retired on 2026-09-16).
+    so nothing re-promotes them. Replies and expiry return tool results through the
+    recorder and finalizer. The sweeper separately fails inactive calls without judging them.
 
     Guarded by a marker (work_store_meta) because it must run EXACTLY once: under the new
     model 'waiting' + user_reply legitimately reappears for PRE-surface asks parked by a
@@ -68,6 +68,7 @@ def _migrate_parked_asks_to_dispatched(conn) -> None:
             logger.info("[work_store] migrated %d parked ask(s) 'waiting' -> 'dispatched'", n)
     except Exception as e:
         logger.error("[work_store] parked-ask migration failed: %s", e)
+        raise
 
 
 def dayflow_work_db_path() -> str:
@@ -97,21 +98,25 @@ def get_dayflow_work_store():
         if store is None:
             from work_objects.store import WorkStore
             store = WorkStore(path, busy_timeout_ms=_BUSY_TIMEOUT_MS)
-            # Same-package private access, on purpose: the migrations run on the
-            # store's own connection and log their own failures loudly.
-            _migrate_node_active_to_dispatched(store._conn)
-            _migrate_parked_asks_to_dispatched(store._conn)
-            # Closure-cascade repair (2026-07-30 zombie-wake incident): terminal work
-            # objects created before closure cascaded may still hold startable nodes
-            # with armed wakes. Must run before any apply() touches those rows — the
-            # closure invariant in WorkObject.validate() rejects them otherwise.
-            # Logged HERE: work_objects/ is app-independent and its stdlib logger
-            # does not reach the app's log files.
-            repaired = store.repair_terminal_zombies()
-            if repaired:
-                logger.warning(
-                    "[work_store] closure-cascade repair: abandoned %d startable node(s) "
-                    "inside terminal work objects (a nonzero count after the first run "
-                    "means a writer bypassed the closure invariant)", repaired)
+            try:
+                # Same-package private access, on purpose: the migrations run on the
+                # store's own connection and log their own failures loudly.
+                _migrate_node_active_to_dispatched(store._conn)
+                _migrate_parked_asks_to_dispatched(store._conn)
+                # Closure-cascade repair (2026-07-30 zombie-wake incident): terminal work
+                # objects created before closure cascaded may still hold startable nodes
+                # with armed wakes. Must run before any apply() touches those rows — the
+                # closure invariant in WorkObject.validate() rejects them otherwise.
+                # Logged HERE: work_objects.store uses a stdlib logger that
+                # does not reach the app's log files.
+                repaired = store.repair_terminal_zombies()
+                if repaired:
+                    logger.warning(
+                        "[work_store] closure-cascade repair: abandoned %d startable node(s) "
+                        "inside terminal work objects (a nonzero count after the first run "
+                        "means a writer bypassed the closure invariant)", repaired)
+            except Exception:
+                store.close()
+                raise
             _stores[path] = store
     return store

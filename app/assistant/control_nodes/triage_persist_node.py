@@ -54,6 +54,7 @@ class TriagePersistNode(ControlNode):
 
             meta["last_reviewed_at"] = now_utc.isoformat()
             item_dict = dict(meta)
+            item_dict["evaluator_pending"] = True
             item_dict.setdefault("item_id", item_id)
             item_dict.setdefault("source_type", str(meta.get("source_type") or "triage_admitted"))
             item_dict.setdefault("summary", str(meta.get("summary") or item.get("content") or ""))

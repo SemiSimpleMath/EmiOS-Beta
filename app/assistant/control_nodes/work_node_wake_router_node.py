@@ -6,7 +6,7 @@ for quiet hours / a meeting / the user being away? This node reads the answer of
 either dispatches the node or lets the pass end.
 
   still `actionable`  -> stage it and go to the switchboard, the same dispatch every node gets
-  held (`waiting`)    -> the pass ends; the hold's reactivate_at re-arms the wake on its own
+  held (`waiting`)    -> the pass ends; the next planning tick re-arms its persisted wake
   gone / ended        -> the pass ends
 
 Until 2026-09-18 it sat inside the orchestrator's state_map and fell through to the materializer
@@ -31,15 +31,16 @@ class WorkNodeWakeRouterNode(ControlNode):
         work_id, _, node_id = ref.partition("::")
         try:
             from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
-            node = get_dayflow_work_store().load(work_id).nodes.get(node_id)
+            wo = get_dayflow_work_store().load(work_id)
+            node = wo.nodes.get(node_id)
         except Exception as e:
             logger.error("[%s] could not read %s after the state_mover: %s", self.name, ref, e)
             node = None
 
-        if node is None or node.status != "actionable":
+        if node is None or not wo.is_work_unit(node) or node.status != "actionable":
             status = node.status if node is not None else "missing"
             logger.info("[%s] %s not dispatching this pass (status=%s) — the state_mover held it, "
-                        "or it ended; its wake re-arms if it was held.", self.name, ref, status)
+                        "or it ended; the next planning tick re-arms a held wake.", self.name, ref, status)
             # Straight to the room's tail. The finalizer no longer runs in this room — it runs
             # in the dispatch room that made the call — so a pass which dispatched nothing has
             # nothing here to judge and simply ends.

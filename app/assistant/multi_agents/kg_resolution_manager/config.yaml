@@ -4,7 +4,6 @@ description: "Reasoning manager that resolves a cluster of kg_maintenance_findin
 max_cycles: 60
 role_bindings:
   delegator: emi_team::delegator
-  tool_selector: shared::tool_selector
 
 agents:
   - name: emi_team::delegator

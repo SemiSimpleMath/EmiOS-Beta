@@ -24,7 +24,6 @@ display_name: "Waffle (graph)"
 max_cycles: 80  # Prevent infinite loops
 role_bindings:
   delegator: emi_team::delegator
-  tool_selector: shared::tool_selector
   planner: work_emi_team::planner
 
 agents:

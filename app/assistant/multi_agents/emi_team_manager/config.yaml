@@ -7,7 +7,6 @@ display_name: "Waffle"
 max_cycles: 80  # Prevent infinite loops
 role_bindings:
   delegator: emi_team::delegator
-  tool_selector: shared::tool_selector
   planner: emi_team::planner
 
 agents:

@@ -17,13 +17,12 @@ class ManagerInvoker:
     preprocess the inbound message, apply scope, hand off to the
     manager's request_handler, and return its result. Cross-cutting
     concerns (registry of running instances, display-name assignment,
-    cancel/pause control, status panel) live in
+    cooperative cancel, status panel) live in
     ``MAMInstanceManager`` and are accessed via ``DI.mam_instance_manager``.
 
-    This class does NOT track running invocations or know about chat
-    surfaces. It registers each call with the instance manager at the
-    start and unregisters in a try/finally so the registry can never
-    drift from reality even if a manager raises.
+    This class holds no running-invocation registry. It forwards room and
+    reply metadata, registers the call, and unregisters in finally after
+    preprocessing, scope adaptation, or manager execution returns or raises.
     """
 
     def __init__(

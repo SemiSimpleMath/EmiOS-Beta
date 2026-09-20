@@ -11,6 +11,7 @@ nothing to fall into. And both lanes hold the scheduler's _run_gate for the leng
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import threading
 import time
 from contextlib import contextmanager
@@ -45,6 +46,7 @@ def _ready_node(store, title="Notify at five", nid="n1"):
                                             "satisfied_when_kind": "all_owned_children_done"})
     store.apply("add_node", {"work_id": wo.id, "id": nid, "type": "subtask",
                              "parent_id": wo.goal_node_id, "title": title, "content": "Tell the user."})
+    store.apply("defer_node", {"work_id": wo.id, "node_id": nid, "wake_kind": "time", "wake_at": datetime.now(timezone.utc) - timedelta(seconds=1)})
     return f"{wo.id}::{nid}"
 
 
@@ -185,7 +187,7 @@ def _scheduler(monkeypatch, invoker):
     def _ctx():
         yield
     app = SimpleNamespace(app_context=_ctx)
-    s = DayflowScheduler(timing_engine=SimpleNamespace(scheduler=SimpleNamespace()), app=app)
+    s = DayflowScheduler(timing_engine=SimpleNamespace(scheduler=SimpleNamespace(get_jobs=lambda: [], add_job=lambda **kw: None)), app=app)
     s._started = True
     monkeypatch.setattr("app.assistant.dayflow_orchestrator.dayflow_scheduler.setup_complete", lambda: True)
     monkeypatch.setattr("app.assistant.scope.loader.load_scope_for_source", lambda **kw: None)
@@ -231,3 +233,26 @@ class TestPassesRunOneAtATime:
         s._run_gate.release()
         t.join(timeout=5)
         assert inv.calls == [], "re-checked inside the gate: no longer ready, no pass"
+
+
+def test_tick_and_wake_render_full_task_context_for_timing():
+    from app.assistant.control_nodes.state_mover_prep_node import StateMoverPrepNode
+    from jinja2 import Environment, FileSystemLoader
+    store = _store()
+    ref = _ready_node(store, title="Research options")
+    wid, nid = ref.split("::")
+    directive = "Read public information. " * 20 + "Do not contact the user; save findings for the later notification."
+    store.apply("set_status", {"work_id": wid, "node_id": nid, "status": "waiting", "content": directive,
+        "finalizer": {"verdict": "retry", "outcome": "Previous research found a useful source; reuse it.", "dispatch_epoch": 1}})
+    tick = FakeBlackboard()
+    StateMoverPrepNode(name="prep", blackboard=tick, agent_registry={}, tool_registry={})._build_promotion_candidates()
+    tick_candidate = next(c for c in tick.get_state_value("ready_work_nodes") if c["task_id"] == ref)
+    wake = FakeBlackboard({"triggered_work_node": ref})
+    _prep(wake).action_handler(_activation())
+    assert wake.get_state_value("ready_work_nodes") == [tick_candidate]
+    assert tick_candidate["task"]["directive"] == directive
+    env = Environment(loader=FileSystemLoader(str(Path(__file__).resolve().parents[2] / "agents")))
+    rendered = env.get_template("dayflow_orchestrator/state_mover/prompts/user.j2").render(ready_work_nodes=[tick_candidate])
+    assert directive in rendered
+    assert "Previous research found a useful source; reuse it." in rendered
+    assert "WORK OBJECTIVE: Research options" in rendered

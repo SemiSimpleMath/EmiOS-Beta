@@ -98,7 +98,7 @@ class DayflowSwitchboardArgumentsNode(ControlNode):
             "information": detail,
             "work_id": work_id,
             "node_id": node_id,
-            "trigger_context": {"work_node": ref},
+            "trigger_context": {"work_node": ref, "dispatch_epoch": int(node.payload.get("dispatch_epoch") or 0)},
             "valid_hours": ASK_WINDOW_HOURS,
             "wait_timeout_seconds": ASK_WINDOW_HOURS * 3600,
         }

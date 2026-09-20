@@ -11,7 +11,7 @@ This is the canonical "what's running, who do I address, how do I stop one"
 API. Other modules consult it via ``DI.mam_instance_manager``; nothing else
 should reach into manager runtime state directly.
 
-ManagerInvoker registers/unregisters here; everyone else only reads.
+ManagerInvoker registers/unregisters here; other callers use lookups or cancel.
 """
 from __future__ import annotations
 
@@ -114,6 +114,10 @@ class MAMInstanceManager:
                 thread_ident=current.ident or 0,
                 manager_instance=manager_instance,
             )
+            from app.assistant.ServiceLocator.service_locator import DI
+            mailbox = getattr(DI, "mailbox", None)
+            if mailbox is not None:
+                mailbox.open(invocation_id)
             self._records[invocation_id] = record
         self._publish_status_to_disk()
         logger.info(
@@ -131,8 +135,8 @@ class MAMInstanceManager:
 
         Also clears the invocation's mailbox queue — nobody will ever
         drain it again (queues are keyed by the globally-unique
-        invocation_id), so a post that raced the manager's exit must not
-        sit in memory until process restart.
+        invocation_id). Closing also removes active registration, so later posts
+        are refused and cannot recreate the queue.
         """
         with self._lock:
             removed = self._records.pop(invocation_id, None)
@@ -154,7 +158,7 @@ class MAMInstanceManager:
                 from app.assistant.ServiceLocator.service_locator import DI
                 mailbox = getattr(DI, "mailbox", None)
                 if mailbox is not None:
-                    mailbox.clear(invocation_id)
+                    mailbox.close(invocation_id)
             except Exception:
                 logger.debug("[mam] mailbox clear failed at unregister", exc_info=True)
         self._publish_status_to_disk()
@@ -231,10 +235,10 @@ class MAMInstanceManager:
         this write happens from another thread, and the top scope may be a
         nested agent-call scope that gets popped (taking a top-scope write
         with it). The global scope survives every pop and the loop's check
-        reads down the stack, so it always sees the flag. The MAM loop
+        reads down the stack (provided no local key shadows it). The MAM loop
         checks at the top of every cycle and exits via
         ``handle_exit_cancelled`` (an aborted ToolResult). Cancellation is
-        best-effort — if the manager is mid-LLM-call when this fires, it
+        best-effort — if the manager is mid-agent/tool call when this fires, it
         cancels at the next cycle boundary.
 
         Returns True if the cancel was issued, False if no such invocation.

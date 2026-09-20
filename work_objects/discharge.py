@@ -12,15 +12,15 @@ Contract (work-session rewrite, 2026-08-04):
     this layer mints a scope; a missing scope raises (fail-loud doctrine).
     The 2026-08-03 forward-email flounder came from this layer self-minting a
     scope whose pod policy had drifted from the room's.
-  * ``session_id`` (when given) is stamped on the node at claim
+  * ``session_id`` (when given) is stamped on an already-claimed node
     (``payload.session_id``) and inherited by every node grown under it, so
     ownership is a graph fact rather than a live thread. NOTE: nothing reads it
     today — the supervisor it was written for (sweep_stuck_work_nodes) was
     rewritten to a pure subtree-idle rule and consults no session at all.
-  * The node's ``content`` is its DIRECTIVE and is never overwritten; the
+  * Recording preserves the node's ``content`` directive; the
     manager's final answer lands as an EVIDENCE child (the result), any
-    surfaced research pod is attached, and the close is epoch-fenced so a
-    zombie incarnation cannot overwrite its successor's result.
+    surfaced research pod is attached. The result status, pod attachment and evidence are committed atomically
+    after the dispatch-epoch check. This layer does not finalize.
 
 The node managers (work_emi_team_manager, work_web_manager) are ordinary
 first-class configs; this module only drives one node through the standard
@@ -72,7 +72,7 @@ def discharge_node(store, work_id: str, node_id: str, *, scope_context,
     cur = store.load(work_id).nodes[node_id]
     # THE GATE CLAIMS, NOT US. work_node_dispatch_node marks the node `dispatched` before calling
     # any tool, so by the time we run it is already in flight and every other consumer already sees
-    # that. We only stamp session ownership on it — a graph fact the supervisor reads. A node that
+    # that. We only stamp session ownership on it — retained metadata. A node that
     # is somehow NOT claimed is a dispatch bug, and it is loud rather than silently re-claimed.
     if cur.status != "dispatched":
         raise ValueError(
@@ -111,8 +111,8 @@ def discharge_node(store, work_id: str, node_id: str, *, scope_context,
                                      scope_context=scope_context)
         else:
             goal_txt = (cur.content or cur.title or "").strip()
-            lead = "You have been given this node to work on. Try to complete the task in the node."
-            result = iface.invoke_on(task=(f"{lead} {goal_txt}" if goal_txt else lead),
+            from app.assistant.dayflow_orchestrator.work_context import render_view
+            result = iface.invoke_on(task=render_view("discharge_task", directive=goal_txt),
                                      information="", scope_context=scope_context)
     finally:
         reset_work_context(token)
@@ -130,9 +130,12 @@ def discharge_node(store, work_id: str, node_id: str, *, scope_context,
 def drive_work(store, work_id: str, *, scope_context, node_id: str | None = None,
                manager_name: str = "work_emi_team_manager", now=None,
                max_passes: int = 200) -> str:
-    """Standalone driver (scenarios / run-to-goal harnesses): with node_id, run THAT node; without,
-    drive ready top-level nodes (parent == goal) one at a time until the goal satisfies or only
-    future-wake nodes remain ("parked" — never fast-forwards time). Returns the final status."""
+    """Legacy scenario driver. An explicit node_id must already be dispatched.
+
+    The automatic loop selects ready nodes but does not claim them, so discharge_node
+    rejects its first selected node. Neither branch invokes the finalizer. This helper
+    is not currently a working run-to-goal driver; Dayflow uses WorkSession.
+    """
     from work_objects.model import utcnow
     if node_id is not None:
         discharge_node(store, work_id, node_id, scope_context=scope_context,
@@ -167,7 +170,7 @@ def _render_dependencies(wo, node_id: str) -> str:
     dep_ids = [e.src for e in wo.edges if e.dst == node_id and e.relation == "depends_on"]
     if not dep_ids:
         return ""
-    lines = ["You can build directly on these already-completed upstream results:"]
+    dependencies = []
     for did in dep_ids:
         d = wo.nodes.get(did)
         if d is None:
@@ -177,8 +180,10 @@ def _render_dependencies(wo, node_id: str) -> str:
                  if (m.parent_id == did or m.id in produced)
                  and getattr(m, "type", "") in ("evidence", "artifact") and (m.content or m.pod_ref)]
         if parts:
-            lines.append(f"- {d.title}: {' | '.join(parts)}")
-    return "\n".join(lines) if len(lines) > 1 else ""
+            dependencies.append({"title": d.title, "results": parts})
+    from app.assistant.dayflow_orchestrator.work_context import render_view
+    return render_view("discharge_dependencies", dependencies=dependencies).strip()
+
 
 
 def render_graph_view(wo) -> str:

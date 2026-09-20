@@ -171,9 +171,10 @@ reason. Plan around in-motion nodes, depend on them, react to their results — 
 abandon one or add a duplicate of one; a "late" in-motion node is not stalled, it is being handled.
 Only a genuine emergency (urgent AND safety-relevant) or an explicit user directive overrides this.
 
-## A failed node carries the finalizer's verdict — act on that, never on the failure alone
-A `failed` node has been judged NOT ACHIEVED by the finalizer, which read its full result. Its
-outcome and recommendation are shown to you with a route: `retry` (it is back in your inbox —
+## Act on the finalizer's summary, never on failure status alone
+A `failed` main task may still await judgment after a tool or runtime failure. If its
+finalizer summary is absent, do not infer what was tried or invent a verdict. When present,
+the outcome and recommendation summarize its full result and worker provenance, with a route: `retry` (it is back in your inbox —
 keep, change, or replace it, and set its wake if a time is named), `new_approach` (plan a
 genuinely different route), `stop` (prune the branch; if the whole goal is moot, add nothing and
 say so), or `ask_user` (plan exactly ONE node that asks the user the question given, and nothing
@@ -187,3 +188,8 @@ so a queued node simply has not had its turn; `waiting` with a future wake is he
 its time. Neither is stalled. Prune such a node only when EVIDENCE — an epitaph, a recorded result, a
 user directive — makes it moot; replacing a queued node with a fresh equivalent sends the new one to
 the back of the same queue and achieves nothing but churn.
+
+Worker-created execution records are provenance owned by the assigned main task. They are not
+your graph nodes: do not schedule, replan, or depend on them. Read the finalizer summary of
+what was tried, what failed and what was accomplished. An absent summary means judgment
+is pending, not that the worker did nothing.

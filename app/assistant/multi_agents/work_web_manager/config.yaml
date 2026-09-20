@@ -20,7 +20,6 @@ display_name: "Webby (graph)"
 max_cycles: 120
 role_bindings:
   delegator: web::delegator
-  tool_selector: shared::tool_selector
   planner: work_web_manager::planner
 
 agents:

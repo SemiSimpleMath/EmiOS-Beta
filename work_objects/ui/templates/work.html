@@ -124,7 +124,7 @@ function renderNode(n,depth){
   const snip=(n.content&&n.title)?`<div class="sub">${esc(n.content)}</div>`:'';
   let html=`<div class="node ${n.id===SEL_NODE?'sel':''}" style="margin-left:${depth*18}px" onclick="selectNode('${n.id}')">
      <div class="ic">${ic}</div>
-     <div class="ti"><div>${esc(label)} ${badge(n.status)} ${flag}</div>${snip}</div>
+     <div class="ti"><div>${esc(label)} ${n.record_role==='provenance'?'<span class="badge">provenance</span>':''} ${badge(n.status)} ${flag}</div>${snip}</div>
      ${owner}${pod}
    </div>`;
   for(const c of childrenOf(n.id))html+=renderNode(c,depth+1);
@@ -134,7 +134,7 @@ function renderNode(n,depth){
 function renderMain(){
   const m=document.getElementById('main');
   const goal=DATA.nodes.find(n=>n.id===DATA.goal_node_id)||DATA.nodes.find(n=>!n.parent_id);
-  const work=DATA.nodes.filter(n=>!n.is_terminal&&WORK_TYPES.includes(n.type));
+  const work=DATA.nodes.filter(n=>n.record_role==='task'&&!n.is_terminal);
   const ready=work.filter(n=>n.ready).length,active=work.filter(n=>n.status==='active').length,
         waiting=work.filter(n=>n.status==='waiting').length,blocked=work.filter(n=>n.blocked).length;
   const roots=goal?[goal]:DATA.nodes.filter(n=>!n.parent_id);
@@ -174,7 +174,8 @@ function renderDetail(){
     <h3>${TYPE_IC[n.type]||'•'} ${esc(n.title||n.type)} ${badge(n.status)}</h3>
     <div class="kv">
       <div class="k">id</div><div style="font-family:monospace">${esc(n.id)}</div>
-      <div class="k">type</div><div>${esc(n.type)}</div>
+      <div class="k">role</div><div>${esc(n.record_role)}</div>
+      <div class="k">storage type</div><div>${esc(n.type)}</div>
       <div class="k">owner</div><div>${esc(n.owner_agent||'—')}</div>
       <div class="k">satisfied when</div><div>${esc(n.satisfied_when_kind||'—')}</div>
       <div class="k">side effect</div><div>${esc(n.side_effect||'—')}</div>
@@ -184,12 +185,12 @@ function renderDetail(){
     ${n.content?`<div class="k" style="color:var(--muted)">content / result</div><pre class="body">${esc(n.content)}</pre>`:''}
     ${pay}${pod}
     <div class="editbox" style="margin-top:14px;border-top:1px dashed var(--border);padding-top:10px">
-      <div class="k" style="color:var(--muted)">✏️ edit ${isGoal?'goal':'node'}</div>
+      <div class="k" style="color:var(--muted)">✏️ edit ${isGoal?'goal':n.record_role}</div>
       <input id="ed-title" placeholder="title" style="width:100%;margin:4px 0;box-sizing:border-box;background:var(--panel2);color:inherit;border:1px solid var(--border);padding:6px;border-radius:4px">
       <textarea id="ed-content" rows="4" placeholder="content / detail" style="width:100%;box-sizing:border-box;background:var(--panel2);color:inherit;border:1px solid var(--border);padding:6px;border-radius:4px"></textarea>
       <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
         <button onclick="saveNode('${n.id}')">💾 Save</button>
-        <button onclick="addNode('${n.id}')">+ child</button>
+        <button onclick="addNode('${n.id}')">+ provenance record</button>
         ${isGoal?'':`<button onclick="removeNode('${n.id}')" style="color:var(--red)">🗑 remove</button>`}
       </div>
       <div class="k" style="color:var(--muted);margin-top:8px">set status</div>

@@ -80,21 +80,16 @@ def test_flatten_handles_empty_and_malformed():
 
 
 def _fake_wo():
-    goal = SimpleNamespace(
-        id="node_goal", type="goal", created_by="steward",
-        content="Complete and submit July monthly Seyfarth timesheets on 2026-08-01.",
-    )
-    ask = SimpleNamespace(id="ask1", type="subtask", created_by="architect",
-                          content="Finish July monthly timesheets")
-    reply = SimpleNamespace(
-        id="reply1", type="evidence", created_by="reply", parent_id="ask1",
-        content="User has acknowledged this advice. Additional from user: Those are done first of next month always.",
-    )
-    return SimpleNamespace(
-        id="work_bdc2b9abfd47",
-        goal_node_id="node_goal",
-        nodes={"node_goal": goal, "ask1": ask, "reply1": reply},
-    )
+    from work_objects.model import WorkObject, WorkNode
+    wo = WorkObject(id="work_bdc2b9abfd47", goal_node_id="node_goal", status="abandoned")
+    wo.add_node(WorkNode(id="node_goal", work_id=wo.id, type="goal", status="abandoned",
+        content="Complete and submit July monthly Seyfarth timesheets on 2026-08-01."))
+    wo.add_node(WorkNode(id="ask1", work_id=wo.id, type="subtask", parent_id="node_goal", status="closed",
+        content="Finish July monthly timesheets", payload={"finalizer": {
+            "verdict": "achieved", "outcome": "Those are done first of next month always."}}))
+    wo.add_node(WorkNode(id="reply1", work_id=wo.id, type="evidence", parent_id="ask1", status="assumed",
+        content="RAW_WORKER_HISTORY_NOT_FOR_STEWARD"))
+    return wo
 
 
 SUMMARY = {

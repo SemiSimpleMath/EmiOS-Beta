@@ -5,7 +5,6 @@ display_name: "Watt"
 max_cycles: 30
 role_bindings:
   delegator: devices::delegator
-  tool_selector: shared::tool_selector
   planner: devices::planner
 
 agents:

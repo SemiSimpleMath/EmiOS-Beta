@@ -9,6 +9,25 @@ logger = get_logger(__name__)
 
 class FinalAnswerNormalizer:
     @staticmethod
+    def full_terminal_payload(final_fields, blackboard):
+        """Retain domain siblings from the latest matching final-answer producer.
+
+        Never search older outputs: their unrelated domain fields must not leak
+        into a later agent's answer. State fields remain the envelope source.
+        """
+        for msg in reversed(blackboard.get_messages() or []):
+            if getattr(msg, "data_type", None) != "agent_result":
+                continue
+            payload = getattr(msg, "data", None)
+            if not isinstance(payload, dict) or not payload:
+                continue
+            supplied = {k: v for k, v in payload.items() if k in final_fields and v not in (None, "", [], {})}
+            if supplied and all(final_fields[k] == value for k, value in supplied.items()):
+                return {**payload, **{k: v for k, v in final_fields.items() if v not in (None, "", [], {})}}
+            break
+        return final_fields
+
+    @staticmethod
     def to_string(value: Any) -> str:
         if value is None:
             return ""

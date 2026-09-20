@@ -56,8 +56,9 @@ class MultiAgentManager:
         Fail-fast routing validation (always on).
 
         Contract:
-        - state_map must be explicit and internally coherent.
-        - control node references must exist in manager config.
+        - state_map must be explicit, with non-empty string edges.
+        - targets and supplied return-control prefixes must be in the configured
+          name/role set; this does not verify loaded instances or missing edges.
         - no hardcoded topology assumptions for nodes that explicitly set next_agent.
         """
         flow_cfg = self.flow_config if isinstance(self.flow_config, dict) else {}
@@ -89,10 +90,10 @@ class MultiAgentManager:
         # vocabulary — agents/nodes emit synthetic last_agent signal states
         # ("<agent>_return_control" from FlowController, "<agent>_execute_dag"
         # from MultiToolAgent, "graceful_exit"/"max_limit"/"error_exit" from
-        # the exit paths) — but every state_map VALUE must resolve to
-        # something the loop can actually activate, and a *_return_control
-        # key must belong to a configured agent. Both are boot-time config
-        # errors, not runtime dead-ends.
+        # the exit paths). Values and supplied *_return_control prefixes are
+        # checked against this name set at construction. Role targets are added
+        # without checking that they are loaded; missing return-control edges
+        # are not inferred from agent output schemas.
         agent_names = {
             str(a.get("name")).strip()
             for a in (self.manager_config.get("agents") or [])
@@ -100,9 +101,20 @@ class MultiAgentManager:
         }
         bindings = self.manager_config.get("role_bindings") or {}
         routable = agent_names | control_node_names
-        if isinstance(bindings, dict):
-            routable |= {str(k).strip() for k in bindings.keys() if isinstance(k, str)}
-            routable |= {str(v).strip() for v in bindings.values() if isinstance(v, str)}
+        if not isinstance(bindings, dict):
+            raise ValueError("role_bindings must be an object")
+        for alias, target in bindings.items():
+            if not isinstance(alias, str) or not alias.strip() or target not in routable:
+                raise ValueError(f"role binding {alias!r} must resolve directly to a configured instance")
+        routable |= set(bindings)
+        registry = getattr(self, "agent_registry", None)
+        if registry is not None:
+            for target in {bindings.get(dst, dst) for dst in state_map.values()}:
+                if registry.get_agent_instance(target) is None:
+                    raise ValueError(f"route target {target!r} was not loaded")
+        for section in ("tool_return", "critic", "summary"):
+            if section in flow_cfg and not isinstance(flow_cfg[section], dict):
+                raise ValueError(f"flow_config.{section} must be an object")
         for src, dst in state_map.items():
             if dst.strip() not in routable:
                 raise ValueError(
@@ -181,7 +193,8 @@ class MultiAgentManager:
         to the blackboard. All dispatch logic lives in MailboxDispatcher;
         this manager method is a one-line entry point.
 
-        Called at the top of every cycle in ``_run_loop``. Never raises.
+        Called at the top of every cycle in ``_run_loop``. The dispatcher catches
+        drain/message failures; a failure reading the invocation id here propagates.
         """
         invocation_id = self.blackboard.get_state_value("_invocation_id")
         if not isinstance(invocation_id, str) or not invocation_id.strip():
@@ -468,13 +481,13 @@ class MultiAgentManager:
         return result
 
     def _run_loop(self, max_cycles, delegator, delegator_data):
-        # max_cycles budgets LLM-AGENT ACTIVATIONS — the unit that costs
-        # time and money. Deterministic plumbing (control nodes, tool
-        # dispatch/handling hops) does NOT consume budget; before
-        # 2026-06-11 it did, which made "12 cycles" mean ~3 real agent
-        # decisions and aborted legitimate work mid-answer.
+        # max_cycles counts completed loop-selected non-ControlNode activations.
+        # Control-node dispatch/handling hops do not consume it; counting those
+        # used to abort legitimate work after only a few agent decisions.
+        # The delegator and calls made inside nodes/tools are not counted here,
+        # so this is not a total LLM-call or elapsed-time budget.
         cycles = 0        # loop iterations (plumbing included) — backstop only
-        agent_cycles = 0  # LLM-agent activations — the budgeted unit
+        agent_cycles = 0  # completed loop-selected non-ControlNode activations
         # A state_map cycle between control nodes never activates an agent,
         # so an iteration backstop is still required to stop infinite spins.
         iteration_cap = max(max_cycles * 8, 40)
@@ -496,8 +509,8 @@ class MultiAgentManager:
                 logger.debug("failed to update manager loop counters exception details", exc_info=True)
 
             # Drain mailbox: deliver outside-of-loop messages (e.g. @mention
-            # steering, cancel signals from another thread, runtime context
-            # injection) before any agent runs this cycle. Always at the safe
+            # steering and runtime context injected from another thread)
+            # before any agent runs this cycle. Always at the safe
             # boundary — never mid-LLM-call.
             self._drain_mailbox()
 
@@ -507,12 +520,13 @@ class MultiAgentManager:
                 logger.warning(f"⚠️ {self.name} cancelled. Exiting loop.")
                 return "cancelled"
             
-            if agent_cycles >= max_cycles:
-                logger.warning(
-                    f"⚠️ {self.name} reached max agent cycles ({max_cycles}; "
-                    f"{cycles} loop iterations)."
-                )
-                return "max_cycles"
+            if self.blackboard.get_state_value("exit", False):
+                logger.info(f"✅ Task completed by {self.name}. Exiting loop.")
+                return "success"
+            if self.blackboard.get_state_value('error'):
+                logger.warning(f"⚠️ {self.name} detected error state. Exiting loop.")
+                return "error"
+
             if cycles >= iteration_cap:
                 logger.warning(
                     f"⚠️ {self.name} hit the iteration backstop ({iteration_cap}) "
@@ -520,12 +534,6 @@ class MultiAgentManager:
                     f"routing loop."
                 )
                 return "max_cycles"
-            if self.blackboard.get_state_value("exit", False):
-                logger.info(f"✅ Task completed by {self.name}. Exiting loop.")
-                return "success"
-            if self.blackboard.get_state_value('error'):
-                logger.warning(f"⚠️ {self.name} detected error state. Exiting loop.")
-                return "error"
 
             # 1. Always call delegator to handle routing logic
             pre_next_agent = self.blackboard.get_state_value("next_agent")
@@ -559,6 +567,13 @@ class MultiAgentManager:
                 self.blackboard.update_state_value("error", True)
                 self.blackboard.update_state_value("error_message", f"missing agent instance: {next_agent_name}")
                 return "error"
+
+            if not isinstance(next_agent, ControlNode) and agent_cycles >= max_cycles:
+                logger.warning(
+                    f"⚠️ {self.name} reached max agent cycles ({max_cycles}; "
+                    f"{cycles} loop iterations)."
+                )
+                return "max_cycles"
 
             # 3. Activate the agent (it now runs within a guaranteed scope).
             next_scope_raw = self.blackboard.get_state_value("scope_context")
@@ -651,7 +666,7 @@ class MultiAgentManager:
             return self.handle_unknown_exit()
 
     def handle_exit_cancelled(self):
-        """A cancel is a user order to stop NOW — return a deterministic aborted
+        """After cancellation is observed at a loop boundary, return an aborted
         ToolResult without re-entering any loop. (The graceful-exit loop would
         trip the still-set cancelled flag on its first cycle anyway; routing a
         cancel through it used to fall out of handle_graceful_exit_reason with
@@ -823,7 +838,7 @@ class MultiAgentManager:
                  f"Debug info: {final_raw_error}")
 
         return ToolResult(
-            result_type="final_answer",
+            result_type="manager_aborted",
             content=final,
-            data_list=[{}]
+            data={"aborted": True, "exit_state": "error_exit", "error_message": error_message or "unknown"}
         )

@@ -75,7 +75,8 @@ class CreateDayflowTicketTool(BaseTool):
             # If pre-formatted fields are missing but a brief is provided,
             # use LLM to generate the ticket copy.
             if not args.get("title") and args.get("ticket_brief"):
-                formatted = self._format_brief(args["ticket_brief"])
+                formatted = self._format_brief(args["ticket_brief"],
+                                               work_node_ref=str((args.get("trigger_context") or {}).get("work_node") or ""))
                 args.update(formatted)
 
             ticket_kind = self._required_str(args, "ticket_kind").lower()
@@ -124,6 +125,16 @@ class CreateDayflowTicketTool(BaseTool):
             )
             if ticket is None:
                 raise RuntimeError("ticket_manager.create_ticket returned None.")
+            work_binding = None
+            work_ref = str(trigger_context.get("work_node") or "")
+            if "::" in work_ref:
+                from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+                work_id, node_id = work_ref.split("::", 1)
+                epoch = int(trigger_context["dispatch_epoch"])
+                work_store = get_dayflow_work_store()
+                work_store.apply("bind_ticket", {"work_id": work_id, "node_id": node_id,
+                    "expected_dispatch_epoch": epoch, "ticket_id": ticket.ticket_id}, actor="create_dayflow_ticket")
+                work_binding = (work_store, work_id, node_id, epoch)
             if not ticket_manager.mark_proposed(ticket.ticket_id):
                 raise RuntimeError(f"Failed to mark ticket proposed: {ticket.ticket_id}")
 
@@ -142,6 +153,11 @@ class CreateDayflowTicketTool(BaseTool):
 
             suggestion_msg = Message(event_topic="proactive_suggestion", data=ticket_dict)
             DI.event_hub.publish(suggestion_msg)
+            if work_binding is not None:
+                work_store, work_id, node_id, epoch = work_binding
+                work_store.apply("record_action", {"work_id": work_id, "node_id": node_id,
+                    "channel": "ticket", "target": "user", "summary": title, "outcome": "sent",
+                    "payload": {"ticket_id": ticket.ticket_id, "dispatch_epoch": epoch}}, actor="create_dayflow_ticket")
 
             if speak_tts:
                 tts_text = ticket_dict.get("message") or ticket_dict.get("title") or "I have a suggestion for you."
@@ -282,7 +298,7 @@ class CreateDayflowTicketTool(BaseTool):
         )
 
     # A responded ticket: the user dealt with it, whichever button they pressed.
-    _RESPONDED_STATES = frozenset({"accepted", "dismissed", "completed"})
+    _RESPONDED_STATES = frozenset({"accepted", "dismissed", "completed", "snoozed"})
     # Still on screen, still answerable.
     _LIVE_STATES = frozenset({"pending", "proposed", "snoozed"})
 
@@ -345,7 +361,7 @@ class CreateDayflowTicketTool(BaseTool):
                 continue
             ctx = old.trigger_context if isinstance(old.trigger_context, dict) else {}
             old_ref = str(ctx.get("work_node") or "")
-            if not old_ref.startswith(prefix) or old_ref == ref:
+            if not old_ref.startswith(prefix):
                 continue
             ticket_manager.mark_expired(old.ticket_id, reason=f"superseded by {ref}")
             logger.info("[create_dayflow_ticket] expired open ask %s (superseded by %s)",
@@ -378,8 +394,22 @@ class CreateDayflowTicketTool(BaseTool):
         DI.event_hub.register_event("dayflow_ticket_responded", _on_ticket_responded)
 
         try:
+            # Register first, then reconcile the durable row: replies between publication
+            # and subscription must complete the same call immediately.
+            manager = get_ticket_manager()
+            def saved_result():
+                ticket = manager.get_ticket_by_id(ticket_id)
+                if ticket is None:
+                    raise RuntimeError(f"Ticket {ticket_id} disappeared while awaiting its result")
+                return CreateDayflowTicketTool.result_for_ticket(ticket)
+            saved = saved_result()
+            if saved is not None:
+                return saved
             logger.info("[create_dayflow_ticket] Waiting for response to ticket %s (timeout=%.0fs)", ticket_id, timeout)
             answered = event.wait(timeout=timeout)
+            saved = saved_result()
+            if saved is not None:
+                return saved
 
             if not answered:
                 logger.info("[create_dayflow_ticket] Ticket %s timed out after %.0fs", ticket_id, timeout)
@@ -388,12 +418,20 @@ class CreateDayflowTicketTool(BaseTool):
                 # update event so the frontend refreshes immediately instead
                 # of waiting for its poll cycle.
                 try:
-                    get_ticket_manager().mark_expired(ticket_id, reason="wait_timeout")
+                    expired = manager.mark_expired(ticket_id, reason="wait_timeout")
+                    saved = saved_result()
+                    if saved is not None and (saved.data or {}).get("action") != "timeout":
+                        return saved
+                    if not expired:
+                        if saved is not None:
+                            return saved
+                        raise RuntimeError(f"Ticket {ticket_id} could not be expired or reconciled")
                 except Exception as exc:
                     logger.warning(
                         "[create_dayflow_ticket] mark_expired failed for %s: %s",
                         ticket_id, exc,
                     )
+                    raise
                 try:
                     DI.event_hub.publish(Message(
                         event_topic="proactive_suggestion_update",

@@ -245,7 +245,7 @@ class RequestPreprocessor:
             resolved_data["task_resources"] = task_resources
             resolved_data["task_resource_context"] = task_resource_context
 
-        # Deterministic skip sentinel for spec-driven tasks.
+        # Deterministic skip sentinel for any resolved task, with or without a task file.
         try:
             t = (resolved_task or "").strip()
             if t.upper().startswith("SKIPPED:"):

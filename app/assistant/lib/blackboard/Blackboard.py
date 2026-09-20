@@ -8,13 +8,15 @@ class Blackboard:
     """Shared-state substrate for a manager loop: a stack of scope dicts + a
     message log.
 
-    CONCURRENCY CONTRACT (this class is deliberately lock-free — read before
+    CONCURRENCY CONTRACT (scope operations are lock-free — read before
     changing how an instance is shared):
 
     - Scope stacks are MANAGER-LOCAL and SINGLE-THREADED. Each MultiAgentManager
       owns its own Blackboard and runs on one thread, so push_call_context /
-      pop_call_context / update_state_value on a manager's blackboard never
-      race. NEVER call push_call_context / pop_call_context on a blackboard
+      pop_call_context and ordinary local writes belong to that thread.
+      Cooperative cancellation is an explicit cross-thread global-key write;
+      this does not make compound scope operations thread-safe.
+      NEVER call push_call_context / pop_call_context on a blackboard
       shared across threads — the scope stack is not thread-safe and a
       concurrent push/pop would corrupt it.
 
@@ -233,10 +235,10 @@ class Blackboard:
     def pop_call_context(self):
         """
         Pops the top call context from the stack and destroys the corresponding
-        local scope, returning control to the previous agent.
+        local scope, returning the context tuple. The caller chooses routing.
         """
         if self.call_stack:
-            # The context and the state scope are removed in a single, atomic operation.
+            # Paired removals on the owning thread; not an atomic cross-thread operation.
             popped_context = self.call_stack.pop()
             self.scopes.pop()
 

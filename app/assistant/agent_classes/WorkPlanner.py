@@ -43,11 +43,8 @@ class WorkPlanner(Planner):
         return super().construct_prompt(message)
 
     def _refresh_work_projection(self) -> None:
-        try:
-            from work_objects.runtime import get_work_context
-            from app.assistant.control_nodes.workobject_render_node import render_work_projection
-        except Exception:
-            return  # work_objects not on path -> not a WorkObject run
+        from work_objects.runtime import get_work_context
+        from app.assistant.control_nodes.workobject_render_node import render_work_projection
         try:
             ctx = get_work_context()
         except RuntimeError:
@@ -57,7 +54,8 @@ class WorkPlanner(Planner):
             self.blackboard.update_state_value("work_projection", render_work_projection(wo, ctx.node_id))
         except Exception as e:
             logger.error("[%s] work_projection refresh failed: %s", self.name, e)
-            logger.debug("[%s] work_projection refresh exception", self.name, exc_info=True)
+            self.blackboard.update_state_value("work_projection", "")
+            raise
 
     # --------------------------------------------------------------------- #
     def _reconcile_to_graph(self, result_dict) -> None:

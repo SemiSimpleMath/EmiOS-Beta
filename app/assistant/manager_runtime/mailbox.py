@@ -31,7 +31,9 @@ only routes.
 In-memory only. Queues are keyed by invocation_id (globally unique — a
 message can never apply to a different invocation), and
 ``MAMInstanceManager.unregister`` clears an invocation's queue when it ends,
-so posts that raced the manager's exit don't linger. The TTL is a backstop
+clearing messages queued before that cleanup. A later post can recreate an
+ended invocation's queue. TTL is evaluated only when that id is drained; no
+background sweep removes undrained queues. The TTL is a backstop
 for messages parked while a single cycle runs pathologically long — sized in
 MINUTES so steering posted during an ordinary long tool call (browser work
 routinely exceeds two minutes) is delivered at the next cycle boundary, not
@@ -52,10 +54,9 @@ logger = get_logger(__name__)
 
 # Default TTL: messages older than this are dropped at drain time. A pure
 # backstop — cross-invocation misdelivery is impossible (unique invocation
-# ids) and ended invocations get their queue cleared at unregister — so this
-# only guards a cycle that runs pathologically long. 30 minutes clears any
-# real tool call (browser steps routinely exceed the old 120s, which was
-# silently eating @mention steering exactly when the user wanted to steer).
+# ids) and unregister clears the queue present at cleanup. Undrained queues
+# are not expired automatically. Thirty minutes allows longer tool calls than
+# the old 120-second window, but steering older than that is still dropped.
 _DEFAULT_TTL_SECONDS = 1800.0
 
 
@@ -81,15 +82,30 @@ class Mailbox:
     """Per-invocation typed-message inbox. Singleton via ``DI.mailbox``.
 
     Keyed by ``invocation_id`` (the same id ``ManagerInvoker`` uses in its
-    active-invocations registry). Posting to an unknown invocation_id is
-    harmless — the queue just lingers and ages out.
+    invocation lifecycle). Posting does not check whether the id is active.
+    An undrained queue remains until clear() or process exit; TTL alone does
+    not reclaim it.
     """
 
     def __init__(self, *, ttl_seconds: float = _DEFAULT_TTL_SECONDS) -> None:
         self._lock = threading.Lock()
         self._queues: Dict[str, Deque[MailboxMessage]] = {}
+        self._active: set[str] = set()
         self._ttl_seconds = float(ttl_seconds)
         logger.info("✅ Mailbox initialized (ttl=%.1fs).", ttl_seconds)
+
+    def open(self, invocation_id: str) -> None:
+        """Register a live invocation before it becomes addressable."""
+        if not invocation_id or not invocation_id.strip():
+            raise ValueError("mailbox invocation id is required")
+        with self._lock:
+            self._active.add(invocation_id)
+
+    def close(self, invocation_id: str) -> None:
+        """Atomically refuse future posts and discard the ended invocation's queue."""
+        with self._lock:
+            self._active.discard(invocation_id)
+            self._queues.pop(invocation_id, None)
 
     def post(
         self,
@@ -102,8 +118,7 @@ class Mailbox:
     ) -> bool:
         """Drop one message into an invocation's queue.
 
-        Returns True if posted, False on bad input. Does NOT verify the
-        invocation is still running (that's the sender's concern).
+        Returns True if posted, False on bad input or a non-live invocation.
         """
         invocation_id = (invocation_id or "").strip()
         message_type = (message_type or "").strip()
@@ -119,6 +134,8 @@ class Mailbox:
             metadata=dict(metadata) if isinstance(metadata, dict) else {},
         )
         with self._lock:
+            if invocation_id not in self._active:
+                return False
             self._queues.setdefault(invocation_id, deque()).append(msg)
         logger.info(
             "[mailbox] posted type=%s to %s payload_keys=%s",
@@ -159,9 +176,14 @@ class Mailbox:
         return out
 
     def peek_count(self, invocation_id: str) -> int:
-        """Return how many messages are queued (no TTL pruning)."""
+        """Return the number of unexpired queued messages."""
         with self._lock:
             queue = self._queues.get(invocation_id)
+            now = datetime.now(timezone.utc)
+            while queue and (now - queue[0].posted_at_utc).total_seconds() > self._ttl_seconds:
+                queue.popleft()
+            if not queue:
+                self._queues.pop(invocation_id, None)
             return len(queue) if queue else 0
 
     def clear(self, invocation_id: str) -> None:
@@ -171,7 +193,7 @@ class Mailbox:
 
 
 # Reserved blackboard key holding per-agent runtime injection lists.
-# Append-only ``{agent_name: [text, text, ...]}`` — never cleared by the
+# Append-only ``{agent_name: [{text, posted_at_utc, from_who}, ...]}`` — never cleared by the
 # dispatcher. Each agent renders its own slot during prompt assembly.
 _RUNTIME_INJECTIONS_BB_KEY = "_runtime_injections"
 

@@ -158,9 +158,8 @@ class StateMoverPrepNode(ControlNode):
             if str(s.get("status") or "").lower() in {"done", "abandoned"}:
                 continue
             wo = store.load(s["id"])
-            goal_id = wo.goal_node_id
             for n in wo.nodes.values():
-                if n.id == goal_id or n.status not in {"proposed", "waiting"}:
+                if not wo.is_work_unit(n) or n.status not in {"proposed", "waiting"}:
                     continue
                 if str(getattr(n, "wake_kind", None) or "") in {"event", "signal"}:
                     continue   # external waits are shown in WORK-OBJECT WAITS instead
@@ -173,11 +172,8 @@ class StateMoverPrepNode(ControlNode):
                 family = FAMILY_BY_TYPE.get(n.type, "spine")
                 if "actionable" not in TRANSITIONS.get(family, {}).get(n.status, set()):
                     continue   # non-dispatchable family
-                ready.append({
-                    "task_id": f"{s['id']}::{n.id}",
-                    "context": (n.title or n.content or "").strip().replace("\n", " ")[:140],
-                    "kind": str(getattr(n, "type", "") or ""),
-                })
+                from app.assistant.dayflow_orchestrator.work_context import state_mover_candidate
+                ready.append(state_mover_candidate(wo, n))
         self.blackboard.update_state_value("ready_work_nodes", ready)
         # One glossary, one source. The state_mover reads and writes node statuses, so it gets the
         # same words as the steward, finalizer and repair rather than a private copy that can drift.
@@ -185,8 +181,7 @@ class StateMoverPrepNode(ControlNode):
         self.blackboard.update_state_value("node_status_legend", STATUS_LEGEND)
 
     def _build_work_object_waits(self, all_items):
-        """Find work-object nodes parked on an EXTERNAL event (deps + time already met, so is_ready is
-        True) and the recent incoming intake to match them against. Sets waiting_work_nodes +
+        """Find work-object nodes parked on an EXTERNAL event (deps + time already met, ignoring only the external wake while matching) and the recent incoming intake to match them against. Sets waiting_work_nodes +
         work_wait_intake on the blackboard. deps/time are the graph's job; only the event match is the
         state_mover's (this replaces the standalone event_waker)."""
         from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
@@ -203,7 +198,8 @@ class StateMoverPrepNode(ControlNode):
                 # user_reply is an in-flight ask — the dispatch surfaces it and re-asks until the user
                 # replies, and the reply is then recorded as the node's result. The state_mover only wakes
                 # passive EXTERNAL waits (event/signal) by matching incoming intake.
-                if getattr(n, "wake_kind", None) in {"event", "signal"} and wo.is_ready(n, now):
+                if (wo.is_work_unit(n) and getattr(n, "wake_kind", None) in {"event", "signal"}
+                        and wo.is_ready(n, now, ignore_external_wake=True)):
                     waiting.append({
                         "task_id": f"{s['id']}::{n.id}",
                         "waiting_for": getattr(n, "wake_ref", "") or "",

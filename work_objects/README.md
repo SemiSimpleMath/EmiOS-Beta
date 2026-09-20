@@ -1,14 +1,65 @@
 # work_objects — the WorkObject substrate (live)
 
-> **Status: LIVE — the dayflow orchestrator's execution substrate**, in the main repo since 2026-06-21.
-> The production work store lives in **emi.db** (four additive tables, opened via
-> `app/assistant/dayflow_orchestrator/work_store.py`); the `work.db`/`business_run.db` files here serve
-> the scenario harnesses only. Since the cutover the dependency is two-way by design: code here imports
-> `app.*`, and the dayflow orchestrator + the worker managers import `work_objects.*`.
-> The **data model below (§node taxonomy, principles) is authoritative.** For execution, the worker
-> inner loop shipped per `DESIGN.md` (as `work_emi_team_manager`); the outer loop is the dayflow
-> pipeline — evaluate → finalize → architect → repair → promote → dispatch — documented in
-> `docs/architecture/05_DAYFLOW.md`.
+## Main tasks and worker provenance
+
+Only a `subtask` whose `parent_id` is the work object's goal is an orchestrator work
+unit (`WorkObject.is_work_unit`). Worker-created descendants are **provenance records**
+of execution within an assigned task: internal checklist state, delegated attempts,
+failures, findings and saved outputs. They share the existing graph storage types;
+that does not make them independently schedulable graph tasks. No schema migration
+or rewriting of existing records is required for this classification.
+
+- Promotion, materialization, timed/event wakes, dispatch/session entry, boot ask
+  reconnection and inactivity supervision exclude provenance as independent assignments.
+  Supervision still uses activity anywhere in the owned history to assess the main task.
+- A replacement worker sees the complete owned history, including nested results and
+  failures, so it can reuse prior work. Unfinished/dispatched provenance records describe
+  the last recorded attempt, not proof of a currently running independent job.
+- The finalizer reads the full main-task directive, its returned result and full owned
+  provenance. Its outcome summarizes what was tried, went wrong, succeeded and remains
+  unresolved, preserving useful saved-output references.
+- Architect/steward views show main tasks and finalizer summaries, not the worker's
+  internal record list or raw results. Missing summary is labeled awaiting finalizer
+  summary. Architect deltas cannot directly target or depend on provenance records.
+- Internal helper failures do not increment the whole goal's failed-attempt count.
+  Existing historical counts are preserved; this change does not repair past data.
+- `/work` labels these records provenance and excludes them from schedulable-task counts
+  and ready/blocked badges. The owner can still inspect the execution history.
+
+This boundary does not solve the separate claim/epoch/finalizer-recovery defects in
+LIVE 3, WO1 and DF4. Generic graph `is_ready` remains a local dependency/time predicate;
+orchestrator callers must also enforce `is_work_unit`.
+
+
+> **Status: live package; historical design below.** The current contract is
+> [Work Objects](../docs/architecture/08_WORK_OBJECTS.md). Code is the source of truth.
+
+## Current implementation
+
+- `model.py` defines the graph and satisfaction queries; `store.py` persists it in
+  five core SQLite tables. Production uses `emi.db` via the Dayflow accessor.
+- Graph tables hold current state. `events` is a mutation-input audit log, not a
+  complete replay stream. One `apply` is atomic; a sequence of calls is not.
+- Dayflow plans and claims nodes, then a WorkSession opens the dispatch manager:
+  tool call → result recorder → finalizer. `discharge_node` runs a preclaimed worker
+  and records its result; it does not itself invoke the finalizer.
+- `runtime.py`, `tools.py`, and `work_tools.py` bind graph tools to the active node.
+  `ui/blueprint.py` exposes the graph and manual edits. The package imports `app.*`;
+  production also calls the service-setup helper originally written for scenarios.
+- Ownership cycles are checked; dependency cycles are not. Only explicit immediate-
+  parent authority is checked on creation; budgets are metadata. `ready`/node `blocked`
+  are queries, whereas knowledge `stale` is a stored status.
+- The recorder fences its status write, not its preceding pod attachment or subsequent
+  evidence write. The legacy `drive_work` automatic loop omits the required claim.
+  See [deferred findings](../docs/design/bug_list_2026-09-18.md#work-object-follow-up-2026-09-19).
+
+## Historical design and rationale
+
+The sections below preserve the original proposal and its WHY. Their present-tense
+class descriptions, event-replay guarantees, authority/budget inheritance and proposed
+filenames are **design intent, not current implementation instructions**. In particular,
+WorkOrchestrator/WorkManager/WorkAgent and cross-object delegation are not the current
+Dayflow execution path. Use the reference above when changing code.
 
 ## Why this exists
 A new execution substrate for **long-running, open-ended work** — "improve my life", "run a business", multi-day projects — distinct from the Message-native dayflow/manager stack. Work is a durable, typed **graph that agents mutate**, not flat text/Messages they pass around. The graph is the source of truth; the transcript is just an event log.

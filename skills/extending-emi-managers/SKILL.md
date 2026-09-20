@@ -42,14 +42,13 @@ usual reason a new manager "isn't found".
 
 ```yaml
 name: my_manager                  # keep equal to the directory name
-class_name: MultiAgentManager     # required; names a class in app/assistant/agent_classes/
+class_name: MultiAgentManager     # required; class in app/assistant/manager_classes/
 description: "One line — what this manager is for."
-max_cycles: 20                    # budget of LLM-AGENT activations (default 30)
+max_cycles: 20                    # loop-selected non-ControlNode activations (default 30)
 max_exit_cycles: 10               # budget for the graceful-exit loop (default 10)
 
 role_bindings:
   delegator: room::delegator      # REQUIRED — the loop resolves the 'delegator' role every run
-  tool_selector: shared::tool_selector
 
 agents:                           # REQUIRED key (may be a short list, but must exist)
   - name: room::delegator
@@ -60,8 +59,6 @@ agents:                           # REQUIRED key (may be a short list, but must 
 control_nodes:                    # REQUIRED key, and at least one named entry
   - name: my_prep_node
     class: MyPrepNode             # CamelCase class; see "the class key" below
-  - name: tool_caller
-    class: ToolCaller
   - name: final_answer_node
     class: FinalAnswerNode
   - name: manager_exit_node
@@ -75,7 +72,7 @@ tools:                            # the manager's OUTER tool gate
     - ask_kg
   except_tools: []                # subtracted from allowed_tools
 
-scope_contract:                   # the scope ceiling; narrows, never expands
+scope_contract:                   # receiving-manager policy; see Scope below
   tools:
     allowed_tools: ["all"]
     blocked_tools:
@@ -90,12 +87,17 @@ flow_config:
   state_map:                      # REQUIRED, non-empty
     "room::delegator": "my_prep_node"
     "my_prep_node": "my_namespace::planner"
-    "my_namespace::planner": "tool_caller"
-    "tool_caller": "final_answer_node"
+    "my_namespace::planner": "final_answer_node"
+    "my_namespace::planner_return_control": "final_answer_node"
     "final_answer_node": "manager_exit_node"
     "graceful_exit": "graceful_exit_control_node"
     "graceful_exit_control_node": "final_answer_node"
 ```
+
+This is a straight-through shape: the example agent produces final-answer fields
+or a `return_control` result. Tool selection needs an arguments stage plus
+`ToolCaller`, `ToolResultHandler`, and return routing; copy a live worker flow
+for that case. The placeholders must be implemented before construction.
 
 `tools.allowed_tools` may contain the literal `"all"`, which expands to the whole tool registry.
 An empty/missing `allowed_tools` logs "has no allowed tools configured" and the manager runs with none.
@@ -114,6 +116,8 @@ goes through ingress and does not need a `flow` block. Omit it unless a room rea
 ## The `class:` key, and manager-local aliases
 
 Each entry under `agents:` and `control_nodes:` carries `name:` and `class:`.
+For standard agents, AgentLoader uses the named registry entry's class and config;
+changing only the manager entry's `class:` does not override that agent class.
 
 `AgentLoader._resolve_entry_from_declared_class` converts `class:` from CamelCase to snake_case and
 looks **that** up in the registry. Control nodes are registered under their **filename stem**, so
@@ -162,14 +166,18 @@ manager is built. It raises `ValueError` (it does not warn) when:
 - any src/dst is not a non-empty string
 - `control_nodes` is not a list, or names no node
 - **any state_map VALUE does not name a configured agent, control node, or role binding** — the most
-  common mistake, and it is caught at boot rather than mid-run
-- a `*_return_control` key's prefix is not a configured agent
-- `flow_config.tool_return.tool_call_result_handler_node` is set but absent from `state_map`
-- a `critic:` section omits any of `subject_agent` / `critic_agent` / `continue_agent`
-- a `summary:` section omits any of `source_agent` / `summary_agent` / `resume_agent`
+  common mistake, caught when the manager is constructed
+- a supplied `*_return_control` key's prefix is outside that same name/role set
+- a dict `flow_config.tool_return` has no non-empty handler name, or that name is absent from `state_map`
+- a dict `critic:` section omits any of `subject_agent` / `critic_agent` / `continue_agent`
+- a dict `summary:` section omits any of `source_agent` / `summary_agent` / `resume_agent`
 
-Between them: boot catches unknown/unreachable agent names, construction catches broken routing. So
-the cheapest test of a new manager is simply to build it:
+These checks are incomplete: role-binding targets are admitted to the name set
+without proving they are loaded; missing return-control edges are not inferred
+from output schemas; non-dict optional sections skip the subsection checks.
+Boot's unused-agent check is a reference scan, not graph reachability.
+Start verification by building the manager, then inspect loaded instances and
+exercise its normal, tool-return, and exit routes:
 
 ```python
 DI.manager_registry.preload_all()
@@ -184,7 +192,8 @@ DI.manager_invoker.invoke(manager, message)
 ```
 
 `invoke` takes the **manager instance**, not its name. One fresh instance per invocation, each with
-its own `Blackboard` — managers share no state.
+its own `Blackboard`. `request_handler` does not reset an existing instance;
+shared DI services and persistent stores remain shared between managers.
 
 ## What your nodes can see
 
@@ -201,15 +210,28 @@ Per-node config is available too: give an entry a `config:` block and read it wi
 
 ## Budgets
 
-`max_cycles` counts **LLM-agent activations only** — control nodes and tool plumbing are free. A
-separate backstop (`max_cycles * 8`, minimum 40 iterations) catches control-node routing loops. On
-exhaustion the manager runs its graceful-exit loop with `max_exit_cycles`.
+`max_cycles` counts completed loop-selected non-`ControlNode` activations.
+The delegator and agent/tool calls made inside nodes do not increment it.
+A separate backstop (`max_cycles * 8`, minimum 40 iterations) catches node
+routing loops. On exhaustion the manager attempts its graceful-exit loop
+with `max_exit_cycles`. This does not cap total LLM calls or elapsed time.
 
 ## Scope
 
-A manager invoked without a `scope_context` **raises in production** — every invocation must carry a
-scope, which `manager_invoker` attaches. Under `EMI_TEST_MODE` (or pytest) a permissive scope is
-substituted so harnesses run.
+Use an explicit scope with `manager_invoker`. ScopeAdapter can also derive a
+room scope or accept `data.scope_contract`; strict mode permits system
+derivation for task-file/resource-contract request data and otherwise rejects
+missing scope. Its errors propagate. A direct scope-less `request_handler`
+call instead catches its internal scope error and enters error-exit handling.
+Test mode permits scope substitution.
+
+A parent allow-list of `["all"]`, or one naming the child manager, grants the
+child's declared tool surface (`scope_contract.tools.allowed_tools`, otherwise
+config `tools.allowed_tools`). Other parent lists intersect with that surface.
+Denials accumulate; per-manager rules restrict further; authority and write
+expansion is rejected. See [Managers](../../docs/architecture/02_MANAGERS.md)
+and [Runtime Data Contract](../../docs/architecture/02b_RUNTIME_DATA_CONTRACT.md)
+for result types, reserved-key filtering, and current implementation limits.
 
 ## Read vs write managers
 

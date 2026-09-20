@@ -1,0 +1,7 @@
+{{ objective }}
+{% if success_criteria %}
+Success criteria: {{ success_criteria }}
+{% endif %}{% if sources %}
+— Originating intake —
+{% for source in sources %}- {{ source.summary }}{% if source.pod_id %}  [full content: {{ source.pod_id }} — open with pod_fetch]{% endif %}
+{% endfor %}{% endif %}

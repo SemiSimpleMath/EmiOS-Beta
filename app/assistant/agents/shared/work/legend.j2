@@ -1,0 +1,10 @@
+NODE STATUS KEY
+proposed: not yet promoted; may await an architect revision.
+actionable: queued; inspect dependencies, wakes and pending revision instructions before dispatch.
+dispatched: a call is in flight; do not duplicate it.
+waiting: deliberately held on time or an external event.
+done: result recorded, awaiting finalizer judgment; NOT goal completion.
+closed: finalizer judged achieved; satisfies dependencies.
+failed: execution failed or finalizer judged not achieved; consult the judgment below.
+abandoned: dropped with a reason; superseded: replaced with a reason.
+Worker provenance is execution history inside a task, never an independent assignment.

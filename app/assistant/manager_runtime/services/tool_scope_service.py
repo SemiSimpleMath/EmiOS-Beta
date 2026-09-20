@@ -4,7 +4,7 @@ import json
 import re
 from typing import Any
 
-from app.assistant.lib.tool_execution.tool_access_control import resolve_tool_min_authority
+from app.assistant.lib.tool_execution.tool_access_control import resolve_tool_min_authority, check_tool_access
 from app.assistant.manager_runtime.services.tool_scope_state_manager import ToolScopeStateManager
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message, ScopeContext
@@ -175,7 +175,9 @@ class ToolScopeService:
     ) -> list[str]:
         """
         Calls shared::tool_narrower to pick the most task-relevant tools from the
-        already-filtered ranked list. always_show tools are preserved regardless.
+        supplied candidate list. initialize_scope currently supplies the saved
+        pre-scope list and filters the result afterwards. always_show survives
+        narrowing only when present in the candidate list.
         Returns the original ranked list unchanged if the narrower fails.
         """
         from app.assistant.ServiceLocator.service_locator import DI
@@ -335,6 +337,7 @@ class ToolScopeService:
     def _filter_to_ceiling(
         items: list[str], *, scope_contract_enforced: bool,
         scope_context: "ScopeContext | None", all_tools_cfg,
+        task_allowed_tools=None, task_except_tools=None,
     ) -> list[str]:
         """Filter a tool list to the scope's permission CEILING — the single
         definition of 'allowed'. Two gates, both mirroring execution
@@ -343,32 +346,18 @@ class ToolScopeService:
             per_manager + the subtree-grant at narrowing time).
           - L1 authority floor: a tool whose min_authority exceeds the scope's
             authority_level is dropped.
-        EVERY visibility path runs through this — pinned and ranked alike — so
-        visibility is always a strict subset of what execution permits. A
-        forced/pinned tool can NARROW visibility, never bypass the ceiling.
+        Both pinned and ranked paths run through this scope filter. Task-level
+        allow/except lists are checked separately at execution; this helper
+        does not apply them, so scope-visible need not mean executable.
 
         scope_contract_enforced=False => no contract requested => unrestricted.
         """
-        if not scope_contract_enforced:
-            return items
-        result = items
-        scope_allowed = scope_context.tools.allowed_tools if isinstance(scope_context.tools.allowed_tools, list) else []
-        scope_blocked = scope_context.tools.blocked_tools if isinstance(scope_context.tools.blocked_tools, list) else []
-        allow_set = {str(x).strip() for x in scope_allowed if isinstance(x, str) and str(x).strip()}
-        block_set = {str(x).strip() for x in scope_blocked if isinstance(x, str) and str(x).strip()}
-        # Empty allow_set means "allow nothing" -> show nothing. Only "all"
-        # bypasses the allow filter (absence of a contract is handled above).
-        if "all" not in allow_set:
-            result = [t for t in result if t in allow_set]
-        if block_set:
-            result = [t for t in result if t not in block_set]
-        authority_level = int(getattr(scope_context.approval, "authority_level", 0) or 0)
-        kept: list[str] = []
-        for t in result:
-            floor = resolve_tool_min_authority(t, all_tools_cfg.get(t) if isinstance(all_tools_cfg, dict) else None)
-            if floor is None or authority_level >= floor:
-                kept.append(t)
-        return kept
+        return [tool for tool in items if check_tool_access(
+            tool_name=tool, scope_contract_enforced=scope_contract_enforced,
+            scope_context=scope_context, task_allowed_tools=task_allowed_tools,
+            task_except_tools=task_except_tools, caller_name="tool_visibility",
+            tool_min_authority=resolve_tool_min_authority(tool, all_tools_cfg.get(tool) if isinstance(all_tools_cfg, dict) else None),
+        )[0]]
 
     def initialize_scope(
         self,
@@ -408,6 +397,8 @@ class ToolScopeService:
                     pinned, scope_contract_enforced=scope_contract_enforced,
                     scope_context=scope_context,
                     all_tools_cfg=tool_registry.get_all_tools(),
+                    task_allowed_tools=blackboard.get_state_value("task_allowed_tools"),
+                    task_except_tools=blackboard.get_state_value("task_except_tools"),
                 )
                 logger.info(
                     "[tool_scope] %s pinned_tools override: skipping ranking/narrowing, "
@@ -467,7 +458,6 @@ class ToolScopeService:
         # The narrower IS the filter — hidden_tools is redundant when it runs.
         # When the narrower is NOT enabled, apply hidden_tools as the filter.
         use_narrower = bool(vis_cfg.get("use_narrower"))
-        ranked_for_narrower = list(ranked)  # Save pre-hidden list for narrower.
 
         if hidden_tools and not use_narrower:
             pre_hidden_count = len(ranked)
@@ -486,25 +476,23 @@ class ToolScopeService:
         scope_contract_enforced, scope_context = self._read_scope(blackboard)
 
         def _apply_scope_filters(items: list[str], stage: str) -> list[str]:
-            """Visibility is a strict subset of the scope's permission ceiling
-            (allow/block + L1 authority floor). Called BEFORE the narrower (so it
-            never evaluates already-blocked tools) AND AFTER it (so its expanded
-            list can't re-introduce out-of-ceiling tools)."""
+            """Apply task restrictions, scope policy and authority to candidate tools."""
             return self._filter_to_ceiling(
                 items, scope_contract_enforced=scope_contract_enforced,
                 scope_context=scope_context, all_tools_cfg=all_tools_cfg,
+                task_allowed_tools=blackboard.get_state_value("task_allowed_tools"),
+                task_except_tools=blackboard.get_state_value("task_except_tools"),
             )
 
-        # Pre-narrower filter: keeps narrower from wasting tokens on blocked tools.
+        # Filter candidate input before exposing it to the narrower.
         ranked = _apply_scope_filters(ranked, stage="pre_narrower")
 
         # Optional LLM narrowing: tighten visible list to task-relevant tools.
-        # Narrower sees the FULL pre-filter ranked list (pre-hidden) so it can
-        # surface any tool the task needs, including leaf tools normally hidden
-        # from the planner.
+        # The narrower receives only visible, authorized candidates; validate its
+        # output again because it can return names outside those candidates.
         if use_narrower and (task or information):
             ranked = self._run_narrower(
-                ranked=ranked_for_narrower,
+                ranked=ranked,
                 always_show=always_show,
                 tool_registry=tool_registry,
                 task=task,

@@ -114,7 +114,7 @@ User message via WebSocket
 
 ```
 belief_engine/             # Belief inference engine (top-level package; tables live in emi.db)
-work_objects/              # Work-object substrate (goal + node DAG; four tables in emi.db)
+work_objects/              # Work-object substrate (goal + node DAG; five tables in emi.db)
 
 app/assistant/
   agent_classes/           # Base agent classes (Agent, Planner, OneShotAgent, Delegator, ...)

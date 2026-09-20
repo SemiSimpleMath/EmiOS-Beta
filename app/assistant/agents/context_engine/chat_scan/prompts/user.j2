@@ -1,5 +1,6 @@
-{% if information %}
-{{ information }}
-
+Primary user: {{ primary_user }}
+{% if recent_chat_context %}
+Recent conversation context (reference material):
+{{ recent_chat_context }}
 {% endif %}
 User message: {{ task }}

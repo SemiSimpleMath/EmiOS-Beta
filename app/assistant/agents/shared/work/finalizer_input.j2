@@ -1,0 +1,11 @@
+JUST-COMPLETED NODE — id: {{ view.task.id }} | title: {{ view.task.title }}
+FULL TASK: {{ view.task.directive }}
+SUCCESS CONDITION: {{ view.task.success_kind }}
+TOOL STATUS: {% if view.task.status == 'failed' %}the tool reported it could not run{% else %}the call returned{% endif %}. That is input, not the verdict — judge whether the node's GOAL was achieved from the result below.
+{% if view.work.failure_count >= repeat_failure_limit %}
+{{ view.work.failure_count }} ATTEMPTS HAVE NOT ACHIEVED THIS GOAL, under one task id or another. Another try of the same shape will not help. If this result is not achieved, the runtime will escalate it to ask the user whatever would unblock it — so put that question in `question_for_user` yourself, precisely.
+{% endif %}
+ITS FULL RESULT:
+{{ result_text or '(no result recorded)' }}
+
+{% set records = view.records %}{% include 'shared/work/provenance.j2' %}

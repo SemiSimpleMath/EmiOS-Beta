@@ -14,7 +14,7 @@ class ToolReturnRouter(ControlNode):
     Responsibilities:
     - Validate the source node that produced the tool result.
     - Capture resume target (tool calling agent) for downstream nodes.
-    - Route directly back to the tool calling agent.
+    - Leave next_agent clear so state_map can run processing nodes before resuming.
     """
 
     def action_handler(self, message):

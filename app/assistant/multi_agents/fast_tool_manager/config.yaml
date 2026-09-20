@@ -5,7 +5,6 @@ max_cycles: 8
 
 role_bindings:
   delegator: fast_tool::delegator
-  tool_selector: shared::tool_selector
 
 agents:
   - name: fast_tool::delegator

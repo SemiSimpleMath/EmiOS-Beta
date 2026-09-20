@@ -268,8 +268,8 @@ class TestSupervision:
             with ws._sessions_lock:
                 ws._live_sessions.pop(sid, None)
 
-    def test_a_whole_quiet_subtree_is_failed(self):
-        """A run that dies strands everything it grew, not just the node it was given."""
+    def test_a_quiet_main_task_is_failed_without_rewriting_provenance(self):
+        """Supervise the main assignment; preserve its execution records for takeover."""
         store = _store()
         wid, gid = _mk_wo(store)
         _sub(store, wid, gid, "n1", status="actionable")
@@ -281,11 +281,10 @@ class TestSupervision:
         sweep_stuck_work_nodes(now_utc=_long_after())
         wo = store.load(wid)
         assert wo.nodes["n1"].status == "failed"
-        assert wo.nodes["n1a"].status == "failed"
+        assert wo.nodes["n1a"].status == "dispatched"
 
-    def test_a_quiet_sub_step_is_failed_even_after_its_root_already_was(self):
-        """Each dispatched node is judged on its own quiet, so an abandoned sub-step
-        cannot be left in flight forever by whatever happened to its parent."""
+    def test_provenance_is_preserved_after_its_main_task_failed(self):
+        """A provenance status records the last observed execution, not a live dispatch lease."""
         store = _store()
         wid, gid = _mk_wo(store)
         _sub(store, wid, gid, "n1", status="actionable")
@@ -296,7 +295,7 @@ class TestSupervision:
         store.apply("set_status", {"work_id": wid, "node_id": "n1", "status": "failed"})
 
         sweep_stuck_work_nodes(now_utc=_long_after())
-        assert store.load(wid).nodes["n1a"].status == "failed"
+        assert store.load(wid).nodes["n1a"].status == "dispatched"
 
 
 class TestOneDispatchPerTick:

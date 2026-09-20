@@ -4,7 +4,6 @@ description: "A manager that orchestrates knowledge graph exploration for relati
 max_cycles: 80  # Prevent infinite loops
 role_bindings:
   delegator: kg_explorer::delegator
-  tool_selector: shared::tool_selector
 
 agents:
   - name: kg_explorer::delegator

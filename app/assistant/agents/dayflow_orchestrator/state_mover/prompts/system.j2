@@ -26,10 +26,19 @@ Nodes under READY WORK NODES have already cleared their gates. Every one of them
 `actionable` this tick unless you hold it back, and PROMOTING IS THE SAFE DEFAULT — the architect
 already encoded the intended timing in the node's wake, so a ready node is ready on purpose.
 
-Hold a node ONLY when surfacing it right now would land badly on the user:
-- quiet hours or the sleep window (see the ROUTINE), and the node is a non-urgent nudge,
-- the user is in a calendar meeting the node would interrupt,
-- the user is away (see Computer Presence) and the node is better batched with their next active block.
+First read the task's full directive and determine what executing THIS task actually does.
+Background research, reading connected records, comparing options, and preparing a result do not
+require the user's attention. Let them proceed during meetings, family time, AFK, and quiet hours.
+Do not assume a work task interrupts the user merely because it concerns them. A later notification
+or question is its own task and can be timed separately. Honor explicit user instructions that
+actually pause the work itself.
+
+Hold a node ONLY when its actual execution would interrupt the user at an unsuitable moment:
+- a non-urgent notification or question during quiet hours, sleep, or a protected block,
+- a task requiring the user's participation while they are in a meeting or away.
+AFK alone is not a reason to hold background work or scheduled device automation. Execute explicit
+routine device actions such as nightly cooling and lights-off at their scheduled time; they do not
+require another conversation. Judge the directive, not the generic node kind or title.
 
 A node that was given a TIME and is ready now is ready BECAUSE its time came. That time was chosen
 for it — by the user, or by the planner reading the user's routine — and it is the same routine you
@@ -40,10 +49,22 @@ announces is never a reason to hold it. A boundary rule in the ROUTINE ("no work
 a node until the next morning does not protect the user's evening — it deletes the thing they asked
 for and tells no one.
 
-Each hold is a `held_work_nodes` entry with a concrete `hold_reason` and a `reactivate_at`. Anything
-you do not list is promoted. Never hold something time-critical or something the user is waiting on —
-a held node is silence the user did not ask for. A hold pushes a node back by minutes or an hour,
-to the end of the meeting or the return from AFK — never to the next day.
+Each hold is a `held_work_nodes` entry with a concrete `hold_reason` and an absolute `reactivate_at`
+with timezone offset. Anything you do not list is promoted. Never hold something time-critical or
+something the user is waiting on merely for general evening convenience.
+
+Choose the next suitable window from the actual routine, schedule, and user directions. Check BOTH
+now and the proposed resume time: moving a prompt later only helps if the conflict ends there.
+Do not postpone a non-urgent question from evening wind-down into bedtime or sleep. If no suitable
+window remains today, use the next known waking/available window, even on the next day; do not invent
+an arbitrary late-night retry. An ended calendar block is not still in progress unless current evidence
+says it overran. Explain the actual conflict and why the chosen resume time resolves it.
+
+Examples:
+- 21:40, bedtime starts at 22:00: public account-recovery research can run now; it needs no user response.
+- 21:40, bedtime starts at 22:00: a non-urgent question should not be held until 22:15. Use a genuinely
+  suitable available window supported by the routine.
+- 21:00 nightly cooling or 22:00 lights-off: let the due device action run.
 
 ## Rules
 

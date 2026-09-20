@@ -1,4 +1,4 @@
-"""_validate_strict_routing_config — the boot-time routing gate.
+"""_validate_strict_routing_config â€” the boot-time routing gate.
 
 2026-07-08 strengthening: every state_map VALUE must name a configured agent,
 control node, or role binding (a bad value used to surface only as a runtime
@@ -67,9 +67,24 @@ class TestStateMapValueValidation:
 
 def test_every_live_manager_config_validates():
     paths = sorted(glob.glob(os.path.join("app", "assistant", "multi_agents", "*", "config.yaml")))
-    assert paths, "no manager configs found — wrong working directory?"
+    assert paths, "no manager configs found â€” wrong working directory?"
     for path in paths:
         with open(path, encoding="utf-8") as f:
             cfg = yaml.safe_load(f)
         mgr = _validator_shell(cfg, name=os.path.basename(os.path.dirname(path)))
         mgr._validate_strict_routing_config()
+
+
+def test_role_alias_cannot_hide_an_unconfigured_target():
+    cfg = _base_config({"team::planner": "ghost_alias"})
+    cfg["role_bindings"]["ghost_alias"] = "missing"
+    with pytest.raises(ValueError):
+        _validator_shell(cfg)._validate_strict_routing_config()
+
+
+@pytest.mark.parametrize("section", ["tool_return", "critic", "summary"])
+def test_optional_routing_sections_must_be_objects(section):
+    cfg = _base_config({"team::delegator": "team::planner"})
+    cfg["flow_config"][section] = "invalid"
+    with pytest.raises(ValueError):
+        _validator_shell(cfg)._validate_strict_routing_config()

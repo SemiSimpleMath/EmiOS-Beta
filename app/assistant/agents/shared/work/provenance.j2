@@ -1,0 +1,10 @@
+## WORKER PROVENANCE (attempts, failures and accomplishments)
+These records belong to the assigned task. Reuse completed work; do not start from scratch.
+Unfinished records describe prior internal work, not independent assignments or proof of a live job.
+{% for record in records %}
+- record:{{ record.id }} | parent:{{ record.parent_id }} | {{ record.type }} | status:{{ record.status }} | {{ record.title }}
+  {{ record.content }}
+{% if record.pod_ref %}  saved output: {{ record.pod_ref }}
+{% endif %}{% if record.terminal %}  reason: {{ record.terminal.get('reason', '') }}
+{% endif %}{% endfor %}{% if not records %}(no execution history recorded)
+{% endif %}

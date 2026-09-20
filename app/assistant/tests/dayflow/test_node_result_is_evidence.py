@@ -37,10 +37,11 @@ def test_node_result_reads_the_evidence(wo_with_result):
     assert node_result(wo, wo.nodes[nid]) == "RESULT: X done — found 3 items"
 
 
-def test_render_shows_evidence_result_not_directive(wo_with_result):
+def test_strategic_render_waits_for_finalizer_instead_of_exposing_raw_evidence(wo_with_result):
     wo, _ = wo_with_result
     r = render_work_portfolio(wo)
-    assert "RESULT: X done — found 3 items" in r
+    assert "RESULT: X done — found 3 items" not in r
+    assert "awaiting finalizer summary" in r
     assert "RESULT: DIRECTIVE" not in r
 
 

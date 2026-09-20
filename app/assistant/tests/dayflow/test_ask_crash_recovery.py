@@ -13,6 +13,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+import pytest
+
 from app.assistant.dayflow_orchestrator import work_session as ws
 
 
@@ -38,7 +40,7 @@ def _ticket(ref, *, state, user_text="", user_action="", valid_minutes=45, ticke
     return SimpleNamespace(
         ticket_id=ticket_id, state=state, title="the picture-day plan",
         user_text=user_text, user_action=user_action,
-        trigger_context={"work_node": ref}, created_at=now,
+        trigger_context={"work_node": ref, "dispatch_epoch": 1}, created_at=now,
         valid_until=now + timedelta(minutes=valid_minutes),
     )
 
@@ -57,6 +59,27 @@ class _TM:
 def _patch(monkeypatch, tickets):
     import app.assistant.ticket_manager as tm_pkg
     monkeypatch.setattr(tm_pkg, "get_ticket_manager", lambda: _TM(tickets))
+    from app.assistant.ServiceLocator.service_locator import DI
+
+    judged = []
+
+    class FinalizerAgent:
+        def action_handler(self, message):
+            judged.append(message)
+            missed = "user not reached" in message.information or "TOOL STATUS: the tool reported" in message.information
+            return SimpleNamespace(data={
+                "verdict": "unrecoverable" if missed else "achieved",
+                "next_step": "stop" if missed else "",
+                "outcome": "The user was not reached." if missed else "The user received the plan and answered.",
+                "recommendation": "Stop this branch." if missed else "",
+            })
+
+    def create_agent(name):
+        assert name == "dayflow_orchestrator::work_finalizer"
+        return FinalizerAgent()
+
+    monkeypatch.setattr(DI, "agent_factory", SimpleNamespace(create_agent=create_agent))
+    return judged
 
 
 class TestReArmInflightAsks:
@@ -73,7 +96,9 @@ class TestReArmInflightAsks:
         assert ws.re_arm_inflight_asks() == 1
 
         wo = store.load(wid)
-        assert wo.nodes["ask1"].status == "done"
+        assert wo.nodes["ask1"].status == "closed"
+        assert wo.nodes["ask1"].payload["finalizer"]["verdict"] == "achieved"
+        assert wo.status == "done"
         evidence = [n for n in wo.nodes.values() if n.parent_id == "ask1" and n.type == "evidence"]
         assert "this is all moot" in evidence[0].content
 
@@ -85,7 +110,9 @@ class TestReArmInflightAsks:
         assert ws.re_arm_inflight_asks() == 1
 
         wo = store.load(wid)
-        assert wo.nodes["ask1"].status == "done"      # a result, not a failure
+        assert wo.nodes["ask1"].status == "failed"
+        assert wo.nodes["ask1"].payload["finalizer"]["verdict"] == "unrecoverable"
+        assert wo.status == "active"
         evidence = [n for n in wo.nodes.values() if n.parent_id == "ask1" and n.type == "evidence"]
         assert "user not reached" in evidence[0].content
 
@@ -108,7 +135,8 @@ class TestReArmInflightAsks:
             entry["thread"].join(timeout=5)
 
         assert len(waits) == 1
-        _, _, _, _, ticket_id, remaining = waits[0]
+        _, _, _, _, ticket_id, remaining, epoch = waits[0]
+        assert epoch == 1
         assert ticket_id == "t1"
         assert 0 < remaining <= 30 * 60          # what is LEFT, not a fresh window
         # Untouched: still in flight, no second question minted.
@@ -130,7 +158,7 @@ class TestReArmInflightAsks:
         sid = ws.session_id_for(wid, "ask1")
         with ws._sessions_lock:
             ws._live_sessions[sid] = {"thread": SimpleNamespace(is_alive=lambda: True),
-                                      "started_at": datetime.now(timezone.utc)}
+                                      "started_at": datetime.now(timezone.utc), "epoch": 1}
         try:
             _patch(monkeypatch, [_ticket(f"{wid}::ask1", state="accepted", user_text="yes")])
             assert ws.re_arm_inflight_asks() == 0
@@ -199,3 +227,84 @@ class TestItIsActuallyCalled:
         sched.start()
 
         assert order == ["re_arm", "tick"]
+
+
+@pytest.mark.parametrize("result_type,content,action,expected", [
+    ("ticket_response", "User responded: yes", "acknowledge", "closed"),
+    ("ticket_response", "Notify expired, user not reached", "timeout", "failed"),
+    ("error", "Ticket lookup failed", "error", "failed"),
+    ("success", "", "empty", "failed"),
+])
+def test_resumed_wait_records_then_finalizes(monkeypatch, result_type, content, action, expected):
+    from app.assistant.lib.tools.create_dayflow_ticket.create_dayflow_ticket import CreateDayflowTicketTool
+    from app.assistant.utils.pydantic_classes import ToolResult
+    from app.assistant.dayflow_orchestrator import node_dispatch
+
+    store = _store()
+    wid = _inflight_ask(store)
+    ticket = _ticket(f"{wid}::ask1", state="proposed")
+    judged = _patch(monkeypatch, [ticket])
+    monkeypatch.setattr(CreateDayflowTicketTool, "_wait_for_ticket_response", staticmethod(
+        lambda *args: ToolResult(result_type=result_type, content=content, data={"action": action})))
+    progress = []
+    monkeypatch.setattr(node_dispatch, "signal_work_progress",
+                        lambda ref: progress.append(store.load(wid).nodes["ask1"].status))
+
+    ws._run_resume_ask_session(store, wid, "ask1", ws.session_id_for(wid, "ask1"), "t1", 60, 1)
+
+    wo = store.load(wid)
+    assert wo.nodes["ask1"].status == expected
+    assert wo.nodes["ask1"].payload["finalizer"]["outcome"]
+    assert len(judged) == 1
+    assert judged[0].scope_context.room_id == "dayflow_orchestrator"
+    assert progress == [expected], "planning was signaled before the recovered result was judged"
+    assert any(n.parent_id == "ask1" and n.type == "evidence" for n in wo.nodes.values())
+
+
+def test_resumed_wait_uses_answer_saved_before_listener_registered(monkeypatch):
+    from app.assistant.lib.tools.create_dayflow_ticket.create_dayflow_ticket import CreateDayflowTicketTool
+    from app.assistant.utils.pydantic_classes import ToolResult
+
+    store = _store()
+    wid = _inflight_ask(store)
+    judged = _patch(monkeypatch, [_ticket(f"{wid}::ask1", state="accepted", user_text="Yes, received it.")])
+    monkeypatch.setattr(CreateDayflowTicketTool, "_wait_for_ticket_response", staticmethod(
+        lambda *args: ToolResult(result_type="ticket_response", content="Notify expired, user not reached",
+                                 data={"action": "timeout"})))
+
+    ws._run_resume_ask_session(store, wid, "ask1", ws.session_id_for(wid, "ask1"), "t1", 60, 1)
+
+    assert store.load(wid).nodes["ask1"].status == "closed"
+    assert len(judged) == 1
+    assert "Yes, received it." in judged[0].information
+
+
+def test_rejected_recovery_result_does_not_finalize_successor(monkeypatch):
+    from app.assistant.lib.tools.create_dayflow_ticket.create_dayflow_ticket import CreateDayflowTicketTool
+    from app.assistant.utils.pydantic_classes import ToolResult
+
+    store = _store()
+    wid = _inflight_ask(store)
+    judged = _patch(monkeypatch, [])
+
+    def successor_returns(*args):
+        for status in ("failed", "dispatched", "done"):
+            store.apply("set_status", {"work_id": wid, "node_id": "ask1", "status": status})
+        return ToolResult(result_type="ticket_response", content="Old answer", data={"action": "acknowledge"})
+
+    monkeypatch.setattr(CreateDayflowTicketTool, "_wait_for_ticket_response", staticmethod(successor_returns))
+    ws._run_resume_ask_session(store, wid, "ask1", ws.session_id_for(wid, "ask1"), "t1", 60, 1)
+
+    assert store.load(wid).nodes["ask1"].status == "done"
+    assert judged == []
+
+
+def test_recovery_does_not_apply_an_older_attempts_ticket(monkeypatch):
+    store = _store()
+    wid = _inflight_ask(store)
+    ticket = _ticket(f"{wid}::ask1", state="accepted", user_text="Old answer")
+    ticket.trigger_context["dispatch_epoch"] = 0
+    judged = _patch(monkeypatch, [ticket])
+    assert ws.re_arm_inflight_asks() == 0
+    assert store.load(wid).nodes["ask1"].status == "dispatched"
+    assert not judged

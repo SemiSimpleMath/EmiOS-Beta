@@ -5,7 +5,6 @@ display_name: "FiloPilo"
 max_cycles: 60
 role_bindings:
   delegator: personal_admin::delegator
-  tool_selector: shared::tool_selector
   planner: personal_admin::planner
 
 agents:

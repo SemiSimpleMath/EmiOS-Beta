@@ -8,6 +8,7 @@ llm_params:
 
 user_context_items:
   - task
-  - information
+  - primary_user
+  - recent_chat_context
 
 system_context_items: []

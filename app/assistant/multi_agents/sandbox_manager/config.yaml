@@ -5,7 +5,6 @@ display_name: "Beaker"
 max_cycles: 80  # match emi_team — write/run/debug iterations + ask_user need headroom
 role_bindings:
   delegator: sandbox_team::delegator
-  tool_selector: shared::tool_selector
   planner: sandbox_team::planner
 
 agents:

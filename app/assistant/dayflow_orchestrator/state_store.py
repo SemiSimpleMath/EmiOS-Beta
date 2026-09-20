@@ -519,3 +519,32 @@ def reload_active_items_onto_blackboard(blackboard, *, now_utc: datetime, caller
         caller or "unknown",
     )
     return len(active_items)
+
+
+def load_admitted_intake() -> List[Dict[str, Any]]:
+    """Durable evaluator inbox; admitted artifacts do not age out before handoff."""
+    with get_db_manager().read_session() as session:
+        stmt = (select(UnifiedLog2026)
+                .where(UnifiedLog2026.source == DAYFLOW_ITEM_SOURCE)
+                .where(UnifiedLog2026.room_id == DAYFLOW_ROOM_ID)
+                .where(func.json_extract(UnifiedLog2026.metadata_json, "$.state") == "artifact")
+                .where(or_(
+                    func.json_extract(UnifiedLog2026.metadata_json, "$.evaluator_pending") == 1,
+                    func.json_extract(UnifiedLog2026.metadata_json, "$.state_reason") == "triage_admit"))
+                .order_by(UnifiedLog2026.timestamp.asc()))
+        return [_row_to_dict(row) for row in session.execute(stmt).scalars().all()]
+
+
+def load_ingestion_identity_index() -> Dict[str, Dict[str, Any]]:
+    """Read all retained identities and short IDs without materializing source content.
+
+    Prompt age windows must not cause source replay or reuse of an old short ID.
+    """
+    with get_db_manager().read_session() as session:
+        stmt = (select(UnifiedLog2026.id,
+                       func.json_extract(UnifiedLog2026.metadata_json, "$.item_id"),
+                       func.json_extract(UnifiedLog2026.metadata_json, "$.short_id"))
+                .where(UnifiedLog2026.source == DAYFLOW_ITEM_SOURCE)
+                .where(UnifiedLog2026.room_id == DAYFLOW_ROOM_ID))
+        return {str(item_id or row_id): {"metadata": {"short_id": short_id}}
+                for row_id, item_id, short_id in session.execute(stmt)}

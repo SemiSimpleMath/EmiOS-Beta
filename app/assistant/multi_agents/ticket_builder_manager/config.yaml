@@ -4,7 +4,6 @@ description: "Composes user-facing tickets. A read-only planner pulls the SUBSTA
 max_cycles: 14
 role_bindings:
   delegator: emi_team::delegator
-  tool_selector: shared::tool_selector
 
 agents:
   - name: emi_team::delegator

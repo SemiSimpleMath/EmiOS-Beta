@@ -620,7 +620,7 @@ class TicketManager:
             )
 
         now = self._now_utc()
-        with self._session_scope() as session:
+        with self._session_scope(immediate=True) as session:
             ticket = session.query(Ticket).filter(Ticket.ticket_id == ticket_id).first()
             if not ticket:
                 logger.warning(f"Ticket not found: {ticket_id}")
@@ -657,6 +657,7 @@ class TicketManager:
             ticket_id: str,
             snooze_minutes: int = 30,
             user_text: Optional[str] = None,
+            user_action: Optional[str] = None,
     ) -> bool:
         """
         Mark ticket as snoozed by user.
@@ -670,7 +671,7 @@ class TicketManager:
         if invalid_kwargs:
             raise ValueError("Transition allowlist is missing required snooze fields.")
 
-        with self._session_scope() as session:
+        with self._session_scope(immediate=True) as session:
             ticket = session.query(Ticket).filter(Ticket.ticket_id == ticket_id).first()
             if not ticket:
                 logger.warning(f"Ticket not found: {ticket_id}")
@@ -688,6 +689,7 @@ class TicketManager:
                     "snooze_until": snooze_until,
                     "snooze_count": snooze_count,
                     "user_text": user_text,
+                    "user_action": user_action,
                     "user_response_parsed": {"decision": "snooze", "snooze_minutes": snooze_minutes},
                 },
             )

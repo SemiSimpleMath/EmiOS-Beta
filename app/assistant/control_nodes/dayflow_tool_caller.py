@@ -10,9 +10,8 @@ user-facing tool routes its reply back to the transport that asked).
 **The call blocks, and that is the design.** Every tool in every room blocks its
 caller: `get_todo_tasks` for a moment, `emi_team_manager` for however long the
 sub-manager runs, `create_dayflow_ticket` for as long as the question stands.
-Each orchestrator run already owns its own thread (the routine runner starts
-one per tick), and the scheduler can open another instance alongside it, so an
-hour spent holding a question open costs this instance and nothing else. The
+This node runs in dayflow_dispatch_manager on its own session thread. Planning
+and wake passes share a separate gate and can continue while the call waits. The
 dayflow-specific part is only what happens AFTER: the ToolResult becomes graph
 state on the node the call was for.
 """
@@ -64,11 +63,15 @@ class DayflowToolCaller(ControlNode):
         from work_objects.result_recorder import record_tool_result
 
         store = get_dayflow_work_store()
-        # MY incarnation, captured before the call. Another orchestrator instance can run
-        # repair while this one blocks, and repair may re-dispatch this node to a successor;
+        # MY incarnation, captured before the call. A later planning pass can arrange a
+        # successor dispatch after the sweeper fails this call;
         # the recorder refuses a stale epoch rather than clobbering the successor's outcome.
         node = store.load(work_id).nodes.get(node_id)
-        my_epoch = int((getattr(node, "payload", None) or {}).get("dispatch_epoch") or 0) if node else 0
+        my_epoch = self.blackboard.get_state_value("dispatch_epoch", None)
+        if (node is None or node.status != "dispatched" or my_epoch is None
+                or int(my_epoch) != int(node.payload.get("dispatch_epoch") or 0)):
+            raise ValueError("stale or missing dispatch attempt; refusing to execute a tool")
+        my_epoch = int(my_epoch)
         tool_name = str(self.blackboard.get_state_value("action") or "").strip()
 
         logger.info("[%s] calling %s for %s (blocking)", self.name, tool_name, ref)
@@ -79,12 +82,16 @@ class DayflowToolCaller(ControlNode):
             agent_registry=self.agent_registry,
         )
 
-        record_tool_result(
+        accepted = record_tool_result(
             store, work_id, node_id, _as_tool_result(result_payload),
             actor=tool_name or self.name,
             expected_epoch=my_epoch,
             evidence_title="tool result",
         )
+
+        self.blackboard.update_state_value("dispatch_epoch", my_epoch)
+        if not accepted:
+            self.blackboard.update_state_value("work_node_ref", "")
 
         # A node just reached a result, so ask for a prompt follow-up tick. Not for the
         # verdict — the finalizer runs next in this very pass — but for the NEXT node:

@@ -10,16 +10,21 @@ from app.assistant.manager_runtime.mailbox import Mailbox, MailboxMessage
 
 @pytest.fixture
 def mailbox() -> Mailbox:
-    return Mailbox(ttl_seconds=60.0)
+    inbox = Mailbox(ttl_seconds=60.0)
+    for invocation in ("inv-A", "inv-B", "inv-C", "A", "B", "X", "inv-fresh"):
+        inbox.open(invocation)
+    return inbox
 
 
 @pytest.fixture
 def short_ttl_mailbox() -> Mailbox:
-    # 50ms TTL — enough to test stale-drop without slowing the suite.
-    return Mailbox(ttl_seconds=0.05)
+    # 50ms TTL â€” enough to test stale-drop without slowing the suite.
+    inbox = Mailbox(ttl_seconds=0.05)
+    inbox.open("inv-stale")
+    return inbox
 
 
-# ── post / drain basics ────────────────────────────────────────────
+# â”€â”€ post / drain basics â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 class TestPostAndDrain:
@@ -72,7 +77,7 @@ class TestPostAndDrain:
         assert len(b) == 1 and b[0].payload["x"] == "for-B"
 
 
-# ── input validation ───────────────────────────────────────────────
+# â”€â”€ input validation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 class TestPostValidation:
@@ -89,7 +94,7 @@ class TestPostValidation:
         assert mailbox.post(invocation_id="A", message_type="t", payload=None) is False  # type: ignore[arg-type]
 
 
-# ── TTL ────────────────────────────────────────────────────────────
+# â”€â”€ TTL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 class TestTTL:
@@ -114,7 +119,7 @@ class TestTTL:
         assert len(msgs) == 1
 
 
-# ── peek / clear ───────────────────────────────────────────────────
+# â”€â”€ peek / clear â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 class TestPeekAndClear:

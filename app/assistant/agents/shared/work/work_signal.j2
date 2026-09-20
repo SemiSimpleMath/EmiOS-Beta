@@ -1,0 +1,7 @@
+
+WORK SIGNAL: age {{ age }} | {{ total }} subtasks ({{ abandoned }} abandoned) | {{ recent }} created in the last hour | depth {{ deepest }} | {{ live }} live
+{% if deepest > depth_warn %}  ⚠ work is {{ deepest }} levels below the goal. Past about {{ depth_warn }} that is a worker re-asking its own question, not decomposition. Read the OUTCOMES above: the answer may already be there.
+{% endif %}{% if burst >= burst_minutes %}  ⚠ {{ burst }} subtasks minted in the last {{ burst_minutes }} minutes. This goal is growing faster than it is finishing.
+{% endif %}{% if recent > recent_warn %}  ⚠ {{ recent }} subtasks in the last hour. A goal that needs this many steps has either changed shape or is not converging.
+{% endif %}{% if total > total_warn %}  ⚠ {{ total }} subtasks for one goal. Consider whether it is done already, or genuinely too big and should be split or abandoned.
+{% endif %}

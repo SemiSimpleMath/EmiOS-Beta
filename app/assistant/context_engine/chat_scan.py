@@ -58,10 +58,6 @@ def scan_for_activation(
     from app.assistant.ServiceLocator.service_locator import DI
     from app.assistant.utils.pydantic_classes import Message, ScopeContext
 
-    information_parts = [f"Primary user: {primary_user}"]
-    if recent_chat_context:
-        information_parts.append(f"Recent conversation context:\n{recent_chat_context}")
-
     agent = DI.agent_factory.create_agent(_AGENT_NAME)
     if agent is None:
         raise RuntimeError(f"chat_scan: agent_factory returned None for '{_AGENT_NAME}'")
@@ -77,7 +73,8 @@ def scan_for_activation(
     result = agent.action_handler(
         Message(
             task=user_message,
-            information="\n\n".join(information_parts),
+            agent_input={"primary_user": primary_user,
+                         "recent_chat_context": recent_chat_context or ""},
             scope_context=scope,
         )
     )

@@ -16,7 +16,7 @@ Inert until the dayflow manager's state_map routes to it.
 """
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.control_nodes.control_node import ControlNode
-from app.assistant.dayflow_orchestrator.work_portfolio import local_stamp
+from app.assistant.dayflow_orchestrator.work_context import render_view
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message
 
@@ -24,6 +24,22 @@ logger = get_logger(__name__)
 
 _MAX_REPLANS_PER_TICK = 3
 _TERMINAL_WO_STATES = {"done", "abandoned"}
+
+
+def _undecomposed_goals(store, created):
+    """Recover initial decomposition from durable empty graphs after a lost tick."""
+    result = {entry["work_id"]: entry for entry in created}
+    for summary in store.list_work_objects():
+        if summary.get("status") != "active" or summary["id"] in result:
+            continue
+        wo = store.load(summary["id"])
+        if any(wo.is_work_unit(node) for node in wo.nodes.values()):
+            continue
+        goal = wo.nodes.get(wo.goal_node_id)
+        if goal is not None:
+            result[wo.id] = {"work_id": wo.id, "objective": goal.content or goal.title,
+                             "rationale": wo.constraints.get("rationale", "")}
+    return list(result.values())
 
 
 def _pending_finalizer_instructions(store) -> dict[str, list[dict]]:
@@ -44,6 +60,8 @@ def _pending_finalizer_instructions(store) -> dict[str, list[dict]]:
             continue
         wo = store.load(summary["id"])
         for node in wo.nodes.values():
+            if not wo.is_work_unit(node):
+                continue
             entry = (node.payload or {}).get("finalizer")
             if not isinstance(entry, dict) or entry.get("consumed_at"):
                 continue
@@ -55,58 +73,13 @@ def _pending_finalizer_instructions(store) -> dict[str, list[dict]]:
     return out
 
 
-_LEAD_FOR = {
-    "plan_changes": "The step {n} ran and ACHIEVED its goal, but what came back changes the plan.",
-    "retry": "The step {n} did NOT achieve its goal. The finalizer judged it worth another attempt, "
-             "differently or later — it is back in your inbox as `proposed`. Keep it, change it, "
-             "or replace it, and set its wake if the recommendation names a time.",
-    "stop": "The step {n} did NOT achieve its goal, and this line of work should STOP. Prune the "
-            "branch; if the outcome says the whole goal is moot, add nothing and say so in "
-            "architect_summary for the steward.",
-    "new_approach": "The step {n} did NOT achieve its goal, and this way of reaching it is wrong. "
-                    "Plan a genuinely different route; do not re-lay the same chain.",
-    "ask_user": "The step {n} did NOT achieve its goal and needs the USER. Plan exactly ONE node whose "
-                "goal is to ask them the question below, and make the rest depend on its answer. "
-                "Do not plan any other attempt.",
-}
-
-
 def _finalizer_block(entries) -> tuple[str, str]:
-    """The finalizer's outstanding verdicts for one work object, as the architect reads them.
-
-    Returns ``(prompt_block, licence)``. The licence — the joined recommendations — is also the
-    PRUNE LICENCE (see `licensed` at the call site), so it is returned separately.
-
-    The outcome and the recommendation both go in: the recommendation says what should happen,
-    the outcome says why, and a recommendation without its grounds can only be obeyed or ignored,
-    never judged. The lead sentence follows the route, because the right framing for an achieved
-    step is the wrong one for a failed one.
-    """
-    blocks, licences = [], []
-    for entry in entries or []:
-        route = str(entry.get("next_step") or "").strip()
-        if not route:
-            continue
-        node_id = str(entry.get("node_id") or "").strip()
-        outcome = str(entry.get("outcome") or "").strip()
-        recommendation = str(entry.get("recommendation") or "").strip()
-        question = str(entry.get("question_for_user") or "").strip()
-        lead = _LEAD_FOR.get(route, "The step {n} needs your attention.").format(n=node_id)
-        block = f"{lead}\n"
-        if entry.get("escalated"):
-            block += ("THE RUNTIME ESCALATED THIS: repeated attempts have not achieved the goal, so "
-                      "the user is asked rather than the same thing tried again.\n")
-        if outcome:
-            block += f"OUTCOME (the finalizer, having read the full result): {outcome}\n"
-        if recommendation:
-            block += f"RECOMMENDATION: {recommendation}\n"
-        if question:
-            block += f"QUESTION FOR THE USER: {question}\n"
-        blocks.append(block)
-        licences.append(recommendation or outcome)
-    if not blocks:
+    """Render instructions in Jinja and separately prepare the pruning licence data."""
+    entries = [e for e in (entries or []) if str(e.get("next_step") or "").strip()]
+    if not entries:
         return "", ""
-    return "\n".join(blocks) + "\n", " ".join(licences)
+    licence = " ".join(str(e.get("recommendation") or e.get("outcome") or "").strip() for e in entries)
+    return render_view("instructions", entries=entries), licence
 
 
 def _duplicate_pairs(data: dict) -> dict[str, str]:
@@ -127,129 +100,21 @@ def _duplicate_pairs(data: dict) -> dict[str, str]:
 
 
 def _render_existing_graph(wo) -> str:
-    """The architect's OWN units, in full, for the re-plan prompt.
-
-    This is the only thing standing between a re-plan and a duplicate, so it shows the things
-    you need to recognise your own work: the node_id to reuse, the full DETAIL (what the node is
-    actually for — two nodes titled "Give the user the assessment" are indistinguishable by title
-    alone), and whether the node is still live.
-
-    It shows ONLY direct children of the goal. Everything below them is the worker's own
-    decomposition, which the architect neither writes nor prunes, and which drowned the list it
-    was supposed to read: one work object rendered 49 lines, 41 of them worker-grown subtasks and
-    evidence rows, with the architect's 8 real units scattered through them. The subtree is
-    reported as a count instead.
-
-    LIVE nodes come first and are never abbreviated — a duplicate is created against the live
-    set, so that is the part that must be impossible to miss. Finished nodes follow as a record,
-    with their epitaphs (also never truncated: a cut-off "user declined ... DO NOT RE" is how
-    dead chains get re-laid).
-    """
-    _FINISHED = {"done", "closed", "abandoned", "superseded", "failed"}
-    live, finished = [], []
-    for n in wo.nodes.values():
-        if n.id == wo.goal_node_id or n.parent_id != wo.goal_node_id:
-            continue
-        kids = [wo.nodes[c] for c in wo.children_of(n.id) if c in wo.nodes]
-        # Steps and RESULTS are counted separately. Lumping them reads a pile of failure receipts
-        # as progress: one delivery node showed "17 sub-nodes" that were 17 evidence rows all
-        # carrying the SAME tool error, and that count was then used to judge which of two
-        # duplicates was further along. Distinct bodies, because N copies of one error is one
-        # thing that happened N times, not N things.
-        steps = [k for k in kids if k.type == "subtask"]
-        results = [k for k in kids if k.type in ("evidence", "artifact")]
-        distinct = len({" ".join((k.content or "").split()) for k in results if (k.content or "").strip()})
-        sub = ""
-        if steps:
-            sub += f" | {len(steps)} step(s) below"
-        if results:
-            sub += f" | {len(results)} result(s)"
-            if distinct == 1 and len(results) > 1:
-                sub += " — ALL IDENTICAL (the same thing happened repeatedly; this is not progress)"
-        wake = ""
-        if getattr(n, "wake_kind", None):
-            when = getattr(n, "wake_at", None)
-            wake = f" | wake={n.wake_kind}" + (f" at {local_stamp(when)}" if when else "")
-        failed_n = int((n.payload or {}).get("failure_count") or 0)
-        if failed_n >= 2:
-            sub += (f" | HAS FAILED {failed_n} TIMES — re-adding this work in any form will most "
-                    f"likely fail again; stop, or plan a node that asks the user to unblock it")
-        if n.status in _FINISHED:
-            term = (n.payload or {}).get("terminal") if hasattr(n, "payload") else None
-            why = f"\n    why: {term.get('reason')}" if isinstance(term, dict) else ""
-            if not why:
-                # A `failed` node has no `terminal` — that payload is only written for the
-                # terminal targets — so its epitaph is the finalizer's verdict and reasoning.
-                # Without this a blocked step arrives here as a bare "status=failed" line, and
-                # BLOCKED means "this needs the user": the one thing the architect must read in
-                # order to plan the node that asks them. A mute failure gets planned around
-                # instead, which is how a dead end turns into another attempt.
-                fin = (n.payload or {}).get("finalizer")
-                if isinstance(fin, dict) and str(fin.get("outcome") or "").strip():
-                    tag = fin.get("next_step") or fin.get("verdict") or "judged"
-                    why = f"\n    why ({tag}): {fin.get('outcome')}"
-                    if str(fin.get("recommendation") or "").strip():
-                        why += f"\n    recommended: {fin.get('recommendation')}"
-            finished.append(f"  - {n.id} | {n.title} | status={n.status}{sub}{why}")
-        else:
-            detail = " ".join((n.content or "").split())
-            live.append(f"  - {n.id} | status={n.status}{wake}{sub}\n"
-                        f"    title : {n.title}\n"
-                        f"    detail: {detail or '(none)'}")
-
-    if not live and not finished:
-        return "(no nodes yet)"
-    out = []
-    # The GOAL's own tally, which survives the re-planning that resets every per-node count.
-    # Rendered first and unmissably: by the time a goal has failed repeatedly, the specific node
-    # that failed has usually been abandoned and replaced, so the per-node lines below can all
-    # read zero while the goal has been failing at the same thing all day.
-    goal_node = wo.nodes.get(wo.goal_node_id or "")
-    unmet = int(((goal_node.payload or {}) if goal_node is not None else {})
-                .get("goal_unmet_attempts") or 0)
-    if unmet >= 2:
-        out.append(
-            f"{unmet} ATTEMPTS HAVE NOT ACHIEVED THIS GOAL — counted across nodes, so re-planned "
-            f"and partly-successful attempts are in this number too. Stop trying. Write ONE node "
-            f"whose goal is to tell the user what was tried, what is blocking it, and ask whether "
-            f"to keep going — and write nothing else. A new wording of the same approach is not a "
-            f"new approach, and going further outside to get around the block is not either.")
-
-    if live:
-        out.append("LIVE — these WILL run. Reuse these node_ids; do not write a second node for "
-                   "work one of them already covers:\n" + "\n".join(live))
-    if finished:
-        out.append("FINISHED — a record of what already happened. Do not re-add these:\n"
-                   + "\n".join(finished))
-    return "\n\n".join(out)
+    """Share the complete strategic task view with the steward, excluding provenance."""
+    from app.assistant.dayflow_orchestrator.work_context import render_view, work_data
+    return render_view("portfolio", work=work_data(wo))
 
 
 def _situational_context(bb) -> str:
-    """The same situational picture the steward sees — user ticket REPLIES (directives), active
-    tickets, the portfolio, and recently-completed work — so the architect re-plans WITH the user's
-    intent in view instead of blind. The steward's prep node loaded these onto the shared (manager)
-    blackboard earlier this tick. Passed as the architect Message's `information` (rendered as CONTEXT)."""
-    parts = []
-    resp = bb.get_state_value("recent_responded_tickets", {}) or {}
-    resp_lines = []
-    for cat, label in (("accepted", "ACCEPTED"), ("declined", "DECLINED"), ("snoozed", "SNOOZED")):
-        for t in (resp.get(cat) or []):
-            c = str(t.get("user_comment") or "").strip()
-            resp_lines.append(f"- {label}: {t.get('title', '')}" + (f' — user: "{c}"' if c else ""))
-    if resp_lines:
-        parts.append("## RECENT TICKET RESPONSES (user directives — incorporate these into the graph)\n"
-                     + "\n".join(resp_lines))
-    active = bb.get_state_value("active_tickets", []) or []
-    if active:
-        parts.append("## ACTIVE TICKETS (awaiting the user)\n"
-                     + "\n".join(f"- [{t.get('suggestion_type', '')}] {t.get('title', '')}" for t in active))
-    portfolio = str(bb.get_state_value("work_portfolio", "") or "").strip()
-    if portfolio:
-        parts.append("## WORK PORTFOLIO\n" + portfolio)
-    completed = str(bb.get_state_value("recent_completed_work", "") or "").strip()
-    if completed:
-        parts.append("## RECENTLY COMPLETED\n" + completed)
-    return "\n\n".join(parts)
+    """Prepare the tick's situational data for the architect's Jinja context block."""
+    responses = bb.get_state_value("recent_responded_tickets", {}) or {}
+    return render_view("situation",
+        responses=[{"category": category, "ticket": ticket}
+                   for category in ("accepted", "acknowledged", "declined", "snoozed")
+                   for ticket in (responses.get(category) or [])],
+        active=bb.get_state_value("active_tickets", []) or [],
+        portfolio=bb.get_state_value("work_portfolio", "") or "",
+        completed=bb.get_state_value("recent_completed_work", "") or "")
 
 
 class WorkArchitectNode(ControlNode):
@@ -265,6 +130,7 @@ class WorkArchitectNode(ControlNode):
             persist = self.blackboard.get_state_value("steward_persist_result", {}) or {}
             created = [c for c in (persist.get("created") or [])
                        if isinstance(c, dict) and c.get("work_id") and c.get("objective")]
+            created = _undecomposed_goals(store, created)
             replan_ids = [str(w).strip() for w in (self.blackboard.get_state_value("replan_work_ids", []) or [])
                           if str(w or "").strip()]
             # The finalizer's outstanding verdicts, read off the graph — the authoritative
@@ -303,12 +169,14 @@ class WorkArchitectNode(ControlNode):
                     work_id = c["work_id"]
                     try:
                         rationale = str(c.get("rationale") or "").strip()
-                        why = (f"## WHY THIS IS A WORK OBJECT — the steward's brief (its NATURE + intent; "
-                               f"honor it: a reminder about the user's own activity is a single node whose "
-                               f"goal is to tell them at the right time)\n{rationale}\n\n" if rationale else "")
-                        result = agent.action_handler(Message(task=c["objective"], information=why + info, scope_context=scope))
+                        why = render_view("architect_context", rationale=rationale, situation=info)
+                        wo = store.load(work_id)
+                        goal = wo.nodes.get(wo.goal_node_id)
+                        objective = (goal.content or goal.title) if goal else c["objective"]
+                        task = render_view("architect_task", mode="create", objective=objective)
+                        result = agent.action_handler(Message(task=task, information=why, scope_context=scope))
                         nodes = (getattr(result, "data", {}) or {}).get("nodes", []) or []
-                        res = apply_architect_dag(store, work_id, nodes)
+                        res = apply_architect_dag(store, work_id, nodes, expected_updated_at=wo.updated_at)
                         decomposed.append({"work_id": work_id, "nodes": len(res.get("added", []))})
                         logger.info("[%s] decomposed %s into %d node(s)",
                                     self.name, work_id, len(res.get("added", [])))
@@ -331,40 +199,23 @@ class WorkArchitectNode(ControlNode):
                         objective = (getattr(goal, "content", "") or getattr(goal, "title", "")) if goal else ""
                         finalizer_block, licence = _finalizer_block(pending.get(work_id))
                         licensed = bool(licence) or (work_id in user_directed)
-                        task = (
-                            f"{objective}\n\n{finalizer_block}This goal ALREADY has a work graph (below). Revise it "
-                            f"as a DELTA per the verdict above and the CONTEXT: ADD the steps still missing, and "
-                            f"ABANDON (list their node_ids in abandon_node_ids) only nodes the EVIDENCE — "
-                            f"epitaphs, recorded results, user directives — makes moot or wrong; un-finished "
-                            f"sub-steps go with them. Queued (actionable) and held (future-wake) nodes are the "
-                            f"runtime's: they WILL run — never prune one for slowness. Do NOT recreate "
-                            f"existing nodes (reference their node_ids in depends_on). Output the delta only. "
-                            f"Existing nodes:\n{_render_existing_graph(wo)}"
-                        )
+                        task = render_view("architect_task", mode="replan", objective=objective,
+                                           finalizer_block=finalizer_block, graph=_render_existing_graph(wo))
                         result = agent.action_handler(Message(task=task, information=info, scope_context=scope))
                         data = getattr(result, "data", {}) or {}
                         res = apply_architect_dag(store, work_id, data.get("nodes", []) or [],
                                                   abandon_reason=str(data.get("abandon_reason") or "").strip(),
                                                   abandon_node_ids=data.get("abandon_node_ids", []) or [],
                                                   licensed=licensed,
-                                                  duplicate_of=_duplicate_pairs(data))
+                                                  duplicate_of=_duplicate_pairs(data),
+                                                  finalizer_instructions=pending.get(work_id, []),
+                                                  expected_updated_at=wo.updated_at)
                         replanned.append({"work_id": work_id, "added": len(res.get("added", [])),
                                           "abandoned": len(res.get("abandoned", [])),
                                           "deduplicated": len(res.get("deduplicated", []))})
                         logger.info("[%s] re-planned %s: +%d node(s), -%d abandoned (%d duplicate)",
                                     self.name, work_id, len(res.get("added", [])),
                                     len(res.get("abandoned", [])), len(res.get("deduplicated", [])))
-                        # Acted on — stamp each verdict so the next re-plan of this object does
-                        # not re-apply a judgment about a step already dealt with. Only after the
-                        # graph write succeeded: a replan that raised must be able to run again.
-                        for entry in pending.get(work_id, []):
-                            try:
-                                store.apply("consume_finalizer_instruction",
-                                            {"work_id": work_id, "node_id": entry["node_id"]},
-                                            actor="architect")
-                            except Exception as e:
-                                logger.error("[%s] could not consume the finalizer instruction on "
-                                             "%s::%s: %s", self.name, work_id, entry["node_id"], e)
                     except Exception as e:
                         logger.error("[%s] re-plan failed for %s: %s", self.name, work_id, e)
                         logger.debug("[%s] re-plan exception", self.name, exc_info=True)

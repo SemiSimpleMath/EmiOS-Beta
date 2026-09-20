@@ -4,7 +4,6 @@ description: "Read-only KG investigator. Composes SQL queries against emi.db to 
 max_cycles: 40
 role_bindings:
   delegator: emi_team::delegator
-  tool_selector: shared::tool_selector
 
 agents:
   - name: emi_team::delegator

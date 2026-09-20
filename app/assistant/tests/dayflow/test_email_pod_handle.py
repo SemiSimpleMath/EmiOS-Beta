@@ -1,7 +1,7 @@
 """An email item carries the pod holding its body, and that handle reaches the worker.
 
 2026-09-13. A worker was told its answer lived in "newsletter [7667]". `short_id` is a
-prompt label: no tool in the system accepts one, and it is not unique — 7667 was assigned
+prompt label: no tool in the system accepts one, and it is not unique â€” 7667 was assigned
 to both a school newsletter and an unrelated June chat about broken monitors. So the worker
 had a number it could not open. It asked the user three times, watched those tickets
 expire, and then spent 117 nodes and fifteen levels of recursion rebuilding from the open
@@ -102,6 +102,9 @@ def _summary_for(meta, monkeypatch):
         id, status, content = "goal_1", "dispatched", "Do the thing."
 
     class _WO:
+        id = "work_1"
+        updated_at = NOW
+        constraints = {}
         goal_node_id = "goal_1"
         nodes = {"goal_1": _Goal()}
 

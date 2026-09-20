@@ -297,7 +297,10 @@ class TestRepeatedFailureIsEscalated:
     def _exhaust(self, store, wid, node_id):
         for _ in range(_REPEAT_FAILURE_LIMIT - 1):
             store.apply("set_status", {"work_id": wid, "node_id": node_id, "status": "dispatched"})
-            store.apply("set_status", {"work_id": wid, "node_id": node_id, "status": "failed"})
+            wo = store.apply("set_status", {"work_id": wid, "node_id": node_id, "status": "failed"})
+            store.apply("finalize_task", {"work_id": wid, "node_id": node_id,
+                "expected_dispatch_epoch": wo.nodes[node_id].payload["dispatch_epoch"],
+                "finalizer": {"verdict": "retry", "outcome": "Attempt did not achieve the goal", "next_step": "retry"}})
 
     def test_a_retry_at_the_limit_becomes_ask_user_and_does_not_reopen(self, monkeypatch):
         store = _store()
@@ -328,7 +331,12 @@ class TestRepeatedFailureIsEscalated:
         wid = _errored_wo(store)
         for _ in range(_REPEAT_FAILURE_LIMIT):
             store.apply("set_status", {"work_id": wid, "node_id": "nf1", "status": "dispatched"})
-            store.apply("set_status", {"work_id": wid, "node_id": "nf1", "status": "failed"})
+            wo = store.apply("set_status", {"work_id": wid, "node_id": "nf1", "status": "failed"})
+            store.apply("finalize_task", {"work_id": wid, "node_id": "nf1",
+                "expected_dispatch_epoch": wo.nodes["nf1"].payload["dispatch_epoch"],
+                "finalizer": {"verdict": "retry", "outcome": "Attempt did not achieve the goal", "next_step": "retry"}})
+        store.apply("set_status", {"work_id": wid, "node_id": "nf1", "status": "dispatched"})
+        store.apply("set_status", {"work_id": wid, "node_id": "nf1", "status": "failed"})
         info = _capture_prompt(monkeypatch, wid, "nf1", ASK)["information"]
         assert "HAVE NOT ACHIEVED THIS GOAL" in info
         assert "question_for_user" in info
@@ -347,7 +355,8 @@ class TestRepeatedFailureIsEscalated:
         wid = _returned_wo(store)
         _run(monkeypatch, wid, "n1", ASK)
         rendered = render_work_portfolio(store.load(wid))
-        assert "FINALIZER (unrecoverable -> ask_user)" in rendered
+        assert "FINALIZER: unrecoverable" in rendered
+        assert "NEXT: ask_user" in rendered
         assert ASK["question_for_user"] in rendered
 
 
@@ -384,7 +393,7 @@ class TestTheHandoffToTheArchitect:
         wid = _returned_wo(store)
         _run(monkeypatch, wid, "n1", RETRY)
         assert wid in _pending_finalizer_instructions(store)
-        store.apply("consume_finalizer_instruction", {"work_id": wid, "node_id": "n1"}, actor="architect")
+        store.apply("consume_finalizer_instruction", {"work_id": wid, "node_id": "n1", "expected_finalizer": store.load(wid).nodes["n1"].payload["finalizer"]}, actor="architect")
         assert wid not in _pending_finalizer_instructions(store)
         assert store.load(wid).nodes["n1"].payload["finalizer"]["consumed_at"]
 
@@ -393,8 +402,8 @@ class TestTheHandoffToTheArchitect:
         wid = _returned_wo(store)
         _run(monkeypatch, wid, "n1", ASK)
         rendered = _render_existing_graph(store.load(wid))
-        assert "status=failed" in rendered
-        assert "why (ask_user)" in rendered and ASK["outcome"] in rendered
+        assert "[failed] n1" in rendered
+        assert "NEXT: ask_user" in rendered and ASK["outcome"] in rendered
 
 
 class TestTheRollupDoesNotRaceTheArchitect:
@@ -410,7 +419,7 @@ class TestTheRollupDoesNotRaceTheArchitect:
         store = _store()
         wid = _returned_wo(store)
         _run(monkeypatch, wid, "n1", PLAN_CHANGES)
-        store.apply("consume_finalizer_instruction", {"work_id": wid, "node_id": "n1"}, actor="architect")
+        store.apply("consume_finalizer_instruction", {"work_id": wid, "node_id": "n1", "expected_finalizer": store.load(wid).nodes["n1"].payload["finalizer"]}, actor="architect")
         store.apply("edit_node", {"work_id": wid, "node_id": "n1", "title": "Research the deadline"})
         assert store.load(wid).status == "done"
 

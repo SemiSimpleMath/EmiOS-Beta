@@ -1,0 +1,5 @@
+{% for item in items %}- {{ item.title }}{% if item.when %}  (dropped {{ item.when }}){% endif %}
+{% if item.reason %}  {% if dropped %}recorded reason{% else %}ended{% endif %}: {{ item.reason }}
+{% endif %}{% for finalizer in item.finalizers %}  task outcome: {% include 'shared/work/finalizer_summary.j2' %}
+{% endfor %}{% if item.goal_note %}  final note on the goal: {{ item.goal_note }}
+{% endif %}{% else %}{% if not dropped %}(nothing completed in the last {{ window_hours }}h){% endif %}{% endfor %}

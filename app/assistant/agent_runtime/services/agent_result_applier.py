@@ -55,7 +55,8 @@ class AgentResultApplier:
     def apply_result_to_state(self, result_dict: dict) -> None:
         """Write LLM output keys to blackboard with global/append policy.
 
-        Each key is written according to:
+        Undeclared reserved runtime keys are logged and skipped. Accepted keys
+        are written according to:
         - global_output_keys config: writes to global blackboard scope
         - append_fields config: appends to existing list instead of replacing
         """

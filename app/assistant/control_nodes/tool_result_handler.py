@@ -119,8 +119,8 @@ class ToolResultHandler(ControlNode):
 
     def action_handler(self, message):
         """
-        Main entry point - determines if this is a tool result or agent result.
-        This is called by the delegator for agent results.
+        Agent-return entry point, called directly by ToolCaller after a nested
+        agent call; a manager state_map may also route here.
         For tool results, tool_caller should call process_tool_result_direct() instead.
         """
         # This should only be called for agent results now
@@ -130,8 +130,8 @@ class ToolResultHandler(ControlNode):
         if current_context:
             # current_context is a tuple: (calling_agent, called_agent, scope_id)
             calling_agent, called_agent, scope_id = current_context
-            # Agent results are stored in GLOBAL blackboard by Agent._handle_flow_control()
-            # get_state_value searches from current scope down to global, so it will find it
+            # ToolCaller stores <called_agent>_result in the callee scope.
+            # Read it before popping; get_state_value also searches parent scopes.
             result = self.blackboard.get_state_value(f"{called_agent}_result")
             # If there is no agent result and no scope-level `result`, do NOT pop the call context.
             # This situation can happen if this handler is reached via state_map after a tool call.
@@ -425,7 +425,8 @@ class ToolResultHandler(ControlNode):
             clear_pending_tool(self.blackboard)
             return
 
-        # Canonical behavior: always defer routing to delegator/state_map via tool_return_router.
+        # Normal path: defer routing to delegator/state_map (often tool_return_router).
+        # Clearance failures and install approval have already returned above.
         self.blackboard.update_state_value("next_agent", None)
         logger.debug("[%s] tool_result_handler defers routing to delegator/state_map.", self.name)
 
@@ -436,7 +437,7 @@ class ToolResultHandler(ControlNode):
     def _update_latest_playwright_snapshot_state(self, *, message: Message, tool_result) -> None:
         """
         Keep exactly one planner-visible snapshot card: the latest one.
-        Older snapshot cards are hidden from context/history to prevent stale-ref usage.
+        Replaces snapshot state keys; this method does not hide older history messages.
         """
         try:
             data = getattr(tool_result, "data", None)

@@ -1,4 +1,4 @@
-"""Tests for MailboxDispatcher — drain + dispatch logic for the typed
+"""Tests for MailboxDispatcher â€” drain + dispatch logic for the typed
 message bus into a running manager.
 
 Validates the dispatcher in isolation: each ``message_type`` lands on
@@ -30,6 +30,15 @@ class _FakeBlackboard:
         self._state[key] = value
 
 
+def _injected_texts(bb):
+    slots = bb.get_state_value(_RUNTIME_INJECTIONS_BB_KEY) or {}
+    for entries in slots.values():
+        for entry in entries:
+            assert entry["posted_at_utc"]
+            assert entry["from_who"] == "system"
+    return {name: [entry["text"] for entry in entries] for name, entries in slots.items()}
+
+
 def _make_msg(*, mtype, payload):
     return MailboxMessage(
         message_type=mtype,
@@ -48,7 +57,7 @@ def role_resolver():
     return {"planner": "fake::planner"}.get
 
 
-# ── agent_inject: appends per agent name ─────────────────────────
+# â”€â”€ agent_inject: appends per agent name â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 class TestAgentInject:
@@ -59,7 +68,7 @@ class TestAgentInject:
             _make_msg(mtype="agent_inject", payload={"planner": "do thing X"}),
             bb, role_resolver,
         )
-        assert bb.get_state_value(_RUNTIME_INJECTIONS_BB_KEY) == {
+        assert _injected_texts(bb) == {
             "fake::planner": ["do thing X"],
         }
 
@@ -69,7 +78,7 @@ class TestAgentInject:
             _make_msg(mtype="agent_inject", payload={"web::planner": "literal name"}),
             bb, role_resolver,
         )
-        assert bb.get_state_value(_RUNTIME_INJECTIONS_BB_KEY) == {
+        assert _injected_texts(bb) == {
             "web::planner": ["literal name"],
         }
 
@@ -83,7 +92,7 @@ class TestAgentInject:
             _make_msg(mtype="agent_inject", payload={"planner": "second"}),
             bb, role_resolver,
         )
-        assert bb.get_state_value(_RUNTIME_INJECTIONS_BB_KEY) == {
+        assert _injected_texts(bb) == {
             "fake::planner": ["first", "second"],
         }
 
@@ -105,7 +114,7 @@ class TestAgentInject:
             _make_msg(mtype="agent_inject", payload={"reviewer": "for reviewer"}),
             bb, role_resolver,
         )
-        assert bb.get_state_value(_RUNTIME_INJECTIONS_BB_KEY) == {
+        assert _injected_texts(bb) == {
             "fake::planner": ["for planner"],
             "reviewer": ["for reviewer"],
         }
@@ -116,35 +125,35 @@ class TestAgentInject:
             _make_msg(mtype="agent_inject", payload={"planner": "x"}),
             bb, role_resolver=None,
         )
-        # No resolver → role string used as agent name verbatim.
-        assert bb.get_state_value(_RUNTIME_INJECTIONS_BB_KEY) == {"planner": ["x"]}
+        # No resolver â†’ role string used as agent name verbatim.
+        assert _injected_texts(bb) == {"planner": ["x"]}
 
 
-# ── blackboard_write: simple set ─────────────────────────────────
+# â”€â”€ blackboard_write: simple set â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 class TestBlackboardWrite:
 
-    def test_writes_each_key(self, dispatcher, role_resolver):
+    def test_arbitrary_blackboard_write_is_rejected(self, dispatcher, role_resolver):
         bb = _FakeBlackboard()
         dispatcher._dispatch_one(
             _make_msg(mtype="blackboard_write",
                       payload={"cancelled": True, "extra_context": "from outside"}),
             bb, role_resolver,
         )
-        assert bb.get_state_value("cancelled") is True
-        assert bb.get_state_value("extra_context") == "from outside"
+        assert bb.get_state_value("cancelled") is None
+        assert bb.get_state_value("extra_context") is None
 
-    def test_empty_key_skipped(self, dispatcher, role_resolver):
+    def test_unsupported_message_writes_no_keys(self, dispatcher, role_resolver):
         bb = _FakeBlackboard()
         dispatcher._dispatch_one(
             _make_msg(mtype="blackboard_write", payload={"": "lost", "real": "kept"}),
             bb, role_resolver,
         )
-        assert bb.get_state_value("real") == "kept"
+        assert bb.get_state_value("real") is None
 
 
-# ── unknown type: logged + dropped, no crash ─────────────────────
+# â”€â”€ unknown type: logged + dropped, no crash â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 class TestUnknownType:
@@ -159,7 +168,7 @@ class TestUnknownType:
         assert bb.get_state_value("k") is None
 
 
-# ── drain_to: end-to-end with a mocked Mailbox ──────────────────
+# â”€â”€ drain_to: end-to-end with a mocked Mailbox â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 class TestDrainTo:
@@ -181,10 +190,10 @@ class TestDrainTo:
             )
 
         assert applied == 2
-        assert bb.get_state_value(_RUNTIME_INJECTIONS_BB_KEY) == {
+        assert _injected_texts(bb) == {
             "fake::planner": ["first"],
         }
-        assert bb.get_state_value("cancelled") is True
+        assert bb.get_state_value("cancelled") is None
         mock_mailbox.drain.assert_called_once_with("inv-A")
 
     def test_empty_invocation_id_returns_zero(self, dispatcher, role_resolver):

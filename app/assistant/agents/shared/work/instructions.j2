@@ -1,0 +1,12 @@
+{% for entry in entries %}
+{% if entry.next_step == 'plan_changes' %}The step {{ entry.node_id }} ran and ACHIEVED its goal, but what came back changes the plan.
+{% elif entry.next_step == 'retry' %}The step {{ entry.node_id }} did NOT achieve its goal. The finalizer judged it worth another attempt, differently or later — it is back in your inbox as `proposed`. Keep it, change it, or replace it, and set its wake if the recommendation names a time.
+{% elif entry.next_step == 'stop' %}The step {{ entry.node_id }} did NOT achieve its goal, and this line of work should STOP. Prune the branch; if the outcome says the whole goal is moot, add nothing and say so in architect_summary for the steward.
+{% elif entry.next_step == 'new_approach' %}The step {{ entry.node_id }} did NOT achieve its goal, and this way of reaching it is wrong. Plan a genuinely different route; do not re-lay the same chain.
+{% elif entry.next_step == 'ask_user' %}The step {{ entry.node_id }} did NOT achieve its goal and needs the USER. Plan exactly ONE node whose goal is to ask them the question below, and make the rest depend on its answer. Do not plan any other attempt.
+{% else %}The step {{ entry.node_id }} needs your attention.
+{% endif %}{% if entry.get('escalated') %}THE RUNTIME ESCALATED THIS: repeated attempts have not achieved the goal, so the user is asked rather than the same thing tried again.
+{% endif %}{% if entry.get('outcome') %}OUTCOME (the finalizer, having read the full result): {{ entry.outcome }}
+{% endif %}{% if entry.get('recommendation') %}RECOMMENDATION: {{ entry.recommendation }}
+{% endif %}{% if entry.get('question_for_user') %}QUESTION FOR THE USER: {{ entry.question_for_user }}
+{% endif %}{% endfor %}

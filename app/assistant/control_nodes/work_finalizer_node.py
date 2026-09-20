@@ -4,18 +4,18 @@ that judgment to the graph. AUTHORITATIVE (step 3): it is the only thing that pr
 
 Part of the TOOL RETURN PATH, and fixed to ONE node: the tool caller has just recorded a result
 on the node this pass dispatched, and this judges that result. It is not a sweep. Nothing else is
-looked at, because nothing else can have changed — a run makes one call, and the graph moves only
-when a call returns.
+adjudicated. Its owned provenance is read to understand prior attempts and results.
+Other dispatch workers and planning passes can change the graph concurrently (see WO1).
 
 The node judged is always a TOP-LEVEL one (a direct child of the goal — the architect's units;
 the worker's nested checklist is its own business and never counts toward the goal). BOTH
 outcomes are judged: `done` (the call returned) and `failed` (it did not). Judging the failure
-is the point — the result text is the only account of the failure MODE, and the mode is what
+is the point — the returned result and owned provenance explain the failure MODE, which is what
 decides whether trying again could possibly go differently. The steward and the architect deal
 in top-level nodes; this is the one thing that reads what actually happened inside one.
 
 It invokes the work_finalizer adjudicator on {the WO projection + that node's FULL, un-truncated
-result} and applies the verdict it returns. The verdict answers ONE question — was the node's goal
+result + full directive + owned provenance} and applies the verdict it returns. The verdict answers ONE question — was the node's goal
 achieved — and the tool's own status (returned / reported failure) is input to that judgment, never a
 constraint on it:
 
@@ -78,7 +78,7 @@ _AWAITING_JUDGMENT = {"done", "failed"}
 _REPEAT_FAILURE_LIMIT = 2
 
 # What each verdict writes, as the SEQUENCE of statuses the node passes through. A not-achieved
-# verdict always passes through `failed` — that is the one chokepoint that counts an attempt —
+# verdict is counted once by the store judgment transaction, independently of tool status,
 # even when the call itself returned cleanly. `retry` then re-opens the node to the architect's
 # inbox; the architect may keep it, change it, or replace it, reading the recommendation.
 _STATUS_FOR = {
@@ -125,9 +125,13 @@ class WorkFinalizerNode(ControlNode):
         if str(getattr(wo, "status", "") or "").lower() in _TERMINAL_WO:
             return None
         node = wo.nodes.get(node_id)
-        if node is None or node.status not in _AWAITING_JUDGMENT:
+        if node is None or not wo.needs_finalization(node):
             return None
-        if node.id == wo.goal_node_id or node.parent_id != wo.goal_node_id:
+        expected = self.blackboard.get_state_value("dispatch_epoch", None)
+        epoch = int(node.payload.get("dispatch_epoch") or 0)
+        if (expected is not None and int(expected) != epoch) or node.payload.get("finalized_epoch") == epoch:
+            return None
+        if not wo.is_work_unit(node):
             # Only the architect's own units are judged. A worker's nested step is internal
             # to the call that grew it and never counts toward the goal.
             logger.info("[%s] %s is not a top-level node — nothing to judge.", self.name, ref)
@@ -135,33 +139,11 @@ class WorkFinalizerNode(ControlNode):
         return wo, node
 
     def _judge(self, wo, node, scope) -> dict:
-        from app.assistant.dayflow_orchestrator.work_portfolio import (
-            node_result, render_work_portfolio, STATUS_LEGEND,
-        )
-        projection = STATUS_LEGEND + "\n\n" + render_work_portfolio(wo)
-        # The node's RESULT is the evidence it produced — `content` is its (immutable) directive.
-        result_text = node_result(wo, node) or "(no result recorded)"
-        # The tool's status is stated as INPUT and nothing more. It must not name or narrow the
-        # verdicts: that is how a returned-but-empty call could only ever be judged a success.
-        if node.status == "failed":
-            tool_status = "the tool reported it could not run"
-        else:
-            tool_status = "the call returned"
-        outcome = (f"TOOL STATUS: {tool_status}. That is input, not the verdict — judge whether "
-                   f"the node's GOAL was achieved from the result below.")
-        # Repetition is the thing the finalizer cannot see from one result. The count lives on the
-        # GOAL so it survives the architect re-planning the step under a new node id.
-        goal = wo.nodes.get(wo.goal_node_id or "")
-        unmet = int(((goal.payload or {}) if goal is not None else {}).get("goal_unmet_attempts") or 0)
-        if unmet >= _REPEAT_FAILURE_LIMIT:
-            outcome += (
-                f"\n\n{unmet} ATTEMPTS HAVE NOT ACHIEVED THIS GOAL, under one node id or another. "
-                f"Another try of the same shape will not help. If this result is not achieved, the "
-                f"runtime will escalate it to ask the user whatever would unblock it — so put that "
-                f"question in `question_for_user` yourself, precisely.")
-        info = (f"JUST-COMPLETED NODE — id: {node.id} | title: {node.title}\n"
-                f"{outcome}\n"
-                f"ITS FULL RESULT:\n{result_text}")
+        from app.assistant.dayflow_orchestrator.work_portfolio import node_result, render_portfolio
+        from app.assistant.dayflow_orchestrator.work_context import render_view, worker_data
+        projection = render_portfolio([wo])
+        info = render_view("finalizer_input", view=worker_data(wo, node.id),
+                           result_text=node_result(wo, node), repeat_failure_limit=_REPEAT_FAILURE_LIMIT)
         agent = DI.agent_factory.create_agent("dayflow_orchestrator::work_finalizer")
         res = agent.action_handler(Message(task=projection, information=info, scope_context=scope))
         return getattr(res, "data", {}) or {}
@@ -186,52 +168,20 @@ class WorkFinalizerNode(ControlNode):
                          self.name, verdict, wo.id, node.id)
             return []
 
-        outcome = str(data.get("outcome") or "").strip()
-        recommendation = str(data.get("recommendation") or "").strip()
-        question = str(data.get("question_for_user") or "").strip()
-        route = _ROUTE_FOR.get(verdict) or str(data.get("next_step") or "").strip().lower()
-        sequence = list(_STATUS_FOR[verdict])
-        escalated = False
-
-        if sequence[0] == "failed":
-            # The store counts an attempt on ENTRY to failed; a node already there (the tool
-            # errored) was counted when it arrived, so this verdict adds nothing to the tally.
-            goal = wo.nodes.get(wo.goal_node_id or "")
-            attempts = (int(((goal.payload or {}) if goal is not None else {})
-                            .get("goal_unmet_attempts") or 0)
-                        + (0 if node.status == "failed" else 1))
-            if attempts >= _REPEAT_FAILURE_LIMIT and route != "ask_user":
-                escalated = True
-                route = "ask_user"
-                question = question or recommendation or outcome
-                sequence = ["failed"]          # never re-open: the same thing is not tried again
-                logger.warning("[%s] %s::%s — attempt %d did not achieve the goal; escalating to "
-                               "ask_user instead of %r", self.name, wo.id, node.id, attempts,
-                               data.get("next_step") or verdict)
-
-        payload = {"verdict": verdict, "outcome": outcome, "recommendation": recommendation,
-                   "next_step": route, "question_for_user": question, "escalated": escalated}
-
         from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
-        store = get_dayflow_work_store()
+        from work_objects.store import StaleResult
+        payload = {key: data.get(key, "") for key in ("outcome", "recommendation", "question_for_user")}
+        payload.update(verdict=verdict, next_step=_ROUTE_FOR.get(verdict) or data.get("next_step", ""))
         try:
-            store.apply("set_status", {
-                "work_id": wo.id, "node_id": node.id, "status": sequence[0],
-                "verdict": verdict,
-                "reason": outcome or "finalizer accepted the result",
-                "finalizer": payload,
+            updated = get_dayflow_work_store().apply("finalize_task", {
+                "work_id": wo.id, "node_id": node.id,
+                "expected_dispatch_epoch": int(node.payload.get("dispatch_epoch") or 0),
+                "finalizer": payload, "repeat_failure_limit": _REPEAT_FAILURE_LIMIT,
             }, actor="finalizer")
-            for status in sequence[1:]:
-                store.apply("set_status", {"work_id": wo.id, "node_id": node.id, "status": status},
-                            actor="finalizer")
-        except Exception as e:
-            logger.error("[%s] could not write verdict %r for %s::%s (sequence %s): %s",
-                         self.name, verdict, wo.id, node.id, sequence, e, exc_info=True)
-            raise
-
-        logger.info("[%s] %s::%s -> %s (%s%s)", self.name, wo.id, node.id, sequence[-1], verdict,
-                    f" -> {route}" if route else "")
-        return [{"work_id": wo.id, "node_id": node.id, "verdict": verdict, "next_step": route}]
+        except StaleResult:
+            return []
+        fin = updated.nodes[node.id].payload["finalizer"]
+        return [{"work_id": wo.id, "node_id": node.id, "verdict": verdict, "next_step": fin["next_step"]}]
 
     def _scope(self, message):
         scope = getattr(message, "scope_context", None)

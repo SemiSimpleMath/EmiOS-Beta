@@ -290,7 +290,7 @@ class PodStore:
         since: Optional[Union[datetime, str]] = None,
         since_utc: Optional[datetime] = None,
         query: Optional[str] = None,
-        limit: int = 50,
+        limit: int | None = 50,
     ) -> List[Pod]:
         """Fetch pods a consumer cares about.
 
@@ -318,14 +318,14 @@ class PodStore:
           insensitive). When provided, ranking promotes one_liner hits ahead
           of body-only hits, then orders by recency within each group.
         - ``limit``: max rows returned; ordered newest-first (or by query
-          relevance when ``query`` is provided).
+          relevance when ``query`` is provided). None scans the complete window.
         """
         resolved_since = since_utc
         if resolved_since is None and since is not None:
             resolved_since = _parse_since(since)
 
         needle = str(query or "").strip()
-        max_rows = max(1, int(limit or 50))
+        max_rows = None if limit is None else max(1, int(limit or 50))
 
         session = get_session()
         try:
@@ -400,7 +400,7 @@ class PodStore:
                 q = q.filter(or_(*all_filters))
                 # Wider pool so Python-side ranking has room to promote
                 # pods hitting more tokens above pods hitting fewer.
-                q = q.order_by(PodRow.created_at.desc()).limit(max_rows * 5)
+                q = q.order_by(PodRow.created_at.desc()).limit(None if max_rows is None else max_rows * 5)
                 rows = q.all()
 
                 def _score(row: PodRow) -> tuple:

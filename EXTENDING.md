@@ -53,8 +53,10 @@ will run daily at 06:00 in the morning window."
   windows, or pod-kind allowlists is hot-loaded — edit the JSON,
   next refresh tick or next event picks it up.
 - **Validation runs at startup.** Bad configs (missing fields, typo'd
-  references, unreachable agents) are surfaced with clear errors at
-  `Running agent registry validation...` early in the boot log.
+  agent references) are surfaced during `Running agent registry validation...`.
+  Unused-agent references warn; this is not graph reachability validation.
+  Manager construction performs additional routing-name checks. Build a new
+  manager and verify its loaded instances and routes; startup alone is insufficient.
 - **Auto-discovery, not central registries.** New routine handlers
   via `@routine_handler()` decorator. New skills via filesystem walk.
   No central dict to forget to update.

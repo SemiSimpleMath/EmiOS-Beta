@@ -19,14 +19,13 @@ max_cycles: 12
 # The contract (unchanged): NO re-planning, but ALWAYS re-judge the moment. The architect's decision
 # about what to do and roughly when is not reopened — but whether RIGHT NOW is a good moment is a
 # fresh judgment, because the world moved since the timer was set. The state_mover sees exactly
-# one candidate (the due node); a hold parks it and its reactivate_at re-arms the wake on its own.
+# one candidate (the due node); a hold persists its wake_at for the next planning tick to re-arm.
 #
 # The dispatch tail — switchboard -> work_node_dispatch_node -> post_room_finalize_node — is the
 # orchestrator's, verbatim. A change to that tail is a change here too.
 
 role_bindings:
   delegator: room::delegator
-  tool_selector: shared::tool_selector
 
 agents:
   - name: room::delegator

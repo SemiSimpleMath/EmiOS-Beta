@@ -5,7 +5,6 @@ display_name: "Webby"
 max_cycles: 120
 role_bindings:
   delegator: web::delegator
-  tool_selector: shared::tool_selector
   planner: web::planner
 
 agents:

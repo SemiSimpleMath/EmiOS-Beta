@@ -467,6 +467,38 @@ class RoomSessionManager:
             return str(inbound_msg.id or "") or None
         return None
 
+    def _maybe_trigger_context_engine(self, *, envelope, request_data):
+        """Start background context work after delivery, reusing scoped room history."""
+        if str(envelope.room_id or "").strip() != "master_room":
+            return
+        try:
+            from app.assistant.utils.subsystem_flags import is_subsystem_enabled
+            if not is_subsystem_enabled("context_engine"):
+                return
+            from app.assistant.context_engine.pipeline import maybe_trigger_pipeline
+            from app.assistant.kg_core.user_identity import get_primary_user_name
+            import json
+
+            user_message = str(envelope.content or "").strip()
+            if not user_message:
+                return
+            # Already filtered for room/mode visibility by _prepare_turn_context.
+            # Reuse the snapshot; no extra history query or model call on this path.
+            history = [{key: message.get(key) for key in
+                        ("timestamp", "sender", "role", "content", "room_id")}
+                       for message in request_data.get("seeded_chat_messages", [])]
+            triggered = maybe_trigger_pipeline(
+                user_message=user_message,
+                primary_user=get_primary_user_name(),
+                owner_id=envelope.room_id,
+                recent_chat_context=json.dumps(history, ensure_ascii=False, default=str),
+            )
+            logger.debug("context_engine trigger: triggered=%s owner_id=%r request_id=%s",
+                         triggered, envelope.room_id, envelope.request_id)
+        except Exception as e:
+            logger.error("context_engine trigger failed (non-fatal): %s", e)
+            logger.debug("context_engine trigger exception details", exc_info=True)
+
     def _prepare_turn_context(
             self,
             *,
@@ -835,31 +867,6 @@ class RoomSessionManager:
                 logger.error("Failed updating dayflow orchestrator block timer from master_room ingress: %s", e)
                 logger.debug("dayflow orchestrator block timer update exception details", exc_info=True)
 
-            try:
-                from app.assistant.utils.subsystem_flags import is_subsystem_enabled
-                if is_subsystem_enabled("context_engine"):
-                    from app.assistant.context_engine.pipeline import maybe_trigger_pipeline
-                    from app.assistant.kg_core.user_identity import get_primary_user_name
-
-                    primary_user = get_primary_user_name()
-                    owner_id = str(envelope.room_id or "").strip()
-                    user_message = str(envelope.content or "").strip()
-
-                    if user_message:
-                        triggered = maybe_trigger_pipeline(
-                            user_message=user_message,
-                            primary_user=primary_user,
-                            owner_id=owner_id,
-                        )
-                        logger.debug(
-                            "context_engine trigger: triggered=%s owner_id=%r request_id=%s",
-                            triggered,
-                            owner_id,
-                            envelope.request_id,
-                        )
-            except Exception as e:
-                logger.error("context_engine trigger failed (non-fatal): %s", e)
-                logger.debug("context_engine trigger exception details", exc_info=True)
 
         self._register_reply_route(envelope=envelope)
         inbound_message_id = self._persist_inbound_turn(
@@ -907,6 +914,7 @@ class RoomSessionManager:
                 reply_text=outbound_intent.reply_text,
                 should_send=bool(outbound_intent.send),
             )
+            self._maybe_trigger_context_engine(envelope=envelope, request_data=request_data)
             self._persist_outbound_turn(
                 adapter=adapter,
                 persist_unified_log=persist_unified_log,

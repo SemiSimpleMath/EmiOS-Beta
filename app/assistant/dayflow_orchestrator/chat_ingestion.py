@@ -98,7 +98,6 @@ def _load_chat_since(
     *,
     room_ids: list[str],
     since_utc: datetime,
-    sql_limit: int = 500,
 ) -> list[UnifiedLog2026]:
     if not room_ids:
         return []
@@ -108,14 +107,13 @@ def _load_chat_since(
             stmt = (
                 select(UnifiedLog2026)
                 .where(UnifiedLog2026.source.in_(list(_CHAT_SOURCES)))
-                .where(UnifiedLog2026.timestamp > since_utc)
+                .where(UnifiedLog2026.timestamp >= since_utc)
                 .where(or_(
                     UnifiedLog2026.direction == "inbound",
                     UnifiedLog2026.direction == "outbound",
                     UnifiedLog2026.direction.is_(None),
                 ))
                 .order_by(UnifiedLog2026.timestamp.asc())
-                .limit(max(int(sql_limit or 0), 1))
             )
 
             if len(room_ids) == 1:
@@ -124,7 +122,7 @@ def _load_chat_since(
                 stmt = stmt.where(UnifiedLog2026.room_id.in_(room_ids))
 
             rows = session.execute(stmt).scalars().all()
-            return [r for r in rows if not _is_ticket_noise(r) and not _is_non_normal_mode(r)]
+            return rows
     except Exception as e:
         logger.error("chat_ingestion: failed loading chat rows: %s", e)
         logger.debug("chat_ingestion load exception details", exc_info=True)
@@ -213,8 +211,9 @@ def ingest_cross_room_chat(
     """Load new cross-room chat and convert to dayflow items.
 
     Returns ``(messages, new_watermark)`` where *new_watermark* is the
-    timestamp of the newest ingested message (or ``None`` when nothing
-    was ingested).  The caller should persist the watermark after
+    timestamp of the newest examined row, including excluded noise (or
+    ``None`` when no rows exist). The boundary is inclusive; destination IDs
+    deduplicate repeated rows, so tied timestamps cannot lose messages.  The caller should persist the watermark after
     successfully persisting the messages.
     """
     now = now_utc or datetime.now(timezone.utc)
@@ -234,8 +233,9 @@ def ingest_cross_room_chat(
 
     for row in rows:
         try:
-            msg = _row_to_dayflow_message(row, now_utc=now)
-            messages.append(msg)
+            if not _is_ticket_noise(row) and not _is_non_normal_mode(row):
+                msg = _row_to_dayflow_message(row, now_utc=now)
+                messages.append(msg)
 
             row_ts = row.timestamp
             if row_ts is not None:
@@ -244,9 +244,9 @@ def ingest_cross_room_chat(
                 if newest_ts is None or row_ts > newest_ts:
                     newest_ts = row_ts
         except Exception as e:
-            logger.error("chat_ingestion: skipping row %s: %s", getattr(row, "id", "?"), e)
+            logger.error("chat_ingestion: failed converting row %s: %s", getattr(row, "id", "?"), e)
             logger.debug("chat_ingestion row conversion exception details", exc_info=True)
-            continue
+            raise
 
     logger.info(
         "chat_ingestion: converted %d/%d chat row(s) from rooms %s since %s.",

@@ -5,7 +5,6 @@ display_name: "Wire"
 max_cycles: 80  # match emi_team — auth + ask_user + multi-step API chains need headroom
 role_bindings:
   delegator: http_team::delegator
-  tool_selector: shared::tool_selector
   planner: http_team::planner
 
 agents:

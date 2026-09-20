@@ -8,31 +8,34 @@ Architecture rules (so this survives new node types without churn):
     switch helpers, but nothing constrains the column — a NEW node type or
     relation needs ZERO schema change.
 
-  * FIRST-CLASS COLUMNS for everything the engine queries / filters / joins
+  * Prefer FIRST-CLASS COLUMNS for fields the engine queries / filters / joins
     (the scheduler, the writer, the authority gate): status, wake_*,
     satisfied_when_*, authority, side_effect, requires_approval, deadline,
     parent_id, provenance. Discriminator:
         does the engine query it?  -> column
         does only an LLM read it?  -> `content` (NL) or `payload` (typed bag)
-    Type-specific fields (a Tool's args, a quality_bar's threshold, an Evidence
+    Current exceptions: payload also holds machine-read dispatch_epoch, finalizer,
+    failure counters and session_id. Type-specific fields (a Tool's args, an Evidence
     node's confidence) go in `payload` — that JSON is *natural* there, not awkward.
 
   * OWNERSHIP IS A TREE on `parent_id` — each node has <=1 parent, roots are
     NULL, the tree is acyclic. This single spine carries decomposition + the
-    authority/budget ceiling that flows DOWN. Edges are NEVER used for ownership
+    intended authority/budget ceiling. The store checks explicit authority against every ancestor ceiling; it does not enforce budgets. Edges are NEVER used for ownership
     (no dual representation, so the two can never drift).
 
-  * DEPENDENCY / KNOWLEDGE IS A DAG of EDGES (their own table), never JSON arrays
+  * DEPENDENCY / KNOWLEDGE uses EDGES (their own table), never JSON arrays
     on a node — the ready-set and dependents queries are the hot path and must be
     relational + indexed. depends_on / produces / verifies / answers / supports /
     supersedes / references are edges. A node owned ONCE (parent_id) can be reused
-    by MANY via edges (e.g. one Evidence node supports many).
+    by MANY via edges (e.g. one Evidence node supports many). Dependency acyclicity
+    is checked for new dependency writes, but historical validate() does not audit it.
 
-  * The append-only `events` log is the SOURCE OF TRUTH; `nodes`/`edges` are a
-    rebuildable projection. The validated writer (store.py, next) appends events
-    and updates the projection.
+  * The graph tables hold current state. The writer appends mutation inputs to
+    `events` in the same transaction; generated IDs are not fully recorded, and
+    there is no replay implementation. Rebuildability remains a design goal.
 
-  * ready / blocked / stale are DERIVED (computed below), never stored.
+  * ready / blocked queries are DERIVED below. `stale` is a stored knowledge
+    status; the WorkObject container also has a stored `blocked` status.
 
 If an engine-load-bearing field is later discovered, it's an additive
 `ALTER TABLE ... ADD COLUMN` (cheap), not a redesign.
@@ -56,7 +59,7 @@ NODE_TYPES_KNOWN = {
     "question",                                  # open loop
     "verification",                              # check
 }
-# DAG cross-links ONLY — ownership is not here (it's the parent_id tree).
+# Relationship cross-links ONLY (dependency cycles are not validated) — ownership is not here (it's the parent_id tree).
 EDGE_RELATIONS_KNOWN = {
     "depends_on", "produces", "answers", "verifies",
     "supersedes", "supports", "contradicts", "references",
@@ -79,10 +82,10 @@ WAKE_KINDS = {"time", "event", "user_reply", "signal"}
 # terminal: a worker-`done` node has only produced a RESULT — the finalizer must judge it and close it
 # before it counts toward the goal (the done->closed gate; see work_finalizer).
 _SATISFIED_STATUSES = {"closed", "verified", "passed", "answered"}
-# statuses past which a node will never become ready again
+# classified as terminal for queries; some can transition back to runnable states
 _TERMINAL_STATUSES = {"done", "closed", "failed", "abandoned", "superseded", "verified", "passed", "answered", "unanswerable"}
 # statuses from which the engine can still START work — is_ready promotes proposed/waiting/
-# actionable (wake arming reads the same set) and work_repair re-issues failed. A terminal
+# actionable (wake arming reads the same set); failed can be retried. A terminal
 # WorkObject must contain none: closing cascades them to abandoned (store._op_set_work_status /
 # _rollup) and validate() enforces the invariant, so a closed object can never fire again.
 _STARTABLE_STATUSES = {"proposed", "actionable", "waiting", "failed"}
@@ -118,8 +121,8 @@ class WorkNode(BaseModel):
     satisfied_when_ref: Optional[str] = None     # e.g. a verification node id
     side_effect: str = "read"                    # see SIDE_EFFECTS
     requires_approval: bool = False
-    authority: Optional[int] = None              # ceiling; None = inherit parent
-    # per-node budget is deferred (v1 enforces at root, in WorkObject.constraints).
+    authority: Optional[int] = None              # explicit ceiling; None is not resolved through ancestors here
+    # Budget enforcement is deferred; WorkObject.constraints stores metadata only.
     # when it lands it rides the SAME parent_id ceiling channel as authority and
     # becomes additive columns — the tree already leaves room; no node owns budget alone.
     deadline: Optional[datetime] = None
@@ -137,7 +140,7 @@ class WorkNode(BaseModel):
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
-    # --- open tiers: NL body + type-specific bag (NEVER engine-queried) ---
+    # --- open tiers: NL body + type-specific bag, including runtime metadata ---
     content: str = ""
     payload: dict[str, Any] = Field(default_factory=dict)
 
@@ -223,6 +226,27 @@ class WorkObject(BaseModel):
         return edge
 
     # ---- derived queries (nothing here is stored) ----
+    def is_work_unit(self, node: WorkNode) -> bool:
+        """Only a direct task child of the goal is an orchestrator assignment.
+
+        Descendants of an assigned task are worker-owned provenance, even when
+        their storage type is subtask. They are never independent dispatch candidates.
+        """
+        return bool(self.goal_node_id and node.type == "subtask"
+                    and node.parent_id == self.goal_node_id)
+
+    def provenance_for(self, node_id: str) -> list[WorkNode]:
+        """Owned execution records, in parent-before-child order, for worker takeover/judgment."""
+        records, seen = [], {node_id}
+        def visit(parent_id):
+            for record in self.nodes.values():
+                if record.parent_id == parent_id and record.id not in seen:
+                    seen.add(record.id)
+                    records.append(record)
+                    visit(record.id)
+        visit(node_id)
+        return records
+
     def deps_of(self, node_id: str) -> list[str]:
         """node ids this node depends_on."""
         return [e.src for e in self.edges if e.dst == node_id and e.relation == "depends_on"]
@@ -232,6 +256,8 @@ class WorkObject(BaseModel):
         return [n.id for n in self.nodes.values() if n.parent_id == node_id]
 
     def is_satisfied(self, node: WorkNode) -> bool:
+        if self.is_work_unit(node):
+            return node.status == "closed"  # Main tasks require finalizer judgment for every success kind.
         # A worker's OWN checklist child (parent != goal) is final at `done`: the
         # finalizer judges only TOP-LEVEL nodes, so `done` is the last state any
         # machine ever gives a child. Requiring `closed` of one made every
@@ -257,10 +283,34 @@ class WorkObject(BaseModel):
         # quality_bar -> deferred to v2; default -> a plain terminal-good status.
         return node.status in _SATISFIED_STATUSES
 
-    def is_ready(self, node: WorkNode, now: Optional[datetime] = None) -> bool:
+    def needs_finalization(self, node: WorkNode) -> bool:
+        """A recorded main-task result without a judgment for this dispatch incarnation."""
+        if not self.is_work_unit(node) or node.status not in {"done", "failed"}:
+            return False
+        epoch = int(node.payload.get("dispatch_epoch") or 0)
+        if node.payload.get("finalized_epoch") == epoch:
+            return False
+        finalizer = node.payload.get("finalizer")
+        if (isinstance(finalizer, dict) and finalizer.get("dispatch_epoch") is None
+                and "finalized_epoch" not in node.payload and node.payload.get("result_epoch") != epoch):
+            return False  # Already judged by an older version; never recount it on upgrade.
+        return True
+
+    def has_pending_revision(self) -> bool:
+        """A finalizer instruction must be applied before another main task starts."""
+        return any(isinstance(n.payload.get("finalizer"), dict)
+                   and n.payload["finalizer"].get("next_step")
+                   and not n.payload["finalizer"].get("consumed_at")
+                   for n in self.nodes.values() if self.is_work_unit(n))
+
+    def is_ready(self, node: WorkNode, now: Optional[datetime] = None, *, ignore_external_wake: bool = False) -> bool:
         # proposed/waiting = gate-checkable (state_mover reads this to decide promotion);
         # actionable = already state_mover-promoted but not yet dispatched — still "ready".
         if node.status not in {"proposed", "waiting", "actionable"}:
+            return False
+        if self.is_work_unit(node) and (self.status != "active" or self.has_pending_revision()):
+            return False
+        if node.wake_kind in {"event", "signal"} and not ignore_external_wake:
             return False
         now = now or utcnow()
         if node.wake_at is not None and node.wake_at > now:
@@ -350,7 +400,7 @@ CREATE TABLE IF NOT EXISTS nodes (
     created_at          TEXT,
     updated_at          TEXT,
     content             TEXT,
-    payload             TEXT             -- json: type-specific, LLM-read only
+    payload             TEXT             -- json: type-specific facts and runtime metadata
 );
 CREATE INDEX IF NOT EXISTS ix_nodes_work_status ON nodes(work_id, status);
 CREATE INDEX IF NOT EXISTS ix_nodes_wake        ON nodes(wake_kind, wake_at);
@@ -385,7 +435,7 @@ CREATE TABLE IF NOT EXISTS edges (
 CREATE INDEX IF NOT EXISTS ix_edges_dst ON edges(work_id, dst, relation);
 CREATE INDEX IF NOT EXISTS ix_edges_src ON edges(work_id, src, relation);
 
--- append-only source of truth; nodes/edges are the rebuildable projection
+-- mutation-input audit log; generated IDs are not fully recorded for replay
 CREATE TABLE IF NOT EXISTS events (
     seq     INTEGER PRIMARY KEY AUTOINCREMENT,
     work_id TEXT NOT NULL,

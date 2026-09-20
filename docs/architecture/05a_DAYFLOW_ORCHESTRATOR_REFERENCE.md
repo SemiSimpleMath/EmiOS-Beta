@@ -1,5 +1,36 @@
 # Dayflow Orchestrator — Module & Path Reference
 
+## Main tasks and worker provenance
+
+Only a `subtask` whose `parent_id` is the work object's goal is an orchestrator work
+unit (`WorkObject.is_work_unit`). Worker-created descendants are **provenance records**
+of execution within an assigned task: internal checklist state, delegated attempts,
+failures, findings and saved outputs. They share the existing graph storage types;
+that does not make them independently schedulable graph tasks. No schema migration
+or rewriting of existing records is required for this classification.
+
+- Promotion, materialization, timed/event wakes, dispatch/session entry, boot ask
+  reconnection and inactivity supervision exclude provenance as independent assignments.
+  Supervision still uses activity anywhere in the owned history to assess the main task.
+- A replacement worker sees the complete owned history, including nested results and
+  failures, so it can reuse prior work. Unfinished/dispatched provenance records describe
+  the last recorded attempt, not proof of a currently running independent job.
+- The finalizer reads the full main-task directive, its returned result and full owned
+  provenance. Its outcome summarizes what was tried, went wrong, succeeded and remains
+  unresolved, preserving useful saved-output references.
+- Architect/steward views show main tasks and finalizer summaries, not the worker's
+  internal record list or raw results. Missing summary is labeled awaiting finalizer
+  summary. Architect deltas cannot directly target or depend on provenance records.
+- Internal helper failures do not increment the whole goal's failed-attempt count.
+  Existing historical counts are preserved; this change does not repair past data.
+- `/work` labels these records provenance and excludes them from schedulable-task counts
+  and ready/blocked badges. The owner can still inspect the execution history.
+
+This boundary does not solve the separate claim/epoch/finalizer-recovery defects in
+LIVE 3, WO1 and DF4. Generic graph `is_ready` remains a local dependency/time predicate;
+orchestrator callers must also enforce `is_work_unit`.
+
+
 > Companion to `05_DAYFLOW.md`. This document details the **full functionality** of the
 > dayflow_orchestrator: a paragraph per agent module (with the control node that drives it),
 > the orchestration/tick flow, the two persistence lanes, and an enumeration of **every path**
@@ -62,10 +93,12 @@ the EventHub and pokes a tick on: `repo_update` for actionable content types (`e
 NON-poke follow-up so a sequential chain advances in minutes). Guarantees: a **single** APScheduler one-shot job
 (`JOB_ID = dayflow_scheduler_next_tick`, `replace_existing=True`) → at most one pending tick; `poke()`
 during a running tick stores the reason instead of scheduling; pokes are floored at
-`POKE_MIN_INTERVAL_SECONDS = 600` since the last finish, scheduled item-wakes use `MIN_GAP_SECONDS = 120`,
+`POKE_MIN_INTERVAL_SECONDS = 600` since the last planning finish, non-poke planning follow-ups use
+`MIN_GAP_SECONDS = 120`; precise node wakes share the run gate but do not use that timing floor,
 and a sooner already-scheduled run is never clobbered by a later one. `_execute_tick` gates on
-`setup_complete()` and on `unified_log_2026` being non-empty (no chat history → no tick, but it still
-arms a ceiling tick so the heartbeat cannot go dark), then holds `self._lock` + `self._running` and —
+`setup_complete()` and on `unified_log_2026` being non-empty. An unmet prerequisite returns before
+re-arming; a history-query exception explicitly schedules a ceiling tick. It then sets `self._running`
+under the short-lived `self._lock` and holds —
 since 2026-09-18 — **`self._run_gate` for the whole manager invocation**. That gate is shared with the
 wake lane, so a planning tick and a node wake never run at once. On the 3rd consecutive failure it
 surfaces one owner ticket. Its `finally` block **always** re-arms: `_arm_ceiling_tick`
@@ -515,8 +548,8 @@ leaving a window where the user could answer a node that did not yet say it was 
 **`work_session.open_session` / `_run_dispatch_room`** (`dayflow_orchestrator/work_session.py`) —
 the single dispatch host, where both branches became one shape. It refuses a node that is not
 already `dispatched` ("the dispatch gate claims a node before any tool is called") and one with no
-tool named. Then: register the session **first** (so a `dispatched` node with no session is
-definitively orphaned rather than racing its own registration), stamp `session_id` on the graph,
+tool named. Then: register the session before starting its thread (so ask recovery can see its owner),
+stamp `session_id` on the graph,
 and start a daemon thread that opens `dayflow_dispatch_manager` on the node with `delegate_to` +
 `work_node_ref` seeded on its blackboard — the room's entire input. Blocking there is the point. A
 crash inside the thread fails the node under its own `expected_dispatch_epoch`; the `finally` always
@@ -527,8 +560,11 @@ boot, driven from the TICKET side because the ticket is the durable record and c
 `trigger_context.work_node`. An ask is a tool call that can outlive its process. For each node still
 `dispatched` with no live session it either lands the answer the user already gave, lands "user not
 reached" if the window lapsed, or waits out the remainder on the ticket **already on screen** —
-never minting a second one. Without it the orphan sweep would fail those nodes and the question
-would be asked twice, discarding an answer given minutes earlier.
+never minting a second one. Both the already-settled and resumed-wait paths call
+`_record_and_finalize_ask_result`: the ordinary recorder saves the result, then the dispatch room's
+`WorkFinalizerNode` judges it with a fresh blackboard and the dayflow room's scope. A rejected stale
+result skips finalization. Planning is signaled after this handoff; it has no finalizer stage.
+Without recovery, the inactivity sweep could fail an ask whose answer was already saved.
 
 **`discharge_node` / `drive_work`** (`work_objects/discharge.py`) — the worker driver, for
 everything that is not a ticket. Note the module: the old `work_runtime.py` split, and
@@ -831,7 +867,8 @@ Two branches, chosen by the switchboard reading the node's GOAL:
 - **reach the user** → `create_dayflow_ticket`. The ticket is composed by `ticket_builder_manager` and
   tagged `trigger_context.work_node`; the call blocks for the ask window and **the user's reply returns
   as the call's RESULT**. The node stays `dispatched` throughout — no `waiting` park, no re-ask timer.
-  An unanswered ticket expiring is a timed-out tool call: the sweeper fails the node.
+  Expiry returns "user not reached" as a ToolResult; the recorder writes `done` and the finalizer
+  judges the outcome. The sweeper handles calls that remain `dispatched` past the inactivity limit.
 - **do the work** → `work_emi_team_manager` (an ordinary manager tool; the old `run_work_node` name is
   gone). The worker grows its own subtree under the node and its answer is recorded as an evidence child.
 
@@ -840,11 +877,12 @@ GOAL was achieved — `achieved` / `achieved_plan_changes` / `retry` / `unrecove
 with an `outcome` prose account persisted at `payload.finalizer`. It is the **sole** producer of `closed`,
 so it alone can complete a work object; `done` never does.
 
-**P5 — Failure handling (no repair stage).** A node reaches `failed` three ways: the finalizer judged it
-not-achieved, dispatch broke before it ran, or the sweeper failed a stuck/expired one. In every case the
-node carries the finalizer's verdict and route, and the **architect** acts on it next tick — keep/retry,
-plan a different approach, prune the branch, or plan the ONE node that asks the user. Repeated failure is
-the runtime's call, not the model's: at `_REPEAT_FAILURE_LIMIT` unmet attempts on the GOAL,
+**P5 — Failure handling (no repair stage).** A node reaches `failed` when its tool reports an error
+or returns nothing, the finalizer judges it not-achieved, dispatch/session execution crashes, or the
+sweeper finds a stuck call. The normal and recovered tool-return paths run the finalizer and persist
+its verdict and route; the architect acts on that instruction next tick. Direct claim/session/sweeper
+failures can have no verdict. The steward must flag those objects for a re-plan; finalization is not
+a background sweep. Repeated failure is the runtime's call, not the model's: at `_REPEAT_FAILURE_LIMIT` unmet attempts on the GOAL,
 `work_finalizer_node` forces `ask_user` and does not re-open the node. The store's failed-node fence
 refuses an architect write on a `failed` node unless that verdict (or a user directive) licenses it.
 
@@ -856,8 +894,8 @@ there are no item-lane dispatch records for finalize to reconcile.)
 
 The router **consumes** `triggered_work_node` (blanks it) so only this pass acts on the wake. Held
 (`waiting`) or gone → straight to the room's tail: a pass that dispatched nothing has nothing to
-judge, since the finalizer now lives in the dispatch room. A held node's own `reactivate_at` re-arms
-its wake.
+judge, since the finalizer now lives in the dispatch room. A held node persists a new `wake_at`;
+the next ordinary planning tick re-arms it. The wake pass itself currently performs no timer re-arm.
 
 > **Why the router fills `task`/`information` itself, and what happened when it did not.** The
 > switchboard routes on `task` + `information` — those are its `user_context_items`. On a normal tick

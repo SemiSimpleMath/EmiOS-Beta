@@ -4,9 +4,9 @@ work_objects.runtime — the bridge between the live tool runtime and a WorkObje
 The graph tools are registered as normal BaseTools, so the tool_caller invokes
 them like any tool: `execute(ToolMessage) -> ToolResult`. But a graph tool needs
 to know WHICH node it acts on and WHICH store to write — context the ToolMessage
-doesn't carry. The WorkManager sets that here right before it runs an agent on a
-node; the tool bodies read it. A contextvar (not a plain global) so parallel
-managers later get their own binding per thread/task.
+doesn't carry. Callers such as discharge_node set it before invoking a worker;
+the tool bodies read it. A contextvar isolates execution contexts; new threads
+must establish or explicitly copy their own binding.
 """
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
 # Control Nodes
 
-Control Nodes are deterministic (non-LLM) state machines that execute within the agent loop. They handle routing decisions, tool dispatch, data normalization, and exit logic.
+Control Nodes are Python orchestration steps that execute within the agent loop. They handle routing decisions, tool dispatch, data normalization, and exit logic. Their own routing can be deterministic while their implementation calls tools or LLM agents (for example, work architecture and finalization).
 
 ## Base Class
 
@@ -21,7 +21,7 @@ Route based on blackboard state:
   before the work-object cutover; there is no ticket branch here now — the switchboard decides.)
 - **`work_node_wake_prep_node.py`** — Head of `dayflow_wake_manager`: stages the one due node for the state_mover, or ends the pass if it is no longer ready
 - **`work_node_wake_router_node.py`** — After the state_mover in the wake pass: dispatch the node if left `actionable`, end the pass if held
-- **`tool_return_router.py`** — Routes tool results back to the calling agent
+- **`tool_return_router.py`** — Validates the result-handler source, saves the calling agent as `resume_target`, and leaves routing to `state_map`
 
 (Other room-specific routers follow the same shape:
 `kg_dev_chat_task_router_node.py`, `geoguessr_router_node.py`,
@@ -40,7 +40,7 @@ Route based on blackboard state:
   - Surface-specific subclasses route a single room's dispatch: `chat_tool_caller.py`,
     `master_room_tool_caller.py` (shared helpers in `_tool_caller_util.py`).
 
-- **`tool_result_handler.py`** — Processes tool results and pops call context
+- **`tool_result_handler.py`** — Records tool results in the current scope; its separate agent-return path pops the nested call context
 - **`tool_approve_node.py`** (`ToolApproveNode`) — Resolves a tool's approval gate
   before dispatch (raises the owner ticket / blocks on the decision)
 
@@ -59,8 +59,8 @@ Route based on blackboard state:
 ### Exit/Return Nodes
 
 - **`final_answer_node.py`** — Normalizes output and sets exit flag
-- **`graceful_exit_control_node.py`** — Handles clean exits
-- **`manager_exit_node.py`** — Multi-manager exit coordination
+- **`graceful_exit_control_node.py`** — Writes an abort report for error/budget exit routing
+- **`manager_exit_node.py`** — Materializes the current manager's final answer if needed and sets `exit`
 
 ### Dayflow / Work-Object Nodes
 
@@ -144,10 +144,19 @@ self.blackboard.update_state_value("error", True)
 
 ToolCaller is the most complex control node. It handles:
 
-1. **Tool execution**: Resolves tool from registry, builds scope context, executes
-2. **Agent-to-agent calls**: Pushes a new call context (scope) on the blackboard stack, invokes the target agent, then pops the scope when done
+1. **Tool execution**: Resolves tool from registry, validates inherited scope, executes
+2. **Agent-to-agent calls**: Pushes a call context, invokes the target agent synchronously, stores its returned payload, then calls `ToolResultHandler.action_handler`; that handler reads the child result before popping and records the response in the parent scope
 3. **MCP tools**: Dispatches to MCP server tools with namespace resolution
 4. **Approval flows**: Checks tool approval requirements from scope policy
+
+For a standard tool, ToolCaller stays in the current scope and directly calls
+`ToolResultHandler.process_tool_result_direct` with the returned ToolResult,
+including a blocked approval result. It does not schedule that handler with
+`next_agent`. An exception escaping execution instead sets manager error state.
+The normal result path clears `next_agent` and lets `state_map` route from the
+handler; clearance failures and install-approval routing are explicit exceptions.
+`ToolReturnRouter` records the eventual resume target so configured processing
+nodes can run before the caller resumes.
 
 ### Call Context Stack
 
@@ -163,6 +172,9 @@ blackboard.push_call_context(
 ```
 
 ## Example Flow Through Control Nodes
+
+Schematic routing example; each manager config chooses its concrete nodes.
+The shared ToolCaller/result-handler segment below shows direct result handling.
 
 ```
 chat_gate agent
@@ -187,11 +199,15 @@ ChatSwitchboardArgumentsNode / MasterRoomSwitchboardArgumentsNode
 ToolCaller
   -> resolves "get_weather" from tool registry
   -> executes tool with scope enforcement
-  -> sets next_agent = "tool_result_handler"
+  -> directly calls tool_result_handler.process_tool_result_direct(result)
 
 ToolResultHandler
   -> processes result
-  -> routes back to source agent or final_answer
+  -> records result in the current scope; sets last_agent to its own name
+  -> normally clears next_agent; the next Delegator pass uses state_map
+
+ToolReturnRouter (if configured on that path)
+  -> records resume_target; state_map chooses the next processing/resume node
 ```
 
 ## How to Add a New Control Node
@@ -215,8 +231,9 @@ ToolResultHandler
 5. Set `next_agent` to route explicitly (the Delegator honours it and returns early), or
    leave it `None` to let the manager's `state_map` decide.
 6. Declare the node in a manager's `control_nodes:` with `name:` + `class:`, and reference
-   that `name` in the `state_map`. A `state_map` value naming nothing configured is a
-   **boot-time `ValueError`**, not a runtime dead end.
+   that `name` in the `state_map`. At construction, values outside the configured
+   names plus role-binding keys/values raise `ValueError`. Also verify that aliases
+   resolve to loaded instances: the membership check does not prove that.
 
 Two conveniences from the base class worth using instead of re-inventing:
 
@@ -227,9 +244,10 @@ Two conveniences from the base class worth using instead of re-inventing:
 - **Returning to a caller**: `_pop_and_route_to_calling_agent()` pops the call-context
   triple `(calling_agent, called_agent, scope_id)` and routes back to the caller.
 
-Control nodes are **free** in the manager's budget: `max_cycles` counts LLM-agent
-activations only. A separate iteration backstop (`max_cycles * 8`, minimum 40) exists
-precisely to catch a control-node routing loop.
+A loop-selected `ControlNode` does not increment `max_cycles`; a loop-selected
+non-control agent does. Agents/tools called inside a node are outside that
+counter, so this is not a total LLM-call or wall-clock budget. A separate
+iteration backstop (`max_cycles * 8`, minimum 40) catches control-node loops.
 
 ## Key Files
 

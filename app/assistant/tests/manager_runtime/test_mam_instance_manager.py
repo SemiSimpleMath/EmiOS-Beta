@@ -1,4 +1,4 @@
-"""Tests for MAMInstanceManager — the runtime registry for MAM invocations.
+"""Tests for MAMInstanceManager â€” the runtime registry for MAM invocations.
 
 Covers the display-name assignment algorithm (collision + reset
 semantics), room-scoped lookups, base-name vs exact lookups, and
@@ -43,7 +43,7 @@ def _register(mam, *, base="Webby", room="master_room", manager_type="web_manage
     )
 
 
-# ── Display-name assignment ───────────────────────────────────────
+# â”€â”€ Display-name assignment â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 class TestDisplayNameAssignment:
@@ -66,7 +66,7 @@ class TestDisplayNameAssignment:
     def test_different_rooms_dont_collide(self, mam):
         a = _register(mam, base="Webby", room="master_room")
         b = _register(mam, base="Webby", room="slack::C123")
-        # Both plain Webby — different rooms, different namespaces.
+        # Both plain Webby â€” different rooms, different namespaces.
         assert a.display_name == "Webby"
         assert b.display_name == "Webby"
 
@@ -81,7 +81,7 @@ class TestDisplayNameAssignment:
         r2 = _register(mam, base="Webby", room="master_room")  # Webby_2
         mam.unregister(r1.invocation_id)
         mam.unregister(r2.invocation_id)
-        # Namespace is empty — next register starts fresh.
+        # Namespace is empty â€” next register starts fresh.
         r3 = _register(mam, base="Webby", room="master_room")
         assert r3.display_name == "Webby"
 
@@ -89,7 +89,7 @@ class TestDisplayNameAssignment:
         _register(mam, base="Webby", room="master_room")  # Webby
         r2 = _register(mam, base="Webby", room="master_room")  # Webby_2
         mam.unregister(r2.invocation_id)
-        # Webby still alive → next is _3 (no slot reuse mid-flight).
+        # Webby still alive â†’ next is _3 (no slot reuse mid-flight).
         r3 = _register(mam, base="Webby", room="master_room")
         assert r3.display_name == "Webby_3"
 
@@ -97,7 +97,7 @@ class TestDisplayNameAssignment:
         r1 = _register(mam, base="Webby", room="master_room")  # Webby
         _register(mam, base="Webby", room="master_room")  # Webby_2
         mam.unregister(r1.invocation_id)
-        # Only Webby_2 alive — but namespace is non-empty, so highest
+        # Only Webby_2 alive â€” but namespace is non-empty, so highest
         # known suffix is 2, next is _3 (no plain reuse).
         r3 = _register(mam, base="Webby", room="master_room")
         assert r3.display_name == "Webby_3"
@@ -109,7 +109,7 @@ class TestDisplayNameAssignment:
         assert b.display_name == "Webby_2"
 
 
-# ── Lookups ───────────────────────────────────────────────────────
+# â”€â”€ Lookups â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 class TestLookups:
@@ -132,7 +132,7 @@ class TestLookups:
 
     def test_find_by_display_name_respects_room_scope(self, mam):
         _register(mam, base="Webby", room="master_room")
-        # Looking up Webby in a different room → not found.
+        # Looking up Webby in a different room â†’ not found.
         assert mam.find_by_display_name("Webby", room_id="slack::C123") is None
 
     def test_find_by_base_returns_all_in_room(self, mam):
@@ -158,7 +158,7 @@ class TestLookups:
         assert len(slack) == 1 and slack[0].base_display_name == "Em"
 
 
-# ── Register / unregister bookkeeping ─────────────────────────────
+# â”€â”€ Register / unregister bookkeeping â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 class TestRegistration:
@@ -181,7 +181,7 @@ class TestRegistration:
         mam.unregister("nope")
 
 
-# ── Status payload (back-compat with old API shape) ───────────────
+# â”€â”€ Status payload (back-compat with old API shape) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 class TestStatusPayload:
@@ -202,7 +202,7 @@ class TestStatusPayload:
         assert row["base_display_name"] == "Webby"
 
 
-# ── Cancel ────────────────────────────────────────────────────────
+# â”€â”€ Cancel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 class TestCancel:
@@ -211,7 +211,7 @@ class TestCancel:
         r = _register(mam)
         ok = mam.cancel(r.invocation_id)
         assert ok is True
-        # Cancel writes the GLOBAL scope — a top-scope write is discarded
+        # Cancel writes the GLOBAL scope â€” a top-scope write is discarded
         # when a nested agent-call scope pops (2026-07-08 runtime audit B2).
         r.manager_instance.blackboard.update_global_state_value.assert_any_call(
             "cancelled", True,
@@ -221,7 +221,7 @@ class TestCancel:
         assert mam.cancel("nonexistent") is False
 
 
-# ── Unregister clears the invocation's mailbox queue ──────────────
+# â”€â”€ Unregister clears the invocation's mailbox queue â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 def test_unregister_clears_mailbox_queue(mam, monkeypatch):
@@ -240,5 +240,16 @@ def test_unregister_clears_mailbox_queue(mam, monkeypatch):
     assert mailbox.peek_count(r.invocation_id) == 1
 
     mam.unregister(r.invocation_id)
-    # Nobody can ever drain this queue again — it must not linger.
+    # Nobody can ever drain this queue again â€” it must not linger.
     assert mailbox.peek_count(r.invocation_id) == 0
+
+
+def test_post_after_unregister_cannot_recreate_mailbox(mam, monkeypatch):
+    from app.assistant.manager_runtime.mailbox import Mailbox
+    from app.assistant.ServiceLocator.service_locator import DI
+    mailbox = Mailbox()
+    monkeypatch.setattr(DI, "mailbox", mailbox, raising=False)
+    record = _register(mam)
+    mam.unregister(record.invocation_id)
+    assert not mailbox.post(invocation_id=record.invocation_id, message_type="agent_inject", payload={"planner": "too late"})
+    assert mailbox.peek_count(record.invocation_id) == 0

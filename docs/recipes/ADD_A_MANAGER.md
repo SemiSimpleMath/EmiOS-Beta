@@ -12,13 +12,14 @@ Read [02_MANAGERS.md](../architecture/02_MANAGERS.md) and [15_EMI_TEAM_AND_SCOPE
 | New general-purpose worker for a domain | **Derive from emi_team.** Reuse its delegator + summary; write your own planner + final_answer. |
 | New transactional / one-off pipeline | Don't write a manager. Write a **pipeline** ([Add a pipeline](ADD_A_PIPELINE.md)). |
 
-This recipe walks the **emi_team-derived** path because that's what 90% of new managers should be.
+This recipe walks the **emi_team-derived** worker path. Use the
+[manager extension skill](../../skills/extending-emi-managers/SKILL.md) for a
+smaller straight-through manager.
 
 ## File layout
 
 ```
 app/assistant/multi_agents/<my_manager_name>/
-  __init__.py
   config.yaml
 ```
 
@@ -36,6 +37,9 @@ app/assistant/agents/<namespace>/
     agent_form.py
 ```
 
+`ManagerRegistry.preload_all()` requires only `config.yaml`; `__init__.py` is
+optional. The directory name is the registry key used by `create_manager`.
+
 `<namespace>` is your domain — e.g., `kg_mutation`, `entertainment`, `devices`.
 
 ## `config.yaml` — the manager
@@ -47,7 +51,7 @@ name: my_domain_manager
 class_name: MultiAgentManager
 display_name: "Pancake"            # optional per-manager persona name
 description: One-line description of what this manager does.
-max_cycles: 80                     # default 30; budgets LLM-agent activations, not loop hops
+max_cycles: 80                     # default 30; loop-selected non-ControlNode activations
 
 # role_bindings alias roles to concrete agents. THE ENTRY AGENT IS THE
 # `delegator` binding — there is NO `entry_agent` field.
@@ -99,7 +103,7 @@ tool_visibility:
 # The scope layer — distinct from `tools:` above. This is the durable guard.
 scope_contract:
   tools:
-    allowed_tools:                 # the manager's own surface (a ceiling, narrows-only)
+    allowed_tools:                 # own surface; parent manager grants admit it
       - my_typed_tool
       - ask_user
     blocked_tools:                 # always unions DOWN to children
@@ -135,23 +139,28 @@ Three things the old shape got wrong and that you must get right:
 
 The `scope_contract` is critical, and its fields nest under `scope_contract.tools.*` and `scope_contract.writes.*` (not top-level `approval` / `resources` blocks). Two rules to internalize:
 
-1. **It can only narrow.** If the inbound Message says `write_kg: false` and your contract says `write_kg: true`, `ScopeAdapter` rejects with "scope_contract attempted to expand writes.write_kg from false to true" (`manager_runtime/services/scope_adapter.py`). Fix: have the *caller* seed the inbound Message's scope with the right permissions. The kg_investigator's `scope.yaml` (its `_investigation_scope` / `_mutation_scope`) is the reference pattern for a caller that grants `write_kg`.
+1. **Authority and write rights cannot expand.** If the inbound Message says `write_kg: false` and your contract says `write_kg: true`, `ScopeAdapter` rejects with "scope_contract attempted to expand writes.write_kg from false to true" (`manager_runtime/services/scope_adapter.py`). Fix: have the *caller* seed the inbound Message's scope with the right permissions. The kg_investigator's `scope.yaml` (its `_investigation_scope` / `_mutation_scope`) is the reference pattern for a caller that grants `write_kg`.
 
-2. **`blocked_tools` unions down and `requires_approval_tools` is additive-narrowing only.** A manager can add denials and approval gates but never lift them.
+2. **Tool grants are resolved at the receiving manager.** Parent `["all"]` or
+a grant naming this manager admits its declared tool surface; other parent
+allow-lists intersect with it. `blocked_tools` and `requires_approval_tools`
+accumulate, and `scope.tools.per_manager` can restrict the result further.
 
 ## Write your planner
 
-The planner picks the next action. Most derived managers' planners are `Agent` (not `Planner`) because the domain-specific logic doesn't need the plan-validation overhead.
+The planner picks the next action. The referenced `kg_mutation::planner` uses
+`Planner`; keep its agent config consistent when copying this worker flow.
+AgentLoader resolves standard-agent classes from the agent registry, so a
+manager entry alone does not override the class. A plain `Agent` flow must
+provide its own tool-argument preparation before ToolCaller.
 
 ```yaml
 # app/assistant/agents/my_domain/planner/config.yaml
 name: my_domain::planner
-class_name: Agent
+class_name: Planner
 
-llm_params:
-  llm_provider: openai
-  engine: gpt-5.1
-  model_tier: smart
+# Copy llm_params from the current source agent, then select the intended
+# provider/engine pair. Keep model names out of this recipe.
 
 allowed_tools:
   - my_typed_tool
@@ -181,7 +190,17 @@ action_required: true
 
 ## Write your final_answer
 
-The final_answer compiles the manager's terminal report. Critical: it carries the **standard envelope** so `manager_exit_node` can extract a result for the caller.
+The final_answer compiles the manager's terminal report. The standard envelope
+lets `manager_exit_node` extract a human answer. Domain-only structured output
+is also supported through terminal-agent capture when no final-answer fields
+are populated.
+
+**Current limit:** when populated `final_answer_*` fields win, the exit node
+constructs its payload from those fields plus carry-through data. Sibling
+domain fields such as `outcome` below are not automatically included, even in
+`final_answer_raw`. Put required machine-readable details in the declared
+`final_answer_data_list`, or use a domain-only terminal form and verify the
+returned payload. Preserving mixed-form fields is a deferred runtime finding.
 
 ```python
 # app/assistant/agents/my_domain/final_answer/agent_form.py
@@ -225,12 +244,16 @@ Critically: **never use `List[dict]`** in a final_answer form. OpenAI rejects wi
 
 A manager doesn't fire on its own — something has to call it. Two patterns:
 
-**Pattern A: another manager's `tool_caller` invokes you as an agent.**
-```yaml
-# in a parent manager's config.yaml
-allowed_nodes: [my_domain_manager, ...]
-```
-Then the parent's planner emits `action: my_domain_manager` and `tool_caller` invokes you.
+**Pattern A: expose the manager through a registered tool wrapper.**
+
+Follow the static wrapper shape in
+`app/assistant/lib/tools/work_emi_team_manager/work_emi_team_manager.py`: a
+`BaseTool` owns `ManagerInterface("<manager_directory>")` and delegates
+`execute(tool_message)` to it. Supply the tool contract/registration files
+described in [Add a tool](ADD_A_TOOL.md). Add the wrapper's name to the parent
+manager's `tools.allowed_tools` and its effective scope/planner tool policy.
+The parent emits that tool name as `action`. Merely naming a manager in
+`allowed_nodes` does not register a tool or instantiate an agent.
 
 **Pattern B: a Python entry point invokes you directly.**
 ```python
@@ -260,17 +283,20 @@ The scope_context here grants the permissions the manager needs. The narrowing r
 
 ## Verify
 
-```bash
+```powershell
 .venv\Scripts\python.exe -c "
 import app.assistant.tests.test_setup
 from app.assistant.ServiceLocator.service_locator import DI
 mgr = DI.multi_agent_manager_factory.create_manager('my_domain_manager')
 print('manager loaded:', mgr.name)
-print('agents:', [a for a in mgr.agents])
+print('agents:', [name for name, instance in mgr.agent_registry.agents.items() if instance is not None])
 "
 ```
 
-If a state_map references a missing agent or control node, the validator surfaces it on app startup.
+Construction checks routing-name membership. It does not prove that aliases
+resolve to instantiated agents or that every possible return-control signal
+has an edge. Inspect the loaded instances and exercise normal, tool-return,
+and error/cancel routes. Always create a fresh manager for each invocation.
 
 ## Common pitfalls
 
@@ -278,10 +304,10 @@ If a state_map references a missing agent or control node, the validator surface
 - **`agents` or `control_nodes` written as bare strings.** Both are `{name, class}` lists. And `control_nodes` is required — a config with none fails validation.
 - **Looked for an `entry_agent` field.** There isn't one. The entry agent is the `role_bindings.delegator` binding.
 - **Forgot to seed write_kg in the caller's scope.** Manager rejects with "scope_contract attempted to expand writes.write_kg from false to true". Fix the caller, not the manager.
-- **Reused `emi_team::final_answer` instead of writing your own.** Works but you lose the per-domain structured outcome. Write your own; carry the envelope.
+- **Expected arbitrary sibling fields in a final-answer form to survive.** Verify the returned payload; populated envelope fields currently bypass terminal-agent capture of sibling domain fields.
 - **state_map references control nodes by wrong name.** `tool_caller` is correct (singular), not `tool_caller_node`.
 - **Manager runs forever.** Either `max_cycles` is too high, or your planner never returns `return_control`. Check the planner's loop-exit conditions.
-- **Specialized planner uses `class_name: Planner`.** Usually wrong — `Planner` adds plan-validation that conflicts with most decision-rule planners. Use `class_name: Agent`.
+- **Changed only the manager entry's agent class.** Standard-agent loading uses the named registry definition; keep the agent's own `class_name` and its flow requirements consistent.
 
 ## See also
 

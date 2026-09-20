@@ -1,11 +1,13 @@
 # WorkObject Execution Architecture — Worker Versions of the Live Stack
 
-**Status:** design of 2026-06-18; partially shipped. The **inner loop (§4–5b) is LIVE** as
+**Status:** historical design of 2026-06-18; partially shipped. Current behavior and
+persistence limits are documented in `docs/architecture/08_WORK_OBJECTS.md`; the
+class sketches and guarantees below are design intent, not an implementation contract. The **inner loop (§4–5b) is LIVE** as
 `work_emi_team_manager` (render node + `WorkPlanner` reconcile hook). The **outer loop (§6–6b,
 the `WorkOrchestrator`) was superseded** by the dayflow orchestrator pipeline — evaluator →
 finalizer → architect → repair → state_mover promotion → materializer/switchboard dispatch —
-see `docs/architecture/05_DAYFLOW.md`. The **WorkObject data model + taxonomy in `README.md`
-is unchanged and still authoritative** — this doc only changes *how work is executed over it*.
+see `docs/architecture/05_DAYFLOW.md`. The rationale in `README.md` is retained as history; `model.py` and `store.py`
+are the source of truth for the implemented data model and validation.
 
 ---
 

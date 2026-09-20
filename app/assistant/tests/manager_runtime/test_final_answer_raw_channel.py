@@ -48,7 +48,7 @@ class TestManagerExitNodeRawCapture:
 
     def test_explicit_result_wins_when_writer_produced_the_last_output(self):
         # Planner return_control straight to exit: the planner wrote `result`
-        # AND is the latest agent_result — its payload is the answer.
+        # AND is the latest agent_result â€” its payload is the answer.
         bb = Blackboard()
         bb.add_msg(Message(data_type="agent_result", sender="team::planner", data={"result": PLAN}))
         bb.update_state_value("result", PLAN)
@@ -73,7 +73,7 @@ class TestManagerExitNodeRawCapture:
         assert bb.get_state_value("final_answer_raw") == PLAN
 
     def test_tool_envelope_result_stays_without_writer_stamp(self):
-        # tool_result_handler writes `result` without a writer stamp — the
+        # tool_result_handler writes `result` without a writer stamp â€” the
         # envelope keeps winning (pre-existing tool-exit flows unchanged).
         bb = Blackboard()
         bb.add_msg(Message(data_type="agent_result", sender="team::planner", data={"action": "some_tool"}))
@@ -114,3 +114,20 @@ def test_normalizer_never_lifts_final_answer_raw_into_data_list():
     normalized = FinalAnswerNormalizer.normalize({"answer": "hi", "final_answer_raw": PLAN})
     lifted_keys = {d.get("key") for d in normalized["final_answer_data_list"]}
     assert "final_answer_raw" not in lifted_keys
+
+
+import pytest
+from app.assistant.control_nodes.final_answer_node import FinalAnswerNode
+
+@pytest.mark.parametrize("node_type", [ManagerExitNode, FinalAnswerNode])
+def test_mixed_terminal_form_retains_domain_siblings(node_type):
+    bb = Blackboard()
+    bb.add_msg(Message(data_type="agent_result", sender="earlier", data={"outcome": "stale"}))
+    current = {"final_answer_answer": "Completed mutation", "outcome": "applied", "revision_log_id": "revision-7"}
+    bb.add_msg(Message(data_type="agent_result", sender="terminal", data=current))
+    for key, value in current.items():
+        bb.update_state_value(key, value)
+    node_type("exit", bb, None, None).action_handler(Message())
+    raw = bb.get_state_value("final_answer_raw")
+    assert raw["outcome"] == "applied"
+    assert raw["revision_log_id"] == "revision-7"

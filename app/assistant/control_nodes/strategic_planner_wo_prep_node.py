@@ -10,6 +10,7 @@ auto-resolved by the context injector and needs no building here.
 Inert until the dayflow manager's state_map routes to it.
 """
 from app.assistant.control_nodes.control_node import ControlNode
+from app.assistant.dayflow_orchestrator.work_context import render_view
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -76,22 +77,13 @@ def _resolve_ticket_provenance(ticket_id: str, ticket_manager, status_by_id) -> 
     """Chase a schedule entry's verbatim ticket id to the originating work object:
     ticket -> trigger_context.work_node -> work object -> current status, plus the
     user's recorded response. Pure lookups on edges recorded at write time."""
-    if not ticket_id:
-        return "source ticket id empty — unresolved"
-    ticket = ticket_manager.get_ticket_by_id(ticket_id)
-    if ticket is None:
-        return f"source ticket:{ticket_id} unresolved"
-    trigger_context = getattr(ticket, "trigger_context", None)
-    ref = str(trigger_context.get("work_node") or "") if isinstance(trigger_context, dict) else ""
-    if "::" in ref:
-        work_id = ref.split("::", 1)[0]
-        out = f"outcome of {work_id} — {status_by_id.get(work_id, 'unresolved')}"
-    else:
-        out = f"from ticket {ticket_id}"
-    action = str(getattr(ticket, "user_action", "") or "").strip()
-    if action:
-        out += f"; user {action}"
-    return out
+    ticket = ticket_manager.get_ticket_by_id(ticket_id) if ticket_id else None
+    trigger = getattr(ticket, "trigger_context", None) or {}
+    ref = str(trigger.get("work_node") or "") if isinstance(trigger, dict) else ""
+    work_id = ref.split("::", 1)[0] if "::" in ref else ""
+    return render_view("ticket_provenance", ticket_id=ticket_id, found=ticket is not None,
+                       work_id=work_id, status=status_by_id.get(work_id, "unresolved"),
+                       action=str(getattr(ticket, "user_action", "") or "").strip())
 
 
 def _goal_epitaph(wo) -> str:
@@ -118,32 +110,14 @@ def _abandoned_line(summary, wo) -> str:
     title = str(summary.get("title") or "").strip()
     when = parse_iso_utc(str(summary.get("updated_at") or ""))
     when_s = utc_to_local(when).strftime("%a %I:%M %p") if when else ""
-    line = f"- {title}" + (f"  (dropped {when_s})" if when_s else "")
-    if wo is None:
-        return line
     nodes = getattr(wo, "nodes", {}) or {}
-    # The RECORDED EPITAPH (goal node's terminal reason) is the load-bearing WHY —
-    # it is where "user declined — DO NOT RECREATE" actually lives, and it renders
-    # FULL (owner ruling: never truncate decision input in prompts).
-    epitaph = _goal_epitaph(wo)
-    if epitaph:
-        line += f"\n  recorded reason: {epitaph}"
-    replies = [
-        n for n in nodes.values()
-        if getattr(n, "type", "") == "evidence"
-        and getattr(n, "created_by", "") == "reply"
-        and (getattr(n, "content", "") or "").strip()
-    ]
-    if replies:
-        # Nodes rebuild in event order — the last reply is the newest, the
-        # user's final word on this goal.
-        text = (replies[-1].content or "").strip().replace("\n", " ")
-        line += f"\n  the user's last word on it: \"{text}\""
-    goal = nodes.get(getattr(wo, "goal_node_id", "") or "")
-    goal_content = (getattr(goal, "content", "") or "").strip().replace("\n", " ") if goal else ""
-    if goal_content and goal_content.lower() != title.lower():
-        line += f"\n  final note on the goal: {goal_content}"
-    return line
+    goal = nodes.get(getattr(wo, "goal_node_id", ""))
+    note = str(getattr(goal, "content", "") or "").strip()
+    item = {"title": title, "when": when_s, "reason": _goal_epitaph(wo),
+            "finalizers": [task.payload["finalizer"] for task in nodes.values()
+                           if wo.is_work_unit(task) and task.payload.get("finalizer")],
+            "goal_note": note if note.lower() != title.lower() else ""}
+    return render_view("recent_work", items=[item], dropped=True, window_hours=18).strip()
 
 
 def _build_recent_dispatch_results(all_items, now_utc, *, max_age_hours=6, limit=10):
@@ -194,6 +168,16 @@ class StrategicPlannerWoPrepNode(ControlNode):
     def action_handler(self, message):
         self.blackboard.update_state_value("next_agent", None)
 
+        from app.assistant.dayflow_orchestrator.state_store import load_admitted_intake
+        from app.assistant.dayflow_orchestrator.contracts import get_meta
+        inbox = {}
+        for item in [*load_admitted_intake(), *(self.blackboard.get_state_value("admitted_artifacts", []) or [])]:
+            item_id = str(get_meta(item).get("item_id") or item.get("id") or "")
+            if item_id:
+                inbox[item_id] = item
+        self.blackboard.update_state_value("admitted_artifacts", list(inbox.values()))
+        self.blackboard.update_state_value("admitted_artifacts_count", len(inbox))
+
         # 1) The portfolio (active work objects) + the DONE-LOG (recently completed/abandoned) — the
         #    evaluator's primary inputs. The done-log is its memory so it does NOT recreate work it just
         #    finished (especially recurring routine automations that re-appear in the routine each tick).
@@ -215,6 +199,10 @@ class StrategicPlannerWoPrepNode(ControlNode):
         from app.assistant.dayflow_orchestrator.work_portfolio import render_portfolio
 
         store = get_dayflow_work_store()
+        from app.assistant.dayflow_orchestrator.work_intake import reconcile_transferred_intake
+        remaining = reconcile_transferred_intake(store, list(inbox.values()))
+        self.blackboard.update_state_value("admitted_artifacts", remaining)
+        self.blackboard.update_state_value("admitted_artifacts_count", len(remaining))
         summaries = store.list_work_objects()   # newest-updated first; raises if unreadable
 
         active, unreadable = [], []
@@ -232,12 +220,7 @@ class StrategicPlannerWoPrepNode(ControlNode):
 
         portfolio = render_portfolio(active)
         if unreadable:
-            portfolio = (
-                f"!! INCOMPLETE VIEW — {len(unreadable)} active work object(s) could not be "
-                f"read ({', '.join(unreadable)}). Work exists that is NOT listed below. Do "
-                f"NOT conclude that an objective is uncovered; prefer changing or re-planning "
-                f"existing work over creating any new work this cycle.\n\n" + portfolio
-            )
+            portfolio = render_view("incomplete_portfolio", unreadable=unreadable, portfolio=portfolio)
         recent_completed, recent_abandoned = self._render_recent_completed(summaries, store)
         self.blackboard.update_state_value("work_portfolio", portfolio)
         self.blackboard.update_state_value("recent_completed_work", recent_completed)
@@ -289,10 +272,10 @@ class StrategicPlannerWoPrepNode(ControlNode):
                                  self.name, s.get("id"), e)
             if status == "done":
                 epitaph = _goal_epitaph(wo) if wo is not None else ""
-                done.append(f"- {title}" + (f"\n  ended: {epitaph}" if epitaph else ""))
+                done.append({"title": title, "reason": epitaph, "when": "", "finalizers": [], "goal_note": ""})
             elif status == "abandoned":
                 abandoned.append(_abandoned_line(s, wo))
-        done_str = "\n".join(done) if done else f"(nothing completed in the last {window_hours}h)"
+        done_str = render_view("recent_work", items=done, dropped=False, window_hours=window_hours).strip()
         abandoned_str = "\n".join(abandoned) if abandoned else ""
         return done_str, abandoned_str
 

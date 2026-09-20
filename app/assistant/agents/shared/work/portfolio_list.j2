@@ -1,0 +1,4 @@
+{% include 'shared/work/legend.j2' %}
+{% for work in works %}{% include 'shared/work/portfolio.j2' %}
+{% else %}(no active work objects)
+{% endfor %}

@@ -45,6 +45,7 @@ def dayflow_orchestrator_cadence_tick(
     raw_blocked = status.get("blocked_until_utc")
     blocked_until_utc = parse_iso_utc_strict(raw_blocked, label="blocked_until_utc") if raw_blocked else None
     if blocked_until_utc is not None and now_utc < blocked_until_utc:
+        status = {}
         status["last_skip_reason"] = "blocked_by_master_room_timer"
         status["last_skip_at_utc"] = now_utc.isoformat()
         status["last_routine_id"] = routine_id
@@ -84,6 +85,8 @@ def dayflow_orchestrator_cadence_tick(
     # this tick's architect sees the casualties. (Their verdict comes from the work_finalizer in the
     # dispatch room; work_repair, named here originally, retired on 2026-09-16.)
     sweep_stuck_work_nodes(now_utc=now_utc)
+    from app.assistant.dayflow_orchestrator.work_session import recover_pending_finalizations
+    recover_pending_finalizations()
 
     # Build minimal extras (day_of_week). Per-agent prep nodes own the rest.
     blackboard_extras = build_dayflow_blackboard_extras()
@@ -123,7 +126,10 @@ def dayflow_orchestrator_cadence_tick(
     try:
         manager = DI.multi_agent_manager_factory.create_manager("dayflow_orchestrator_manager")
         result = DI.manager_invoker.invoke(manager, msg)
-        status["last_room_request_id"] = request_id
+        from work_objects.result_recorder import _is_failure, _answer_text
+        if _is_failure(result):
+            raise RuntimeError(_answer_text(result) or "Dayflow planning manager aborted")
+        status = {"last_room_request_id": request_id}
     except Exception as e:
         logger.error("dayflow_orchestrator_cadence_tick: manager invocation failed: %s", e)
         logger.debug("cadence tick exception details", exc_info=True)

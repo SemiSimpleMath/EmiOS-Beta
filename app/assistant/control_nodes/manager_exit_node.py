@@ -28,7 +28,7 @@ class ManagerExitNode(ControlNode):
                 # have a real final answer — else a pod-bearing dispatch with no final_answer_* set
                 # would discard the dispatched manager's `result` answer text.
                 has_state_final = any(v not in (None, "", [], {}) for v in final_fields.values())
-                source_payload = final_fields if has_state_final else self.blackboard.get_state_value("result")
+                source_payload = FinalAnswerNormalizer.full_terminal_payload(final_fields, self.blackboard) if has_state_final else self.blackboard.get_state_value("result")
                 if not has_state_final:
                     # Terminal-agent capture: when the flow's LAST hop is a
                     # form-driven agent (no action, so nothing routed its

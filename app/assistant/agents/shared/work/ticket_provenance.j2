@@ -1,0 +1,4 @@
+{%- if not ticket_id -%}source ticket id empty — unresolved
+{%- elif not found -%}source ticket:{{ ticket_id }} unresolved
+{%- else -%}{% if work_id %}outcome of {{ work_id }} — {{ status }}{% else %}from ticket {{ ticket_id }}{% endif %}{% if action %}; user {{ action }}{% endif %}
+{%- endif -%}

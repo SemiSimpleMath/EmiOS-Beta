@@ -61,6 +61,16 @@ import app.assistant.tests.test_setup  # noqa: F401
 from app.assistant.ServiceLocator.service_locator import DI
 ```
 
+## Recording bugs found during other work
+
+Record every bug encountered while reading, documenting, or changing code in
+`docs/design/bug_list_2026-09-18.md`, even when fixing it is outside the current task.
+Check existing entries first; extend them rather than duplicating a finding. Include
+actual versus intended behavior, affected functions, evidence, consequence, and status.
+Label suspected issues and unresolved design decisions explicitly; do not present them
+as confirmed defects. Preserve the finding when it is fixed and update its status.
+Recording a bug does not expand a documentation-only task into a runtime repair.
+
 ## Architecture
 
 EmiOS is a local-first personal AI assistant: Flask + SQLite + ChromaDB with 65+ LLM agents, knowledge graph memory, and multi-transport communication (UI/WebSocket, SMS, Slack, Telegram).
@@ -94,7 +104,9 @@ Context items in `config.yaml` (`user_context_items`) are resolved by the contex
 
 Managers live in `app/assistant/multi_agents/<name>/config.yaml`. Every manager (rooms included) is `class_name: MultiAgentManager`; routing is deterministic via the `Delegator` agent's `flow_config.state_map` lookup. Managers are invoked via `DI.manager_invoker.invoke(manager, message)`, one fresh instance per invocation.
 
-`request_handler` copies the inbound message's `data` onto the blackboard once; the activation Message a control node receives carries none of it — read trigger data from the **blackboard**, never `message.data`. A `state_map` value naming nothing configured raises at manager construction.
+`request_handler` copies the inbound message's `data` onto the blackboard once; the activation Message a control node receives carries none of it — read trigger data from the **blackboard**, never `message.data`. Construction rejects `state_map` targets outside configured names plus role-binding keys/values; it does not prove that every alias resolves to a loaded instance or that every emitted return-control edge exists. Check those explicitly.
+
+Runtime-owned key conventions and the actual agent-output/input filter are documented in `docs/architecture/02b_RUNTIME_DATA_CONTRACT.md`. Use `docs/architecture/02_MANAGERS.md` for cancellation, scope ingress, budgets, and exit results; `final_answer` alone is not proof of success because the default error fallback uses that type too.
 
 ### Dependency Injection
 
@@ -102,21 +114,29 @@ Global service registry: `DI` from `app/assistant/ServiceLocator/service_locator
 
 ### Dayflow Orchestrator
 
+**Task/provenance boundary:** only direct `subtask` children of the goal are independent
+orchestrator assignments (`WorkObject.is_work_unit`). Worker-created descendants are
+execution provenance, never candidates for promotion, wake or dispatch. A takeover
+worker and the finalizer read their full history; architect/steward read the finalizer's
+summary. Preserve provenance on takeover; do not add parent-completion dependencies
+or turn internal records into additional graph tasks. See architecture/08_WORK_OBJECTS.
+
+
 Autonomous daily workflow engine (`app/assistant/dayflow_orchestrator/`). Event-driven via `DayflowScheduler` (debounced, mutual exclusion, precise per-node time wakes, work-progress follow-up ticks). Full doc: `docs/architecture/05_DAYFLOW.md`.
 
-**Everything actionable is a WORK OBJECT**: a goal plus a small DAG of nodes in the work store (`work_objects/` substrate; five tables in emi.db via `work_store.py`; validated writer with per-family transitions, and every terminal write requires a reason).
+**Everything actionable is a WORK OBJECT**: a goal plus a typed graph in the work store (`work_objects/`; five core tables in emi.db via `work_store.py`, plus migration metadata). Ownership cycles are checked; new dependency edges reject cycles, self-links and duplicates. Historical graph validation does not repair old dependency defects. Each `apply` atomically writes current graph state and a mutation-input audit event; the log is not replay-complete. Changed `set_status` targets use per-family transitions; entering `closed`/`abandoned`/`superseded` requires a reason, as does terminal `set_work_status`. Initial node statuses must belong to the lifecycle; same-status writes do not replay transition checks. See `docs/architecture/08_WORK_OBJECTS.md` for persistence and result-fence limits.
 
 **Three managers, one pass at a time** — a planning tick and a node wake both hold `DayflowScheduler._run_gate`:
 
-- **`dayflow_orchestrator_manager`** — the planning tick (state_map in `multi_agents/dayflow_orchestrator_manager/config.yaml`): intake_triage → context_enricher → evaluator (`strategic_planner_wo`: decides WHAT work exists, converts intake to work objects) → work_architect (per-goal DAG + re-plan; wake primitives `wake_at` | `wake_ref`; a replan prunes queued/`actionable` or future-wake-held nodes ONLY when licensed by the finalizer's verdict on that node or a steward-classed user directive — the store's churn fence refuses silence-based prunes) → state_mover (deterministic `is_ready` promotion; the LLM may only HOLD, and never a node whose time just came) → materializer → action_selector → switchboard (reads each node's GOAL: reach-the-user → `create_dayflow_ticket`, everything else → `work_emi_team_manager`) → **`work_node_dispatch` claims ONE node and the pass ENDS**.
+- **`dayflow_orchestrator_manager`** — the planning tick (state_map in `multi_agents/dayflow_orchestrator_manager/config.yaml`): intake_triage → context_enricher → evaluator (`strategic_planner_wo`: decides WHAT work exists, converts intake to work objects) → work_architect (per-goal DAG + re-plan; wake primitives `wake_at` | `wake_ref`; a replan prunes queued/`actionable` or future-wake-held nodes ONLY when licensed by the finalizer's verdict on that node or a steward-classed user directive — the store's churn fence refuses silence-based prunes) → state_mover (deterministic `is_ready` promotion; the LLM may HOLD for current context; its prompt forbids holding a boundary announcement for the boundary it announces) → materializer → action_selector → switchboard (reads each node's GOAL: reach-the-user → `create_dayflow_ticket`, everything else → `work_emi_team_manager`) → **`work_node_dispatch` claims ONE node and the pass ENDS**.
 - **`dayflow_wake_manager`** — one due time-wake: stage that node → state_mover re-judges the moment → dispatch or hold. No planning stage exists in it, so a wake cannot re-plan.
 - **`dayflow_dispatch_manager`** — one claimed node on its own thread: arguments → the tool call (which BLOCKS this room, not the tick) → `work_finalizer_node`.
 
-**The finalizer** judges whether the node's GOAL was achieved — `achieved` / `achieved_plan_changes` / `retry` / `unrecoverable` (+ `next_step` = stop | new_approach | ask_user) — always with an `outcome` prose account, persisted on the node at `payload.finalizer`. SOLE producer of `closed` (`is_satisfied` keys on it; `done` alone completes nothing). Every not-achieved verdict passes through `failed`, which is how a step reaches the architect. Repeated failure is the runtime's call: at `_REPEAT_FAILURE_LIMIT` unmet attempts on the GOAL it forces `ask_user`. `work_repair` is retired (files on disk, unwired); `sweep_stuck_work_nodes` fails orphaned/frozen jobs for the finalizer to judge.
+**The finalizer** judges whether the node's GOAL was achieved — `achieved` / `achieved_plan_changes` / `retry` / `unrecoverable` (+ `next_step` = stop | new_approach | ask_user) — always with an `outcome` prose account, persisted on the node at `payload.finalizer`. Normal Dayflow producer of `closed` (all main tasks require it; nested checklist subtasks can satisfy at `done`). This is a runtime convention, not a store authorization rule. Every not-achieved verdict passes through `failed`, which is how a step reaches the architect. Repeated failure is the runtime's call: at `_REPEAT_FAILURE_LIMIT` unmet attempts on the GOAL it forces `ask_user`. `work_repair` is retired (files on disk, unwired); `sweep_stuck_work_nodes` records a failed result after over 80 minutes of subtree inactivity; ordinary finalization judges that result and owns failure counting; the steward can request an architect re-plan.
 
-**Asks**: a node whose goal is to ask/tell the user is ticketed and marked `dispatched + wake_kind=user_reply` — an in-flight tool call whose result is the user's reply (one live ask per work object; a new ask ticket supersedes prior open ones). The reply/dismissal is recorded as evidence → done and the finalizer judges it; an unanswered ticket expiring is a timed-out tool call — the sweeper fails the node, and the finalizer's route decides what happens next. There is no re-ask timer.
+**Asks**: a node whose goal is to ask/tell the user is ticketed and marked `dispatched + wake_kind=user_reply` — an in-flight tool call whose result is the user's reply (one live ask per work object; a new ask ticket supersedes prior open ones). The reply/dismissal is recorded as evidence → done and the finalizer judges it; ticket expiry returns "user not reached", which is also recorded and finalized. Boot recovery reconnects the existing ticket and runs the same recorder and `WorkFinalizerNode` before signaling planning; it never creates another ticket. There is no re-ask timer.
 
-**Items** (`unified_log_2026`, `source='dayflow_item'`, upsert by `Message.id` = `metadata.item_id`, `short_id` for prompts) are now intake + context: ingestion (chat/email/delegation/pods) → triage → the evaluator converts actionable intake and closes it `converted_to_work_object:<id>`. Item transitions live in `dayflow_item_writer.ALLOWED_TRANSITIONS`, enforced by `write_dayflow_item`; `state_store.py` reads. The item dispatch lane is retired (a guard in `work_node_dispatch_node` closes strays loudly).
+**Items** (`unified_log_2026`, `source='dayflow_item'`, upsert by `Message.id` = `metadata.item_id`, `short_id` for prompts) are now intake + context: ingestion (chat/email/delegation/pods) → triage → the evaluator converts actionable intake and closes it `converted_to_work_object:<id>`. Item transitions live in `dayflow_item_writer.ALLOWED_TRANSITIONS`, enforced by `write_dayflow_item`; `state_store.py` reads. The item dispatch lane is retired (a guard in `work_node_dispatch_node` raises on non-work-node references).
 
 ### Rooms
 
@@ -215,3 +235,7 @@ For multi-step tasks, state a brief plan:
 ```
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+### Dayflow repair contract (2026-09-19)
+
+Claims, result recording, finalizer judgments and architect revision batches are transactional and dispatch-epoch fenced. Finalizer judgments increment failure counts once per attempt. Admitted intake remains durable until its source context is stored on a work object. Agent-facing work text is rendered by shared/work Jinja templates; Python prepares structured values. Architect and steward see main-task statuses, dependencies, gates and finalizer summaries; workers and finalizers additionally see owned provenance. See docs/design/dayflow_prompt_context_standard_2026-09-19.md and its rendered example.

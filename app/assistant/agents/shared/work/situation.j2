@@ -1,0 +1,9 @@
+{% if responses %}## RECENT TICKET RESPONSES (user directives — incorporate these into the graph)
+{% for response in responses %}- {{ response.category | upper }}: {{ response.ticket.get('title', '') }}{% if response.ticket.get('user_comment') %} — user: "{{ response.ticket.user_comment }}"{% endif %}
+{% endfor %}{% endif %}{% if active %}## ACTIVE TICKETS (awaiting the user)
+{% for ticket in active %}- [{{ ticket.get('suggestion_type', '') }}] {{ ticket.get('title', '') }}
+{% endfor %}{% endif %}{% if portfolio %}## WORK PORTFOLIO
+{{ portfolio }}
+{% endif %}{% if completed %}## RECENTLY COMPLETED
+{{ completed }}
+{% endif %}

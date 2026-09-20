@@ -24,6 +24,9 @@ class FakeJob:
 
 
 class FakeAPScheduler:
+    def get_jobs(self):
+        return []
+
     def __init__(self):
         self.jobs = {}
         self.add_calls = []

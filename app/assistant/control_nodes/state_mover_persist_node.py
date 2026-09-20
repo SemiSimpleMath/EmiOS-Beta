@@ -72,9 +72,8 @@ class StateMoverPersistNode(ControlNode):
             except Exception as e:
                 logger.warning("[%s] promote: %s not loadable: %s", self.name, s.get("id"), e)
                 continue
-            goal_id = wo.goal_node_id
             for n in wo.nodes.values():
-                if n.id == goal_id or n.status not in {"proposed", "waiting"}:
+                if not wo.is_work_unit(n) or n.status not in {"proposed", "waiting"}:
                     continue
                 if only and f"{wo.id}::{n.id}" != only:
                     continue
@@ -145,7 +144,7 @@ class StateMoverPersistNode(ControlNode):
             try:
                 wo = store.load(work_id)
                 node = wo.nodes.get(node_id)
-                if node is None or getattr(node, "wake_kind", None) not in _EVENT_WAKES:
+                if node is None or not wo.is_work_unit(node) or getattr(node, "wake_kind", None) not in _EVENT_WAKES:
                     continue  # already woken, or not an event-wait
                 status, content = node.status, (node.content or "")
                 store.apply("defer_node", {"work_id": work_id, "node_id": node_id, "wake_kind": None},

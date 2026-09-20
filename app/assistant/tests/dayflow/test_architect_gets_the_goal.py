@@ -75,7 +75,7 @@ def _tick_blackboard(**extra):
 def test_a_fresh_goal_is_decomposed_not_the_tick():
     store = _store()
     wo = store.apply("create_work_object", {
-        "title": "Prepare for picture day", "goal_content": "Prepare for picture day",
+        "title": "Prepare for picture day", "goal_content": "Prepare the child for makeup Picture Day",
         "satisfied_when_kind": "all_owned_children_done"})
 
     bb = _tick_blackboard(steward_persist_result={"created": [

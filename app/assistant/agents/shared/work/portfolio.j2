@@ -1,0 +1,24 @@
+=== WORK OBJECT {{ work.id }} ===
+goal: {{ work.objective }}
+status: {{ work.status }} | progress: {{ work.completed }}/{{ work.tasks|length }} top-level tasks complete
+{% if work.success_criteria %}success criteria: {{ work.success_criteria }}
+{% endif %}goal failures judged by finalizer: {{ work.failure_count }}
+{% if work.failure_count >= 2 %}{{ work.failure_count }} ATTEMPTS HAVE NOT ACHIEVED THIS GOAL — counted across tasks. Follow the finalizer escalation: explain what blocked progress and ask whether to keep going; do not silently repeat the same approach.
+{% endif %}{% if work.pending_replan %}PENDING ARCHITECT REVISION: apply the finalizer instruction before further dispatch.
+{% endif %}{% if work.unrun %}STILL UNRUN ({{ work.unrun }}): completing this work object would DISCARD these outstanding tasks.
+{% endif %}
+TASKS (main assignments only)
+{% for task in work.tasks %}
+- [{{ task.status }}] {{ task.id }} | {{ task.title }}
+  GOAL: {{ task.directive }}
+  dispatch attempt: {{ task.epoch }} | finalizer failure count: {{ task.failure_count }}
+{% if task.awaiting_judgment %}  AWAITING JUDGMENT: result exists; completion has not been accepted.
+{% endif %}{% if task.dependencies %}  DEPENDS ON: {% for dep in task.dependencies %}{{ dep.id }} [{{ dep.status }}; {% if dep.satisfied %}satisfied{% else %}BLOCKED{% endif %}]{% if not loop.last %}, {% endif %}{% endfor %}
+{% endif %}{% if task.wake_kind %}  WAIT: {{ task.wake_kind }}{% if task.wake_at %} | {{ task.wake_at }}{% endif %}{% if task.wake_ref %} | {{ task.wake_ref }}{% endif %}
+{% endif %}{% if task.terminal %}  REASON: {{ task.terminal.get('reason', '') }}
+{% endif %}{% if task.finalizer or task.awaiting_judgment %}{% set finalizer = task.finalizer %}{% include 'shared/work/finalizer_summary.j2' %}{% endif %}
+{% endfor %}
+{% if work.actions %}ACTIONS TAKEN ({{ work.actions|length }}) — already performed; do not repeat without justification
+{% for action in work.actions %}- {{ action.when }} | {{ action.channel }} -> {{ action.target }} [{{ action.outcome }}] {{ action.summary }}
+{% endfor %}{% endif %}{% for contact in work.repeated_contacts %}WARNING: {{ contact.count }} separate {{ contact.channel }} messages to {{ contact.target }} on this goal alone. Asking again is very unlikely to be the missing step.
+{% endfor %}
