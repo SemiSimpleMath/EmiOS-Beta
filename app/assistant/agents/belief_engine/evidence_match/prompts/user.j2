@@ -1,0 +1,13 @@
+## evidence
+{{ evidence | tojson }}
+
+## catalog
+{{ catalog | tojson }}
+
+{% if selection_retry %}
+## Correct the previous invalid selection
+The previous response did not satisfy the selection contract. Reconsider the same
+complete catalog and return a complete valid selection using only allowed_ids.
+Do not omit relevant beliefs merely to avoid the error.
+{{ selection_retry | tojson }}
+{% endif %}

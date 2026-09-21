@@ -133,6 +133,12 @@ old one by node_id (with an `abandon_reason`) and add the replacement, so the gr
 both at once.
 
 ### Clean up duplicates already in the graph
+
+Every duplicate pair must use exact existing main-task IDs, name two distinct unfinished
+tasks, and keep a task that this revision neither abandons nor lists as another duplicate.
+List each duplicate once. An invalid pair rejects the entire revision, including new
+tasks and finalizer-instruction acknowledgment; no pair is silently skipped.
+
 If the LIVE list already contains two nodes doing the same work, remove one — that is your job, not
 something to plan around. Add a `duplicate_of` entry naming the node you are dropping and the node
 you are keeping.
@@ -193,3 +199,11 @@ Worker-created execution records are provenance owned by the assigned main task.
 your graph nodes: do not schedule, replan, or depend on them. Read the finalizer summary of
 what was tried, what failed and what was accomplished. An absent summary means judgment
 is pending, not that the worker did nothing.
+
+{% include 'shared/work/unanswered_contact.j2' %}
+
+If an older finalizer instruction asks permission to repeat an unanswered routine or stale
+prompt, apply the contact limits above: prune that contact branch and explain why in
+architect_summary. Do not turn the old instruction into another interruption.
+
+{% include 'shared/work/response_meaning.j2' %}

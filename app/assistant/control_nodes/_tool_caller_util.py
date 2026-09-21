@@ -318,15 +318,19 @@ def _execute_tool(
             tool_result = blocked_result
 
     if tool_result is None:
-        if is_mcp:
-            tool_result = execute_mcp_tool_call(
-                tool_name=tool_name,
-                tool_config=tool_config,
-                arguments=arguments,
-                tool_registry=tool_registry,
-            )
-        else:
-            tool_result = tool_instance.execute(tool_message)
+        from app.assistant.manager_runtime.execution import tool_call
+        from app.assistant.lib.core_tools.manager_interface.manager_interface import ManagerInterface
+        with tool_call(tool_name, external=not isinstance(getattr(tool_instance, "manager_interface", tool_instance), ManagerInterface)) as execution_call:
+            if is_mcp:
+                tool_result = execute_mcp_tool_call(
+                    tool_name=tool_name,
+                    tool_config=tool_config,
+                    arguments=arguments,
+                    tool_registry=tool_registry,
+                )
+            else:
+                tool_result = tool_instance.execute(tool_message)
+            execution_call.result = tool_result
         if isinstance(approval_ticket_id, str) and approval_ticket_id.strip():
             finalize_approval_ticket(ticket_id=approval_ticket_id, tool_result=tool_result)
 

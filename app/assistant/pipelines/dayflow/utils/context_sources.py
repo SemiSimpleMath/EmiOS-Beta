@@ -857,6 +857,7 @@ def _format_ticket_for_context(ticket) -> Dict[str, Any]:
         "responded_at_iso": responded_at.isoformat() if responded_at else "",
         "snooze_until_local": snooze_until_local.strftime("%I:%M %p") if snooze_until_local else "",
         "user_comment": ticket.user_text or "",
+        "response_details": getattr(ticket, "user_response_parsed", None) or {},
         "user_action": (getattr(ticket, "user_action", "") or "").lower(),
         "acted_on_item_ids": acted_on_item_ids,
         "execution_result": getattr(ticket, "execution_result", "") or "",
@@ -903,7 +904,8 @@ def get_responded_tickets_categorized(since_utc: datetime, ticket_type: Optional
 
             if action in ("done", "willdo", "accept", "accepted"):
                 result["accepted"].append(formatted)
-            elif action == "acknowledge":
+            elif action in ("acknowledge", "answer"):
+                # A recorded answer is not blanket approval; retain scoped details.
                 result["acknowledged"].append(formatted)
             elif action in ("skip", "no", "decline", "declined", "dismiss", "dismissed"):
                 result["declined"].append(formatted)

@@ -1,0 +1,9 @@
+{% for belief in beliefs %}
+- [belief:{{ belief.belief_key }}]{% if belief.short_id %} ({{ belief.short_id }}){% endif %}
+  {{ belief.statement }}
+  confidence={{ belief.confidence | default('unknown') }}; kind={{ belief.kind | default('unspecified') }}; domain={{ belief.domain | default('unspecified') }}
+  {% if belief.conditions %}conditions={{ belief.conditions | tojson }}{% endif %}
+  {% if belief.first_observed %}first_observed={{ belief.first_observed }};{% endif %}{% if belief.last_confirmed %}last_confirmed={{ belief.last_confirmed }}{% endif %}
+{% else %}
+(no selected beliefs)
+{% endfor %}

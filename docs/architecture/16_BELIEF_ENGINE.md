@@ -43,7 +43,7 @@ Five steps, defined in `belief_engine/pipeline/pipeline.py`, run once over the w
 
 ```
 CollectEvidenceStep ─> UpdateBeliefsStep ─> RecomputeBeliefSnapshotStep ─> ReevaluateBeliefsStep ─> CanonicalizeBeliefSetStep
-   (no LLM)             (LLM: belief_updater)   (no LLM, universal)         (LLM: belief_reevaluator,    (LLM: merge_verifier,
+   (no LLM)             (LLM: belief_updater)   (no LLM, universal)         (LLM: belief_reevaluator,    (LLM: discovery/review,
                                                                              conditional)                 pairwise)
 ```
 
@@ -63,23 +63,24 @@ There is **no `kg_edge` evidence path** anymore — `collect_evidence` reads onl
 
 ### Step 2 — `UpdateBeliefsStep`
 
-`belief_engine/pipeline/steps/update_beliefs.py`. Calls `belief_engine::belief_updater` with the full evidence block plus the top-K semantically similar existing beliefs (one combined query over the batch; `k=8`, threshold `0.50`).
+`belief_engine/pipeline/steps/update_beliefs.py`. Processes complete evidence records in chronological batches. `belief_engine::evidence_match` selects complete current belief records (statements, conditions, confidence and dates) from catalog pages; it does not expand every selected belief into its historical evidence/lineage. Each batch selects against the current store after preceding batches have committed. A conservative UTF-8 payload budget splits oversized multi-record batches before the updater call; a single source that still cannot fit fails pending without truncation. Historical evidence remains available to focused reevaluation and pair reconciliation. Identical selection inputs reuse durable receipts; no embedding threshold or top-K admission gate is used.
 
 Per-belief decisions (`agent_form.py`): `create | update | deprecate | no_change`. Applied via `BeliefStore`. Key behaviours:
 
-- **Lock honored**: if the target belief has `locked=1` (owner correction via `/beliefs`), a mutating `update`/`deprecate` is downgraded to `no_change` — evidence still attaches and `observation_count`/`last_confirmed` advance, but statement and status stay exactly as the owner set them.
-- **`no_change`** still upserts so `observation_count` increments and cited evidence attaches.
+- **Lock honored**: if the target belief has `locked=1` (owner correction via `/beliefs`), a mutating `update`/`deprecate` is downgraded to `no_change` — evidence still attaches and observation metadata is derived from original sources, but statement and status stay exactly as the owner set them.
+- **`no_change`** preserves the claim and attaches cited evidence; rereading unchanged sources does not manufacture another observation.
 - **Contestation**: a belief is queued in `contested_keys` (and `mark_contested`'d) for Step 4 when the agent returns `status=contested` (on create or update), or when an `update` lowers confidence vs the stored value.
-- The agent must populate `evidence_refs` (1-based indices into the bundle) so the right evidence rows attach to the right belief; out-of-range/empty refs attach nothing.
+- The agent must populate `evidence_refs` (1-based indices into the current batch) with explicit per-claim evidence relations. Invalid indices or missing relationships fail the write; Python never remaps a reference semantically.
 - A `kind` field from the agent (§6) is passed through to the upsert; absent, the store heuristic-classifies it.
-- **Write-time dedup (2026-09-10)**: before a `create` lands, `dedup_candidate` compares the statement with its nearest active beliefs (global, cosine ≥ `MERGE_THRESHOLD`) and asks `belief_engine::merge_verifier` once per candidate, nearest first — each side carried with its dated evidence. A `same` verdict turns the create into an update of the existing key (statement = the verifier's `canonical_statement`); `supersedes` deprecates whichever side the evidence dates as outdated (when the STORED one reads as current the new belief is still written, and the weekly sweep resolves the pair with both trails in hand); `contradicts` marks the stored belief `contested` for Step 4; `different` and `specialises` are recorded in `belief_distinct_pairs` once the new belief has an id. One verifier call per candidate, instead of one per candidate pair in a nightly sweep.
+- **Evidence-first matching**: new beliefs are stored with their evidence before Step 5 investigates duplicates. No statement-only write-time merge occurs. Conditions are preserved on no-change and omitted-condition updates.
+
 - The agent's `domain` field files a NEW belief under its primary area (validated against the enabled ids, else the key's dot-prefix, else the write is refused loudly). An existing belief keeps its area.
 
 ### Step 3 — `RecomputeBeliefSnapshotStep`
 
 `belief_engine/pipeline/steps/recompute_belief_snapshot.py` → `belief_engine/decay/recompute.py`. No LLM, idempotent. **This replaced `DecayStaleBeliefsStep` (2026-05-11) and runs universally** — there is no `decay_enabled` gate. It is placed *between* Update (which bumps `last_confirmed`) and Reevaluate (which consumes the contested keys it emits).
 
-For each active belief in the domain it aggregates the belief's `belief_evidence` rows into evidence-weighted support/contradiction weights (see decay v2, §5), derives a confidence band, and writes back `current_support_weight`, `current_contradiction_weight`, `current_net_weight`, `current_confidence_band`, and `last_contradicted_at`. Then:
+For each active belief in the domain it aggregates original evidence through live and archived merge lineage, deduplicating exact source observations and explicit model-reviewed observation equivalences. It ignores canonicalization/deprecation bookkeeping regardless of historical weight. It aggregates these observations into evidence-weighted support/contradiction weights (see decay v2, §5), derives a confidence band, and writes back `current_support_weight`, `current_contradiction_weight`, `current_net_weight`, `current_confidence_band`, and `last_contradicted_at`. Then:
 
 - band == `faded` → `status='deprecated'` (terminal).
 - band ∈ {`contested`, `deprecated_by_contradiction`} → `status='contested'`, and the key is appended onto `ctx.belief_update_result["contested_keys"]` so `ReevaluateBeliefsStep` picks it up.
@@ -88,35 +89,31 @@ For each active belief in the domain it aggregates the belief's `belief_evidence
 
 ### Step 4 — `ReevaluateBeliefsStep` (conditional)
 
-`belief_engine/pipeline/steps/reevaluate_beliefs.py`. Runs only if there are contested keys (from Step 2 or Step 3). For each, fetches the **complete** evidence trail from `belief_evidence` (capped at 50, oldest-first) and asks `belief_engine::belief_reevaluator` for an authoritative rewrite. Actions: `rewrite | qualify | split | deprecate | confirm`. `confirm` restores `status=active` and bumps `last_confirmed`. `split` is expected to reuse the original key for one child; a safety net deprecates the original if a split emitted only new keys (orphan guard).
+`belief_engine/pipeline/steps/reevaluate_beliefs.py`. Runs for queued keys plus all persisted contested beliefs, including conflicts found by a previous matching run. For each, fetches the complete evidence trail, including archived merge predecessors, without a record or character cutoff and asks `belief_engine::belief_reevaluator` for an authoritative rewrite. Actions: `rewrite | qualify | split | deprecate | confirm`. `confirm` restores `status=active` and bumps `last_confirmed`. `split` is expected to reuse the original key for one child; a safety net deprecates the original if a split emitted only new keys (orphan guard).
 
 ### Step 5 — `CanonicalizeBeliefSetStep`
 
-`belief_engine/pipeline/steps/canonicalize_belief_set.py`. **Rewritten 2026-06-16 to a pairwise-verifier design** (the old chunk-based canonicalizer is dead — §11). Two recall channels *propose* candidate duplicate **pairs** over the domain's active belief set; `belief_engine::merge_verifier` *decides* each pair.
+`belief_engine/matching/` implements incremental LLM discovery and source-based review.
+`match_discover` proposes related pairs for new or changed beliefs against the active catalog;
+`match_review` reads both complete packets, conditions and original evidence lineage.
+No similarity thresholds, keyword gates, fixed top-K or source-text truncation apply.
 
-- **Channel 1 — embedding NN**: pairs with cosine `>= MERGE_THRESHOLD (0.80)`. Recall-biased — the verifier is the precision gate.
-- **Channel 2 — shared distinctive keyword**: pairs sharing a lightly-stemmed token whose document frequency across the set is in `[KEYWORD_DF_MIN=2, KEYWORD_DF_MAX=12]` **and** cosine `>= KEYWORD_MIN_COSINE (0.50)`. This catches divergent-phrasing dups that embed just below 0.80 ("standing-break nudges" vs "standing break reminders"). The DF band excludes unique words (nothing to pair) and corpus-common/topical words (embedding's job). `_STOP` only pre-drops universal glue.
+Discovery and pair judgments are durable and bound to content versions and prompt/schema
+policy. New evidence/conditions invalidate affected judgments; counters, processing dates
+and unchanged nights do not. Whole-record pages and per-run work budgets permit resumable
+baseline coverage without claiming that an unfinished pass is complete.
 
-Pairs are sorted strongest-first and capped at `MAX_PAIRS=4000`. The verifier is **asymmetric** — default not-same; a wrong merge silently destroys a distinct belief — and returns a reconciled `canonical_statement`. On a `same` verdict the better-supported belief (higher `observation_count`) survives, its statement is **rewritten to the canonical statement** (so a superset collapses without dropping the extra clause), and the loser is deprecated via `store.merge_belief`. A local union-find prevents re-merging a belief already folded in this pass. **Owner-locked beliefs are excluded** from both sides.
+Relations are `same`, `different`, `specialises`, `supersedes`, `contradicts`, `unresolved`.
+Only source-cited, version-fenced decisions can mutate beliefs. Same merges atomically with
+conditions, tags, preserved source dates, lineage and a complete before/after receipt.
+It creates no supporting observation. Supersession deprecates the explicitly identified
+outdated side; contradiction marks both contested. Other decisions preserve both records.
+Locked records cannot be changed. Invalid responses fail pending rather than become cached
+negative judgments. Index writes have durable retry receipts after the SQLite commit.
 
-**Relations, not a boolean (2026-09-11)**. The verifier used to answer same / not-same, so the only thing it could say about two beliefs that cannot both be true ("likes honey" / "dislikes honey") was `different` — which was then *recorded as a settled verdict* and never asked again. It now returns one of five relations, and each side reaches it with `belief_context_block`: area, kind, observation count, first/last dates, and the six most recent dated evidence lines. That context is load-bearing, because `supersedes` and `contradicts` are the same two sentences and only the dates separate them.
-
-| Relation | What the store does |
-| --- | --- |
-| `same` | Merge, as above. |
-| `different` | Both stand. Recorded in `belief_distinct_pairs` — free skip next pass. |
-| `specialises` | Both stand, the narrower qualifying the broader. Recorded the same way. |
-| `supersedes` | The dated evidence shows one is a later state of the other. The outdated side (`current_side` names the other) is deprecated. Without a usable `current_side` nothing is touched and the pair is logged at ERROR. |
-| `contradicts` | Same subject, opposing claims, dates inconclusive. **Both** are marked `contested` for Step 4, which rules on their full trails. Deliberately NOT recorded as settled — an unresolved conflict must be re-asked. |
-
-An unreadable relation falls back to `different` at ERROR level: no belief is ever changed on a verdict the engine could not parse.
-
-**Two modes** (`belief_engine/state/sweep_tracker.py`, `decide_mode()`):
-
-- **`full`** — propose pairs across *all* active beliefs in the domain. Runs on the first bootstrap run and every `FULL_SWEEP_INTERVAL_DAYS=7`.
-- **`new_only`** — the other ~6 nights: **skipped**. New beliefs are verified against their nearest neighbours when written (Step 2), so the incremental pass has nothing left to ask. The sweep stamp is kept under the key `global`.
-
-The mode is decided **once per parent run** in `BeliefEngineAdapter` (so a midnight rollover can't split domains across modes) and threaded via `ctx.canonicalization_mode`. After a successful `full` run the adapter calls `mark_full_sweep_completed()` (atomic temp-file write to `data/belief_engine_state.json`, gitignored). `dry_run=True` returns embedding-only candidate clusters without LLM calls (used by `scripts/dry_run_canonicalize.py`); the routine adapter never passes it.
+See [incremental matching](../design/incremental_belief_matching_2026-09-20.md) for tables,
+budgets, limitations, and verification. Legacy distinct-pair and sweep data remain for
+history; their statement-only verdicts are not trusted by the new matcher.
 
 ## 5. Decay v2 — evidence-weighted half-life
 
@@ -193,7 +190,7 @@ The three additive side tables (DDL in `schema.py`; also `CREATE … IF NOT EXIS
 
 ### Embeddings — `BeliefChroma`
 
-`belief_engine/chroma/belief_chroma.py`, collection `belief_engine_beliefs`, keyed by `belief_id`, sharing the project embedding model/client but managed separately. Used for `find_similar()` (Step 2) and the canonicalization recall channel (`get_all_for_domain` returns `(id, vector)` pairs). Embeddings are upserted on every `upsert_belief` and deleted on merge. Plain `deprecate()` does **not** delete the embedding — so `BeliefStore.find_similar` re-checks `status == "active"` after the Chroma hit to filter deprecated-but-not-merged rows.
+`belief_engine/chroma/belief_chroma.py`, collection `belief_engine_beliefs`, keyed by `belief_id`, sharing the project embedding model/client but managed separately. Used by semantic retrieval consumers; nightly matching and updater context selection now use LLM catalog discovery instead. Embeddings are upserted on every `upsert_belief` and deleted on merge. Plain `deprecate()` does **not** delete the embedding — so `BeliefStore.find_similar` re-checks `status == "active"` after the Chroma hit to filter deprecated-but-not-merged rows.
 
 ## 7. Tagging layer
 
@@ -201,7 +198,7 @@ The three additive side tables (DDL in `schema.py`; also `CREATE … IF NOT EXIS
 
 `tag_beliefs(mode=…)` drives `belief_engine::belief_tagger` (mini tier) over active beliefs in batches of 15. Each belief gets the **union of its `domain`** (itself a valid vocab tag, except `general` which is deliberately not a tag) **and the LLM's cross-cutting tags**. So a belief the LLM leaves empty is still tagged by its domain; the LLM only *adds* reach. `mode="needs"` selects untagged + stale beliefs (statement changed since `assigned_at`) for the nightly pass; `mode="all"` is the one-time backfill.
 
-**Consumer pull-sets** (`pull_sets` in the YAML): `meal_engine`, `health_status`, `entertainment`, `routine_stage`. A consumer pulls a tag *set*; a belief surfaces if it carries *any* tag in that set. **Bridge tags** (`dietary`, `family`, `social`, `meal`) let a consumer reach beliefs filed under a different primary domain.
+**Consumer pull-sets** (`pull_sets` in the YAML): `meal_engine`, `health_status`, `entertainment`, `routine_stage`. Consumers using these sets pull beliefs carrying any tag in their set. Dayflow routine projection instead uses LLM selection across the active export, regardless of kind or tag. **Bridge tags** (`dietary`, `family`, `social`, `meal`) let a consumer reach beliefs filed under a different primary domain.
 
 ## 8. Identity layer
 
@@ -235,7 +232,7 @@ The old "no live DB query path" claim is **only partly true now**. `beliefs_for_
 
 `resource_user_beliefs.json` is read by:
 
-- **Dayflow routine stage** — `app/assistant/pipelines/dayflow/steps/dayflow_routine_stage.py`. Feeds the agent that regenerates `resource_dayflow_routine.md`. Admits a belief by routine-shaping `kind` OR a `routine_stage` pull-set tag.
+- **Dayflow routine stage** — `app/assistant/pipelines/dayflow/steps/dayflow_routine_stage.py`. Feeds the agent that regenerates `resource_dayflow_routine.md`. The standard `dayflow_belief_selector` agent selects exact keys from the full active export using daily and weekly context; the writer places selected beliefs in useful time slots, retaining conditions and belief-key citations. Preparation goes before its event, and current status/milestones can suppress resolved reminders. Cache invalidation includes calendar, catalog, day theme, status, milestones and weekly context; the existing hourly eligibility gate remains. See [contextual projection](../design/contextual_belief_projection_2026-09-20.md) for examples and limits.
 - **Health status stage** — `health_status_stage.py`. Admits `health`/`sleep` domain OR a `health_status` bridge tag.
 - **Entertainment advisor stage** — `entertainment_advisor_stage.py`. Uses the `entertainment` pull-set.
 - **Dayflow orchestrator room** — `resource_user_beliefs` is an allowed resource, injectable into any agent under that room's scope.
@@ -252,7 +249,7 @@ The v2 satellites were deleted on 2026-07-07 (`subconscious/belief_tagging.py`, 
 final removal. Two legacy pairs remain on disk — edit only the live one:
 
 1. **Decay**: live = `belief_engine/decay/` + `RecomputeBeliefSnapshotStep` (universal, evidence-weighted). Dead = `belief_engine/pipeline/steps/decay_stale_beliefs.py` (`DecayStaleBeliefsStep`) + `BeliefStore.decay_temporary_beliefs` / `flag_stale_chronic_beliefs` — the old time-threshold path, no longer wired into `pipeline.py` (the `decay_enabled` YAML key that gated it is now inert). Sandbox-only.
-2. **Canonicalization**: live = `belief_engine::merge_verifier` + the pairwise dedup in `canonicalize_belief_set.py` (durable `belief_distinct_pairs` verdicts, a global weekly sweep stamp, per-run call cap). Dead = the `belief_engine::belief_canonicalizer` agent (chunk-based; on disk, referenced only by `scripts/backup_beliefs.py`, never by the pipeline).
+2. **Canonicalization**: live = `matching/service.py` with `match_discover` and `match_review`. Legacy `merge_verifier`, `belief_canonicalizer`, distinct-pair helpers and sweep tracker are no longer called by the active pipeline.
 
 ## 12. Scheduling
 
@@ -273,7 +270,8 @@ Routine functions are registered as `@routine_handler`-decorated handlers in `ap
 | --- | --- | --- |
 | `belief_engine::belief_updater` | strong (`gpt-5.6-luna`) | Step 2 — `create/update/deprecate/no_change` per belief |
 | `belief_engine::belief_reevaluator` | strong (`gpt-5.6-luna`) | Step 4 — authoritative rewrite of contested beliefs from full trail |
-| `belief_engine::merge_verifier` | strong (`gpt-5.6-luna`) | Steps 2 & 5 — per-pair relation (`same` / `different` / `specialises` / `supersedes` / `contradicts`) + reconciled `canonical_statement` |
+| `belief_engine::evidence_match`, `belief_engine::match_discover` | mini | Updater context selection and incremental pair discovery |
+| `belief_engine::match_review` | strong | Complete source-based pair judgment and canonical belief |
 | `belief_engine::belief_tagger` | mini (`gpt-5.6-luna`) | §7 — cross-cutting tags from the standardized vocab |
 | `belief_engine::belief_canonicalizer` | mini | **DEAD** (§11 trap 3) — old chunk-based canonicalizer |
 
@@ -296,7 +294,7 @@ Practical implication: any script that prunes/rebalances/re-seeds beliefs should
 | `belief_engine/pipeline/steps/update_beliefs.py` | LLM `belief_updater`; lock honoring; contestation queue |
 | `belief_engine/pipeline/steps/recompute_belief_snapshot.py` | Universal evidence-weighted snapshot + fade/contest transitions |
 | `belief_engine/pipeline/steps/reevaluate_beliefs.py` | LLM `belief_reevaluator` — full-trail rewrite of contested |
-| `belief_engine/pipeline/steps/canonicalize_belief_set.py` | Pairwise merge via `merge_verifier`; full/new_only modes |
+| `belief_engine/pipeline/steps/canonicalize_belief_set.py` | Incremental matching adapter; every run resumes pending work |
 | `belief_engine/pipeline/steps/decay_stale_beliefs.py` | **DEAD** — old time-threshold decay (§11 trap 2) |
 | `belief_engine/decay/model.py` | Decay v2 math kernel — kinds, half-lives, two-weight, bands |
 | `belief_engine/decay/recompute.py` | The snapshot job (walks rows, writes back) |
@@ -306,13 +304,13 @@ Practical implication: any script that prunes/rebalances/re-seeds beliefs should
 | `belief_engine/tagging.py` | v1 tag writer + `sanitize` / `pull_set` |
 | `belief_engine/identity.py` | Short ids (`b<n>`) + `belief_merges` provenance |
 | `belief_engine/archive.py` | Nightly eviction of deprecated beliefs to `*_archive` |
-| `belief_engine/state/sweep_tracker.py` | `decide_mode` (full vs new_only), `FULL_SWEEP_INTERVAL_DAYS=7` |
+| `belief_engine/state/sweep_tracker.py` | Legacy sweep scheduler; not used by the active pipeline |
 | `belief_engine/config.py` | `belief_domains.yaml` loader |
 | `belief_engine/db/models.py` | **Authoritative** SQLAlchemy schema (all 5 tables) |
 | `belief_engine/db/schema.py` | **Partial/legacy** DDL — missing decay-v2 + lock columns (§6) |
 | `belief_engine/db/ensure_schema.py` | Idempotent legacy migration entry point (prints "Migration OK") |
 | `belief_engine/export/export_beliefs.py` | Content-guarded JSON export (v2-flag-gated no-op) |
-| `app/assistant/agents/belief_engine/{belief_updater,belief_reevaluator,merge_verifier,belief_tagger}/` | Live agents |
+| `app/assistant/agents/belief_engine/{belief_updater,belief_reevaluator,evidence_match,match_discover,match_review,belief_tagger}/` | Live agents |
 | `app/assistant/agents/belief_engine/belief_canonicalizer/` | **DEAD** agent (§11 trap 3) |
 | `app/assistant/routine_handlers/{belief_archive,belief_tag_v1}.py` | Routine function handlers |
 | `app/routes/beliefs.py` | `/beliefs` owner surface (`beliefs_admin_bp`, local-only) |
@@ -339,6 +337,6 @@ Practical implication: any script that prunes/rebalances/re-seeds beliefs should
 | Unexpected confidence | It's the **snapshot band** (`current_confidence_band`), not the stored `confidence`. Check the belief's evidence weights/ages and `kind` (half-life). |
 | Faded / auto-deprecated | `RecomputeBeliefSnapshotStep`: net weight fell below the floor. Look at evidence ages vs the kind's half-life. Then the `belief_archive` sweep moved it to `user_beliefs_archive`. |
 | Flipped to `contested` | Either Step 2 (confidence drop / explicit contested) or Step 3 (`conflict_ratio ≥ 0.6` or both weights high). `belief_reevaluator` writes the resolution. |
-| Unexpectedly merged | `belief_evidence` row `source_type='canonicalization'` on the survivor (verifier reasoning + absorbed statements), and the `belief_merges` redirect. |
+| Unexpectedly merged | `belief_match_pairs` decision/context and `belief_match_merges` full before/after receipt, plus `belief_merges` redirect. Historical merges may only have legacy canonicalization evidence. |
 | Owner edit didn't stick overnight | Confirm `locked=1` — only locked beliefs are protected from the updater/decay/canonicalize. |
 | Force a re-export | `python -m belief_engine.export.export_beliefs` (content-guarded — touch a statement to force a write). |

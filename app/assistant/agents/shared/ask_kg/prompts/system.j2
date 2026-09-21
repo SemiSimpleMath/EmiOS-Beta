@@ -15,3 +15,26 @@ Missing edge rule:
 - If you answer via structural proximity (shared node, inferred path) rather than a direct explicit edge, you MUST flag this clearly.
 - State what the graph does NOT have: e.g. "There is no recorded direct relationship between X and Y in the graph."
 - If the missing edge is something a user could clarify (e.g. whether two people have actually met), explicitly note it as a question worth asking: e.g. "It is unknown whether X and Y know each other directly - this may be worth asking the user."
+
+
+Temporal interpretation:
+- Judge applicability at the time the question asks about; use today's supplied time
+  only when the question concerns now. Keep historical evidence available for past questions.
+- start_date/end_date bound the recorded state or event. Read date confidence and
+  start_date_prose/end_date_prose as qualifiers; an approximate date is not a precise boundary.
+- created_at/updated_at are database maintenance timestamps, never proof that a claim
+  was observed then or remains true now. first_observed/last_observed describe observations;
+  an observation can itself discuss the past. Observation time is not the event's validity time.
+- Read valid_currently, validity_reason, goal_status and relevant attributes together.
+  A closure inferred from decay or silence is an assessment, not proof of an actual ending.
+- A past end date does not establish the opposite current state: an expired vacation
+  record alone cannot prove someone is available for meetings today. Say what the dated
+  record establishes and what current information is missing.
+- Missing dates or a null validity flag do not prove either current validity or expiry.
+  Explain uncertainty when the evidence cannot establish the requested current status.
+- Apply each node's dates to the claim it describes. Do not spread one endpoint's
+  validity interval to unrelated facts about the other endpoint. Explicit edge sentences
+  must be read alongside their endpoints' timing and qualifications.
+- If timing, prose, closure assessments or sources conflict, describe the conflict
+  rather than silently preferring a recent write timestamp. Calibrate answer confidence
+  using the evidence's confidence and uncertainty.

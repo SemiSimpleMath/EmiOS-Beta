@@ -47,13 +47,15 @@ class TestApplyWorkOutcome:
         path = _register(tmp_path)
         result = apply_work_outcome(
             f"concern:{_CID[:8]}", work_id="work_x", outcome="abandoned",
-            user_words="Do not arrange this. Drop this task alltogether.",
+            user_response={"user_text": "No thanks", "response_details": {
+                "meaning": "decline", "label": "No thanks", "typed_text": "",
+                "scope": "Arrange AC service"}},
             register_path=path)
         assert result == "user_declined"
         reg = json.loads(path.read_text(encoding="utf-8"))
         assert reg["active"] == []
         concern = reg["dormant"][0]
-        assert "Do not arrange this" in concern["reinforcement_notes"]
+        assert "No thanks" in concern["reinforcement_notes"]
         assert concern["user_declined_at_utc"]
         assert concern["last_disposition_at_count"] == 23   # pressure window reset
 
@@ -104,7 +106,7 @@ class TestPropagateWorkOutcome:
             propagate_work_outcome(store, "work_x", "abandoned")
         apply_mock.assert_called_once_with(
             f"concern:{_CID[:8]}", work_id="work_x", outcome="abandoned",
-            user_words="Do not arrange this.")
+            user_response={"user_text": "Do not arrange this.", "provenance": "legacy_reply"})
         trigger_mock.assert_called_once()
 
     def test_no_refs_is_a_silent_noop(self):

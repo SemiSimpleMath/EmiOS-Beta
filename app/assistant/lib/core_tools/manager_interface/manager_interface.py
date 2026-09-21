@@ -41,6 +41,22 @@ class ManagerInterface:
         return str(self.manager_name or "").strip() == "emi_team_manager"
 
     def _run_on_given_node(self, work_id, node_id, tool_message):
+        from app.assistant.manager_runtime.execution import current_owner, Owner, REGISTRY
+        from work_objects.runtime import peek_work_context
+        if current_owner() is not None or peek_work_context() is not None:
+            return self._run_on_given_node_body(work_id, node_id, tool_message)
+        from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+        store = get_dayflow_work_store()
+        node = store.load(work_id).nodes[node_id]
+        owner = Owner(store, work_id, node_id, int(node.payload.get("dispatch_epoch") or 0))
+        store.start_execution(owner)
+        try:
+            with REGISTRY.span("attempt", self.manager_name, owner=owner, attribution=node_id):
+                return self._run_on_given_node_body(work_id, node_id, tool_message)
+        finally:
+            REGISTRY.finish_owner(owner)
+
+    def _run_on_given_node_body(self, work_id, node_id, tool_message):
         """Run this manager ON the node the caller handed it.
 
         ONE entry, for callers of both kinds, because the manager's job is the same either way:
@@ -91,9 +107,9 @@ class ManagerInterface:
                     scope_context=getattr(tool_message, "scope_context", None),
                 )
             goal_txt = (node.content or node.title or "").strip()
-            lead = "You have been given this node to work on. Try to complete the task in the node."
+            from app.assistant.dayflow_orchestrator.work_context import render_view
             return self.invoke_on(
-                task=(f"{lead} {goal_txt}" if goal_txt else lead),
+                task=render_view("discharge_task", directive=goal_txt),
                 information="",
                 scope_context=getattr(tool_message, "scope_context", None),
             )

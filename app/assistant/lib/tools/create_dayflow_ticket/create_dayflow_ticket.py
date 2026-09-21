@@ -40,6 +40,9 @@ def format_expiry_result(*, reason: str, question: str) -> str:
     return f"{line} (sent to the user: {question})" if question else line
 
 
+from app.assistant.manager_runtime.execution import activity
+
+
 class CreateDayflowTicketTool(BaseTool):
     def __init__(self) -> None:
         super().__init__("create_dayflow_ticket")
@@ -104,6 +107,12 @@ class CreateDayflowTicketTool(BaseTool):
             if "plan_mode_available" in args:
                 raise ValueError("plan_mode_available is not allowed; it is derived from ticket_kind.")
 
+            if args.get("response_choices") is not None:
+                from app.assistant.ticket_manager.response_choices import validate_choices
+                trigger_context["response_choices"] = validate_choices(args["response_choices"])
+                trigger_context["ticket_kind"] = ticket_kind
+                if action_type != "none" or status_effect:
+                    raise ValueError("Contextual responses require finalizer judgment, not automatic ticket side effects")
             ticket_manager = get_ticket_manager()
             # ONE LIVE QUESTION PER WORK OBJECT (2026-08-18 walk-storm): before a new ask appears,
             # expire any still-open ask bound to the same work object, so the old question vanishes
@@ -218,7 +227,7 @@ class CreateDayflowTicketTool(BaseTool):
             return ToolResult(result_type="error", content=f"create_dayflow_ticket failed: {e}", data={})
 
     @staticmethod
-    def _format_brief(brief: str, work_node_ref: str = "") -> dict[str, str]:
+    def _format_brief(brief: str, work_node_ref: str = "") -> dict[str, Any]:
         """Compose ticket fields via ticket_builder_manager: a read-only planner
         pulls the substance the goal promises (work graph + pods by id), then the
         composer writes the final {title, message}. `work_node_ref` is the
@@ -263,10 +272,13 @@ class CreateDayflowTicketTool(BaseTool):
                     # TicketKind subclasses (str, Enum), so str() on it yields
                     # "TicketKind.notify" — Enum.__str__, not the value — which
                     # _ui_policy_for_ticket_kind then rejects. Unwrap to .value.
+                    from app.assistant.agents.ticket_builder.composer.agent_form import AgentForm
+                    data = AgentForm.model_validate(data).model_dump(mode="json")
                     kind = data.get("ticket_kind")
                     kind = getattr(kind, "value", kind)
                     return {
                         "ticket_kind": str(kind or "advice"),
+                        "response_choices": data["response_choices"],
                         "suggestion_type": str(data.get("suggestion_type") or "general"),
                         "title": str(data.get("title") or ""),
                         "message": str(data.get("message") or brief),
@@ -318,11 +330,19 @@ class CreateDayflowTicketTool(BaseTool):
         action = str(getattr(ticket, "user_action", "") or "").strip()
 
         if state in cls._RESPONDED_STATES:
+            response = getattr(ticket, "user_response_parsed", None) or {}
+            content = format_response_result(answer=user_text or action or state, question=title)
+            if response.get("response_history"):
+                from app.assistant.dayflow_orchestrator.work_context import render_view
+                content = render_view("ticket_response", title=title,
+                                      message=getattr(ticket, "message", ""), response=response)
             return ToolResult(
                 result_type="ticket_response",
-                content=format_response_result(answer=user_text or action or state, question=title),
+                content=content,
                 data={"ticket_id": getattr(ticket, "ticket_id", ""), "title": title,
-                      "action": action or state, "user_text": user_text},
+                      "action": action or state, "user_text": user_text, "response_details": response,
+                      "question": getattr(ticket, "message", "") or title,
+                      "responded_at": (ticket.responded_at.isoformat() if getattr(ticket, "responded_at", None) else "")},
             )
         if state not in cls._LIVE_STATES:
             # expired / failed / anything else terminal: it ended without the user.
@@ -368,6 +388,7 @@ class CreateDayflowTicketTool(BaseTool):
                         old.ticket_id, ref)
 
     @staticmethod
+    @activity("user_wait")
     def _wait_for_ticket_response(ticket_id: str, title: str, timeout: float) -> ToolResult:
         """Block until the user responds to the ticket, or timeout.
 

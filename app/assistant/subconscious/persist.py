@@ -42,8 +42,8 @@ _REGISTER_LOCK = threading.RLock()
 # that accumulated 64 evidence items over 3 weeks with no decision.
 DISPOSITION_REINFORCEMENT_THRESHOLD = 8
 # A concern sitting in `addressing` this many days without resolution is
-# stale — the handoff likely dropped; the noticer must re-escalate or
-# resolve it.
+# due for review. Age alone is not evidence that handling failed or permission
+# to contact the user again.
 ADDRESSING_STALE_DAYS = 4
 # Evidence list cap per concern: keep the founding items + the freshest.
 _EVIDENCE_KEEP_HEAD = 3
@@ -111,7 +111,7 @@ def compute_pressure(register: Dict[str, Any], *, now_utc: Optional[datetime] = 
                 needs.append(c)
 
     for c in register.get("addressing") or []:
-        since_raw = str(c.get("addressing_since_utc") or "").strip()
+        since_raw = str(c.get("addressing_reviewed_at_utc") or c.get("addressing_since_utc") or "").strip()
         if not since_raw:
             continue
         try:
@@ -215,7 +215,7 @@ def _apply_noticer_output_locked(
     # already researched it) but the concern is NOT resolved yet (no booking/appointment). Moving
     # it out of `active` stops it nagging the planner (project_concerns reads only `active`) while
     # keeping it tracked. This is owner-driven: the noticer decides this from reading dayflow's
-    # public outcomes; dayflow never writes the register.
+    # public outcomes; Dayflow also delivers durable closure receipts through this writer.
     for a in addressing_concerns:
         cid = a.get("concern_id")
         if not cid or cid not in by_id:
@@ -223,6 +223,7 @@ def _apply_noticer_output_locked(
             continue
         existing = by_id[cid]
         existing["addressing_since_utc"] = now_utc_iso
+        existing["addressing_reviewed_at_utc"] = now_utc_iso
         note = a.get("notes")
         if note:
             existing["reinforcement_notes"] = (
@@ -304,6 +305,7 @@ def _apply_noticer_output_locked(
             if not any(c.get("concern_id") == cid for c in register.get("active", [])):
                 register.setdefault("active", []).append(existing)
             existing.pop("addressing_since_utc", None)
+            existing.pop("addressing_reviewed_at_utc", None)
             existing["escalation"] = {
                 "target": "dayflow_orchestrator",
                 "urgency": "high",
@@ -312,6 +314,8 @@ def _apply_noticer_output_locked(
             }
             existing["last_disposition_at_count"] = int(existing.get("reinforcement_count") or 0)
         elif action == "keep_active":
+            if existing in register.get("addressing", []):
+                existing["addressing_reviewed_at_utc"] = now_utc_iso
             # Justified continuation — resets the pressure window so the
             # rule doesn't re-fire next tick.
             existing["last_disposition_at_count"] = int(existing.get("reinforcement_count") or 0)
@@ -535,7 +539,10 @@ def apply_work_outcome(
     work_id: str,
     outcome: str,
     user_words: str = "",
+    user_response: Optional[dict] = None,
     register_path: Optional[Path] = None,
+    receipt_id: str = "",
+    work_context: Optional[dict] = None,
 ) -> str:
     """Deterministic back-propagation of a work-object outcome onto its concern
     (2026-08-01 audit: outcomes never reached the register — 19 AC-service
@@ -545,10 +552,10 @@ def apply_work_outcome(
     ``concern:<prefix>`` — resolved by unique prefix against the register.
     Applied by outcome:
       done                      -> move active->addressing, journal "ADDRESSED by <work_id>"
-      abandoned + user words    -> journal the words verbatim, park DORMANT with
-                                   user_declined_at_utc (projection stops pushing it)
-      abandoned, no user words  -> journal only (a system drop must not silence a
-                                   real concern)
+      abandoned + unqualified explicit decline button -> park DORMANT
+      other abandoned replies -> journal exact words/choice/scope for the noticer;
+                                 text presence or acknowledgment is not a decline
+      done -> also preserve any recorded reply context in the journal
     Returns what happened: 'addressing' | 'user_declined' | 'journaled' |
     'unresolved'. Lives with the other register writers: one lock, one atomic save.
     """
@@ -578,15 +585,38 @@ def apply_work_outcome(
                 concern_ref, len(matches))
             return "unresolved"
         bucket, index, concern = matches[0]
+        if receipt_id and receipt_id in concern.get("work_outcome_receipts", []):
+            return "already_applied"
 
         def _journal(line: str) -> None:
             concern["reinforcement_notes"] = (
                 (concern.get("reinforcement_notes") or "") + f"\n[{now_iso}] {line}")
             _trim_journal(concern)
 
-        if outcome == "abandoned" and user_words.strip():
-            words = user_words.strip().replace("\n", " ")[:300]
-            _journal(f'USER DECLINED via {work_id}: "{words}"')
+        response = dict(user_response or {})
+        # Separate from the bounded reinforcement journal: ordinary observations
+        # must not evict a settled user decision or the work that addressed it.
+        concern.setdefault("work_outcomes", {})[work_id] = {
+            "work_id": work_id, "outcome": outcome, "recorded_at": now_iso,
+            "context": dict(work_context or {}), "user_response": response,
+            "legacy_user_words": user_words,
+        }
+        if receipt_id:
+            concern.setdefault("work_outcome_receipts", []).append(receipt_id)
+
+        details = response.get("response_details") or {}
+        history = details.get("response_history") or []
+        latest = history[-1] if history else details
+        # Typed text can qualify or override any button. Leave that interpretation
+        # to the existing noticer; do not infer intent from words or lifecycle state.
+        explicit_decline = (latest.get("meaning") == "decline"
+                            and not str(latest.get("typed_text") or "").strip())
+        if response:
+            _journal(f"USER RESPONSE via {work_id}: " + json.dumps(response, ensure_ascii=False))
+        elif user_words.strip():
+            _journal(f"USER WORDS via {work_id}: " + json.dumps(user_words, ensure_ascii=False))
+        if outcome == "abandoned" and explicit_decline:
+            _journal(f"USER DECLINED via {work_id} (explicit scoped choice; see response above)")
             concern["user_declined_at_utc"] = now_iso
             concern["last_disposition_at_count"] = int(concern.get("reinforcement_count") or 0)
             if bucket in ("active", "addressing"):
@@ -594,6 +624,7 @@ def apply_work_outcome(
                 register.setdefault("dormant", []).append(concern)
             result = "user_declined"
         elif outcome == "done":
+            concern["addressing_reviewed_at_utc"] = now_iso
             _journal(f"ADDRESSED by {work_id} (done)")
             concern["last_disposition_at_count"] = int(concern.get("reinforcement_count") or 0)
             if bucket == "active":
@@ -602,7 +633,7 @@ def apply_work_outcome(
                 register.setdefault("addressing", []).append(concern)
             result = "addressing"
         else:
-            _journal(f"dayflow {outcome} {work_id} (no user words recorded)")
+            _journal(f"dayflow {outcome} {work_id}" + (" (user response recorded above)" if response or user_words.strip() else " (no user words recorded)"))
             result = "journaled"
 
         register["last_updated_utc"] = now_iso

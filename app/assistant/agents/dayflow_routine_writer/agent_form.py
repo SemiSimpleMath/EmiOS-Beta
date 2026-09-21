@@ -7,9 +7,8 @@ class AgentForm(BaseModel):
             "The full updated dayflow routine document in markdown. "
             "Time-structured, day-specific, belief-enriched. "
             "Must cover the full remaining day from current time onward. "
-            "Past sections that are fully resolved may be condensed into a single "
-            "'## What has happened' summary block rather than dropped entirely, "
-            "so the agent retains context about the day so far."
+            "Place preparation before its event, preserve conditions, cite belief keys, "
+            "and suppress asks already handled according to supplied evidence."
         )
     )
     change_summary: str = Field(

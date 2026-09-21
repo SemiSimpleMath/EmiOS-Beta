@@ -177,6 +177,10 @@ class ProactiveSuggestionPopup {
     }
     
     _resolveLayout(s) {
+        const kind = s.trigger_context?.ticket_kind || s.button_layout;
+        if (s.ticket_type === 'dayflow_orchestrator' && ['notify', 'advice', 'decision'].includes(kind)) {
+            return { layout: kind, planMode: false };
+        }
         switch ((s.ticket_type || '').toLowerCase()) {
             case 'cron_reminder':    return { layout: 'activity',      planMode: false };
             case 'tool_approval':    return { layout: 'tool_approval', planMode: false };
@@ -238,8 +242,21 @@ class ProactiveSuggestionPopup {
             const isAdvice    = layout === 'advice';
             const isQuestion  = layout === 'question';
             
+            const choices = !isToolApproval && s.ticket_type === 'dayflow_orchestrator'
+                ? (s.response_choices || s.trigger_context?.response_choices || []) : [];
             let buttonHtml;
-            if (isToolApproval) {
+            if (choices.length) {
+                buttonHtml = `
+                    <div class="proactive-text-container">
+                        <input type="text" class="proactive-user-text" data-idx="${idx}"
+                            aria-label="Your response; press Enter to send without selecting a button"
+                            placeholder="Your response (Enter to send)" maxlength="4000">
+                    </div>
+                    <div class="proactive-actions-row">${choices.map(c =>
+                        `<button class="proactive-btn-sm proactive-btn-choice" data-idx="${idx}"
+                            data-choice-id="${this.escapeHtml(c.id)}">${this.escapeHtml(c.label)}</button>`
+                    ).join('')}</div>`;
+            } else if (isToolApproval) {
                 buttonHtml = `
                     <button class="proactive-btn-sm proactive-btn-accept" data-idx="${idx}">Allow</button>
                     <button class="proactive-btn-sm proactive-btn-dismiss" data-idx="${idx}">Deny</button>
@@ -341,9 +358,8 @@ class ProactiveSuggestionPopup {
         // Restore text input values after re-rendering
         listContainer.querySelectorAll('.proactive-user-text').forEach(input => {
             const ticketId = input.closest('.proactive-item').dataset.ticketId;
-            if (userTextValues[ticketId]) {
-                input.value = userTextValues[ticketId];
-            }
+            const draft = this.suggestions.find(s => s.ticket_id === ticketId)?._draftText;
+            input.value = userTextValues[ticketId] ?? draft ?? '';
         });
         // ...and put the cursor back where it was, if that card is still here.
         if (typingIn) {
@@ -361,6 +377,20 @@ class ProactiveSuggestionPopup {
             listContainer.querySelectorAll(`.${cls}`).forEach(btn => {
                 btn.addEventListener('click', () => this.respond(
                     parseInt(btn.dataset.idx), action, btn.textContent.trim()));
+            });
+        });
+        listContainer.querySelectorAll('.proactive-btn-choice').forEach(btn => {
+            btn.addEventListener('click', () => this.respond(
+                parseInt(btn.dataset.idx), 'choice', '', btn.dataset.choiceId));
+        });
+        listContainer.querySelectorAll('.proactive-item').forEach(item => {
+            if (!item.querySelector('.proactive-btn-choice')) return;
+            const input = item.querySelector('.proactive-user-text');
+            input.addEventListener('keydown', e => {
+                if (e.key === 'Enter' && !e.shiftKey && input.value.trim()) {
+                    e.preventDefault();
+                    this.respond(parseInt(input.dataset.idx), 'answer', '');
+                }
             });
         });
         // The × carries no text of its own, so it sends its tooltip.
@@ -545,7 +575,7 @@ class ProactiveSuggestionPopup {
     // only place that knows what its buttons say — the same action reads "Acknowledge"
     // on the advice layout and "OK" on the notify layout — so it travels with the
     // response instead of the server guessing at it from the action token.
-    async respond(idx, action, label = '') {
+    async respond(idx, action, label = '', choiceId = null) {
         const suggestion = this.suggestions[idx];
         if (!suggestion) return;
         
@@ -557,7 +587,8 @@ class ProactiveSuggestionPopup {
         // Get user text from input box (before removing from DOM)
         const popup = document.getElementById('proactive-popup');
         const textInput = popup.querySelector(`.proactive-user-text[data-idx="${idx}"]`);
-        const userText = textInput ? textInput.value.trim() : '';
+        const userText = textInput ? textInput.value : '';
+        suggestion._draftText = userText;
         
         // Get snooze value if applicable
         const selectEl = popup.querySelector(`.proactive-snooze-select[data-idx="${idx}"]`);
@@ -576,7 +607,8 @@ class ProactiveSuggestionPopup {
                     action: action,
                     user_text: userText,
                     snooze_minutes: snoozeMinutes,
-                    label: label
+                    label: label,
+                    choice_id: choiceId
                 })
             });
             
@@ -590,18 +622,20 @@ class ProactiveSuggestionPopup {
                 try { detail = (await response.json()).error || ''; } catch (e) { detail = ''; }
                 console.warn('Suggestion no longer answerable:', detail);
                 this.showTransientNotice(
-                    'That question expired before your answer reached it, so it was not recorded.'
+                    (detail || 'That response could not be recorded.') + (userText ? ' Your text: ' + userText : '')
                 );
             } else if (!response.ok) {
                 console.error('Error responding to suggestion:', await response.text());
                 // Re-add on error (rollback optimistic update)
+                suggestion._processing = false;
                 this.suggestions.splice(idx, 0, suggestion);
                 this.render();
             }
         } catch (e) {
             console.error('Error responding to suggestion:', e);
             // Re-add on error
-            this.suggestions.splice(idx, 0, suggestion);
+            suggestion._processing = false;
+                this.suggestions.splice(idx, 0, suggestion);
             this.render();
         }
     }

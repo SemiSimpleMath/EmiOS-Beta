@@ -145,7 +145,7 @@ def test_the_goal_line_carries_the_pod_handle(stub_store, monkeypatch):
     line = _summary_for(msg.metadata, monkeypatch)
     assert POD in line
     assert "pod_fetch" in line
-    assert msg.metadata["summary"] in line, "the summary is kept, the handle is added"
+    assert msg.metadata["email_summary"] in line, "the informative email summary and full-source handle are kept"
 
 
 def test_an_item_with_no_pod_gets_no_dangling_handle(stub_store, monkeypatch):

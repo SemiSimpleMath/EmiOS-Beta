@@ -514,6 +514,12 @@ class MultiAgentManager:
             # boundary — never mid-LLM-call.
             self._drain_mailbox()
 
+            from app.assistant.manager_runtime.execution import REGISTRY, ExecutionCancelled
+            try:
+                REGISTRY.check()
+            except ExecutionCancelled:
+                return "cancelled"
+
             # Cooperative cancellation hook (mam_instance_manager.cancel /
             # Orchestrator._request_cancel_instance write this, global scope).
             if self.blackboard.get_state_value("cancelled", False):
@@ -643,6 +649,9 @@ class MultiAgentManager:
             return self.handle_exit_reason(exit_reason)
 
         except Exception as e:
+            from app.assistant.manager_runtime.execution import ExecutionCancelled
+            if isinstance(e, ExecutionCancelled):
+                return self.handle_exit_cancelled()
             logger.error("❌ Fatal error in agent loop: %s", e)
             logger.debug("fatal error in agent loop exception details", exc_info=True)
             try:

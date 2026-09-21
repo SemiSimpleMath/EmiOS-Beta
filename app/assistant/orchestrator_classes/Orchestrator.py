@@ -1562,6 +1562,10 @@ class Orchestrator:
         try:
             bb = getattr(inst, "blackboard", None)
             if bb is not None:
+                invocation_id = bb.get_state_value("_invocation_id")
+                if invocation_id:
+                    from app.assistant.ServiceLocator.service_locator import DI
+                    DI.mam_instance_manager.cancel(invocation_id)
                 setter = getattr(bb, "update_global_state_value", None)
                 if callable(setter):
                     setter("cancelled", True)

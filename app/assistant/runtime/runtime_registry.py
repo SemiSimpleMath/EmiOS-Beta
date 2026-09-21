@@ -160,10 +160,14 @@ class RuntimeRegistry:
             task = row["tasks"].get(task_id)
             if not isinstance(task, dict):
                 return
+            if task.get("finished_at_utc") is not None:
+                return
+            was_running = task.get("status") == "running"
             task["finished_at_utc"] = _now_utc()
             task["status"] = "error" if isinstance(error, str) and error.strip() else "completed"
             task["last_error"] = str(error).strip() if isinstance(error, str) and error.strip() else None
-            row["running"] = max(0, int(row.get("running", 0)) - 1)
+            if was_running:
+                row["running"] = max(0, int(row.get("running", 0)) - 1)
             if task["status"] == "completed":
                 row["completed"] += 1
             else:
@@ -340,16 +344,29 @@ def start_monitored_thread(
             raise
         reg.mark_thread_stopped(thread_id=thread_id, error=None)
 
-    thread = threading.Thread(target=_wrapped, daemon=daemon, name=name)
-    reg.register_thread(
-        thread_id=thread_id,
-        owner=owner,
-        kind=kind,
-        daemon=daemon,
-        metadata=metadata,
-        thread_ref=thread,
-    )
-    thread.start()
+    from app.assistant.manager_runtime.execution import bind_background
+    bound, cleanup = bind_background(_wrapped, name)
+    def run_bound():
+        try:
+            bound()
+        except BaseException as exc:
+            reg.mark_thread_stopped(thread_id=thread_id, error=str(exc))
+            raise
+    thread = threading.Thread(target=run_bound, daemon=daemon, name=name)
+    try:
+        reg.register_thread(
+            thread_id=thread_id,
+            owner=owner,
+            kind=kind,
+            daemon=daemon,
+            metadata=metadata,
+            thread_ref=thread,
+        )
+        thread.start()
+    except BaseException as exc:
+        cleanup()
+        reg.mark_thread_stopped(thread_id=thread_id, error=str(exc))
+        raise
     return thread
 
 
@@ -390,7 +407,23 @@ class MonitoredThreadPoolExecutor:
             self._registry.executor_task_finished(executor_id=self._executor_id, task_id=task_id, error=None)
             return result
 
-        return self._executor.submit(_wrapped)
+        from app.assistant.manager_runtime.execution import bind_background
+        cleanup = lambda: None
+        try:
+            bound, cleanup = bind_background(_wrapped, task_name)
+            future = self._executor.submit(bound)
+        except BaseException as exc:
+            cleanup()
+            self._registry.executor_task_finished(executor_id=self._executor_id, task_id=task_id, error=str(exc))
+            raise
+        def completed(done):
+            if done.cancelled():
+                cleanup()
+                self._registry.executor_task_finished(executor_id=self._executor_id, task_id=task_id, error="cancelled before start")
+            elif done.exception() is not None:
+                self._registry.executor_task_finished(executor_id=self._executor_id, task_id=task_id, error=str(done.exception()))
+        future.add_done_callback(completed)
+        return future
 
     def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
         self._executor.shutdown(wait=wait, cancel_futures=cancel_futures)

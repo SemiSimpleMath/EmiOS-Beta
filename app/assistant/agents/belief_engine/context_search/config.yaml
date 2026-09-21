@@ -1,0 +1,10 @@
+name: belief_engine::context_search
+class_name: Agent
+llm_params:
+  llm_provider: openai
+  engine: gpt-5.6-luna
+  model_tier: strong
+allowed_tools: []
+except_tools: []
+user_context_items: [review_input]
+system_context_items: []

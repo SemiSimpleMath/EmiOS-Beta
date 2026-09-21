@@ -234,6 +234,7 @@ class DayflowScheduler:
             return
         if not setup_complete():
             logger.info("[DayflowScheduler] Setup not complete; skipping tick.")
+            self._arm_ceiling_tick()
             return
 
         try:
@@ -243,6 +244,7 @@ class DayflowScheduler:
                 has_history = session.query(UnifiedLog2026.id).limit(1).scalar() is not None
             if not has_history:
                 logger.info("[DayflowScheduler] No chat history yet; skipping tick.")
+                self._arm_ceiling_tick()
                 return
         except Exception as e:
             # A transient DB failure is NOT a quiet state: this tick's date-job is consumed, so
@@ -355,10 +357,10 @@ class DayflowScheduler:
     def _arm_ceiling_tick(self) -> None:
         """Arm the heartbeat tick.
 
-        This runs in the tick's ``finally`` and is the SOLE place the next ordinary tick is
-        armed, so it must not propagate: a raise here would leave NO tick scheduled AND skip
-        the work-node re-arm that follows the call site, silently ending autonomy until an
-        external poke. On failure it logs loudly; the next tick re-arms.
+        Called after a readiness skip and in an executed tick's ``finally``.
+        It must not propagate: a raise would also skip subsequent work-node re-arming.
+        Scheduling failures are logged; an external poke or restart may be needed
+        if no other job remains. Existing sooner ticks are preserved.
 
         It used to scan dayflow ITEMS for the earliest ``reactivate_at_utc`` and arm a
         fast tick for that item. That lane is retired (2026-09-16): items are intake +

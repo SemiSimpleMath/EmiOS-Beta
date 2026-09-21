@@ -566,7 +566,7 @@ never minting a second one. Both the already-settled and resumed-wait paths call
 result skips finalization. Planning is signaled after this handoff; it has no finalizer stage.
 Without recovery, the inactivity sweep could fail an ask whose answer was already saved.
 
-**`discharge_node` / `drive_work`** (`work_objects/discharge.py`) — the worker driver, for
+**`discharge_node`** (`work_objects/discharge.py`) — the worker driver, for
 everything that is not a ticket. Note the module: the old `work_runtime.py` split, and
 `work_objects/runtime.py` is now only the contextvar binding, **not** the driver. It **does not
 claim** — the gate already did, so it *raises* if the node is any other status, because a node that
@@ -575,8 +575,11 @@ work contextvar, invokes the worker through `ManagerInterface.invoke_on` (the sa
 seam everyone else uses, so the sub-manager scope is built once and a manager failure comes back as
 a structured tool error), and hands the result to `result_recorder`. The result lands as an
 **evidence child** — the node's `content` is its directive and is never overwritten. With
-`node_id=None`, `drive_work` drives ready top-level nodes up to `max_passes=200` until the goal
-satisfies or only future-wake nodes remain (`"parked"`); it never fast-forwards time.
+`node_id=None`, the standalone `drive_work` wrapper promotes/claims ready main tasks,
+runs this primitive, and invokes the existing finalizer against the caller's store.
+It can finalize a previously recorded result without rerunning its worker. It stops
+for gates or a judgment requiring planning; it never fast-forwards time or retries
+on its own. This wrapper is a scenario runner, not Dayflow's scheduler.
 
 **work_repair** — **RETIRED 2026-09-16.** `work_repair_node` and `work_repair_apply` remain on disk but
 are on no path: the node is absent from the `state_map` and nothing imports the applier. Its three

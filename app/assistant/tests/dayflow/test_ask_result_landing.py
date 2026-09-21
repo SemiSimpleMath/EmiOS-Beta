@@ -255,8 +255,11 @@ class TestDeclineReachesTheConcern:
 
         record_tool_result(
             store, wid, "ask1",
-            _response("the picture was already taken so this is all moot."),
-            actor="reply", evidence_title="user response")
+            ToolResult(result_type="ticket_response", content="No thanks", data={
+                "ticket_id": "ticket-decline", "action": "answer", "user_text": "No thanks",
+                "response_details": {"label": "No thanks", "meaning": "decline", "typed_text": "",
+                                     "scope": "Continue this preparation task"}}),
+            actor="create_dayflow_ticket", evidence_title="user response")
         store.apply("set_work_status", {"work_id": wid, "status": "abandoned",
                                         "reason": "steward: objective dropped"}, actor="steward")
         concern_feedback.propagate_work_outcome(store, wid, "abandoned")
@@ -266,4 +269,4 @@ class TestDeclineReachesTheConcern:
         assert [c["concern_id"] for c in register["dormant"]] == [concern_id]
         parked = register["dormant"][0]
         assert parked.get("user_declined_at_utc")
-        assert "this is all moot" in parked["reinforcement_notes"]
+        assert "No thanks" in parked["reinforcement_notes"]

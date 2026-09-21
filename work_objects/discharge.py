@@ -58,6 +58,24 @@ def _ensure_registered() -> None:
 def discharge_node(store, work_id: str, node_id: str, *, scope_context,
                    manager_name: str = "work_emi_team_manager",
                    session_id: str | None = None) -> "ToolResult | None":
+    from app.assistant.manager_runtime.execution import current_owner, Owner, REGISTRY
+    if current_owner() is not None:
+        return _discharge_node_body(store, work_id, node_id, manager_name=manager_name,
+                                    scope_context=scope_context, session_id=session_id)
+    node = store.load(work_id).nodes[node_id]
+    owner = Owner(store, work_id, node_id, int(node.payload.get("dispatch_epoch") or 0))
+    store.start_execution(owner)
+    try:
+        with REGISTRY.span("attempt", "discharge_node", owner=owner, attribution=node_id):
+            return _discharge_node_body(store, work_id, node_id, manager_name=manager_name,
+                                        scope_context=scope_context, session_id=session_id)
+    finally:
+        REGISTRY.finish_owner(owner)
+
+
+def _discharge_node_body(store, work_id: str, node_id: str, *, scope_context,
+                   manager_name: str = "work_emi_team_manager",
+                   session_id: str | None = None) -> "ToolResult | None":
     """Drive ONE node to a yield/finish through the standard manager loop. Returns the manager's
     ToolResult — exactly what a normal manager-as-tool call returns. The node's resulting STATUS is a
     graph property: read it via store.load(work_id).nodes[node_id].status.
@@ -130,36 +148,55 @@ def discharge_node(store, work_id: str, node_id: str, *, scope_context,
 def drive_work(store, work_id: str, *, scope_context, node_id: str | None = None,
                manager_name: str = "work_emi_team_manager", now=None,
                max_passes: int = 200) -> str:
-    """Legacy scenario driver. An explicit node_id must already be dispatched.
+    """Bounded standalone scenario runner using normal claim/result/finalizer APIs.
 
-    The automatic loop selects ready nodes but does not claim them, so discharge_node
-    rejects its first selected node. Neither branch invokes the finalizer. This helper
-    is not currently a working run-to-goal driver; Dayflow uses WorkSession.
+    Operates only on main tasks. Stops for time/event gates, pending revisions or
+    a judged failure; it does not implement architect replanning or automatic
+    retries. An explicit node may be ready, already dispatched, or awaiting
+    finalization. Caller owns the store and scope; no global Dayflow writes.
     """
     from work_objects.model import utcnow
-    if node_id is not None:
-        discharge_node(store, work_id, node_id, scope_context=scope_context,
-                       manager_name=manager_name)
-        n = store.load(work_id).nodes.get(node_id)
-        return n.status if n else "missing"
-
-    now = now or utcnow()
-    done_ids: set[str] = set()
+    from app.assistant.control_nodes.work_finalizer_node import WorkFinalizerNode
+    if scope_context is None:
+        raise ValueError("drive_work requires caller-provided scope")
+    if max_passes < 1:
+        raise ValueError("max_passes must be positive")
+    finalizer = WorkFinalizerNode("scenario_finalizer", None, None, None)
     for _ in range(max_passes):
         wo = store.load(work_id)
-        if wo.status == "done":
-            return "done"
-        goal = wo.goal_node_id
-        ready = [n for n in wo.ready_nodes(now)
-                 if n.id != goal and n.parent_id == goal and n.id not in done_ids]
-        if not ready:
-            has_future = any(n.wake_at is not None and n.wake_at > now
-                             for n in wo.nodes.values() if n.status in {"proposed", "waiting"})
-            return "parked" if has_future else store.load(work_id).status
-        for n in ready:
-            done_ids.add(n.id)
-            discharge_node(store, work_id, n.id, scope_context=scope_context,
+        if wo.status in {"done", "abandoned"}:
+            return wo.nodes[node_id].status if node_id is not None else wo.status
+        clock_now = now or utcnow()
+        if node_id is not None:
+            node = wo.nodes[node_id]
+            if not wo.is_work_unit(node):
+                raise ValueError("drive_work only dispatches main tasks")
+        else:
+            pending = [n for n in wo.nodes.values() if wo.needs_finalization(n)]
+            ready = [n for n in wo.ready_nodes(clock_now) if wo.is_work_unit(n)]
+            node = next(iter(pending or ready), None)
+            if node is None:
+                future = any(n.wake_at is not None and n.wake_at > clock_now
+                             for n in wo.nodes.values() if wo.is_work_unit(n)
+                             and n.status in {"proposed", "waiting", "actionable"})
+                return "parked" if future else wo.status
+        if not wo.needs_finalization(node):
+            if node.status != "dispatched":
+                if not wo.is_ready(node, clock_now):
+                    return node.status if node_id is not None else wo.status
+                if node.status != "actionable":
+                    store.apply("set_status", {"work_id":work_id, "node_id":node.id,
+                                               "status":"actionable"}, actor="scenario")
+                # The shared atomic claim rechecks real current gates and ownership.
+                store.apply("claim_task", {"work_id":work_id, "node_id":node.id}, actor="dispatch_gate")
+            discharge_node(store, work_id, node.id, scope_context=scope_context,
                            manager_name=manager_name)
+        finalizer.finalize_recorded(store, work_id, node.id, scope_context=scope_context)
+        updated = store.load(work_id)
+        if node_id is not None:
+            return updated.nodes[node_id].status
+        if updated.nodes[node.id].status != "closed" or updated.has_pending_revision():
+            return updated.status
     return store.load(work_id).status
 
 

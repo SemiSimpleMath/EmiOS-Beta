@@ -29,6 +29,7 @@ from belief_engine.decay.model import (
     valence_from_signal_type,
     EVIDENCE_BASE_WEIGHT,
     DEFAULT_BASE_WEIGHT,
+    decayed_weight, half_life_for_kind,
 )
 
 logger = get_logger(__name__)
@@ -100,24 +101,18 @@ def recompute_belief_snapshots(
         if not belief_ids:
             return stats
 
-        # Fetch all evidence for these beliefs in one go.
-        # Chunk by 500 to keep IN clause sane on SQLite.
-        evidence_by_belief: Dict[str, List] = {bid: [] for bid in belief_ids}
-        CHUNK = 500
-        for i in range(0, len(belief_ids), CHUNK):
-            chunk = belief_ids[i:i + CHUNK]
-            placeholders = ",".join(f":id{j}" for j in range(len(chunk)))
-            params = {f"id{j}": chunk[j] for j in range(len(chunk))}
-            rows = session.execute(
-                text(
-                    f"SELECT belief_id, source_type, signal_type, valence, weight, "
-                    f"  source_date, created_at "
-                    f"FROM belief_evidence WHERE belief_id IN ({placeholders})"
-                ),
-                params,
-            ).fetchall()
-            for ev_row in rows:
-                evidence_by_belief.setdefault(str(ev_row[0]), []).append(ev_row)
+        # Follow original evidence through merge lineage, including archived predecessors.
+        # Bookkeeping is excluded irrespective of legacy stored weights. Exact repeated
+        # observations and model-reviewed source equivalences contribute only once.
+        from belief_engine.matching.context import observations
+        from belief_engine.matching.history import connection
+        from belief_engine.db.paths import belief_db_path
+        evidence_by_belief = {}
+        with connection(belief_db_path()) as evidence_conn:
+            for bid in belief_ids:
+                evidence_by_belief[bid] = [(bid, e.get('source_type'), e.get('signal_type'),
+                    e.get('valence'), e.get('weight'), e.get('source_date'), e.get('created_at'), e.get('half_life_days_snapshot'))
+                    for e in observations(evidence_conn, bid)]
 
         # 2. Per belief: aggregate and decide.
         for b in beliefs:
@@ -126,6 +121,11 @@ def recompute_belief_snapshots(
                 kind = b[3] or None
                 ev_rows = evidence_by_belief.get(bid, [])
                 if not ev_rows:
+                    # Missing original evidence does not establish falsity. Keep the claim,
+                    # but never retain a legacy high confidence supported only by bookkeeping.
+                    session.execute(text("UPDATE user_beliefs SET current_support_weight=0, "
+                        "current_contradiction_weight=0,current_net_weight=0,current_confidence_band='unverified' "
+                        "WHERE id=:id"),{'id':bid})
                     stats.skipped_no_evidence += 1
                     continue
 
@@ -139,29 +139,38 @@ def recompute_belief_snapshots(
                     weight_db = er[4]
                     source_date = er[5]
                     created_at = er[6]
-                    observed_at = _parse_iso(source_date) or _parse_iso(created_at)
+                    observed_at = _parse_iso(source_date)  # ingestion time is not an observation date
                     if observed_at is None:
                         continue
                     # Prefer stored valence; fall back to signal_type mapping.
                     valence = valence_db or valence_from_signal_type(signal_type)
                     # Prefer stored weight; fall back to source_type baseline.
-                    if weight_db is None or weight_db == 0.0:
+                    if weight_db is None:
                         base_w = EVIDENCE_BASE_WEIGHT.get(source_type, DEFAULT_BASE_WEIGHT)
                     else:
                         base_w = float(weight_db)
                     # Ignore bookkeeping events (canonicalization, deprecation rows).
                     if base_w == 0.0:
                         continue
-                    events.append((base_w, valence, observed_at))
+                    snapshot = er[7]
+                    # -1 explicitly records no decay for new durable evidence. NULL is
+                    # legacy/unspecified and falls back to the current belief kind.
+                    half_life = half_life_for_kind(kind) if snapshot is None else (None if snapshot == -1 else snapshot)
+                    aged = decayed_weight(base_w,(now-observed_at).total_seconds()/86400,half_life)
+                    events.append((aged, valence, now))
                     if valence == "contradict":
                         if last_contradicted is None or observed_at > last_contradicted:
                             last_contradicted = observed_at
 
                 if not events:
+                    session.execute(text("UPDATE user_beliefs SET current_support_weight=0, "
+                        "current_contradiction_weight=0,current_net_weight=0,current_confidence_band='unverified' "
+                        "WHERE id=:id"),{'id':bid})
                     stats.skipped_no_evidence += 1
                     continue
 
-                weights = compute_belief_weights(events, kind, now)
+                # Each source has already decayed using its own recorded half-life.
+                weights = compute_belief_weights(events, 'durable_fact', now)
                 band = band_for_weights(weights)
 
                 # 3. Write snapshot columns.

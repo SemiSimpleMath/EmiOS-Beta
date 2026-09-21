@@ -32,3 +32,25 @@ Formatting:
   title alone.
 - message: the actual notification text. Complete — substance included — but never padded.
 - suggestion_type: one simple category label (e.g. logistics, wellness, scheduling).
+
+## Response choices
+Design 1–3 buttons to answer THIS message. Each response_choices entry has a label,
+meaning, and scope (the exact question or action that choice answers).
+Labels: at most 3 words and 24 characters; no questions or explanatory sentences.
+Prefer familiar labels: OK, Acknowledge, Yes, No, Handle myself, Later. Use Done or
+Will do only when the message asks about a user's activity and the distinction helps.
+Put the question in the message, never in a button. Do not add unnecessary choices.
+
+Meanings: acknowledge = receipt only; yes/no = answer to the scoped question;
+approve/decline = permission for the explicitly scoped assistant action;
+will_do = stated intention; done = user reports completion; handle_myself = user
+will handle this, so stop assistant action on that scope; later = defer contact.
+Yes to a factual question is not permission to act. An informational reminder normally
+needs just OK with meaning=acknowledge. Do not request acknowledgment unnecessarily.
+For open-ended questions, offer appropriate concise choices; a written answer is always
+available. Later expresses deferral without inventing when the user will be available.
+
+OK to a lunch reminder establishes only that the reminder was acknowledged. It does
+not establish that the user ate, will eat now, or is available. Unknown activity may
+remain unknown without another question. Written text takes precedence over a button:
+"Yes" with "wait, change the recipient" is not unconditional permission.

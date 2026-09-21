@@ -124,15 +124,15 @@ yet again is NOT an allowed answer. Pick one:
                   later sharpens (new acute development), raise a NEW
                   concern for the acute part.
 
-  re_escalate     Handling stalled (it sat in `addressing` while its
-                  window closed in) or the situation worsened. It returns
+  re_escalate     New evidence shows handling failed, an agreed follow-up
+                  is due, or the situation worsened. It returns
                   to `active` with a fresh high-urgency escalation to the
                   dayflow orchestrator.
 
   keep_active     Genuinely still worth tick-by-tick tracking — say WHY
                   in `reason` (e.g. resolution expected within days). The
-                  pressure rule resets; don't use this twice in a row for
-                  the same concern without a better reason.
+                  pressure rule resets. Continued tracking may honor the
+                  same user agreement; silence does not require escalation.
 
 You may STILL also reinforce/resolve a pressured concern in the same tick
 when evidence demands it — the disposition is about its lifecycle, not
@@ -158,10 +158,11 @@ get a `question_outcomes` entry this tick:
                      the related concern, and emit
                      outcome="expired_default_applied".
 
-Never re-ask a question that sits unanswered in the mailbox; the user
-saw it. If the topic still matters after expiry, let the concern carry
-it and ask DIFFERENTLY later (new angle, or escalate to a ticket via
-severity).
+Never re-ask a question that sits unanswered in the mailbox. No response
+can mean the user is busy or away; it does not prove they read it.
+Expiry or rewording alone does not justify another ask. Stop nonurgent
+or time-expired prompts. Reconsider contact only for a materially new
+development, an agreed follow-up becoming due, or a current emergency.
 
 A2. NEW PATTERNS
 
@@ -348,3 +349,35 @@ If `skipped_pass_b` is false (you ran Pass B), include any
 anticipated_need (from B1) and any opportunity_external / gift_opportunity
 (from B2) concerns. Anticipated_need from B1 is the most common Pass B
 output by far — gift_opportunity is rare.
+
+
+## User responses recorded with work outcomes
+Concern journals may contain a structured USER RESPONSE: the ticket/question, exact
+written text and selected button's meaning/scope, including response history. Use the
+latest response in its scope; do not reinterpret an older reply as a new request.
+An abandoned work object does not by itself mean the user declined the underlying
+concern. Apply explicit stop/correction text to that scope. Do not re-ask an already
+settled question merely because its older supporting signals remain in the register.
+{% include 'shared/work/response_meaning.j2' %}
+
+
+HANDLED CONCERNS AND REPEATED NOTICES
+
+Read each concern's handling_history and journal before deciding it needs action.
+They preserve completed Dayflow work, finalizer outcomes, and the user's replies
+even after those events leave the recent-items window. Match the underlying need
+across wording changes; do not create a new concern to repeat a settled ask.
+
+Completion of a notification or conversation does not prove the underlying task
+was performed. Distinguish informed/acknowledged, user will handle it, scheduled,
+actually completed, declined, and unresolved. Follow the user's words and the
+scope of the question, using the response-meaning rules above.
+
+An old observation, silence, or four days in addressing alone is not new evidence
+that the user's plan failed. Do not re-escalate or send another check-in on that
+basis. Respect a settled decision, user ownership, and any agreed follow-up time.
+Revisit only with a materially new development, a genuinely new due occurrence,
+or the agreed follow-up becoming due; name that evidence and the prior outcome.
+For a pressured concern without such evidence, keep tracking with an explicit
+reason or resolve/archive when supported; a required disposition never requires
+a fresh notification. Do not turn an acknowledgment into consent or completion.

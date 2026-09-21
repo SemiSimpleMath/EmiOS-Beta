@@ -1,0 +1,7 @@
+{% set execution = work.execution | default({}) %}
+{% if execution.get('attempts') or execution.get('calls') %}
+EXECUTION OWNERSHIP (separate from task status)
+{% for attempt in execution.get('attempts', []) %}- {{ attempt.node_id }} attempt {{ attempt.epoch }}: {{ attempt.state }}{% if attempt.revoked %}; cancellation requested: {{ attempt.reason }}{% endif %}.
+{% endfor %}{% for call in execution.get('calls', []) %}- {{ call.tool_name }} on {{ call.node_id }} attempt {{ call.epoch }}: {{ call.state }}.
+{% endfor %}Further dispatch within this work object is held until prior execution and uncertain external outcomes are settled. A timeout, finalizer retry, or replacement task does not remove this hold. Do not duplicate the action or repeatedly contact the user because it remains held.
+{% endif %}

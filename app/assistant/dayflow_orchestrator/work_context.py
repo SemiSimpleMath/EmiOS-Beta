@@ -27,6 +27,17 @@ def record_data(record):
             "pod_ref": record.pod_ref, "terminal": record.payload.get("terminal"),
             "epoch": record.payload.get("dispatch_epoch")}
 
+def source_context(wo):
+    sources = [dict(s) for s in wo.constraints.get("source_intake") or []]
+    # Source context survives replanning without exposing worker execution history to planners.
+    for n in wo.nodes.values():
+        source = n.payload.get("external_source")
+        if source:
+            sources.append({**source, "matched_condition": n.payload.get("matched_condition"),
+                            "interpretation": n.content, "task_id": n.parent_id})
+    return sources
+
+
 def task_data(wo, node, now=None):
     epoch = int(node.payload.get("dispatch_epoch") or 0)
     return {"id": node.id, "title": node.title, "directive": node.content or node.title,
@@ -56,6 +67,8 @@ def work_data(wo, now=None):
             "completed": sum(wo.is_satisfied(n) for n in tasks),
             "unrun": sum(n.status in {"proposed", "actionable", "waiting", "dispatched"} for n in tasks),
             "repeated_contacts": [{"channel": c, "target": t, "count": count} for (c, t), count in contacts.items() if count >= 3],
+            "sources": source_context(wo),
+            "execution": wo._execution,
             "actions": [{"when": local_stamp(a.ts), "channel": a.channel, "target": a.target,
                          "summary": a.summary, "outcome": a.outcome} for a in wo.actions]}
 

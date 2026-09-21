@@ -10,7 +10,7 @@ one), change an existing objective, flag one for re-planning, or complete/abando
 longer fits (off-track / situation changed / stalled). Per-step fields (dependencies / reactivate_at /
 wake_signals) live on the graph (depends_on edges, node wake_at/wake_kind), set by the architect.
 """
-from typing import List
+from typing import List, Literal
 
 from pydantic import BaseModel, Field
 
@@ -39,7 +39,15 @@ class WorkObjectSpec(BaseModel):
         "subconscious concern, a belief). Leave EMPTY if it is your own original observation.")
 
 
+class IntakeReview(BaseModel):
+    item_id: str
+    outcome: Literal["no_action", "defer"]
+    reason: str = Field(min_length=1)
+    reconsider_at: str = ""
+
+
 class AgentForm(BaseModel):
+    intake_reviews: List[IntakeReview] = Field(default_factory=list)
     evaluation_summary: str = Field(description="Short summary of your evaluation decisions this pass.")
     new_or_changed: List[WorkObjectSpec] = Field(
         default_factory=list,

@@ -1,0 +1,14 @@
+{% for source in sources %}
+- source item: {{ source.get('item_id', '') }} | type: {{ source.get('source_type', '') }}
+  source timestamp: {{ source.get('created_at', '') or 'unknown' }}
+{% if source.get('sender') %}  sender: {{ source.sender }}
+{% endif %}{% if source.get('subject') %}  subject: {{ source.subject }}
+{% endif %}{% if source.get('message_id') %}  message: {{ source.message_id }}
+{% endif %}{% if source.get('thread_id') %}  thread: {{ source.thread_id }}
+{% endif %}  source summary (not a verbatim quote): {{ source.get('summary', '') }}
+{% if source.get('excerpt') and not (compact_sources | default(false)) %}  source excerpt: {{ source.excerpt }}
+{% endif %}  full source: {{ source.get('pod_id') or 'no pod reference recorded' }}
+{% if source.get('matched_condition') %}  task receiving event: {{ source.get('task_id', '') }}
+  matched waiting condition: {{ source.matched_condition }}
+  wake interpretation (agent judgment): {{ source.get('interpretation', '') }}
+{% endif %}{% endfor %}

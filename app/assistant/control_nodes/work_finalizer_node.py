@@ -148,7 +148,7 @@ class WorkFinalizerNode(ControlNode):
         res = agent.action_handler(Message(task=projection, information=info, scope_context=scope))
         return getattr(res, "data", {}) or {}
 
-    def _apply(self, wo, node, data: dict) -> list:
+    def _apply(self, wo, node, data: dict, *, store=None) -> list:
         """Turn the agent's schema into graph state. The only thing that writes a finalizer verdict.
 
         The verdict decides the status sequence (see _STATUS_FOR); the `outcome` prose and the
@@ -170,18 +170,42 @@ class WorkFinalizerNode(ControlNode):
 
         from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
         from work_objects.store import StaleResult
+        dayflow_delivery = store is None
+        store = get_dayflow_work_store() if store is None else store
         payload = {key: data.get(key, "") for key in ("outcome", "recommendation", "question_for_user")}
         payload.update(verdict=verdict, next_step=_ROUTE_FOR.get(verdict) or data.get("next_step", ""))
         try:
-            updated = get_dayflow_work_store().apply("finalize_task", {
+            updated = store.apply("finalize_task", {
                 "work_id": wo.id, "node_id": node.id,
                 "expected_dispatch_epoch": int(node.payload.get("dispatch_epoch") or 0),
                 "finalizer": payload, "repeat_failure_limit": _REPEAT_FAILURE_LIMIT,
             }, actor="finalizer")
         except StaleResult:
             return []
+        if dayflow_delivery and updated.status in {"done", "abandoned"}:
+            from app.assistant.subconscious.concern_feedback import propagate_work_outcome
+            propagate_work_outcome(store, updated.id, updated.status)
         fin = updated.nodes[node.id].payload["finalizer"]
         return [{"work_id": wo.id, "node_id": node.id, "verdict": fin["verdict"], "next_step": fin["next_step"]}]
+
+    def finalize_recorded(self, store, work_id, node_id, *, scope_context):
+        """Judge a caller-owned store with the standard agent and atomic writer.
+
+        Standalone scenarios use this entry point without accessing the global
+        Dayflow store or triggering its concern/noticer delivery. Failures raise
+        to the scenario; the recorded result remains available for another run.
+        """
+        if scope_context is None:
+            raise ValueError("finalization requires caller-provided scope")
+        wo = store.load(work_id)
+        node = wo.nodes[node_id]
+        if wo.status in _TERMINAL_WO or not wo.needs_finalization(node):
+            return []
+        data = self._judge(wo, node, scope_context)
+        result = self._apply(wo, node, data, store=store)
+        if not result:
+            raise ValueError("finalizer did not apply a judgment")
+        return result
 
     def _scope(self, message):
         scope = getattr(message, "scope_context", None)

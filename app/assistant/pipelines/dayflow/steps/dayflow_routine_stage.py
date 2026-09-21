@@ -10,10 +10,10 @@ schedule items in their hours, clock-anchored beliefs (e.g. "stop cooling at
 06:00", "AC to 70F at 21:00") in their own slots even with no event there, and
 brief ramp guidance for the open hours.
 
-Regeneration is DELTA-GATED: the doc depends only on the expected calendar
-(event shapes) + the beliefs block, so run() skips the LLM unless one of those
-changed since the last generation (fingerprint stored in the pointer). In
-practice it regenerates overnight when beliefs recompute, plus on calendar edits.
+Regeneration is delta-gated over calendar, active belief catalog, day theme,
+current status, milestones and weekly insights. The existing hourly eligibility
+limit still applies. An LLM selects contextually relevant beliefs; the writer
+places their guidance in the day's slots. Neither stage runs on ordinary chat.
 
 - Reads resource_user_beliefs.json (belief engine export)
 - Reads resource_expected_calendar.json (structured UTC times)
@@ -32,7 +32,7 @@ from typing import Any, Dict, Optional, Tuple
 from app.assistant.utils.atomic_write import write_text_atomic
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.time_utils import parse_iso_utc
-from app.assistant.pipelines.dayflow.step_types import BaseStep, StepContext, StepResult, format_belief_line
+from app.assistant.pipelines.dayflow.step_types import BaseStep, StepContext, StepResult
 from app.assistant.pipelines.dayflow.utils.expected_calendar_utils import (
     build_hour_grid,
     end_of_local_day_utc,
@@ -56,11 +56,11 @@ _MIN_REGEN_INTERVAL_SECONDS = 3600
 _BACKDROP_MIN_HOURS = 4  # items longer than this are treated as backdrops
 
 # ---- routine re-windowing (Option B) -------------------------------------------------------------------
-# The routine doc is LLM markdown, cached + frozen by the delta gate (it regenerates only on a calendar/belief
-# change, never as time passes). To keep the VISIBLE window current without re-running the LLM,
+# The routine doc is LLM markdown, cached + frozen by the delta gate (it regenerates on semantic input
+# changes, never just as time passes). To keep the VISIBLE window current without re-running the LLM,
 # _rewindow_cached_doc trims the cached doc to ~now-2h -> end-of-day on each no-delta run: drop the
 # `### HH:MM` hour-sections whose LATEST time is already older than the cutoff. Deterministic, and biased
-# toward KEEPING — it never drops a section with any part still in-window, keeps ## sections / preamble /
+# toward KEEPING â€” it never drops a section with any part still in-window, keeps ## sections / preamble /
 # unparseable headers, and is a pure no-op if the doc has no parseable hour grid.
 _ROUTINE_LOOKBACK_HOURS = 2
 _TIME_TOKEN_RE = re.compile(r"(\d{1,2}):(\d{2})\s*(AM|PM)?", re.IGNORECASE)
@@ -68,7 +68,7 @@ _TIME_TOKEN_RE = re.compile(r"(\d{1,2}):(\d{2})\s*(AM|PM)?", re.IGNORECASE)
 
 def _latest_minutes(header: str) -> Optional[int]:
     """Max minutes-since-midnight among time tokens in a `###` header, or None if none parse. Morning hours
-    are written 24h ('06:00'); afternoon 12h ('01:00 PM') — handle both. Range headers use the END (latest)."""
+    are written 24h ('06:00'); afternoon 12h ('01:00 PM') â€” handle both. Range headers use the END (latest)."""
     best: Optional[int] = None
     for h, m, ap in _TIME_TOKEN_RE.findall(header):
         hh, mm = int(h), int(m)
@@ -87,7 +87,7 @@ def _latest_minutes(header: str) -> Optional[int]:
 def rewindow_routine(md: str, now_local: datetime, lookback_hours: int = _ROUTINE_LOOKBACK_HOURS) -> str:
     """Drop the routine's `### ...` hour-sections whose LATEST time is older than now-lookback_hours. Keeps
     ## sections, the preamble, ambiguous/unparseable `###` sections, and any section with part still in-window
-    (bias toward KEEPING — never drops a future hour). Pure (md, now) -> md; a no-op if no hour grid parses."""
+    (bias toward KEEPING â€” never drops a future hour). Pure (md, now) -> md; a no-op if no hour grid parses."""
     cutoff = now_local.hour * 60 + now_local.minute - lookback_hours * 60
     if cutoff <= 0:
         return md  # early enough that nothing counts as 'past'
@@ -128,9 +128,7 @@ def _format_daily_context(
 ) -> Tuple[str, str]:
     """Returns (daily_context_block, tail_anchors_block).
 
-    The schedule is windowed to "current item + next 2" so the writer
-    only produces detailed blocks for what's actually proximate.
-    Past-the-window items are returned as a separate compact line.
+    Render the full remaining day and recent context; the legacy tail is empty.
     """
     if not ctx_data:
         return "(no daily context available yet)", ""
@@ -147,8 +145,8 @@ def _format_daily_context(
             parts.append(f"Expected schedule:\n{expected}")
     else:
         # Full-day overlay: ~1h look-back through end of day. Split umbrella
-        # backdrops (>=4h blocks like "Work Hours") out as context — they don't
-        # eat hourly slots — and place the rest into the deterministic scaffold.
+        # backdrops (>=4h blocks like "Work Hours") out as context â€” they don't
+        # eat hourly slots â€” and place the rest into the deterministic scaffold.
         lookback_cutoff = now_utc - timedelta(hours=1)
         specific, backdrops = [], []
         for item in expected:
@@ -161,7 +159,7 @@ def _format_daily_context(
             (backdrops if _is_backdrop(item) else specific).append(item)
 
         if backdrops:
-            backdrop_lines = ["Today's backdrops (umbrella blocks — context, not slots to fill):"]
+            backdrop_lines = ["Today's backdrops (umbrella blocks â€” context, not slots to fill):"]
             for item in sorted(backdrops, key=lambda x: str(x.get("start_utc") or "")):
                 title = item.get("title", "")
                 start = item.get("start_local", "")
@@ -186,85 +184,59 @@ def _format_daily_context(
         lines = ["Milestones (what has already happened):"]
         for m in milestones:
             flag = " [ongoing]" if m.get("ongoing") else ""
-            lines.append(f"  {m.get('time', '?')} — {m.get('description', '')}{flag}")
+            lines.append(f"  {m.get('time', '?')} â€” {m.get('description', '')}{flag}")
         parts.append("\n".join(lines))
 
     daily_context_block = "\n\n".join(parts) if parts else "(daily context empty)"
     return daily_context_block, tail_anchors_block
 
 
-_DOMAIN_ORDER = ["routine", "health", "food", "general", "work"]
-
-_CONFIDENCE_RANK = {"high": 0, "medium": 1, "low": 2}
-
-# The daily routine is a SCHEDULE. A belief reaches the writer's context if EITHER:
-#   1. its `kind` is routine-shaping — routine_pattern (recurring routines / wall-clock
-#      anchors) + durable_fact; this drops background tastes / one-off episodics that were
-#      drowning the real routine items (826 active beliefs collapsed to ~290); OR
-#   2. it carries a routing TAG from the routine_stage pull-set (configs/belief_tags.yaml:
-#      routine, home_automation). `kind` is the DECAY axis, not routing — a standing setpoint
-#      like "cooling 75F at 06:00" is correctly kind=stable_preference (evergreen; silence
-#      shouldn't erode it) yet is squarely routine-relevant, and its tags say so. kind alone
-#      stranded these (the AC morning step-up never reached the writer).
-_ROUTINE_RELEVANT_KINDS = {"routine_pattern", "durable_fact"}
+def _read_belief_entries() -> list[dict]:
+    if not _BELIEFS_PATH.exists():
+        raise FileNotFoundError(f"Belief export missing: {_BELIEFS_PATH}")
+    data = json.loads(_BELIEFS_PATH.read_text(encoding="utf-8"))
+    return [e for e in data.get("beliefs", [])
+            if e.get("statement") and e.get("status", "active") == "active"]
 
 
 def _format_beliefs(day_of_week: str) -> str:
-    if not _BELIEFS_PATH.exists():
-        logger.error(
-            "[DayFlowRoutine] Beliefs file not found at %s — routine will have no belief context.",
-            _BELIEFS_PATH,
-        )
-        return ""
-    try:
-        data = json.loads(_BELIEFS_PATH.read_text(encoding="utf-8"))
-        entries = data.get("beliefs") or []
-    except Exception as exc:
-        logger.error("[DayFlowRoutine] Failed reading beliefs: %s", exc, exc_info=True)
-        return ""
-
-    return _render_belief_block(entries)
+    return _render_belief_block(_read_belief_entries())
 
 
 def _render_belief_block(entries: list) -> str:
-    """Render the routine writer's belief context from raw export entries.
+    """Preserve eligible beliefs and their qualifiers; relevance is an LLM decision."""
+    from app.assistant.agent_runtime.services.prompt_builder import _jinja_env
+    beliefs = sorted((e for e in entries if e.get("statement") and e.get("status", "active") == "active"),
+                     key=lambda e: str(e.get("belief_key", "")))
+    return _jinja_env.get_template("dayflow_routine_writer/prompts/beliefs.j2").render(beliefs=beliefs)
 
-    Admits a belief if its `kind` is routine-shaping (see _ROUTINE_RELEVANT_KINDS) OR it
-    carries a routine_stage routing tag (routine / home_automation) — so a recurring schedule
-    that `kind` mislabels a preference (e.g. a standing AC setpoint) still gets in. Background
-    preferences + one-off episodics without a routing tag stay out, so they don't drown the
-    routine items. Importance rises organically from the upstream evidence ranking — no
-    hardcoded pin list. Extracted from _format_beliefs so it's unit-testable.
-    """
-    from belief_engine import tagging as _belief_tags
-    routine_tags = set(_belief_tags.pull_set("routine_stage"))
-    active = [e for e in entries if e.get("statement") and e.get("status", "active") == "active"]
-    rest = [e for e in active
-            if e.get("kind") in _ROUTINE_RELEVANT_KINDS or (set(e.get("tags") or []) & routine_tags)]
 
-    def _sort_key(e: dict) -> tuple:
-        domain_rank = _DOMAIN_ORDER.index(e.get("domain", "")) if e.get("domain", "") in _DOMAIN_ORDER else len(_DOMAIN_ORDER)
-        conf_rank = _CONFIDENCE_RANK.get(e.get("confidence", "low"), 2)
-        return (domain_rank, conf_rank)
-
-    rest.sort(key=_sort_key)
-
-    parts: list[str] = []
-
-    from collections import defaultdict
-    by_domain: dict[str, list] = defaultdict(list)
-    for e in rest:
-        by_domain[e.get("domain", "other")].append(e)
-
-    domain_order = _DOMAIN_ORDER + sorted(k for k in by_domain if k not in _DOMAIN_ORDER)
-    for domain in domain_order:
-        items = by_domain.get(domain)
-        if not items:
-            continue
-        parts.append(f"\n### {domain.capitalize()} beliefs")
-        parts.extend(format_belief_line(e) for e in items)
-
-    return "\n".join(parts) if parts else "(no active beliefs)"
+def _select_beliefs(entries: list[dict], daily_context: str, scope, *, weekly_insights: str = "") -> tuple[list[dict], str]:
+    """The agent selects request-local IDs; Python restores exact original records."""
+    from app.assistant.ServiceLocator.service_locator import DI
+    from app.assistant.utils.pydantic_classes import Message
+    from app.assistant.agents.dayflow_belief_selector.agent_form import AgentForm
+    by_key = {e["belief_key"]: e for e in entries}
+    if len(by_key) != len(entries):
+        raise ValueError("Duplicate belief keys in export")
+    if not entries:
+        return [], "Empty active belief catalog"
+    from belief_engine.matching.selection import select_records
+    def invoke(labeled, retry):
+        agent = DI.agent_factory.create_agent("dayflow_belief_selector")
+        if agent is None:
+            raise RuntimeError("dayflow_belief_selector agent unavailable")
+        result = agent.action_handler(Message(scope_context=scope, agent_input={
+            "daily_context": daily_context, "belief_catalog": labeled,
+            "weekly_insights": weekly_insights, "selection_retry": retry}))
+        return getattr(result, "data", None)
+    from belief_engine.matching.context import pages
+    selected, reasons = [], []
+    for page in pages(entries, max_chars=48000):
+        chosen, reason = select_records(page, invoke, AgentForm)
+        selected.extend(chosen)
+        reasons.append(reason)
+    return selected, "\n".join(reasons)
 
 
 def _format_weekly_insights() -> str:
@@ -272,47 +244,30 @@ def _format_weekly_insights() -> str:
         return ""
     try:
         data = json.loads(_WEEKLY_INSIGHTS_PATH.read_text(encoding="utf-8"))
-        insights = data.get("insights") or {}
-        week_start = str(data.get("week_start") or "").strip()
-        week_end = str(data.get("week_end") or "").strip()
-        parts = []
-        if week_start and week_end:
-            parts.append(
-                f"(Covers last week: {week_start} through {week_end}. "
-                f"Any bare weekday names refer to THAT past week, not the current week.)"
-            )
-        sleep_pattern = insights.get("sleep_pattern", "")
-        if sleep_pattern:
-            parts.append(f"Sleep pattern last week: {sleep_pattern}")
-        health_pattern = insights.get("health_pattern", "")
-        if health_pattern:
-            parts.append(f"Health pattern last week: {health_pattern}")
-        for bc in (insights.get("belief_candidates") or [])[:3]:
-            parts.append(f"Weekly signal [{bc.get('domain','?')}]: {bc.get('statement','')}")
-        return "\n".join(parts)
+        from app.assistant.agent_runtime.services.prompt_builder import _jinja_env
+        return _jinja_env.get_template("dayflow_routine_writer/prompts/weekly.j2").render(weekly=data)
+
     except Exception as exc:
         logger.debug("[DayFlowRoutine] failed reading weekly insights: %s", exc)
         return ""
 
 
-def _routine_inputs_fingerprint(boundary_date_local: str, expected_schedule: list, beliefs_block: str) -> str:
-    """Hash of the only inputs that should drive regeneration: the day's calendar
-    SHAPE (title + start/end, sorted; volatile status/timestamps excluded) and
-    the beliefs block, scoped to the day. Stable through the day; changes when
-    the calendar is edited or beliefs recompute overnight."""
-    items = sorted(
-        f"{it.get('title','')}|{it.get('start_utc','')}|{it.get('end_utc','')}"
-        for it in (expected_schedule or [])
-        if isinstance(it, dict)
-    )
-    payload = boundary_date_local + "\n" + "\n".join(items) + " " + (beliefs_block or "")
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+def _routine_inputs_fingerprint(boundary_date_local: str, expected_schedule: list, beliefs_block: str,
+                                *, daily_context: Optional[dict] = None, weekly_insights: str = "",
+                                belief_catalog: Optional[list] = None) -> str:
+    """Cache exact decision inputs, excluding wall-clock/scaffold rendering and generated timestamps."""
+    context = daily_context or {}
+    payload = {"projection_version": 2, "day": boundary_date_local,
+               "schedule": expected_schedule, "beliefs": beliefs_block, "belief_catalog": belief_catalog,
+               "day_theme": context.get("day_theme"), "current_status": context.get("current_status"),
+               "milestones": context.get("milestones"), "weekly_insights": weekly_insights}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
 class DayFlowRoutineStep(BaseStep):
     """
-    Hourly-regenerating, belief-enriched dayflow routine document.
-    Writes resource_dayflow_routine.md — the canonical injected routine for all agents.
+    Hourly-eligible, delta-gated contextual belief projection.
+    Writes resource_dayflow_routine.md â€” the canonical injected routine for all agents.
     """
 
     step_id: str = "dayflow_routine"
@@ -355,7 +310,7 @@ class DayFlowRoutineStep(BaseStep):
         expected_calendar = ctx.read_resource("resource_expected_calendar.json")
         if isinstance(expected_calendar, dict):
             expected_schedule = expected_calendar.get("expected_schedule")
-            if isinstance(expected_schedule, list) and expected_schedule:
+            if isinstance(expected_schedule, list):
                 merged = dict(data)
                 merged["expected_schedule"] = expected_schedule
                 return merged
@@ -363,7 +318,7 @@ class DayFlowRoutineStep(BaseStep):
 
     def _rewindow_cached_doc(self, ctx) -> bool:
         """Re-trim the cached routine doc to ~now-2h->EOD and re-publish it to the SAME two surfaces the regen
-        writes — the live file + the global blackboard — but NOT the day archive (that keeps the full-day
+        writes â€” the live file + the global blackboard â€” but NOT the day archive (that keeps the full-day
         record). Lets the visible window slide even when the delta gate skips regeneration. Returns True if it
         changed; never raises."""
         try:
@@ -393,39 +348,42 @@ class DayFlowRoutineStep(BaseStep):
         daily_context_block, tail_anchors_block = _format_daily_context(
             daily_ctx_data, now_utc=ctx.now_utc,
         )
-        beliefs_block = _format_beliefs(day_of_week)
+        belief_entries = _read_belief_entries()
+        beliefs_block = _render_belief_block(belief_entries)
         weekly_insights_block = _format_weekly_insights()
 
-        # Delta gate: the routine depends only on the expected calendar + beliefs
-        # (both stable through the day; beliefs recompute overnight). If neither
-        # changed since the last generation, the existing full-day doc still
-        # stands — skip the LLM call entirely.
+        # Reuse only when the calendar, catalog and contextual decision inputs
+        # are unchanged. Wall-clock passage alone only trims the visible window.
         expected_sched = (daily_ctx_data or {}).get("expected_schedule") or []
-        fingerprint = _routine_inputs_fingerprint(boundary_date_local, expected_sched, beliefs_block)
+        fingerprint = _routine_inputs_fingerprint(boundary_date_local, expected_sched, beliefs_block,
+                                                 daily_context=daily_ctx_data, weekly_insights=weekly_insights_block,
+                                                 belief_catalog=belief_entries)
         prev_pointer = ctx.read_resource(_POINTER_FILENAME)
         prev_fp = prev_pointer.get("inputs_fingerprint") if isinstance(prev_pointer, dict) else None
         if prev_fp == fingerprint and (Path(ctx.resources_dir) / _LATEST_FILENAME).exists():
-            # No LLM delta — but slide the VISIBLE window: re-trim the cached doc to ~now-2h->EOD so the dead
+            # No LLM delta â€” but slide the VISIBLE window: re-trim the cached doc to ~now-2h->EOD so the dead
             # morning drops as the day advances (the doc is frozen by the gate; only the window should move).
             # Deterministic, no LLM, biased toward keeping.
             rewound = self._rewindow_cached_doc(ctx)
-            logger.info("[DayFlowRoutine] skipped — no delta; doc re-windowed=%s.", rewound)
+            logger.info("[DayFlowRoutine] skipped â€” no delta; doc re-windowed=%s.", rewound)
             return StepResult(output={"status": "skipped_no_delta", "rewound": rewound})
+
+        scope = load_scope_for_source(kind="pipeline", source_id="dayflow", actor_id="dayflow_belief_selector")
+        selected, selection_reason = _select_beliefs(belief_entries, daily_context_block, scope, weekly_insights=weekly_insights_block)
+        selected_block = _render_belief_block(selected)
 
         md, change_summary = self._call_agent(
             boundary_date_local=boundary_date_local,
             day_of_week=day_of_week,
             daily_context_block=daily_context_block,
             tail_anchors_block=tail_anchors_block,
-            beliefs_block=beliefs_block,
+            beliefs_block=selected_block,
             weekly_insights_block=weekly_insights_block,
             ctx=ctx,
         )
 
         if not md:
-            return StepResult(
-                output={"status": "error", "error": "agent returned no markdown"},
-            )
+            raise RuntimeError("dayflow_routine_writer returned no markdown; guidance was not refreshed")
 
         md = md.strip() + "\n"
         latest_path = Path(ctx.resources_dir) / _LATEST_FILENAME
@@ -452,6 +410,8 @@ class DayFlowRoutineStep(BaseStep):
                 "change_summary": change_summary,
                 "archive_path": str(archive_path),
                 "inputs_fingerprint": fingerprint,
+                "selected_belief_keys": [e["belief_key"] for e in selected],
+                "selection_reason": selection_reason,
             },
         )
 
@@ -462,7 +422,7 @@ class DayFlowRoutineStep(BaseStep):
         runs[self.step_id] = info
 
         logger.info(
-            "[DayFlowRoutine] written → %s | %s",
+            "[DayFlowRoutine] written â†’ %s | %s",
             latest_path.name, change_summary,
         )
         return StepResult(

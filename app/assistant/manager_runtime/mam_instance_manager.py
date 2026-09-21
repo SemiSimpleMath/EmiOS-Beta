@@ -57,6 +57,8 @@ class MAMInstanceManager:
     """The runtime API for MultiAgentManager instances."""
 
     def __init__(self, *, resource_manager: Any = None) -> None:
+        from app.assistant.manager_runtime.execution import REGISTRY
+        self.execution = REGISTRY
         self._lock = threading.Lock()
         self._records: Dict[str, ManagerInstanceRecord] = {}
         # Per-namespace ``(base_display_name, room_id)`` counter that
@@ -93,6 +95,11 @@ class MAMInstanceManager:
 
         ``invocation_id`` is generated here so the registry owns it.
         """
+        from app.assistant.manager_runtime.execution import current_span, current_owner
+        from work_objects.runtime import peek_work_context
+        parent = current_span()
+        ctx = peek_work_context()
+        owner = current_owner() or (ctx.owner if ctx else None)
         invocation_id = self._build_invocation_id(manager_instance_name, request_id)
         current = threading.current_thread()
         with self._lock:
@@ -113,6 +120,9 @@ class MAMInstanceManager:
                 thread_name=str(current.name or ""),
                 thread_ident=current.ident or 0,
                 manager_instance=manager_instance,
+                metadata={"parent_execution_id": parent.id if parent else None,
+                          "owner": owner.public() if owner else None,
+                          "attribution_node_id": ctx.node_id if ctx else (parent.attribution_node_id if parent else None)},
             )
             from app.assistant.ServiceLocator.service_locator import DI
             mailbox = getattr(DI, "mailbox", None)
@@ -231,21 +241,23 @@ class MAMInstanceManager:
     def cancel(self, invocation_id: str) -> bool:
         """Cooperatively cancel a running invocation.
 
-        Sets ``cancelled=True`` in the manager blackboard's GLOBAL scope —
-        this write happens from another thread, and the top scope may be a
-        nested agent-call scope that gets popped (taking a top-scope write
-        with it). The global scope survives every pop and the loop's check
-        reads down the stack (provided no local key shadows it). The MAM loop
-        checks at the top of every cycle and exits via
-        ``handle_exit_cancelled`` (an aborted ToolResult). Cancellation is
-        best-effort — if the manager is mid-agent/tool call when this fires, it
-        cancels at the next cycle boundary.
+        Marks the invocation and descendants as cancelling. For work-owned managers,
+        revokes the whole attempt durably so helper writes and new tool calls stop.
+        Already-admitted calls remain visible until they return. The blackboard flag
+        preserves the existing loop-exit API; cancellation does not kill Python threads.
 
         Returns True if the cancel was issued, False if no such invocation.
         """
+        with self.execution.lock:
+            span = self.execution.active.get(invocation_id)
+            owner = span.owner if span else None
+        if owner:
+            owner.store.revoke_execution(owner, "manager cancellation")
+            self.execution.cancel_owner(owner, "manager cancellation")
+        issued = self.execution.cancel(invocation_id)
         record = self.find_by_invocation_id(invocation_id)
         if record is None:
-            return False
+            return issued
         manager = record.manager_instance
         if manager is None:
             return False
@@ -310,6 +322,7 @@ class MAMInstanceManager:
             running_for_s = round((now_utc - r.started_at_utc).total_seconds(), 2)
             out_rows.append({
                 "invocation_id": r.invocation_id,
+                "execution_context": r.metadata,
                 "manager_name": r.manager_name,
                 "manager_instance_name": r.manager_instance_name,
                 "base_display_name": r.base_display_name,
@@ -322,7 +335,8 @@ class MAMInstanceManager:
                 "running_for_s": running_for_s,
             })
         return {
-            "schema_version": 2,
+            "schema_version": 3,
+            "execution": self.execution.snapshot(),
             "component": "mam_instance_manager",
             "generated_at_utc": now_utc.isoformat(),
             "active_invocation_count": len(out_rows),

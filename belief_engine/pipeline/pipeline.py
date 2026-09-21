@@ -40,10 +40,6 @@ class _RunContext:
     belief_update_result: Optional[Dict] = None
     reevaluation_result: Optional[Dict] = None
     canonicalization_result: Optional[Dict] = None
-    # Set by the caller (BeliefEngineAdapter) to "full" or "new_only".
-    # CanonicalizeBeliefSetStep reads this and falls back to its own
-    # sweep_tracker lookup when None.
-    canonicalization_mode: Optional[str] = None
 
 
 class BeliefEnginePipeline:
@@ -53,11 +49,9 @@ class BeliefEnginePipeline:
         self,
         domain: Optional[str] = None,
         lookback_days: int = 14,
-        canonicalization_mode: Optional[str] = None,
     ) -> None:
         self.domain = domain
         self.lookback_days = lookback_days
-        self.canonicalization_mode = canonicalization_mode
 
     @property
     def label(self) -> str:
@@ -80,7 +74,6 @@ class BeliefEnginePipeline:
             domain=self.label,
             run_id=run_id,
             scope_context=scope_context,
-            canonicalization_mode=self.canonicalization_mode,
         )
         started = datetime.now(timezone.utc).isoformat()
         step_results = []
@@ -105,9 +98,11 @@ class BeliefEnginePipeline:
             t0 = time.monotonic()
             try:
                 logger.info("[BeliefEnginePipeline:%s] >> %s", run_id, step.name)
-                step.run(ctx)
+                details = step.run(ctx)
+                if isinstance(details, dict) and (details.get("status") in ("error", "partial_error") or details.get("stats", {}).get("errors", 0) or details.get("errors", 0)):
+                    raise RuntimeError(f"{step.name} reported incomplete processing: {details}")
                 elapsed = time.monotonic() - t0
-                step_results.append({"step": step.name, "status": "success", "duration_s": round(elapsed, 2)})
+                step_results.append({"step": step.name, "status": "success", "duration_s": round(elapsed, 2), "result": details})
                 logger.info("[BeliefEnginePipeline:%s] << %s OK (%.1fs)", run_id, step.name, elapsed)
             except Exception as exc:
                 elapsed = time.monotonic() - t0

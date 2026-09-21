@@ -21,14 +21,13 @@ from belief_engine.store.belief_store import BeliefStore, BeliefRecord, BeliefUp
 logger = get_logger(__name__)
 
 _AGENT_NAME = "belief_engine::belief_reevaluator"
-# Max evidence items to send — most beliefs won't have more than this
-_MAX_EVIDENCE = 50
 
 
 def _format_belief_block(belief: BeliefRecord) -> str:
     return (
         f"key: {belief.belief_key}\n"
         f"statement: {belief.statement}\n"
+        f"conditions: {belief.conditions}\n"
         f"confidence: {belief.confidence}  scope: {belief.scope}  status: {belief.status}\n"
         f"observation_count: {belief.observation_count}\n"
         f"first_observed: {belief.first_observed}  last_confirmed: {belief.last_confirmed}"
@@ -39,8 +38,8 @@ def _format_evidence_trail(store: BeliefStore, belief: BeliefRecord) -> str:
     evidence = store.get_evidence(belief.id)
     if not evidence:
         return "(no stored evidence)"
-    # Sort oldest first, cap at _MAX_EVIDENCE
-    evidence = sorted(evidence, key=lambda e: e.source_date or e.created_at)[-_MAX_EVIDENCE:]
+    # Complete chronological trail; never truncate source records.
+    evidence = sorted(evidence, key=lambda e: e.source_date or e.created_at)
     lines = []
     for ev in evidence:
         date_tag = ev.source_date or ev.created_at[:10]
@@ -48,7 +47,7 @@ def _format_evidence_trail(store: BeliefStore, belief: BeliefRecord) -> str:
         lines.append(
             f"[{date_tag}][{ev.signal_type}][{ev.source_type}] {weight_tag}\n"
             f"  {ev.summary}"
-            + (f"\n  user_comment: \"{ev.raw_text[:200]}\"" if ev.raw_text else "")
+            + (f"\n  user_comment: \"{ev.raw_text}\"" if ev.raw_text else "")
         )
     return "\n\n".join(lines)
 
@@ -70,6 +69,10 @@ class ReevaluateBeliefsStep:
     def run(self, ctx: Any) -> dict:
         update_result = getattr(ctx, "belief_update_result", None) or {}
         contested_keys: List[str] = update_result.get("contested_keys") or []
+
+        store = BeliefStore()
+        contested_keys = list(dict.fromkeys(contested_keys +
+            [b.belief_key for b in store.list_all(status='contested')]))
 
         if not contested_keys:
             logger.info("[ReevaluateBeliefs] no contested beliefs — skipping")
@@ -163,6 +166,7 @@ class ReevaluateBeliefsStep:
                             confidence=rb.get("confidence", belief.confidence),
                             scope=rb.get("scope", belief.scope),
                             status="active",
+                            conditions=belief.conditions,
                             last_confirmed=today_iso,
                         )
                         store.upsert_belief(req)
@@ -179,7 +183,7 @@ class ReevaluateBeliefsStep:
                         )
                         continue
 
-                    conditions_val: Optional[dict] = None
+                    conditions_val: Optional[dict] = belief.conditions if revised_key == belief.belief_key else None
                     raw_conditions = rb.get("conditions")
                     if raw_conditions:
                         conditions_val = {"text": raw_conditions}

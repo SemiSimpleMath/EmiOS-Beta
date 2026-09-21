@@ -16,7 +16,16 @@ from app.assistant.performance.performance_monitor import performance_monitor
 
 logger = get_logger(__name__)
 
+from app.assistant.manager_runtime.execution import agent_activation, model_boundary
+
 class Agent:
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if "action_handler" in cls.__dict__:
+            cls.action_handler = agent_activation(cls.action_handler)
+        if "call_llm" in cls.__dict__:
+            cls.call_llm = model_boundary(cls.call_llm)
+
     def __init__(
         self,
         name,
@@ -136,6 +145,7 @@ class Agent:
             logger.error(f"[{self.name}] LLM execution failed: {e}")
             raise
 
+    @agent_activation
     def action_handler(self, message: Message) -> Any:
         """Agent lifecycle: prepare → build prompt → call LLM → finalize."""
         timer_id = performance_monitor.start_timer(f"agent_{self.name}", message.id)
@@ -144,6 +154,8 @@ class Agent:
             self._prepare_execution_context(message)
             messages = self._build_messages(message)
             raw_result = self._execute_model(messages)
+            from app.assistant.manager_runtime.execution import REGISTRY
+            REGISTRY.check()
             result = self._finalize_execution(raw_result, message)
             self._record_success(timer_id, message)
             return result
@@ -202,6 +214,7 @@ class Agent:
             "error": str(error)[:200],
         })
 
+    @model_boundary
     def call_llm(
             self,
             messages: List[Dict[str, Any]],

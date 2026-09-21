@@ -134,6 +134,10 @@ def get_approval_timeout_seconds(tool_message: ToolMessage) -> float:
     return timeout_seconds
 
 
+from app.assistant.manager_runtime.execution import activity
+
+
+@activity("approval_wait")
 def request_approval(
     *,
     tool_name: str,

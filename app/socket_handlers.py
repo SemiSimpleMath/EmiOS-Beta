@@ -154,7 +154,7 @@ def register_socket_handlers(socketio):
                         },
                         room=displaced,
                     )
-                    socketio.disconnect(displaced)
+                    socketio.server.disconnect(displaced, namespace=request.namespace)
                     logger.info(
                         "💬 Notified displaced socket=%s... on room_id=%r",
                         displaced[:8], room_id,

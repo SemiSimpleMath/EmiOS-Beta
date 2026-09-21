@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import json
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+class EvidenceRelation(BaseModel):
+    evidence_ref: int
+    valence: Literal["support", "contradict", "qualify"]
+    reasoning: str
 
 
 class BeliefOutput(BaseModel):
@@ -28,6 +35,7 @@ class BeliefOutput(BaseModel):
             "partner sometimes covers this — verify on days they are home.'"
         )
     )
+    conditions_json: Optional[str] = Field(default=None, description='JSON object encoded as text with complete applicability conditions; preserve existing qualifiers.')
     confidence: Literal["high", "medium", "low"] = Field(
         description=(
             "high = explicit user statement or many consistent observations. "
@@ -70,7 +78,7 @@ class BeliefOutput(BaseModel):
             "create = new belief not previously in the store. "
             "update = existing belief needs its statement or confidence revised. "
             "deprecate = belief is no longer valid based on evidence. "
-            "no_change = existing belief is confirmed as-is, only increment observation count. "
+            "no_change = preserve the claim and attach any newly cited evidence. "
             "replace = deprecate this belief AND create a new one in its place (use for preference flips like "
             "'I no longer like X' — emit two output entries: one with action='deprecate' on the old key, "
             "one with action='create' for the new replacement belief)."
@@ -86,9 +94,17 @@ class BeliefOutput(BaseModel):
             "Required for create and update actions. May be empty for no_change or deprecate."
         )
     )
+    evidence_relations: List[EvidenceRelation] = Field(default_factory=list)
     reasoning: str = Field(
         description="One or two sentences explaining why you chose this action and statement."
     )
+
+    @field_validator('conditions_json')
+    @classmethod
+    def validate_conditions(cls, value):
+        if value is not None and not isinstance(json.loads(value), dict):
+            raise ValueError('conditions_json must encode an object')
+        return value
 
 
 class AgentForm(BaseModel):

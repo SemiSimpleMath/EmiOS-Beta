@@ -170,11 +170,22 @@ class StrategicPlannerWoPrepNode(ControlNode):
 
         from app.assistant.dayflow_orchestrator.state_store import load_admitted_intake
         from app.assistant.dayflow_orchestrator.contracts import get_meta
+        from copy import deepcopy
+        # Stored eligibility is authoritative: stale tick memory cannot revive reviewed items.
+        enriched = {str(get_meta(item).get("item_id") or item.get("id") or ""): item
+                    for item in self.blackboard.get_state_value("admitted_artifacts", []) or []}
+        snapshots = {}
         inbox = {}
-        for item in [*load_admitted_intake(), *(self.blackboard.get_state_value("admitted_artifacts", []) or [])]:
+        for item in load_admitted_intake():
             item_id = str(get_meta(item).get("item_id") or item.get("id") or "")
             if item_id:
+                snapshots[item_id] = deepcopy(get_meta(item))
+                enrichment = get_meta(enriched.get(item_id, {})).get("enrichment")
+                if enrichment:
+                    get_meta(item)["enrichment"] = enrichment
                 inbox[item_id] = item
+        self.blackboard.update_state_value("intake_review_snapshots", snapshots)
+        self.blackboard.update_state_value("intake_reviews", [])
         self.blackboard.update_state_value("admitted_artifacts", list(inbox.values()))
         self.blackboard.update_state_value("admitted_artifacts_count", len(inbox))
 
@@ -199,6 +210,10 @@ class StrategicPlannerWoPrepNode(ControlNode):
         from app.assistant.dayflow_orchestrator.work_portfolio import render_portfolio
 
         store = get_dayflow_work_store()
+        from app.assistant.dayflow_orchestrator.work_persist import recover_pending_work_closures
+        recover_pending_work_closures(store)
+        from app.assistant.subconscious.concern_feedback import recover_pending_concern_feedback
+        recover_pending_concern_feedback(store)
         from app.assistant.dayflow_orchestrator.work_intake import reconcile_transferred_intake
         remaining = reconcile_transferred_intake(store, list(inbox.values()))
         self.blackboard.update_state_value("admitted_artifacts", remaining)

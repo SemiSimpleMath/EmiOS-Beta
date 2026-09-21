@@ -229,10 +229,11 @@ then has this scope stack:
 At the top of every loop cycle the manager **drains its mailbox**
 (`_drain_mailbox` → `MailboxDispatcher.drain_to`), delivering
 out-of-band `agent_inject` messages into per-agent steering slots.
-Cancellation uses a direct global `cancelled=True` write through
-`MAMInstanceManager.cancel`, independently of the mailbox. The loop checks
-it at the next boundary after the current synchronous agent/tool call returns.
-A successful cancel request acknowledges the flag write, not completion.
+`MAMInstanceManager.cancel` marks the invocation and descendants as cancelling,
+revokes a work-owned attempt durably, and retains the global `cancelled=True` flag.
+Checks run at manager/agent/tool admission and after model return, including after
+approval waits. A running unsupported tool remains visible until actual exit.
+A successful cancellation request does not establish completion.
 
 Mailbox TTL is checked on drain (default 30 minutes); unregister clears the
 queue present at that moment. A post after cleanup can remain until an
@@ -277,3 +278,12 @@ control nodes can still finish. Cancellation retains priority.
 | `manager_registry/manager_registry.py` | Loads each `multi_agents/<name>/config.yaml` |
 | `multi_agent_manager_factory/MultiAgentManagerFactory.py` | Manager instance factory |
 | `ServiceLocator/service_locator.py` | DI registry (see [17_SERVICE_LAYER](17_SERVICE_LAYER.md)) |
+
+
+## Execution ownership update (2026-09-20)
+
+See [Execution ownership and cancellation](EXECUTION_OWNERSHIP.md) for the current
+invocation tree, immutable main-attempt binding, cancellation boundaries and durable
+takeover barrier. Timeout result recording now revokes further calls/worker writes;
+it does not mean the old thread exited. The two additive execution tables supplement
+the five graph tables. The finalizer remains responsible for judgment and failure counts.

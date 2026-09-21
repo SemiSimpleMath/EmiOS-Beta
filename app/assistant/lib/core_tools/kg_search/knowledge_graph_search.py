@@ -89,6 +89,23 @@ def _short(s: Optional[str], n: int) -> str:
     return s if len(s) <= n else (s[: max(0, n - 1)] + "…")
 
 
+def _ask_node_evidence(node, *, hops=None):
+    """Preserve stored claim timing; applicability is judged by the answering agent."""
+    dates = ('start_date', 'end_date', 'first_observed', 'last_observed',
+             'created_at', 'updated_at')
+    fields = ('start_date_confidence', 'end_date_confidence', 'start_date_prose',
+              'end_date_prose', 'valid_currently', 'validity_reason', 'goal_status',
+              'confidence', 'confidence_tier', 'observation_count')
+    return {
+        'node_id': str(node.id), 'label': node.label, 'type': node.node_type,
+        'hops': hops, 'description': node.description or '',
+        'aliases': list(node.aliases or []), 'attributes': node.attributes or {},
+        **{key: getattr(node, key).isoformat() if getattr(node, key) is not None else None
+           for key in dates},
+        **{key: getattr(node, key) for key in fields},
+    }
+
+
 def _pick_node_by_label(session: Session, label: str) -> Optional[Node]:
     """
     Deterministically pick the "best" node for a label.
@@ -410,7 +427,6 @@ class KnowledgeGraphSearch(BaseTool):
             max_edges = 800
             k_edges = 20
             min_similarity = 0.18
-            max_description_chars = 400
             include_attributes = True
             engine = "gpt-5.6-luna"
             timeout = 60
@@ -475,7 +491,6 @@ class KnowledgeGraphSearch(BaseTool):
                         tgt_id = str(e.target_id)
                         src = node_by_id.get(src_id)
                         tgt = node_by_id.get(tgt_id)
-                        ts = e.updated_at or e.created_at
                         scored_edges.append({
                             "edge_id": edge_id,
                             "sim": round(float(sim), 4),
@@ -487,7 +502,10 @@ class KnowledgeGraphSearch(BaseTool):
                             "target_label": tgt.label if tgt else None,
                             "target_type": tgt.node_type if tgt else None,
                             "sentence": e.sentence,
-                            "updated_at": ts.isoformat() if ts else None,
+                            "updated_at": e.updated_at.isoformat() if e.updated_at else None,
+                            "created_at": e.created_at.isoformat() if e.created_at else None,
+                            "confidence": e.confidence,
+                            "confidence_tier": e.confidence_tier,
                             "attributes": (e.attributes or {}) if include_attributes else {},
                             "source_hops": None,
                             "target_hops": None,
@@ -506,15 +524,7 @@ class KnowledgeGraphSearch(BaseTool):
                         n = node_by_id.get(nid)
                         if not n:
                             continue
-                        evidence_nodes.append({
-                            "node_id": nid,
-                            "label": n.label,
-                            "type": n.node_type,
-                            "hops": None,
-                            "description": _short(n.description, max_description_chars),
-                            "aliases": list(n.aliases or []),
-                            "attributes": (n.attributes or {}) if include_attributes else {},
-                        })
+                        evidence_nodes.append(_ask_node_evidence(n))
 
                     evidence = {
                         "base_node": {"label": "global", "node_id": None, "type": "global"},
@@ -610,7 +620,6 @@ class KnowledgeGraphSearch(BaseTool):
                 tgt_id = str(e.target_id)
                 src = node_by_id.get(src_id)
                 tgt = node_by_id.get(tgt_id)
-                ts = e.updated_at or e.created_at
                 scored_edges_local.append({
                     "edge_id": str(e.id),
                     "sim": round(float(sim), 4),
@@ -622,7 +631,10 @@ class KnowledgeGraphSearch(BaseTool):
                     "target_label": tgt.label if tgt else None,
                     "target_type": tgt.node_type if tgt else None,
                     "sentence": e.sentence,
-                    "updated_at": ts.isoformat() if ts else None,
+                    "updated_at": e.updated_at.isoformat() if e.updated_at else None,
+                    "created_at": e.created_at.isoformat() if e.created_at else None,
+                    "confidence": e.confidence,
+                    "confidence_tier": e.confidence_tier,
                     "attributes": (e.attributes or {}) if include_attributes else {},
                     "source_hops": distance_by_node_id.get(src_id),
                     "target_hops": distance_by_node_id.get(tgt_id),
@@ -641,25 +653,10 @@ class KnowledgeGraphSearch(BaseTool):
                 n = node_by_id.get(nid)
                 if not n:
                     continue
-                evidence_nodes.append({
-                    "node_id": nid,
-                    "label": n.label,
-                    "type": n.node_type,
-                    "hops": distance_by_node_id.get(nid),
-                    "description": _short(n.description, max_description_chars),
-                    "aliases": list(n.aliases or []),
-                    "attributes": (n.attributes or {}) if include_attributes else {},
-                })
+                evidence_nodes.append(_ask_node_evidence(n, hops=distance_by_node_id.get(nid)))
 
             evidence = {
-                "base_node": {
-                    "node_id": base_node_id,
-                    "label": base_node.label,
-                    "type": base_node.node_type,
-                    "description": _short(base_node.description, max_description_chars),
-                    "aliases": list(base_node.aliases or []),
-                    "attributes": (base_node.attributes or {}) if include_attributes else {},
-                },
+                "base_node": _ask_node_evidence(base_node, hops=0),
                 "neighborhood_stats": {
                     "mode": "node_anchored_bfs",
                     "max_hops": int(max_hops),
@@ -746,7 +743,6 @@ class KnowledgeGraphSearch(BaseTool):
         rag_msg = Message(
             agent_input={
                 "date_time": get_local_time_str(),
-                "task": "Answer the question from KG evidence only.",
                 "question": question,
                 "evidence": evidence,
                 "engine": engine,

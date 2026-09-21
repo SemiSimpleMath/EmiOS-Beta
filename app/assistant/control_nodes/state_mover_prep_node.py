@@ -195,7 +195,7 @@ class StateMoverPrepNode(ControlNode):
                 continue
             wo = store.load(s["id"])
             for n in wo.nodes.values():
-                # user_reply is an in-flight ask — the dispatch surfaces it and re-asks until the user
+                # user_reply is an in-flight ask — the dispatch waits until the user
                 # replies, and the reply is then recorded as the node's result. The state_mover only wakes
                 # passive EXTERNAL waits (event/signal) by matching incoming intake.
                 if (wo.is_work_unit(n) and getattr(n, "wake_kind", None) in {"event", "signal"}
@@ -203,23 +203,18 @@ class StateMoverPrepNode(ControlNode):
                     waiting.append({
                         "task_id": f"{s['id']}::{n.id}",
                         "waiting_for": getattr(n, "wake_ref", "") or "",
-                        "context": (n.title or n.content or "").strip().replace("\n", " ")[:140],
+                        "context": n.content or n.title or "",
+                        "work_version": wo.updated_at.isoformat(),
+                        "wake_kind": n.wake_kind,
+                        "objective": wo.constraints.get("objective") or wo.nodes[wo.goal_node_id].content,
+                        "sources": list(wo.constraints.get("source_intake") or []),
                     })
         self.blackboard.update_state_value("waiting_work_nodes", waiting)
-        if not waiting:
-            return
-
-        intake: List[str] = []
-        for item in all_items:
-            meta = get_meta(item)
-            st = str(meta.get("source_type") or "").strip().lower()
-            if st == "email":
-                summ = meta.get("email_summary", "")
-                intake.append(f"Email from {meta.get('email_sender', 'Unknown')}: "
-                              f"\"{meta.get('email_subject', meta.get('summary', ''))}\""
-                              + (f" — {summ}" if summ else ""))
-            elif st == "chat":
-                summ = str(meta.get("summary") or "").strip()
-                if summ:
-                    intake.append(f"Chat: {summ}")
-        self.blackboard.update_state_value("work_wait_intake", intake[:30])
+        from app.assistant.dayflow_orchestrator.work_intake import intake_source
+        from app.assistant.dayflow_orchestrator.intake_review import wake_intake_eligible
+        intake = [intake_source(item) for item in all_items
+                  if str(get_meta(item).get("source_type") or "").lower()
+                  in {"email", "chat", "pod", "user_request"}
+                  and wake_intake_eligible(get_meta(item))] if waiting else []
+        # Preserve source identity; do not silently drop candidates after an arbitrary prefix.
+        self.blackboard.update_state_value("work_wait_intake", [s for s in intake if s["item_id"]])

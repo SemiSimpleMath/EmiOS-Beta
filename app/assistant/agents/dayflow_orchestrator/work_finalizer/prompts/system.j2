@@ -52,9 +52,6 @@ person or organisation outside the household on the user's behalf is never a sub
 - Judge on the FULL text, not the node's title.
 - What came back can be a partial success, a refusal, a "couldn't", or a surprise that reroutes
   everything — read what it actually says.
-- A message that never reached the user is not delivered work. When the result says the notify expired
-  unanswered, decide it deliberately: RETRY when it still needs saying, with the better moment named;
-  ACHIEVED when the moment has passed and repeating it would be noise. "Sent" is not "received".
 - The user's reactions are authoritative. A result carrying "stop / don't / I'll handle it" is
   UNRECOVERABLE with `next_step=stop`, and `outcome` says whether it moots the whole goal.
 - One node, one verdict. Be conservative: ACHIEVED unless the evidence genuinely says otherwise.
@@ -67,3 +64,16 @@ see your summary, not these internal records. A failed internal attempt alone do
 mean the main task failed.
 
 An explicit approval denial ends the action: use UNRECOVERABLE with next_step=stop. Do not recommend retrying, another route, or asking permission again for the same action.
+
+{% include 'shared/work/unanswered_contact.j2' %}
+
+For an unanswered prompt that should stop, use UNRECOVERABLE with next_step=stop.
+This ends further contact on this branch; it does not claim the requested answer or action
+was achieved. Explain in outcome whether the whole goal is obsolete or only the contact
+branch should stop. Do not use ASK_USER merely because the user has not answered: the
+"who can do it" test above does not justify repeating the question to an unavailable user.
+Use RETRY only when the repeat-contact policy above justifies it, and name the reason and
+timing in recommendation. At the retry bound, use STOP for unanswered contact; otherwise
+the runtime would convert another unmet judgment into ASK_USER.
+
+{% include 'shared/work/response_meaning.j2' %}

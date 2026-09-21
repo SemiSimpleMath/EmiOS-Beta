@@ -97,3 +97,41 @@ class TestSweptSocketCannotSelfHeal:
         m.sweep_stale(max_age_seconds=-1)
         m.bind("master_room", "sock_a")            # what register_chat_client does
         assert m.resolve_socket("master_room") == "sock_a"
+
+
+def test_registering_new_tab_disconnects_old_tab_and_preserves_delivery():
+    """Exercise real Socket.IO disconnect callbacks, not a mocked disconnect API."""
+    from types import SimpleNamespace
+    from flask import Flask
+    from flask_socketio import SocketIO
+    from app.socket_handlers import register_socket_handlers
+
+    app = Flask(__name__)
+    app.config['TESTING'] = True
+    manager = SocketManager()
+    app.DI = SimpleNamespace(socket_manager=manager)
+    socketio = SocketIO(app, async_mode='threading')
+    register_socket_handlers(socketio)
+    old = socketio.test_client(app)
+    new = socketio.test_client(app)
+    try:
+        old.emit('register_chat_client', {'room_id': 'master_room'})
+        old_sid = manager.resolve_socket('master_room')
+        new.emit('register_chat_client', {'room_id': 'master_room'})
+        new_sid = manager.resolve_socket('master_room')
+        assert new_sid != old_sid
+        assert not old.is_connected()
+        assert new.is_connected()
+        assert manager.resolve_socket('master_room') == new_sid
+        assert any(e['name'] == 'socket_hijacked' for e in old.queue)
+        new.get_received()
+        socketio.emit('delivery_probe', {'text': 'new owner only'}, to=new_sid)
+        assert [e['name'] for e in new.get_received()] == ['delivery_probe']
+        # Re-registering the current owner must not disconnect it.
+        new.emit('register_chat_client', {'room_id': 'master_room'})
+        assert new.is_connected() and manager.resolve_socket('master_room') == new_sid
+    finally:
+        for client in (old, new):
+            if client.is_connected():
+                client.disconnect()
+    assert not manager.is_bound('master_room')

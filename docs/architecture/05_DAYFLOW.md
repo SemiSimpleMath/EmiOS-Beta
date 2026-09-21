@@ -151,10 +151,21 @@ unanswered ticket expiring returns a ToolResult saying "user not reached". The r
 result as evidence and marks the node `done`; the dispatch finalizer judges whether the goal was
 achieved. The sweeper records a failed timeout result with an epoch and inactivity fence. Cadence resumes the ordinary finalizer for that saved result.
 
-The repeated-failure bound is on the GOAL: `goal_unmet_attempts` counts not-achieved finalizer judgments once per main-task dispatch attempt, and at
-`_REPEAT_FAILURE_LIMIT` the finalizer node escalates the verdict to `ask_user` instead of re-opening the
-step. It survives the architect re-planning under a new node id; it does not survive the steward minting
-a fresh work object for the same action tomorrow.
+Unanswered-contact policy lives in `agents/shared/work/unanswered_contact.j2`, included by
+finalizer, architect, and steward. Silence normally means the user is unavailable. Routine,
+optional, stale, or frequency-limited prompts stop; a further attempt needs continuing
+importance, relevance, and room within the original contact limits and retry bound. No
+permission-to-remind follow-up is warranted by silence alone. The finalizer uses
+`unrecoverable` + `stop` for contact that should end and records what remains unconfirmed;
+the steward abandons obsolete goals rather than claiming their answer or action occurred.
+This is model guidance, not a deterministic notification quota or relevance classifier.
+
+The repeated-failure bound is on the GOAL: `goal_unmet_attempts` preserves lifetime history;
+`goal_unmet_since_progress` counts unmet judgments since the last achieved/achieved-plan-changes
+judgment. At `_REPEAT_FAILURE_LIMIT`, `WorkStore._op_finalize_task` escalates an unmet judgment
+to `ask_user` unless its next step is `stop`. The finalizer must choose STOP for unanswered
+contact at this bound so it does not become a question about asking again. The count survives
+architect re-planning under a new node id, but not a fresh work object.
 Ticket text is composed by `ticket_builder_manager`
 (multi_agents/): dispatch hands over ids and the goal (`work_id::node_id` + the node's directive),
 a read-only planner pulls the SUBSTANCE the goal promises — `read_work_object` on the graph,
@@ -477,3 +488,170 @@ evidence in one version-checked store batch. Either both changes commit or neith
 does; failures leave the task gated. This currently retains evidence in task content.
 The version check covers the post-node load-to-save interval, not the earlier LLM
 matching snapshot or external-message identity.
+
+## Attributed external task context (2026-09-20)
+
+External source context is prepared from intake metadata, with exact pod references,
+source IDs, timestamps, sender/subject, message/thread IDs where available, and a
+labeled summary/excerpt. Worker and finalizer views render this automatically via
+`shared/work/task_context.j2` and `source_context.j2`; the strategic portfolio omits
+excerpts but retains attribution, pod references and wake interpretations. These
+are work-level facts available to every main task, including replacement tasks.
+No pod fetch is added to prompt preparation or ordinary chat. The worker fetches
+the canonical pod when supplied excerpts do not establish what its action requires.
+
+External-wake preparation supplies full directives and all eligible external intake
+candidates in the current intake view, without the former 30-item prefix limit.
+The state mover returns `source_item_id`; persistence resolves it against that
+prepared snapshot, never model-supplied attribution or pod IDs. The gate release
+and a separate owned evidence record commit in one batch fenced by the work version
+captured BEFORE the model call. The original task directive is unchanged. Evidence
+stores the matched condition, original source metadata, and separately labeled model
+interpretation. It is not a schedulable task or a tool result. Unknown sources and
+changed snapshots leave the gate intact for a fresh assessment. This conservative
+work-version fence can defer a second wake in the same work object until the next
+pass if the first wake already changed that work object.
+
+The model still judges semantic matching: a linked reply alone does not establish
+approval. Prompt guidance requires a clear match and distinguishes source text from
+interpretation. Existing historical records without structured sources are not
+backfilled, and existing intake eligibility/age windows still apply.
+
+## Contextual notification responses (2026-09-20)
+
+The existing `ticket_builder::composer` designs 1–3 response choices in its standard
+agent form and Jinja prompt; no additional agent call is introduced. Each choice has
+a short label (at most 3 words / 24 characters; no question marks or line breaks), a
+meaning, and a scope. Distinct labels and count/length rules are validated in Python;
+semantic suitability is the composer's responsibility. Familiar labels are preferred.
+
+The exact choices are saved in `trigger_context.response_choices` and exposed by
+`Ticket.to_dict`, so push and poll/reload share the same UI. The popup renders escaped
+labels and a text field. Click a choice with optional text, or press Enter to submit
+text without a choice. Submitted IDs resolve against server-stored choices; the client
+cannot substitute a label or meaning. Existing tickets keep their legacy layouts.
+Tool-approval tickets continue to use their separate Allow/Deny authorization path.
+
+Contextual tickets require action_type=none and no status effects: a response is
+judgment input, never automatic permission to execute a ticket action. Receipt,
+intention, user-reported completion, scoped yes/no, approval, decline, taking over,
+and deferral remain distinct meanings. Typed text is saved separately and takes
+precedence over the button. OK to a lunch reminder says only that it was received;
+no agent should infer eating, availability or commitment, or ask again just to
+eliminate that uncertainty. A Later choice expresses deferral; finalizer/planner
+judgment decides what follow-up, if any, is useful rather than guessing a snooze time.
+
+The contextual response write is atomic. Exact repeated latest replies are idempotent;
+different replies to an already-responded contextual ticket append timestamped follow-up
+history without resetting its execution/lifecycle state. Expired unanswered tickets
+reject late replies explicitly. The current user_text holds the latest written answer
+(or button label); user_response_parsed preserves exact label, meaning, scope, text,
+and response history. Normal/recovered tool results and planner views render that
+history with shared Jinja. Legacy same-state writes now reject different supplied
+fields instead of silently returning success. They do not acquire follow-up semantics.
+
+No historical ticket migration is required. Follow-ups enter recent-response planning
+context; they do not rewrite finalizer judgments already committed before the follow-up.
+
+
+## Execution ownership update (2026-09-20)
+
+See [Execution ownership and cancellation](EXECUTION_OWNERSHIP.md) for the current
+invocation tree, immutable main-attempt binding, cancellation boundaries and durable
+takeover barrier. Timeout result recording now revokes further calls/worker writes;
+it does not mean the old thread exited. The two additive execution tables supplement
+the five graph tables. The finalizer remains responsible for judgment and failure counts.
+
+
+### Intake review lifecycle (DF33)
+
+All admitted source types follow the same lifecycle, including email, chat, delegation,
+and camera pods. The evaluator accounts for every presented item through a work-object
+`based_on` handoff or `intake_reviews`: `no_action` closes it with a reason;
+`defer` requires a reason and future timezone-aware `reconsider_at`. Deferred items return
+on the first normal planning cycle at/after that time. There is no extra model call or timer.
+The default for reviewed information requiring no work is immediate no-action closure,
+not speculative retention. Original source records/pods and ingestion identities remain stored.
+
+Prep reloads eligible durable admissions; stale blackboard values cannot re-admit closed
+or future-deferred items. Current enrichment is retained. Validation rejects missing,
+unknown, duplicate, or conflicting dispositions before work writes. Explicit review writes
+are one transaction, fenced against metadata changes since preparation. Work-object handoffs
+remain separate commits: save source context first, close intake second; prep reconciles a
+crash between those commits. A failed/omitted review never implicitly discards a request.
+No-action and not-yet-due intake are excluded from the state mover's event candidates;
+transferred sources remain eligible to release existing work gates. This is queue retirement,
+not cancellation of existing work or deletion of historical source context.
+
+
+### Reliable evaluator closure (DF38)
+
+Before other evaluator mutations, complete/abandon decisions are saved as an atomic
+batch of `constraints.pending_work_closure` intents in existing work objects. Each
+terminal `set_work_status` removes its intent in the same commit as closure. Failure
+raises and stops the pass; remaining intents block readiness, claims, revisions,
+worker writes and new tool calls. Evaluator prep retries them before rendering its
+portfolio, so recovery does not rely on the old blackboard or another model decision.
+Result recording/finalization may still preserve outcomes from already-started calls.
+The whole evaluator output is not one transaction; earlier completed closures stay closed.
+Concern feedback is separate best-effort post-commit work. Failure to save the initial
+intent batch stops the pass but cannot leave a durable intent. An external operation
+already in progress cannot be recalled by this mechanism.
+
+Same-pass source/objective updates for a closing work object are committed with its
+closure intent, preserving incoming user context before the object becomes terminal.
+Verification: injected terminal-write failures, restart/second-connection recovery,
+blocked claims/tool calls, atomic intent batches, partial closure progress, separate
+feedback failures, and existing intake/execution/finalization regressions.
+
+
+### Architect duplicate validation (DF6)
+
+Duplicate consolidation requires exact existing unfinished main-task IDs and one retained
+survivor per set. Malformed/repeated pairs, blank/self references, missing or finished
+tasks, provenance references, chains/cycles, and survivors also listed for abandonment
+reject the entire revision. Validation precedes graph writes and finalizer-instruction
+acknowledgment. A rejected revision preserves the graph and pending instruction; valid
+consolidation redirects dependencies within the existing atomic revision batch.
+
+
+### User replies in concern feedback (DF39)
+
+Ticket result evidence carries structured `payload.user_reply` in the same epoch-fenced
+commit as the result. It preserves the actual text, question, ticket ID and contextual
+choice history/meaning/scope for concern feedback, independently of rendered tool prose.
+The normal ticket tool and recovery use this path; timeout/creation/manager results do
+not become user replies. Feedback selects the newest attributed response by timestamp
+and journals it for both completed and abandoned work. Acknowledgment or text presence
+never implies decline. Only an explicit unqualified decline choice automatically parks
+an abandoned concern; typed qualifiers and other replies remain for noticer judgment.
+Historical `created_by=reply` evidence stays readable as unclassified user words.
+
+
+### Durable concern outcomes (DF40)
+
+Every new concern-linked transition to done/abandoned writes a receipt snapshot
+to `work_concern_feedback` in the same SQLite transaction as the graph. This
+includes automatic goal rollup. Dayflow finalization and explicit closure deliver
+after commit; evaluator prep retries pending receipts. Register failures or unknown
+concern refs leave receipts pending. Per-concern receipt IDs prevent duplicate
+journals after partial delivery or a crash before acknowledgment. Generic WorkStore
+has no register/model side effects. There is no historical backfill.
+
+The register's `work_outcomes` preserves objective, terminal reason, main-task
+finalizer judgments and the latest attributed user response from the closure
+snapshot. Both tracked and recently closed concern projections include this and
+the journal, independent of recent Dayflow log retention. Done work moves an active
+concern to addressing; it does not prove the underlying need resolved. Noticer
+policy requires new evidence or an agreed follow-up before repeating a settled ask.
+Addressing reviews restart their four-day review interval without changing when
+handling originally began. A noticer wake is best effort/cooldown guarded; delivery
+does not wait for an LLM, and ordinary chat gains no new work.
+
+
+### Scheduler readiness checks (DF41)
+
+If setup is incomplete or history is empty, the scheduler skips agent execution
+and keeps a fallback readiness check in 30 minutes. The existing scheduling helper
+preserves earlier external wakes and does not add jobs after stop. This prevents a
+first-run readiness skip from consuming the only periodic tick.

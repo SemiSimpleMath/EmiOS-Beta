@@ -1,0 +1,7 @@
+{% for receipt in response_details.get('response_history', []) %}
+Response at {{ receipt.responded_at }}{% if receipt.followup %} (follow-up){% endif %}:
+  Written text (authoritative): {{ receipt.typed_text or '(none)' }}
+  Selected button: {{ receipt.label or '(text-only answer)' }}
+  Button meaning: {{ receipt.meaning }}
+  Scope: {{ receipt.scope }}
+{% endfor %}

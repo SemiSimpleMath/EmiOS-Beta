@@ -68,7 +68,12 @@ class WorkNodeDispatchNode(ControlNode):
             # The CALL is not made here, and not on this thread — see the hand-off below.
             claimed = self._claim(store, work_id, node_id)
             epoch = int(claimed.nodes[node_id].payload["dispatch_epoch"])
-        except Exception:
+        except Exception as exc:
+            from work_objects.execution_store import ExecutionBlocked
+            if isinstance(exc, ExecutionBlocked):
+                self.blackboard.update_state_value("work_node_ref", "")
+                self.blackboard.update_state_value("execution_blocked", str(exc))
+                return  # A hold, not a failed task and not an immediate retry.
             # A rejected claimant owns nothing. In particular it must not fail the winner.
             logger.error("[%s] claim failed for %s::%s", self.name, work_id, node_id, exc_info=True)
             self.blackboard.update_state_value("work_node_ref", "")

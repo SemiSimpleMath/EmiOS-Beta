@@ -96,7 +96,8 @@ def test_active_strategic_renderers_share_statuses_and_hide_terminal_wakes():
         assert "RETIRED_WAKE_MUST_NOT_APPEAR" not in text
         assert "RAW_INTERNAL_EVIDENCE" not in text
         assert "verify [done; BLOCKED]" in text
-        assert "2 ATTEMPTS HAVE NOT ACHIEVED THIS GOAL" in text
+        assert "goal failures judged by finalizer: 2" in text
+        assert "ATTEMPTS HAVE NOT ACHIEVED THIS GOAL" not in text
         assert "first change still allowed two workers" in text
 
 

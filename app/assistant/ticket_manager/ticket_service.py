@@ -95,6 +95,7 @@ class TicketService:
         user_text: Optional[str] = None,
         snooze_minutes: int = 30,
         label: Optional[str] = None,
+        choice_id: Optional[str] = None,
     ) -> TicketResponse:
         """
         Handle a user response to a ticket.
@@ -107,6 +108,8 @@ class TicketService:
                 - Tool approval layout: "accept", "dismiss"
             user_text: Optional user-provided text/explanation
             snooze_minutes: Minutes to snooze (only used if action="later")
+            choice_id: Server-stored contextual choice ID. Its label and meaning are resolved
+                from the ticket; client-supplied labels are ignored for these choices.
             label: The text of the button the user actually pressed, passed through
                 verbatim. The surface that rendered the button is the only place that
                 knows what it said — the same action token reads "Acknowledge" in the
@@ -126,7 +129,7 @@ class TicketService:
                 error="ticket_id required",
             )
 
-        if action not in self.ACTION_TO_STATE:
+        if action not in self.ACTION_TO_STATE and action != "choice":
             return TicketResponse(
                 ticket_id=ticket_id,
                 action=action,
@@ -145,6 +148,27 @@ class TicketService:
                 success=False,
                 error="ticket not found",
             )
+
+        choices = (getattr(ticket, "trigger_context", None) or {}).get("response_choices")
+        if choices and action in {"choice", "answer"}:
+            from app.assistant.ticket_manager.contextual_response import record_response
+            try:
+                receipt = record_response(manager, ticket_id, choice_id if action == "choice" else None,
+                                          user_text or "")
+            except ValueError as exc:
+                return TicketResponse(ticket_id=ticket_id, action=action, success=False, error=str(exc))
+            if receipt is None:
+                return TicketResponse(ticket_id=ticket_id, action=action, success=False,
+                    error="This ticket is no longer answerable; your response was not recorded", not_answerable=True)
+            if not receipt["duplicate"]:
+                self._publish_ticket_responded(ticket_id, receipt["action"], receipt["state"], receipt["user_text"])
+                if user_text and user_text.strip():
+                    self._mark_linked_items_pending_directive(ticket=ticket,
+                        directive_text=user_text, ticket_id=ticket_id)
+            return TicketResponse(ticket_id=ticket_id, action=receipt["action"], success=True)
+        if action == "choice" or (choices and action != "close"):
+            return TicketResponse(ticket_id=ticket_id, action=action, success=False,
+                                  error="Submit a stored choice ID or a written answer")
 
         # REFUSE BEFORE WRITING. A ticket in a terminal state cannot accept a response —
         # _ALLOWED_TRANSITIONS gives `expired`, `dismissed`, `completed` and `failed` no

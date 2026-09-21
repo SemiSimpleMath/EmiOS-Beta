@@ -52,7 +52,8 @@ def node_result(wo, node, *, limit: int | None = None) -> str:
     the failure account do not.
     """
     evidence = [m for m in wo.nodes.values()
-                if m.parent_id == node.id and m.type in ("evidence", "artifact") and (m.content or "").strip()]
+                if m.parent_id == node.id and m.type in ("evidence", "artifact")
+                and m.payload.get("context_role") != "external_wake" and (m.content or "").strip()]
     epoch = int(node.payload.get("dispatch_epoch") or 0)
     current = [m for m in evidence if m.payload.get("dispatch_epoch") == epoch]
     # Explicit attempt receipts take precedence. Full prior history is rendered separately.

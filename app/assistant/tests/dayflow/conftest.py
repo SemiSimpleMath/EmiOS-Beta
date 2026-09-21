@@ -42,7 +42,7 @@ def _wipe_work_store():
         store = get_dayflow_work_store()
         conn = getattr(store, "_conn", None) or getattr(store, "conn", None)
         if conn is not None:
-            for t in ("events", "edges", "nodes", "work_objects"):
+            for t in ("work_concern_feedback", "events", "edges", "nodes", "work_objects"):
                 conn.execute(f"DELETE FROM {t}")
             conn.commit()
     except Exception:

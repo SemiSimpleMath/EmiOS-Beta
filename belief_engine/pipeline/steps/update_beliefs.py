@@ -1,63 +1,40 @@
-"""
-Step 2: Update beliefs based on collected evidence.
-
-For the evidence batch:
-  1. Embed the evidence and find semantically similar existing beliefs — GLOBALLY, across
-     every domain, so a duplicate filed under another area is visible to the updater.
-  2. Send evidence + existing beliefs to the belief_updater LLM agent. The agent files each
-     belief under a primary `domain` (one of the enabled domain ids); domains are areas a
-     belief belongs to, not lanes the engine runs in.
-  3. Apply the agent's decisions (create / update / deprecate / no_change) via BeliefStore.
-
-Write-time dedup (2026-09-10): before a `create` lands, its statement is compared with its
-nearest active belief in the whole store. If they embed at/above MERGE_THRESHOLD the
-merge_verifier decides ONCE whether they are the same belief; a "same" verdict turns the
-create into an update of the existing key (statement = the verifier's reconciled canonical),
-and a "not the same" verdict is recorded in belief_distinct_pairs so the weekly sweep never
-re-asks. This is where duplicates used to be born — one lane could not see another lane's
-belief — and it costs one verifier call per new belief instead of one per candidate pair.
+"""Update beliefs from source evidence and LLM-selected existing context.
+New records are preserved first; the subsequent incremental matcher reviews complete
+stored records and evidence. No statement-only write-time merge is performed.
 """
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional
 
 from app.assistant.ServiceLocator.service_locator import ServiceLocator
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message
 from app.assistant.utils.time_utils import get_local_time_str
 
-from belief_engine.pipeline.steps.canonicalize_belief_set import (
-    MERGE_THRESHOLD, _NEW_STATEMENT_CONTEXT, belief_context_block, verify_relation,
-)
 from belief_engine.pipeline.steps.collect_evidence import EvidenceBundle, EvidenceItem
-from belief_engine.store import distinct_pairs as verdicts
+from belief_engine.matching.service import select_for_evidence
+from belief_engine.matching.context import encode, pages
+from dataclasses import asdict
 from belief_engine.store.belief_store import BeliefRecord, BeliefStore, BeliefUpsertRequest, EvidenceInput
 
 logger = get_logger(__name__)
 
 _AGENT_NAME = "belief_engine::belief_updater"
-_VERIFIER_AGENT_NAME = "belief_engine::merge_verifier"
 
-# How many existing beliefs to surface per semantic search.
-_SIMILAR_K = 8
-_SIMILARITY_THRESHOLD = 0.50
-# Nearest neighbours considered when a new belief is about to be created.
-_DEDUP_K = 3
+# Reserve ample space for system resources, schema and the structured response.
+# This is a conservative transport budget, not a text truncation limit.
+UPDATE_INPUT_BYTES = 180000
 
+class UpdateContextTooLarge(ValueError):
+    pass
 
-def _format_existing_beliefs(beliefs) -> str:
-    if not beliefs:
-        return "(none)"
-    lines = []
-    for belief, score in beliefs:
-        lines.append(
-            f"- key={belief.belief_key!r} domain={belief.domain} confidence={belief.confidence} "
-            f"obs={belief.observation_count} similarity={score:.2f}"
-        )
-        lines.append(f"  Statement: {belief.statement}")
-    return "\n".join(lines)
-
+def check_update_budget(payload):
+    size = len(encode(payload).encode('utf-8'))
+    if size > UPDATE_INPUT_BYTES:
+        raise UpdateContextTooLarge(f'Complete update input needs {size} UTF-8 bytes; budget is {UPDATE_INPUT_BYTES}. Source remains pending; no content was truncated.')
+    return size
 
 def _to_evidence_input(item: EvidenceItem) -> EvidenceInput:
     return EvidenceInput(
@@ -90,6 +67,30 @@ def _resolve_evidence_by_refs(
     return resolved
 
 
+def _assessed_evidence(items: List[EvidenceItem], output: dict) -> List[EvidenceInput]:
+    """Validate model-assigned relationships; never infer them from event sentiment."""
+    refs = output.get('evidence_refs') or []
+    relations = output.get('evidence_relations') or []
+    by_ref = {}
+    for relation in relations:
+        ref = relation['evidence_ref']
+        if type(ref) is not int or ref in by_ref or ref < 1 or ref > len(items):
+            raise ValueError('Invalid or repeated evidence relation')
+        if relation['valence'] not in ('support','contradict','qualify'):
+            raise ValueError('Invalid evidence valence')
+        by_ref[ref] = relation['valence']
+    if any(type(ref) is not int or ref < 1 or ref > len(items) for ref in refs):
+        raise ValueError('Evidence reference outside supplied batch')
+    if set(refs) != set(by_ref):
+        raise ValueError('Each cited source requires an explicit evidence-to-claim relationship')
+    result = []
+    for ref in dict.fromkeys(refs):
+        evidence = _to_evidence_input(items[ref - 1])
+        evidence.valence = by_ref[ref]
+        result.append(evidence)
+    return result
+
+
 def resolve_domain(
     *,
     agent_domain: Any,
@@ -118,96 +119,6 @@ def resolve_domain(
     return None
 
 
-def dedup_candidate(
-    store: BeliefStore,
-    verifier_agent: Any,
-    *,
-    statement: str,
-    belief_key: str,
-    scope_context: Any,
-) -> Tuple[Optional[BeliefRecord], Optional[str], List[Tuple[BeliefRecord, str]]]:
-    """Decide whether a NEW statement is really an existing belief.
-
-    Returns (existing_belief, canonical_statement, distinct_verdicts):
-      - existing_belief is the active belief the verifier judged to be the SAME (the create
-        becomes an update of it), else None;
-      - canonical_statement is the verifier's reconciled text for that merge (may be empty);
-      - distinct_verdicts lists (candidate, reason) pairs the verifier judged NOT the same, for
-        the caller to record once the new belief has an id.
-    One verifier call per candidate, nearest first, stopping at the first "same". A
-    `supersedes` verdict deprecates whichever side the evidence dates as outdated, and a
-    `contradicts` verdict contests the stored belief so the reevaluator rules on its full
-    trail; both let the new belief proceed.
-    """
-    hits = store.find_similar(statement, k=_DEDUP_K, threshold=MERGE_THRESHOLD)
-    distinct: List[Tuple[BeliefRecord, str]] = []
-    for cand, score in hits:
-        if cand.belief_key == belief_key or getattr(cand, "locked", 0):
-            continue
-        # A locked belief must never be rewritten by a merge; a same-key hit is an update, not a dup.
-        verdict = verify_relation(
-            verifier_agent,
-            _AsBelief(statement, belief_key), cand, scope_context=scope_context,
-            context_a=_NEW_STATEMENT_CONTEXT,
-            context_b=belief_context_block(store, cand),
-        )
-        relation = verdict["relation"]
-        reason = str(verdict.get("reason") or "")
-
-        if relation == "same":
-            logger.info(
-                "[UpdateBeliefsStep] write-time dedup: %s folds into %s (sim=%.2f): %s",
-                belief_key, cand.belief_key, score, reason[:160],
-            )
-            return cand, (verdict.get("canonical_statement") or "").strip(), distinct
-
-        if relation == "supersedes":
-            # The incoming statement is side 'a'. If the evidence says the STORED belief is
-            # the outdated one, this new belief replaces it — deprecate the old rather than
-            # letting a preference and its own replacement both sit active. If the stored one
-            # is current instead, the "new" belief is stale news; let it be written anyway
-            # (its own evidence dates it) rather than silently discarding what was observed.
-            if str(verdict.get("current_side") or "").strip().lower() == "a":
-                try:
-                    store.deprecate(cand.belief_key,
-                                    reason=f"superseded by new belief {belief_key}: {reason[:200]}")
-                    logger.info("[UpdateBeliefsStep] %s supersedes %s — old one deprecated",
-                                belief_key, cand.belief_key)
-                except Exception:
-                    logger.exception("[UpdateBeliefsStep] deprecate failed for %s", cand.belief_key)
-            else:
-                logger.warning(
-                    "[UpdateBeliefsStep] %s conflicts with %s but the STORED belief reads as "
-                    "current; writing the new one anyway for its own evidence. %s",
-                    belief_key, cand.belief_key, reason[:160])
-            continue
-
-        if relation == "contradicts":
-            # Same subject, opposing claims, nothing dates them apart. Contest the stored side
-            # so the reevaluator rules on its full trail; the new belief is still written, and
-            # its evidence is what the reevaluator will weigh against.
-            try:
-                store.mark_contested(cand.belief_key)
-            except Exception:
-                logger.exception("[UpdateBeliefsStep] mark_contested failed for %s", cand.belief_key)
-            logger.warning(
-                "[UpdateBeliefsStep] CONTRADICTION: new %s vs stored %s — stored one contested. %s",
-                belief_key, cand.belief_key, reason[:200])
-            continue
-
-        # different | specialises — both stand; remember the verdict once the new belief has an id.
-        distinct.append((cand, f"{relation}: {reason}"))
-    return None, None, distinct
-
-
-class _AsBelief:
-    """The minimal shape verify_relation reads for the new side: statement + key. Its context
-    block is _NEW_STATEMENT_CONTEXT (nothing stored yet), so no evidence lookup is attempted."""
-    def __init__(self, statement: str, belief_key: str) -> None:
-        self.statement = statement
-        self.belief_key = belief_key
-
-
 class UpdateBeliefsStep:
     name = "update_beliefs"
 
@@ -229,6 +140,45 @@ class UpdateBeliefsStep:
         return []
 
     def run(self, ctx: Any) -> dict:
+        bundle = getattr(ctx, "evidence_bundle", None)
+        if bundle is None or bundle.is_empty():
+            ctx.belief_update_result = {"status": "skipped", "reason": "no_evidence"}
+            return ctx.belief_update_result
+        # Whole evidence records, chronological so a later correction is processed
+        # after the earlier observation. Paging is transport, never a semantic bucket.
+        from dataclasses import replace
+        from types import SimpleNamespace
+        total = {k: 0 for k in ("created", "updated", "deprecated", "no_change", "errors", "contested")}
+        contested = []
+        batches = 0
+        def process(items):
+            nonlocal batches
+            child = SimpleNamespace(scope_context=ctx.scope_context,
+                                    evidence_bundle=replace(bundle, items=items))
+            try:
+                result = self._run_batch(child)
+            except UpdateContextTooLarge:
+                if len(items) == 1:
+                    raise
+                middle = len(items) // 2
+                process(items[:middle])
+                process(items[middle:])
+                return
+            batches += 1
+            for key, value in result.get('stats', {}).items():
+                total[key] += value
+            contested.extend(result.get('contested_keys', []))
+            if total['errors']:
+                raise RuntimeError(f"Belief update batch failed: {result}")
+        records = sorted(bundle.items, key=lambda item: (item.source_date, item.source_ref or ''))
+        for page in pages([{'position':i,'item':asdict(item)} for i,item in enumerate(records)], max_chars=48000):
+            process([records[r['position']] for r in page])
+        ctx.belief_update_result = {'status':'ok','domain':self.domain or 'global',
+                                  'stats':total,'contested_keys':list(dict.fromkeys(contested)),
+                                  'batches':batches}
+        return ctx.belief_update_result
+
+    def _run_batch(self, ctx: Any) -> dict:
         label = self.domain or "global"
         bundle: Optional[EvidenceBundle] = getattr(ctx, "evidence_bundle", None)
         if bundle is None or bundle.is_empty():
@@ -247,31 +197,17 @@ class UpdateBeliefsStep:
         agent = agent_factory.create_agent(_AGENT_NAME)
         if agent is None:
             raise RuntimeError(f"Agent {_AGENT_NAME!r} not found")
-        verifier = agent_factory.create_agent(_VERIFIER_AGENT_NAME)
-        if verifier is None:
-            raise RuntimeError(f"Agent {_VERIFIER_AGENT_NAME!r} not found")
-
         items = bundle.items
         evidence_block = bundle.as_block()
 
-        # One semantic query over the whole evidence batch — coarse but cheap;
-        # surfaces beliefs related to the overall topic mix rather than each
-        # individual item. Global unless this is a per-domain slice.
-        combined_query = " ".join(item.summary for item in items)
-        existing_hits = store.find_similar(
-            combined_query,
-            k=_SIMILAR_K,
-            domain=self.domain,
-            threshold=_SIMILARITY_THRESHOLD,
-        )
-        existing_block = _format_existing_beliefs(existing_hits)
+        existing_block = encode(select_for_evidence(store, agent_factory, ctx.scope_context,
+                                                     [asdict(item) for item in items]))
 
         # Scope built once by the pipeline, threaded via ctx — this LLM step
         # receives it, does not build its own.
         msg = Message(
             agent_input={
-                "task": (f"Process new evidence for the '{self.domain}' domain."
-                         if self.domain else "Process new evidence across all areas."),
+                "update_domain": self.domain,
                 "evidence_block": evidence_block,
                 "existing_beliefs_block": existing_block,
                 "date_today": get_local_time_str(),
@@ -280,175 +216,154 @@ class UpdateBeliefsStep:
             scope_context=ctx.scope_context,
         )
 
+        input_bytes = check_update_budget(msg.agent_input)
+        logger.info("[UpdateBeliefsStep] bounded input bytes=%d evidence_items=%d", input_bytes, len(items))
         resp = agent.action_handler(msg)
         payload = resp.data if resp and hasattr(resp, "data") else {}
         belief_outputs = payload.get("beliefs") or []
 
         stats = {"created": 0, "updated": 0, "deprecated": 0, "no_change": 0, "errors": 0,
-                 "contested": 0, "dedup_merged": 0, "verifier_calls": 0}
+                 "contested": 0}
         # Beliefs that need re-evaluation (confidence dropped or explicitly contested)
         contested_keys: List[str] = []
         today_iso = datetime.now(timezone.utc).date().isoformat()
 
         _CONFIDENCE_RANK = {"high": 2, "medium": 1, "low": 0}
 
-        verdict_conn = verdicts.open_conn()
-        try:
-            for bo in belief_outputs:
-                try:
-                    action = bo.get("action", "no_change")
-                    belief_key = bo.get("belief_key", "")
-                    if not belief_key:
-                        logger.warning("[UpdateBeliefsStep] skipping belief with empty key")
-                        continue
+        for bo in belief_outputs:
+            try:
+                action = bo.get("action", "no_change")
+                belief_key = bo.get("belief_key", "")
+                if not belief_key:
+                    logger.warning("[UpdateBeliefsStep] skipping belief with empty key")
+                    continue
 
-                    existing = store.get_by_key(belief_key)
+                existing = store.get_by_key(belief_key)
 
-                    # Honor a manual lock: a belief the owner corrected + locked via /beliefs must
-                    # not be re-evolved or deprecated. Downgrade a mutating action to no_change so
-                    # evidence still attaches and observation_count/last_confirmed advance, but the
-                    # statement and status stay exactly as the owner set them.
-                    if action in ("update", "deprecate") and existing and getattr(existing, "locked", 0):
-                        logger.info(
-                            "[UpdateBeliefsStep] %s is LOCKED — preserving manual correction (was action=%s)",
-                            belief_key, action,
-                        )
-                        action = "no_change"
-
-                    if action == "deprecate":
-                        store.deprecate(belief_key, reason=bo.get("reasoning", ""))
-                        stats["deprecated"] += 1
-                        continue
-
-                    if action == "no_change":
-                        # Still upsert to increment observation_count and attach evidence.
-                        if existing:
-                            req = BeliefUpsertRequest(
-                                domain=existing.domain,
-                                belief_key=belief_key,
-                                statement=existing.statement,
-                                confidence=existing.confidence,
-                                scope=existing.scope,
-                                status=existing.status,
-                                last_confirmed=today_iso,
-                            )
-                            refs = bo.get("evidence_refs") or []
-                            relevant_ev = _resolve_evidence_by_refs(items, refs)
-                            store.upsert_belief(req, [_to_evidence_input(ev) for ev in relevant_ev])
-                            stats["no_change"] += 1
-                        continue
-
-                    new_confidence = bo.get("confidence", "medium")
-                    new_status = bo.get("status", "active")
-                    new_statement = (bo.get("statement") or "").strip()
-
-                    # Refuse to upsert an empty statement — would blank the belief
-                    # in the store. The agent_form requires statement; this guards
-                    # against degenerate output.
-                    if not new_statement:
-                        logger.warning(
-                            "[UpdateBeliefsStep] empty statement on %s action=%s — skipping",
-                            belief_key, action,
-                        )
-                        continue
-
-                    # An agent that says "create" for a key that already exists is updating it.
-                    if action == "create" and existing is not None:
-                        action = "update"
-
-                    # Write-time dedup: is this "new" belief an existing one in other words?
-                    distinct_to_record: List[Tuple[BeliefRecord, str]] = []
-                    if action == "create":
-                        folded, canonical, distinct_to_record = dedup_candidate(
-                            store, verifier,
-                            statement=new_statement, belief_key=belief_key,
-                            scope_context=ctx.scope_context,
-                        )
-                        stats["verifier_calls"] += len(distinct_to_record) + (1 if folded else 0)
-                        if folded is not None:
-                            action = "update"
-                            existing = folded
-                            belief_key = folded.belief_key
-                            new_statement = canonical or new_statement
-                            stats["dedup_merged"] += 1
-
-                    domain = resolve_domain(
-                        agent_domain=bo.get("domain"), belief_key=belief_key,
-                        existing=existing, valid_domains=valid_domains, forced=self.domain,
-                    )
-                    if domain is None:
-                        stats["errors"] += 1
-                        logger.error(
-                            "[UpdateBeliefsStep] cannot file %s: domain %r is not an enabled domain "
-                            "and the key carries no known prefix — skipped",
-                            belief_key, bo.get("domain"),
-                        )
-                        continue
-
-                    prev_confidence = existing.confidence if (existing and action == "update") else new_confidence
-
-                    req = BeliefUpsertRequest(
-                        domain=domain,
-                        belief_key=belief_key,
-                        statement=new_statement,
-                        confidence=new_confidence,
-                        scope=bo.get("scope", "chronic"),
-                        status=new_status,
-                        last_confirmed=today_iso,
-                        kind=bo.get("kind"),
-                    )
-                    refs = bo.get("evidence_refs") or []
-                    relevant_ev = _resolve_evidence_by_refs(items, refs)
-                    evidence_inputs = [_to_evidence_input(ev) for ev in relevant_ev]
-                    written = store.upsert_belief(req, evidence_inputs)
-                    logger.debug(
-                        "[UpdateBeliefsStep] attached %d/%d evidence items to %s (refs=%s)",
-                        len(relevant_ev), len(items), belief_key, refs,
-                    )
-
-                    # The new belief now has an id: remember which neighbours it is NOT, so the
-                    # weekly sweep never pays for those pairs again.
-                    for cand, reason in distinct_to_record:
-                        verdicts.record_distinct(
-                            verdict_conn, written.id, written.statement, cand.id, cand.statement,
-                            reason=reason,
-                        )
-
-                    # Flag for re-evaluation if:
-                    # 1. Status was set to contested (applies to BOTH create and update —
-                    #    a fresh-but-contested belief needs the reevaluator too), OR
-                    # 2. Confidence dropped from a known previous value (update only).
-                    if new_status == "contested":
-                        contested_keys.append(belief_key)
-                        store.mark_contested(belief_key)
-                        stats["contested"] += 1
-                        logger.info("[UpdateBeliefsStep] marked contested: %s", belief_key)
-                    elif action == "update" and _CONFIDENCE_RANK.get(new_confidence, 1) < _CONFIDENCE_RANK.get(prev_confidence, 1):
-                        contested_keys.append(belief_key)
-                        store.mark_contested(belief_key)
-                        stats["contested"] += 1
-                        logger.info(
-                            "[UpdateBeliefsStep] confidence drop %s→%s on %s → queued for re-eval",
-                            prev_confidence, new_confidence, belief_key,
-                        )
-
-                    if action == "create":
-                        stats["created"] += 1
-                    else:
-                        stats["updated"] += 1
-
+                # Honor a manual lock: a belief the owner corrected + locked via /beliefs must
+                # not be re-evolved or deprecated. Downgrade a mutating action to no_change so
+                # evidence still attaches and source-derived metadata is refreshed, but the
+                # statement and status stay exactly as the owner set them.
+                if action in ("create", "replace", "update", "deprecate") and existing and getattr(existing, "locked", 0):
                     logger.info(
-                        "[UpdateBeliefsStep] %s belief key=%s domain=%s confidence=%s",
-                        action, belief_key, domain, req.confidence,
+                        "[UpdateBeliefsStep] %s is LOCKED — preserving manual correction (was action=%s)",
+                        belief_key, action,
                     )
-                except Exception as exc:
+                    action = "no_change"
+
+                if action == "deprecate":
+                    assessed = _assessed_evidence(items, bo)
+                    if existing and assessed:
+                        store.add_evidence_to_existing(belief_key, assessed)
+                    store.deprecate(belief_key, reason=bo.get("reasoning", ""))
+                    stats["deprecated"] += 1
+                    continue
+
+                if action == "no_change":
+                    # Attach newly cited evidence; rereading does not increment or reconfirm.
+                    if existing:
+                        req = BeliefUpsertRequest(
+                            domain=existing.domain,
+                            belief_key=belief_key,
+                            statement=existing.statement,
+                            confidence=existing.confidence,
+                            scope=existing.scope,
+                            status=existing.status,
+                            conditions=existing.conditions,
+                            last_confirmed=today_iso,
+                        )
+                        refs = bo.get("evidence_refs") or []
+                        relevant_ev = _resolve_evidence_by_refs(items, refs)
+                        store.upsert_belief(req, _assessed_evidence(items, bo))
+                        stats["no_change"] += 1
+                    continue
+
+                new_confidence = bo.get("confidence", "medium")
+                new_status = bo.get("status", "active")
+                new_statement = (bo.get("statement") or "").strip()
+
+                # Refuse to upsert an empty statement — would blank the belief
+                # in the store. The agent_form requires statement; this guards
+                # against degenerate output.
+                if not new_statement:
+                    logger.warning(
+                        "[UpdateBeliefsStep] empty statement on %s action=%s — skipping",
+                        belief_key, action,
+                    )
+                    continue
+
+                # An agent that says "create" for a key that already exists is updating it.
+                if action == "create" and existing is not None:
+                    action = "update"
+
+                domain = resolve_domain(
+                    agent_domain=bo.get("domain"), belief_key=belief_key,
+                    existing=existing, valid_domains=valid_domains, forced=self.domain,
+                )
+                if domain is None:
                     stats["errors"] += 1
-                    logger.exception(
-                        "[UpdateBeliefsStep] failed processing belief key=%s: %s",
-                        bo.get("belief_key", "?"), exc,
+                    logger.error(
+                        "[UpdateBeliefsStep] cannot file %s: domain %r is not an enabled domain "
+                        "and the key carries no known prefix — skipped",
+                        belief_key, bo.get("domain"),
                     )
-        finally:
-            verdict_conn.close()
+                    continue
+
+                prev_confidence = existing.confidence if (existing and action == "update") else new_confidence
+
+                req = BeliefUpsertRequest(
+                    domain=domain,
+                    belief_key=belief_key,
+                    statement=new_statement,
+                    confidence=new_confidence,
+                    scope=bo.get("scope", "chronic"),
+                    status=new_status,
+                    last_confirmed=today_iso,
+                    kind=bo.get("kind"),
+                    conditions=json.loads(bo["conditions_json"]) if bo.get("conditions_json") is not None else (existing.conditions if existing else None),
+                )
+                refs = bo.get("evidence_refs") or []
+                relevant_ev = _resolve_evidence_by_refs(items, refs)
+                evidence_inputs = _assessed_evidence(items, bo)
+                written = store.upsert_belief(req, evidence_inputs)
+                logger.debug(
+                    "[UpdateBeliefsStep] attached %d/%d evidence items to %s (refs=%s)",
+                    len(relevant_ev), len(items), belief_key, refs,
+                )
+
+                # Flag for re-evaluation if:
+                # 1. Status was set to contested (applies to BOTH create and update —
+                #    a fresh-but-contested belief needs the reevaluator too), OR
+                # 2. Confidence dropped from a known previous value (update only).
+                if new_status == "contested":
+                    contested_keys.append(belief_key)
+                    store.mark_contested(belief_key)
+                    stats["contested"] += 1
+                    logger.info("[UpdateBeliefsStep] marked contested: %s", belief_key)
+                elif action == "update" and _CONFIDENCE_RANK.get(new_confidence, 1) < _CONFIDENCE_RANK.get(prev_confidence, 1):
+                    contested_keys.append(belief_key)
+                    store.mark_contested(belief_key)
+                    stats["contested"] += 1
+                    logger.info(
+                        "[UpdateBeliefsStep] confidence drop %s→%s on %s → queued for re-eval",
+                        prev_confidence, new_confidence, belief_key,
+                    )
+
+                if action == "create":
+                    stats["created"] += 1
+                else:
+                    stats["updated"] += 1
+
+                logger.info(
+                    "[UpdateBeliefsStep] %s belief key=%s domain=%s confidence=%s",
+                    action, belief_key, domain, req.confidence,
+                )
+            except Exception as exc:
+                stats["errors"] += 1
+                logger.exception(
+                    "[UpdateBeliefsStep] failed processing belief key=%s: %s",
+                    bo.get("belief_key", "?"), exc,
+                )
 
         logger.info("[UpdateBeliefsStep] %s stats=%s", label, stats)
         ctx.belief_update_result = {

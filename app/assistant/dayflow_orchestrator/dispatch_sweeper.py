@@ -344,24 +344,12 @@ _WORK_NODE_FROZEN_TIMEOUT_S = _LONGEST_TOOL_CALL_S + 20 * 60
 
 
 def sweep_stuck_work_nodes(now_utc: Optional[datetime] = None) -> int:
-    """Fail work nodes that have gone quiet, so the graph stops claiming they are in flight.
+    """Record timed-out attempts through the normal result/finalizer path.
 
-    A dispatched node is owned by the orchestrator run that is blocking inside its tool
-    call. There is no liveness to consult — the run holds the call in its own thread and
-    writes nothing until it returns — so the only evidence available is the graph, and
-    the question is simply: has anything about this node or its subtree changed lately?
-
-    STUCK: nothing has been written for ``_WORK_NODE_FROZEN_TIMEOUT_S``. That covers both
-    ways a call can stop existing — the process died with it, or it wedged — and both
-    want the same remedy. The tolerance is derived from the longest window a call may
-    legitimately block so that a question still waiting on the user is never failed out
-    from under them.
-
-    The result transaction rechecks both dispatch epoch and subtree inactivity.
-    Recorded timeout evidence enters ordinary pending finalization; late results are rejected. Goal nodes are skipped — a goal sits
-    ``dispatched`` by design while its work runs.
-
-    Returns count failed.
+    The result transaction rechecks inactivity and epoch and revokes further
+    execution. A live thread remains registered until exit; durable receipts block
+    replacement execution while it or an uncertain external operation remains.
+    The timeout exceeds the ordinary user-reply window. Returns results recorded.
     """
     from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
 
@@ -383,15 +371,7 @@ def sweep_stuck_work_nodes(now_utc: Optional[datetime] = None) -> int:
                 continue
             ref = f"{wo.id}::{node.id}"
             try:
-                # ONE rule: has this node shown any sign of life recently? The call that owns it
-                # runs inside an orchestrator instance and blocks it, so there is no in-process
-                # liveness to consult — and none is needed. A crashed run and a wedged call look
-                # identical from the graph (nothing has been written), and the same remedy fits
-                # both: fail it, and the architect re-plans it next tick. (work_repair adjudicated
-                # this until it retired on 2026-09-16.)
-                #
-                # The tolerance must exceed the longest a call may legitimately block, or a
-                # question the user has not answered yet would be failed out from under them.
+                # Subtree inactivity triggers revocation, never proof of thread exit.
                 idle = _job_idle_seconds(wo, node, None, now)
                 if idle <= _WORK_NODE_FROZEN_TIMEOUT_S:
                     continue

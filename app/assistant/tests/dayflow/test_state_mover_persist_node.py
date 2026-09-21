@@ -47,6 +47,17 @@ def _wo_with_node(store, *, node_id, wake_kind=None, wake_ref=None, title="Do th
     return wo.id
 
 
+def _wake_board(data):
+    from app.assistant.control_nodes.state_mover_prep_node import StateMoverPrepNode
+    bb = FakeBlackboard(data)
+    StateMoverPrepNode(name="prep", blackboard=bb, agent_registry={}, tool_registry={})._build_work_object_waits([
+        {"metadata": {"item_id": "reply-source", "source_type": "email",
+                      "email_body_excerpt": "Yes, approved.", "pod_id": "datapod:email:test-reply"}}])
+    for wake in data["node_wakes"]:
+        wake["source_item_id"] = "reply-source"
+    return bb
+
+
 class TestStateMoverPersistNode:
 
     def test_ready_node_is_promoted(self):
@@ -84,7 +95,7 @@ class TestStateMoverPersistNode:
         wid = _wo_with_node(store, node_id="parked1", wake_kind="event",
                             wake_ref="the school replies with the packet details")
 
-        bb = FakeBlackboard({"node_wakes": [
+        bb = _wake_board({"node_wakes": [
             {"task_id": f"{wid}::parked1", "evidence": "School emailed: packets due Friday."},
         ]})
         _make_node(bb).action_handler(message=None)
@@ -111,23 +122,24 @@ class TestAtomicExternalWake:
         wid = _wo_with_node(store, node_id="atomic", wake_kind="event", wake_ref="approval arrives")
         before = store.load(wid).model_dump(mode="json")
         events_before = store.events(wid)
-        original = store._HANDLERS["set_status"]
+        original = store._HANDLERS["add_node"]
         def fail_evidence(self, wo, data, now, actor=None):
-            if data.get("node_id") == "atomic" and "content" in data:
+            if data.get("parent_id") == "atomic" and "content" in data:
                 raise RuntimeError("simulated evidence write failure")
             return original(self, wo, data, now, actor)
-        monkeypatch.setitem(store._HANDLERS, "set_status", fail_evidence)
-        bb = FakeBlackboard({"node_wakes": [{"task_id": f"{wid}::atomic", "evidence": "Approval received"}]})
+        monkeypatch.setitem(store._HANDLERS, "add_node", fail_evidence)
+        bb = _wake_board({"node_wakes": [{"task_id": f"{wid}::atomic", "evidence": "Approval received"}]})
         _make_node(bb).action_handler(None)
         assert store.load(wid).model_dump(mode="json") == before
         assert store.events(wid) == events_before
         assert not bb.get_state_value("woken_work_nodes")
         assert not bb.get_state_value("promoted_work_nodes")
-        monkeypatch.setitem(store._HANDLERS, "set_status", original)
+        monkeypatch.setitem(store._HANDLERS, "add_node", original)
         _make_node(bb).action_handler(None)
         node = store.load(wid).nodes["atomic"]
         assert node.wake_kind is None
-        assert "Approval received" in node.content
+        assert node.content == "Do the thing"
+        assert any(n.content == "Approval received" for n in store.load(wid).provenance_for("atomic"))
         assert node.status == "actionable"
 
     def test_storage_failure_rolls_back_both_changes(self, monkeypatch):
@@ -140,7 +152,7 @@ class TestAtomicExternalWake:
             original(wo, now)
             raise RuntimeError("simulated commit failure")
         monkeypatch.setattr(store, "_persist", fail_after_write)
-        bb = FakeBlackboard({"node_wakes": [{"task_id": f"{wid}::storage", "evidence": "Reply received"}]})
+        bb = _wake_board({"node_wakes": [{"task_id": f"{wid}::storage", "evidence": "Reply received"}]})
         _make_node(bb)._apply_node_wakes()
         assert store.load(wid).model_dump(mode="json") == before
         assert store.events(wid) == events_before
@@ -154,7 +166,7 @@ class TestAtomicExternalWake:
                 original("defer_node", {"work_id": wid, "node_id": "changed", "wake_kind": "event", "wake_ref": "new condition"})
             return original(op, data, **kwargs)
         monkeypatch.setattr(store, "apply", change_before_batch)
-        bb = FakeBlackboard({"node_wakes": [{"task_id": f"{wid}::changed", "evidence": "Old condition matched"}]})
+        bb = _wake_board({"node_wakes": [{"task_id": f"{wid}::changed", "evidence": "Old condition matched"}]})
         _make_node(bb).action_handler(None)
         node = store.load(wid).nodes["changed"]
         assert node.wake_ref == "new condition"
@@ -164,7 +176,7 @@ class TestAtomicExternalWake:
     def test_missing_evidence_keeps_task_waiting(self):
         store = _store()
         wid = _wo_with_node(store, node_id="empty", wake_kind="event", wake_ref="reply")
-        bb = FakeBlackboard({"node_wakes": [{"task_id": f"{wid}::empty", "evidence": " "}]})
+        bb = _wake_board({"node_wakes": [{"task_id": f"{wid}::empty", "evidence": " "}]})
         _make_node(bb).action_handler(None)
         assert store.load(wid).nodes["empty"].wake_kind == "event"
         assert not bb.get_state_value("woken_work_nodes")

@@ -102,8 +102,8 @@ class BeliefEngineAdapter:
                 "results": [],
             }
 
-        # ONE global pass: every enabled domain's evidence in one bundle, one updater call
-        # that files each belief under its primary area, and dedup that can see across
+        # ONE global pass: every enabled domain's evidence in one bundle, bounded updater batches
+        # that file each belief under its primary area, and dedup that can see across
         # areas. The per-domain loop this replaced minted one copy of the same belief per
         # domain that matched an insight's tags (the "Panda Express x4" bloat).
         logger.info(

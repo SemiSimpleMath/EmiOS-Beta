@@ -1,388 +1,314 @@
-"""Hermetic guard for the pairwise-verifier belief canonicalizer (2026-06-16 rewrite).
-
-No chroma / DB / LLM — fakes for the store, embeddings, and the merge_verifier agent. Proves
-the load-bearing logic of `_run_verifier_dedup_pass`:
-  - embedding-NN proposes pairs >= MERGE_THRESHOLD; the verifier decides each,
-  - a verified merge keeps the higher-observation survivor and rewrites its statement to the
-    verifier's canonical_statement (superset-safe), deprecating the loser,
-  - the verifier's "different" verdict keeps look-alikes apart (hydration != finger-stretch),
-  - union-find collapses a 3-way cluster in ONE pass (2 merges, not 3),
-  - focus_keys (new_only mode) restricts proposals to pairs touching a new belief,
-  - and (2026-09-11) the relations that replaced the same/not-same boolean: `supersedes`
-    deprecates the side the dated evidence calls outdated, `contradicts` contests both for
-    the reevaluator, `specialises` leaves both standing, and an unusable relation changes
-    nothing. Each side reaches the verifier with its dated evidence, which is the only thing
-    that separates a preference that changed from a live conflict.
-"""
-from __future__ import annotations
-
+"""Incremental matching contracts, against isolated SQLite and deterministic fake agents."""
+import json
+import sqlite3
 from types import SimpleNamespace
-
-import belief_engine.pipeline.steps.canonicalize_belief_set as C
-
-
-# Unit-ish embedding vectors: within-topic pairs sit well above MERGE_THRESHOLD (0.80),
-# cross-topic pairs near-orthogonal (below it, never proposed).
-_VECS = {
-    "food.salmiakki.a":      [1.0, 0.0, 0.0, 0.0],
-    "food.salmiakki.b":      [0.99, 0.10, 0.0, 0.0],     # ~0.995 with .a
-    "routine.hydration":     [0.0, 1.0, 0.0, 0.0],
-    "routine.fingerstretch": [0.0, 0.985, 0.17, 0.0],    # ~0.985 with hydration -> proposed
-    "home.dish1":            [0.0, 0.0, 0.0, 1.0],
-    "home.dish2":            [0.0, 0.0, 0.05, 0.998],     # ~0.999 with dish1
-    "home.dish3":            [0.0, 0.03, 0.02, 0.999],    # ~0.999 with dish1
-}
+import pytest
+from belief_engine.db.schema import SCHEMA_SQL
+from belief_engine.matching import service as S
+from belief_engine.matching.context import packet, pages, observations, lineage
+from belief_engine.matching.history import connection, pair_identity, apply_decision
 
 
-def _belief(key, stmt, obs):
-    return SimpleNamespace(
-        id=key, belief_key=key, statement=stmt, confidence="high",
-        scope="chronic", status="active", observation_count=obs, domain="test", kind=None,
-        first_observed="2026-01-04", last_confirmed="2026-08-30",
-    )
+@pytest.fixture
+def db(tmp_path, monkeypatch):
+    path = str(tmp_path/'beliefs.db')
+    with connection(path, initialize=True) as c:
+        c.executescript(SCHEMA_SQL)
+        cols = {r[1] for r in c.execute('PRAGMA table_info(user_beliefs)')}
+        for col, typ in [('locked','INTEGER DEFAULT 0'),('kind','TEXT')]:
+            if col not in cols:
+                c.execute(f'ALTER TABLE user_beliefs ADD COLUMN {col} {typ}')
+        for bid in ('a','b','c'):
+            c.execute('''INSERT INTO user_beliefs(id,belief_key,domain,statement,confidence,scope,status,
+                conditions,observation_count,first_observed,last_confirmed,created_at,updated_at,kind)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                (bid,bid,'routine',f'Complete claim {bid}','high','chronic','active',
+                 '{"when":"morning"}',1,'2026-01-01','2026-01-01','2026-01-01','2026-01-01','stable_preference'))
+            c.execute('''INSERT INTO belief_evidence(id,belief_id,source_type,source_date,signal_type,
+                summary,raw_text,weight,created_at) VALUES (?,?,?,?,?,?,?,?,?)''',
+                ('e'+bid,bid,'daily_insights','2026-01-01','confirms','Source '+bid,'x'*5000+' END',3,'2026-01-01'))
+    monkeypatch.setattr(S,'policy_version',lambda:'policy-1')
+    return path
 
 
-def _evidence(date, summary, signal="observed"):
-    return SimpleNamespace(source_date=date, created_at=f"{date}T09:00:00Z",
-                           signal_type=signal, summary=summary)
-
-
-def _make_beliefs():
-    return [
-        _belief("food.salmiakki.a", "the user's favorite Finnish snack is salmiakki.", 5),
-        _belief("food.salmiakki.b",
-                "Salmiakki is the user's favorite snack; avoid suggesting it when his stomach is upset.", 2),
-        _belief("routine.hydration", "Hydration reminders are currently too frequent.", 3),
-        _belief("routine.fingerstretch", "Finger-stretch reminders are currently too frequent.", 3),
-        _belief("home.dish1", "Run the dishwasher at night.", 4),
-        _belief("home.dish2", "Run the dishwasher after 9 PM.", 1),
-        _belief("home.dish3", "Start the dishwasher late at night.", 1),
-    ]
-
-
-def _topic(s: str) -> str:
-    s = s.lower()
-    for t in ("salmiakki", "dishwasher", "hydration", "finger", "carbonara"):
-        if t in s:
-            return t
-    return s
-
-
-class _FakeChroma:
-    def __init__(self, vecs):
-        self._vecs = vecs
-
-    def get_all_for_domain(self, domain):
-        return list(self._vecs.items())
-
-
-class _FakeStore:
-    """Minimal BeliefStore stand-in: serves embeddings, looks up by key, applies merges,
-    deprecations, contest marks and evidence lookups."""
-    def __init__(self, beliefs, vecs, evidence=None):
-        self._chroma = _FakeChroma(vecs)
-        self.by_key = {b.belief_key: b for b in beliefs}
-        self.merges = []
-        self._evidence = evidence or {}     # belief.id -> [evidence]
-        self.deprecated = []
-        self.contested = []
-
-    def get_evidence(self, belief_id):
-        return list(self._evidence.get(belief_id, []))
-
-    def deprecate(self, belief_key, *, reason=""):
-        self.by_key[belief_key].status = "deprecated"
-        self.deprecated.append((belief_key, reason))
-
-    def mark_contested(self, belief_key):
-        self.by_key[belief_key].status = "contested"
-        self.contested.append(belief_key)
-
-    def list_by_domain(self, domain, *, status="active"):
-        return [b for b in self.by_key.values() if b.status == status]
-
-    def get_by_key(self, key):
-        return self.by_key.get(key)
-
-    def merge_belief(self, *, surviving_key, surviving_statement, surviving_confidence,
-                     surviving_scope, deprecated_keys, domain, merge_reasoning):
-        self.by_key[surviving_key].statement = surviving_statement
-        for dk in deprecated_keys:
-            self.by_key[dk].status = "deprecated"
-        self.merges.append((surviving_key, list(deprecated_keys), surviving_statement))
-
-
-class _FakeAgent:
-    """relation='same' when both statements share a topic word, else 'different' — unless a
-    fixed verdict is scripted for the whole run."""
-    def __init__(self, verdict=None):
-        self.calls = 0
-        self.inputs = []
-        self._verdict = verdict
-
-    def action_handler(self, msg):
-        self.calls += 1
-        ai = msg.agent_input
-        self.inputs.append(ai)
-        if self._verdict is not None:
-            return SimpleNamespace(data=dict(self._verdict))
-        a, b = ai["phrase_a"], ai["phrase_b"]
-        same = _topic(a) == _topic(b)
-        canon = a if len(a) >= len(b) else b   # fuller statement wins
-        return SimpleNamespace(data={
-            "relation": "same" if same else "different",
-            "reason": f"{_topic(a)} vs {_topic(b)}",
-            "canonical_statement": canon if same else "",
-            "current_side": "",
-        })
-
-
-class _FakeFactory:
-    """Holds ONE agent instance so verifier-call counts persist across passes."""
-    def __init__(self, agent=None):
-        self.agent = agent or _FakeAgent()
+class Agents:
+    def __init__(self, relation='different'):
+        self.calls=[]
+        self.relation=relation
 
     def create_agent(self, name):
-        return self.agent
+        return SimpleNamespace(action_handler=lambda msg:self.respond(name,msg.agent_input))
+
+    def respond(self,name,data):
+        self.calls.append((name,data))
+        if name.endswith('match_discover'):
+            pairs=[{'focal_id':f['id'],'candidate_id':c['id'],'reason':'Potentially same'}
+                   for f in data['focal'] for c in data['catalog'] if f['id']!=c['id']]
+            return SimpleNamespace(data={'pairs':pairs,'reasoning':'Inspect sources'})
+        if name.endswith('merge_check'):
+            return SimpleNamespace(data={'verdict':'approve','reason':'Equivalent fixture claims',
+                'changed_meanings':[], 'evidence_ids':[data['a']['evidence'][0]['id'],data['b']['evidence'][0]['id']]})
+        a,b=data['a'],data['b']
+        return SimpleNamespace(data={'relation':self.relation,'reason':'Full source judgment',
+            'evidence_ids':[a['evidence'][0]['id'],b['evidence'][0]['id']],
+            'survivor_id':a['belief']['id'],'current_id':b['belief']['id'],
+            'canonical_statement':'Same fully qualified claim','conditions_json':json.dumps({'when':'morning'}),
+            'scope':'chronic','kind':'stable_preference','equivalent_observations':[]})
 
 
-def _run(beliefs, vecs=_VECS, focus_keys=None, *, monkeypatch, tmp_path, factory=None,
-         evidence=None):
-    """Run one dedup pass with the verdict store pointed at an isolated tmp sqlite file
-    (never the real emi.db). Returns (store, pass_result, factory)."""
-    verdict_db = str(tmp_path / "verdicts.db")
-    monkeypatch.setattr(C.verdicts, "belief_db_path", lambda: verdict_db)
-    factory = factory or _FakeFactory()
-    store = _FakeStore(beliefs, vecs, evidence)
-    pass_result = C._run_verifier_dedup_pass(
-        beliefs, "test", store, factory, scope_context=None, focus_keys=focus_keys,
-    )
-    return store, pass_result, factory
+def test_unchanged_night_has_no_model_calls(db):
+    agents=Agents()
+    first=S.run(db,agents,None)
+    assert first['compared']==3
+    count=len(agents.calls)
+    second=S.run(db,agents,None)
+    assert second['compared']==0 and len(agents.calls)==count
 
 
-def test_full_pass_merges_dups_and_keeps_lookalikes_apart(monkeypatch, tmp_path):
-    beliefs = _make_beliefs()
-    store, res, _ = _run(beliefs, monkeypatch=monkeypatch, tmp_path=tmp_path)
-
-    # salmiakki ×2 -> 1 ; dishwasher ×3 -> 1 (2 merges via union-find) ; = 3 merges total
-    assert res["merges"] == 3
-
-    # salmiakki: higher-obs .a survives, its statement REWRITTEN to the fuller (.b) text.
-    assert store.by_key["food.salmiakki.a"].status == "active"
-    assert store.by_key["food.salmiakki.b"].status == "deprecated"
-    assert "stomach is upset" in store.by_key["food.salmiakki.a"].statement   # superset preserved
-
-    # look-alikes kept apart — the verifier said NOT same despite ~0.985 cosine.
-    assert store.by_key["routine.hydration"].status == "active"
-    assert store.by_key["routine.fingerstretch"].status == "active"
-
-    # 3-way dishwasher cluster collapses to the highest-obs survivor in ONE pass.
-    assert store.by_key["home.dish1"].status == "active"
-    assert store.by_key["home.dish2"].status == "deprecated"
-    assert store.by_key["home.dish3"].status == "deprecated"
-
-    active = [k for k, b in store.by_key.items() if b.status == "active"]
-    assert sorted(active) == ["food.salmiakki.a", "home.dish1",
-                              "routine.fingerstretch", "routine.hydration"]
+@pytest.mark.parametrize('sql',[
+    "UPDATE user_beliefs SET conditions='{\"when\":\"evening\"}' WHERE id='a'",
+    "UPDATE belief_evidence SET raw_text='New complete source' WHERE id='ea'",
+])
+def test_only_changed_belief_reopens_comparisons(db,sql):
+    agents=Agents();S.run(db,agents,None)
+    with connection(db) as c:c.execute(sql)
+    result=S.run(db,agents,None)
+    assert result['discovered']==1 and result['compared']==2
 
 
-def test_focus_keys_restricts_proposals_to_new_belief(monkeypatch, tmp_path):
-    # new_only mode: only the salmiakki.b belief is "new" -> only pairs touching it are
-    # proposed, so salmiakki merges but the dishwasher cluster is left untouched this run.
-    beliefs = _make_beliefs()
-    store, res, _ = _run(beliefs, focus_keys={"food.salmiakki.b"},
-                         monkeypatch=monkeypatch, tmp_path=tmp_path)
-
-    assert res["merges"] == 1
-    assert store.by_key["food.salmiakki.b"].status == "deprecated"
-    assert store.by_key["home.dish2"].status == "active"   # not touched — no focus key in pair
-    assert store.by_key["home.dish3"].status == "active"
+def test_counters_and_processing_dates_do_not_reopen(db):
+    agents=Agents();S.run(db,agents,None)
+    with connection(db) as c:
+        c.execute("UPDATE user_beliefs SET observation_count=99,last_confirmed='today',updated_at='today'")
+    count=len(agents.calls);S.run(db,agents,None)
+    assert len(agents.calls)==count
 
 
-_KW_VECS = {
-    "food.pasta.a": [1.0, 0.0, 0.0],
-    "food.pasta.b": [0.65, 0.76, 0.0],  # cos ~0.65 with .a: below the 0.80 embedding threshold
-                                         # (so embedding never proposes it) but above the keyword
-                                         # cosine floor, so the keyword channel does.
-    "home.dishX":   [0.0, 0.0, 1.0],
-}
+def test_budget_resumes_without_repeating_pairs(db):
+    agents=Agents()
+    one=S.run(db,agents,None,comparison_limit=1)
+    assert one['pending_comparisons']==2
+    S.run(db,agents,None,comparison_limit=1)
+    S.run(db,agents,None,comparison_limit=1)
+    assert sum(name.endswith('match_review') for name,_ in agents.calls)==3
+    assert S.run(db,agents,None)['compared']==0
 
 
-def test_keyword_channel_catches_embedding_miss(monkeypatch, tmp_path):
-    # .a and .b embed at ~0.65 — below the 0.80 embedding threshold, so the embedding channel
-    # never proposes them — but they share the rare word "carbonara" and clear the keyword cosine
-    # floor, so the keyword channel does. Proves the second recall channel reaches dups embedding misses.
-    beliefs = [
-        _belief("food.pasta.a", "Carbonara is one of the user's strongest pasta favorites.", 3),
-        _belief("food.pasta.b", "For a reliable go-to dinner, lean toward making carbonara.", 1),
-        _belief("home.dishX", "Run the dishwasher at night.", 2),
-    ]
-    store, res, _ = _run(beliefs, _KW_VECS, monkeypatch=monkeypatch, tmp_path=tmp_path)
-    assert res["merges"] == 1                                   # carbonara pair merged via keyword
-    assert store.by_key["food.pasta.b"].status == "deprecated"
-    assert store.by_key["food.pasta.a"].status == "active"     # higher-obs survivor
-    assert store.by_key["home.dishX"].status == "active"       # unrelated, untouched
+def test_baseline_discovery_resumes(db):
+    agents=Agents()
+    assert S.run(db,agents,None,discovery_limit=1)['pending_discovery']==2
+    assert S.run(db,agents,None,discovery_limit=1)['pending_discovery']==1
+    assert S.run(db,agents,None,discovery_limit=1)['pending_discovery']==0
+    assert sum(name.endswith('match_review') for name,_ in agents.calls)==3
 
 
-# --- Durability: recorded verdicts skip, statement changes re-judge, the cap truncates ------
+def test_full_source_and_conditions_reach_both_agents(db):
+    agents=Agents();S.run(db,agents,None)
+    for name,data in agents.calls:
+        if name.endswith('match_review'):
+            assert data['a']['evidence'][0]['raw_text'].endswith(' END')
+            assert len(data['a']['evidence'][0]['raw_text'])>5000
+            assert 'morning' in data['a']['belief']['conditions']
+        else:
+            assert 'morning' in data['focal'][0]['conditions']
+            assert data['focal'][0]['statement'].startswith('Complete claim')
 
 
-def test_not_same_verdicts_are_recorded_and_skipped_next_pass(monkeypatch, tmp_path):
-    # Pass 1: hydration vs finger-stretch is proposed (~0.985 cosine) and judged NOT same.
-    beliefs = [
-        _belief("routine.hydration", "Hydration reminders are currently too frequent.", 3),
-        _belief("routine.fingerstretch", "Finger-stretch reminders are currently too frequent.", 3),
-    ]
-    _, res1, factory = _run(beliefs, monkeypatch=monkeypatch, tmp_path=tmp_path)
-    assert res1["merges"] == 0
-    assert res1["verifier_calls"] == 1
-    assert factory.agent.calls == 1
-
-    # Pass 2, same statements: the recorded verdict settles the pair — zero LLM calls.
-    _, res2, _ = _run(beliefs, monkeypatch=monkeypatch, tmp_path=tmp_path, factory=factory)
-    assert res2["verifier_calls"] == 0
-    assert res2["skipped_distinct"] == 1
-    assert factory.agent.calls == 1   # unchanged
-
-    # Pass 3, one statement evolved: the verdict is invalidated — the pair is re-judged.
-    beliefs[0].statement = "Hydration reminders should fire at most twice a day."
-    _, res3, _ = _run(beliefs, monkeypatch=monkeypatch, tmp_path=tmp_path, factory=factory)
-    assert res3["skipped_distinct"] == 0
-    assert res3["verifier_calls"] == 1
-    assert factory.agent.calls == 2
+def test_pages_never_cut_records():
+    records=[{'statement':'x'*50000},{'statement':'y'*50000}]
+    assert [r for p in pages(records,100) for r in p]==records
 
 
-def test_call_cap_truncates_pass(monkeypatch, tmp_path):
-    monkeypatch.setattr(C, "MAX_VERIFIER_CALLS_PER_RUN", 1)
-    beliefs = _make_beliefs()   # would need 4+ verifier calls uncapped
-    _, res, factory = _run(beliefs, monkeypatch=monkeypatch, tmp_path=tmp_path)
-    assert res["truncated"] is True
-    assert res["verifier_calls"] == 1
-    assert factory.agent.calls == 1
+def test_invalid_model_result_stays_pending(db):
+    class Bad(Agents):
+        def respond(self,name,data):
+            if name.endswith('match_review'):return SimpleNamespace(data={'relation':'garbage'})
+            return super().respond(name,data)
+    with pytest.raises(Exception):S.run(db,Bad(),None)
+    with connection(db) as c:
+        assert c.execute('SELECT COUNT(*) FROM belief_match_pairs WHERE applied=0').fetchone()[0]==3
 
 
-# --- Relations beyond same/different (2026-09-11) --------------------------------------
-
-_HONEY_VECS = {
-    "food.honey.like":    [1.0, 0.0, 0.0],
-    "food.honey.dislike": [0.97, 0.24, 0.0],   # ~0.97 — proposed, and irreconcilable
-    "home.dishX":         [0.0, 0.0, 1.0],
-}
+def test_uncertainty_is_preserved_and_remembered(db):
+    agents=Agents('unresolved');S.run(db,agents,None)
+    assert S.run(db,agents,None)['compared']==0
+    with connection(db) as c:assert c.execute("SELECT COUNT(*) FROM user_beliefs WHERE status='active'").fetchone()[0]==3
 
 
-def _honey_beliefs():
-    # Index order matters: side 'a' is the lower-index belief the sweep pairs first.
-    return [
-        _belief("food.honey.like", "The user likes honey in tea.", 4),
-        _belief("food.honey.dislike", "The user dislikes honey and avoids it in tea.", 2),
-        _belief("home.dishX", "Run the dishwasher at night.", 2),
-    ]
+def test_merge_keeps_dates_conditions_lineage_without_new_evidence(db):
+    agents=Agents('same');result=S.run(db,agents,None,comparison_limit=1)
+    assert result['merges']==1
+    with connection(db) as c:
+        a=packet(c,'a')
+        assert a['belief']['last_confirmed']=='2026-01-01'
+        assert json.loads(a['belief']['conditions'])=={'when':'morning'}
+        assert len(a['evidence'])==2
+        assert c.execute('SELECT COUNT(*) FROM belief_evidence').fetchone()[0]==3
+        assert c.execute('SELECT COUNT(*) FROM belief_match_merges').fetchone()[0]==1
+        assert a['belief']['observation_count']==2
 
 
-def test_supersedes_deprecates_the_outdated_side_and_keeps_the_current_one(monkeypatch, tmp_path):
-    factory = _FakeFactory(_FakeAgent({
-        "relation": "supersedes", "reason": "the 2026-08 evidence is the later state",
-        "canonical_statement": "", "current_side": "b",
-    }))
-    store, res, _ = _run(_honey_beliefs(), _HONEY_VECS, monkeypatch=monkeypatch,
-                         tmp_path=tmp_path, factory=factory)
-
-    assert res["superseded"] == 1 and res["merges"] == 0
-    assert store.by_key["food.honey.like"].status == "deprecated"      # side 'a', the old state
-    assert store.by_key["food.honey.dislike"].status == "active"       # side 'b', current
-    assert "superseded by food.honey.dislike" in store.deprecated[0][1]
-    assert store.contested == []
+def test_archived_predecessor_evidence_is_read(db):
+    S.run(db,Agents('same'),None,comparison_limit=1)
+    with connection(db) as c:
+        c.executescript('''CREATE TABLE user_beliefs_archive AS SELECT * FROM user_beliefs WHERE id='b';
+            CREATE TABLE belief_evidence_archive AS SELECT * FROM belief_evidence WHERE belief_id='b';
+            DELETE FROM belief_evidence WHERE belief_id='b';DELETE FROM user_beliefs WHERE id='b';''')
+        assert {e['id'] for e in packet(c,'a')['evidence']}=={'ea','eb'}
 
 
-def test_supersedes_without_a_usable_current_side_leaves_both_active(monkeypatch, tmp_path):
-    factory = _FakeFactory(_FakeAgent({
-        "relation": "supersedes", "reason": "one replaced the other",
-        "canonical_statement": "", "current_side": "",
-    }))
-    store, res, _ = _run(_honey_beliefs(), _HONEY_VECS, monkeypatch=monkeypatch,
-                         tmp_path=tmp_path, factory=factory)
-
-    assert res["superseded_unresolved"] == 1 and res.get("superseded", 0) == 0
-    assert store.deprecated == []
-    assert store.by_key["food.honey.like"].status == "active"
-    assert store.by_key["food.honey.dislike"].status == "active"
+def test_stale_write_rolls_back(db):
+    with connection(db) as c:
+        a,b=packet(c,'a'),packet(c,'b')
+    decision=Agents('same').respond('match_review',{'a':a,'b':b}).data
+    with connection(db) as c:c.execute("UPDATE belief_evidence SET raw_text='changed' WHERE id='ea'")
+    with pytest.raises(ValueError,match='changed'):
+        with connection(db) as c:apply_decision(c,'key',a,b,decision)
+    with connection(db) as c:assert c.execute("SELECT status FROM user_beliefs WHERE id='b'").fetchone()[0]=='active'
 
 
-def test_contradicts_contests_both_sides_and_is_not_recorded_as_settled(monkeypatch, tmp_path):
-    factory = _FakeFactory(_FakeAgent({
-        "relation": "contradicts", "reason": "both supported in the same weeks",
-        "canonical_statement": "", "current_side": "",
-    }))
-    store, res, factory = _run(_honey_beliefs(), _HONEY_VECS, monkeypatch=monkeypatch,
-                               tmp_path=tmp_path, factory=factory)
-
-    assert res["contradictions"] == 1 and res["merges"] == 0
-    assert sorted(store.contested) == ["food.honey.dislike", "food.honey.like"]
-    assert store.deprecated == []
-
-    # An unresolved conflict must be re-asked next pass, not skipped as a settled verdict.
-    # Re-run over the same (now contested) beliefs: get_by_key still serves them, and the pair
-    # is proposed again rather than short-circuited by the verdict memory.
-    for b in store.by_key.values():
-        b.status = "active"
-    _, res2, _ = _run(list(store.by_key.values()), _HONEY_VECS, monkeypatch=monkeypatch,
-                      tmp_path=tmp_path, factory=factory)
-    assert res2["skipped_distinct"] == 0
-    assert res2["verifier_calls"] == 1
+def test_locked_merge_rejected(db):
+    with connection(db) as c:c.execute("UPDATE user_beliefs SET locked=1 WHERE id='a'")
+    with pytest.raises(ValueError,match='locked'):S.run(db,Agents('same'),None,comparison_limit=1)
 
 
-def test_specialises_leaves_both_standing_and_is_remembered(monkeypatch, tmp_path):
-    factory = _FakeFactory(_FakeAgent({
-        "relation": "specialises", "reason": "the second adds a travel condition",
-        "canonical_statement": "", "current_side": "",
-    }))
-    store, res, factory = _run(_honey_beliefs(), _HONEY_VECS, monkeypatch=monkeypatch,
-                               tmp_path=tmp_path, factory=factory)
-
-    assert res["specialises"] == 1 and res["merges"] == 0
-    assert store.deprecated == [] and store.contested == []
-
-    # Inert verdicts are recorded, so the same pair costs no LLM call on the next pass.
-    _, res2, _ = _run(_honey_beliefs(), _HONEY_VECS, monkeypatch=monkeypatch,
-                      tmp_path=tmp_path, factory=factory)
-    assert res2["skipped_distinct"] == 1 and res2["verifier_calls"] == 0
+def test_exact_observations_count_once_and_bookkeeping_never_counts(db):
+    with connection(db) as c:
+        c.execute("UPDATE belief_evidence SET source_ref='same-source', summary='identical', raw_text='same' WHERE belief_id IN ('a','b')")
+    S.run(db,Agents('same'),None,comparison_limit=1)
+    with connection(db) as c:
+        assert len(observations(c,'a'))==1
+        c.execute("UPDATE belief_evidence SET source_type='canonicalization',weight=100 WHERE belief_id IN ('a','b')")
+        assert observations(c,'a')==[]
 
 
-def test_unusable_relation_changes_no_belief(monkeypatch, tmp_path):
-    factory = _FakeFactory(_FakeAgent({
-        "relation": "probably the same?", "reason": "unsure",
-        "canonical_statement": "The user has opinions about honey.", "current_side": "a",
-    }))
-    store, res, _ = _run(_honey_beliefs(), _HONEY_VECS, monkeypatch=monkeypatch,
-                         tmp_path=tmp_path, factory=factory)
-
-    # Falls back to the one inert relation — never guessed into a merge or a deprecation.
-    assert res["merges"] == 0 and res.get("superseded", 0) == 0 and res["contradictions"] == 0
-    assert res["different"] == 1
-    assert all(b.status == "active" for b in store.by_key.values())
+@pytest.mark.parametrize('relation,statuses',[('specialises',['active','active']),('contradicts',['contested','contested']),('supersedes',['deprecated','active'])])
+def test_nonduplicate_relationships(db,relation,statuses):
+    S.run(db,Agents(relation),None,comparison_limit=1)
+    with connection(db) as c:
+        assert [c.execute('SELECT status FROM user_beliefs WHERE id=?',(bid,)).fetchone()[0] for bid in ('a','b')]==statuses
 
 
-def test_each_side_reaches_the_verifier_with_its_dated_evidence(monkeypatch, tmp_path):
-    beliefs = _honey_beliefs()
-    factory = _FakeFactory(_FakeAgent({
-        "relation": "different", "reason": "x", "canonical_statement": "", "current_side": "",
-    }))
-    _run(beliefs, _HONEY_VECS, monkeypatch=monkeypatch, tmp_path=tmp_path, factory=factory,
-         evidence={
-             "food.honey.like": [_evidence("2026-02-11", "asked for honey with the evening tea")],
-             "food.honey.dislike": [_evidence("2026-08-30", "said honey has become too sweet")],
-         })
-
-    ai = factory.agent.inputs[0]
-    assert "2026-02-11" in ai["context_a"] and "evening tea" in ai["context_a"]
-    assert "2026-08-30" in ai["context_b"] and "too sweet" in ai["context_b"]
-    assert "observed 4x" in ai["context_a"] and "observed 2x" in ai["context_b"]
+def test_equivalent_source_observations_contribute_once(db):
+    class SameSource(Agents):
+        def respond(self,name,data):
+            out=super().respond(name,data)
+            if name.endswith('match_review'):
+                out.data['equivalent_observations']=[['ea','eb']]
+            return out
+    S.run(db,SameSource('same'),None,comparison_limit=1)
+    with connection(db) as c:
+        assert len(observations(c,'a'))==1
+        assert len(packet(c,'a')['evidence'])==2
+        assert packet(c,'a')['belief']['observation_count']==1
 
 
-def test_a_side_with_no_evidence_says_so(monkeypatch, tmp_path):
-    beliefs = _honey_beliefs()
-    factory = _FakeFactory(_FakeAgent({
-        "relation": "different", "reason": "x", "canonical_statement": "", "current_side": "",
-    }))
-    _run(beliefs, _HONEY_VECS, monkeypatch=monkeypatch, tmp_path=tmp_path, factory=factory)
-    assert "evidence: (none recorded)" in factory.agent.inputs[0]["context_a"]
+def test_late_merge_validation_failure_rolls_back_every_write(db):
+    class InvalidGroup(Agents):
+        def respond(self,name,data):
+            out=super().respond(name,data)
+            if name.endswith('match_review'):out.data['equivalent_observations']=[['ea','invented']]
+            return out
+    with pytest.raises(ValueError):S.run(db,InvalidGroup('same'),None,comparison_limit=1)
+    with connection(db) as c:
+        assert packet(c,'a')['belief']['statement']=='Complete claim a'
+        assert packet(c,'b')['belief']['status']=='active'
+        assert c.execute('SELECT COUNT(*) FROM belief_merges').fetchone()[0]==0
+
+
+def test_policy_change_reopens_review(db,monkeypatch):
+    agents=Agents();S.run(db,agents,None)
+    monkeypatch.setattr(S,'policy_version',lambda:'policy-2')
+    assert S.run(db,agents,None)['compared']==3
+
+
+def test_evidence_selection_is_cached_and_returns_complete_current_claims(db,monkeypatch):
+    from dataclasses import fields
+    from belief_engine.store.belief_store import BeliefRecord
+    import belief_engine.db.paths as paths
+    monkeypatch.setattr(paths,'belief_db_path',lambda:db)
+    with connection(db) as c:
+        names={f.name for f in fields(BeliefRecord)}
+        records=[BeliefRecord(**{k:v for k,v in dict(row).items() if k in names})
+                 for row in c.execute('SELECT * FROM user_beliefs')]
+    calls=[]
+    class Factory:
+        def create_agent(self,name):
+            def call(msg):
+                calls.append(msg.agent_input)
+                return SimpleNamespace(data={'belief_ids':[next(r['selection_id'] for r in msg.agent_input['catalog'] if r['belief_key']=='a')],'reasoning':'Relevant source'})
+            return SimpleNamespace(action_handler=call)
+    store=SimpleNamespace(list_all=lambda **_:records)
+    evidence=[{'raw_text':'z'*6000+' END','source_date':'2026-01-01'}]
+    first=S.select_for_evidence(store,Factory(),None,evidence)
+    S.select_for_evidence(store,Factory(),None,evidence)
+    assert len(calls)==1 and first[0]['statement']=='Complete claim a'
+    assert first[0]['conditions']=='{"when":"morning"}'
+    assert 'evidence' not in first[0]
+    assert calls[0]['evidence']==evidence
+
+
+def test_index_failure_leaves_durable_retry(db,monkeypatch):
+    import belief_engine.chroma.belief_chroma as chroma
+    S.run(db,Agents('same'),None,comparison_limit=1)
+    def fail(**kwargs):raise RuntimeError('index offline')
+    monkeypatch.setattr(chroma,'get_belief_chroma',lambda:SimpleNamespace(upsert=fail))
+    with pytest.raises(RuntimeError,match='offline'):S.sync_indexes(db)
+    with connection(db) as c:assert c.execute('SELECT index_synced FROM belief_match_merges').fetchone()[0]==0
+    monkeypatch.setattr(chroma,'get_belief_chroma',lambda:SimpleNamespace(upsert=lambda **_:None,delete_many=lambda _:None))
+    S.sync_indexes(db)
+    with connection(db) as c:assert c.execute('SELECT index_synced FROM belief_match_merges').fetchone()[0]==1
+
+
+def test_decay_uses_original_sources_and_ignores_legacy_merge_weight(db,monkeypatch):
+    from datetime import datetime,timezone
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from belief_engine.decay import recompute
+    import belief_engine.db.paths as paths
+    S.run(db,Agents('same'),None,comparison_limit=1)
+    with connection(db) as c:
+        c.execute("INSERT INTO belief_evidence(id,belief_id,source_type,source_date,signal_type,summary,weight,created_at) "
+                  "VALUES ('bookkeeping','a','canonicalization','2026-01-01','confirms','not support',100,'2026-01-01')")
+    engine=create_engine('sqlite:///'+db)
+    monkeypatch.setattr(recompute,'get_session',sessionmaker(bind=engine))
+    monkeypatch.setattr(paths,'belief_db_path',lambda:db)
+    stats=recompute.recompute_belief_snapshots(now_utc=datetime(2026,1,1,tzinfo=timezone.utc))
+    assert stats.errors==0
+    with connection(db) as c:
+        assert c.execute("SELECT current_support_weight FROM user_beliefs WHERE id='a'").fetchone()[0]==6.0
+    engine.dispose()
+
+
+def test_standard_evidence_reader_follows_merge_lineage(db,monkeypatch):
+    from belief_engine.store.belief_store import BeliefStore
+    import belief_engine.db.paths as paths
+    S.run(db,Agents('same'),None,comparison_limit=1)
+    monkeypatch.setattr(paths,'belief_db_path',lambda:db)
+    store=object.__new__(BeliefStore)
+    assert {e.id for e in store.get_evidence('a')}=={'ea','eb'}
+
+
+def test_oversized_pair_does_not_stop_other_pairs_and_is_not_repeated(db, monkeypatch):
+    from belief_engine.matching.investigation import ReviewBudgetExceeded
+    original = S.review
+    attempts = []
+    def review(factory, scope, a, b, **kwargs):
+        attempts.append((a['belief']['id'], b['belief']['id']))
+        if set(attempts[-1]) == {'a','b'}:
+            raise ReviewBudgetExceeded('Complete findings exceed budget')
+        return original(factory, scope, a, b, **kwargs)
+    monkeypatch.setattr(S, 'review', review)
+    agents = Agents()
+    first = S.run(db, agents, None)
+    assert first['compared'] == 2
+    assert first['blocked_review_budget'] == 1
+    assert first['pending_comparisons'] == 1 and first['status'] == 'pending'
+    count = len(attempts)
+    second = S.run(db, agents, None)
+    assert len(attempts) == count and second['blocked_review_budget'] == 1
+    with connection(db) as c:
+        assert c.execute("SELECT COUNT(*) FROM user_beliefs WHERE status='active'").fetchone()[0] == 3
+        c.execute("UPDATE belief_evidence SET raw_text='Changed evidence' WHERE id='ea'")
+    S.run(db, agents, None)
+    assert len(attempts) > count

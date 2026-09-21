@@ -1,9 +1,10 @@
+{% include 'shared/work/task_context.j2' %}
 JUST-COMPLETED NODE — id: {{ view.task.id }} | title: {{ view.task.title }}
 FULL TASK: {{ view.task.directive }}
 SUCCESS CONDITION: {{ view.task.success_kind }}
 TOOL STATUS: {% if view.task.status == 'failed' %}the tool reported it could not run{% else %}the call returned{% endif %}. That is input, not the verdict — judge whether the node's GOAL was achieved from the result below.
-{% if view.work.failure_episode_count >= repeat_failure_limit %}
-{{ view.work.failure_episode_count }} ATTEMPTS HAVE NOT ACHIEVED THIS GOAL, since the last successful finalized task, under one task id or another. Another try of the same shape will not help. Unless the appropriate next step is STOP, if this result is not achieved, the runtime will escalate it to ask the user whatever would unblock it — so put that question in `question_for_user` yourself, precisely.
+{% if view.work.failure_episode_count + 1 >= repeat_failure_limit %}
+{{ view.work.failure_episode_count }} PRIOR ATTEMPTS HAVE NOT ACHIEVED THIS GOAL since the last successful finalized task, under one task id or another. If this attempt is also unmet, it reaches the retry bound ({{ repeat_failure_limit }}). Another try of the same shape will not help. Unless the appropriate next step is STOP, if this result is not achieved, the runtime will escalate it to ask the user whatever would unblock it — so put that question in `question_for_user` yourself, precisely. For unanswered contact, use STOP at the bound instead of asking permission to try again.
 {% endif %}
 {% if view.task.result_error_code in ['approval_denied', 'approval_rejected'] %}
 AUTHORITATIVE RESULT: the user explicitly denied this action. It must stop; do not retry, request approval again, or substitute another route. Record UNRECOVERABLE with next_step=stop.
@@ -12,3 +13,8 @@ ITS FULL RESULT:
 {{ result_text or '(no result recorded)' }}
 
 {% set records = view.records %}{% include 'shared/work/provenance.j2' %}
+
+{% set execution = view.work.execution | default({}) %}
+{% if execution.get('recent_results') %}RECENT EXECUTION RECEIPTS (observations, not finalizer verdicts)
+{% for call in execution.recent_results %}- {{ call.node_id }} attempt {{ call.epoch }} / {{ call.tool_name }} [{{ call.state }}]: {{ call.detail }}
+{% endfor %}{% endif %}

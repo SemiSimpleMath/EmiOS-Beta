@@ -114,6 +114,15 @@ Global service registry: `DI` from `app/assistant/ServiceLocator/service_locator
 
 ### Dayflow Orchestrator
 
+**Evaluator closure:** complete/abandon decisions first save durable `pending_work_closure` intents. A failed closure stops the pass and blocks further execution for that work; evaluator prep retries before planning. Do not clear the intent to make work runnable. Concern feedback is post-commit and best-effort.
+
+**Execution ownership:** use standard ManagerInvoker, agent activation, tool dispatch,
+and monitored thread/executor helpers. WorkContext preserves the main task's captured
+epoch through helper provenance. Timeout/abandonment revokes further calls and writes;
+it does not kill threads. Durable attempt/call receipts block replacement execution
+within the work object while execution or an external outcome remains unresolved.
+Never clear that barrier merely to retry. See `docs/architecture/EXECUTION_OWNERSHIP.md`.
+
 **Task/provenance boundary:** only direct `subtask` children of the goal are independent
 orchestrator assignments (`WorkObject.is_work_unit`). Worker-created descendants are
 execution provenance, never candidates for promotion, wake or dispatch. A takeover
@@ -124,7 +133,7 @@ or turn internal records into additional graph tasks. See architecture/08_WORK_O
 
 Autonomous daily workflow engine (`app/assistant/dayflow_orchestrator/`). Event-driven via `DayflowScheduler` (debounced, mutual exclusion, precise per-node time wakes, work-progress follow-up ticks). Full doc: `docs/architecture/05_DAYFLOW.md`.
 
-**Everything actionable is a WORK OBJECT**: a goal plus a typed graph in the work store (`work_objects/`; five core tables in emi.db via `work_store.py`, plus migration metadata). Ownership cycles are checked; new dependency edges reject cycles, self-links and duplicates. Historical graph validation does not repair old dependency defects. Each `apply` atomically writes current graph state and a mutation-input audit event; the log is not replay-complete. Changed `set_status` targets use per-family transitions; entering `closed`/`abandoned`/`superseded` requires a reason, as does terminal `set_work_status`. Initial node statuses must belong to the lifecycle; same-status writes do not replay transition checks. See `docs/architecture/08_WORK_OBJECTS.md` for persistence and result-fence limits.
+**Everything actionable is a WORK OBJECT**: a goal plus a typed graph in the work store (`work_objects/`; five graph tables and two execution-receipt tables in emi.db via `work_store.py`, plus migration metadata). Ownership cycles are checked; new dependency edges reject cycles, self-links and duplicates. Historical graph validation does not repair old dependency defects. Each `apply` atomically writes current graph state and a mutation-input audit event; the log is not replay-complete. Changed `set_status` targets use per-family transitions; entering `closed`/`abandoned`/`superseded` requires a reason, as does terminal `set_work_status`. Initial node statuses must belong to the lifecycle; same-status writes do not replay transition checks. See `docs/architecture/08_WORK_OBJECTS.md` for persistence and result-fence limits.
 
 **Three managers, one pass at a time** — a planning tick and a node wake both hold `DayflowScheduler._run_gate`:
 
@@ -238,4 +247,15 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ### Dayflow repair contract (2026-09-19)
 
-Claims, result recording, finalizer judgments and architect revision batches are transactional and dispatch-epoch fenced. Finalizer judgments increment failure counts once per attempt. Admitted intake remains durable until its source context is stored on a work object. Agent-facing work text is rendered by shared/work Jinja templates; Python prepares structured values. Architect and steward see main-task statuses, dependencies, gates and finalizer summaries; workers and finalizers additionally see owned provenance. See docs/design/dayflow_prompt_context_standard_2026-09-19.md and its rendered example.
+Claims, result recording, finalizer judgments and architect revision batches are transactional and dispatch-epoch fenced. Finalizer judgments increment failure counts once per attempt. Admitted intake from every source remains durable until transferred with source context to a work object or explicitly reviewed as no-action. Deferrals require a reason and future reconsideration time; omitted/failed decisions stay pending. See `dayflow_orchestrator/intake_review.py`. Agent-facing work text is rendered by shared/work Jinja templates; Python prepares structured values. Architect and steward see main-task statuses, dependencies, gates and finalizer summaries; workers and finalizers additionally see owned provenance. See docs/design/dayflow_prompt_context_standard_2026-09-19.md and its rendered example. External-source context is rendered automatically from structured intake and wake evidence, with exact pod references and attributed summaries/excerpts. External wakes require a prepared source ID and pre-LLM work-version fence; gate release and evidence creation are atomic. Do not append arrival evidence to task directives or treat a linked reply as proof of approval. Contextual ticket choices are designed by ticket_builder::composer; label/count validation is deterministic, semantics live in Jinja. Preserve exact choice meaning/scope and typed text in response history. Acknowledgment is receipt only; accepted ticket state is not authorization. Tool approvals use their separate gate.
+
+
+### Concern outcome delivery
+
+Concern-linked terminal transitions enqueue `work_concern_feedback` in the same
+WorkStore transaction, including automatic rollup. Keep register/model calls outside
+the generic store. Dayflow finalization/closure deliver after commit; evaluator prep
+recovers pending receipts. Register writes are receipt-idempotent; acknowledge only
+after every linked concern is updated. Preserve `work_outcomes` in concern context,
+including attributed user replies and finalizer judgments. A completed notification
+does not prove the underlying need resolved. Noticer recurrence policy lives in Jinja.

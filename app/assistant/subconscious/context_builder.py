@@ -510,19 +510,11 @@ def _build_concerns_register_active() -> str:
                  for c in pressure["needs_disposition"]}
     for c in pressure["addressing_stale"]:
         cid = c.get("concern_id")
-        why = f"stale in 'addressing' since {str(c.get('addressing_since_utc') or '')[:10]}"
+        why = f"addressing review due; last review/start {str(c.get('addressing_reviewed_at_utc') or c.get('addressing_since_utc') or '')[:10]}"
         pressured[cid] = f"{pressured[cid]} AND {why}" if cid in pressured else why
     if pressured:
         by_id = {c.get("concern_id"): c for c in [*active, *addressing]}
-        lines.append("## CONCERNS UNDER PRESSURE — disposition REQUIRED this tick")
-        lines.append(
-            "Each concern below has run long enough that continuing to reinforce "
-            "it is no longer a decision-free default. Emit exactly one "
-            "concern_dispositions entry per id: accept_chronic (real but "
-            "long-term — archive with a summary), re_escalate (handling stalled "
-            "or it got worse — push back to active with high urgency), or "
-            "keep_active (justify WHY longer tracking is right)."
-        )
+        lines.append("## CONCERNS UNDER PRESSURE")
         for cid, why in pressured.items():
             c = by_id.get(cid) or {}
             count = c.get("reinforcement_count")
@@ -606,7 +598,7 @@ def _build_concerns_recently_closed(register: Optional[Dict[str, Any]] = None) -
         lines.append(_render_closed_concern(c, status=f"resolved {stamp}",
                                             why=c.get("resolution_reason")))
     for c in dormant:
-        lines.append(_render_closed_concern(c, status="dormant (accepted as chronic)",
+        lines.append(_render_closed_concern(c, status="dormant",
                                             why=c.get("dormant_reason")))
     return "\n\n".join(lines)
 
@@ -618,6 +610,7 @@ def _render_closed_concern(c: Dict[str, Any], *, status: str, why: Any) -> str:
         f"  subject: {c.get('subject') or 'household'}",
         f"  kind: {c.get('kind')} | horizon: {c.get('horizon')}",
         f"  why it was closed: {str(why or '(no reason recorded)').strip()}",
+        _render_handling_history(c),
     ])
 
 
@@ -672,7 +665,16 @@ def _render_concern_summary(c: Dict[str, Any], *, status: str) -> str:
         f"  first_observed: {c.get('first_observed')}",
         f"  notes: {(c.get('notes') or '')[:300]}",
     ]
+    parts.append(_render_handling_history(c))
     return "\n".join(parts)
+
+
+def _render_handling_history(c: Dict[str, Any]) -> str:
+    """Data only; lifecycle policy belongs in the noticer Jinja prompt."""
+    return "\n".join([
+        "  handling_history: " + json.dumps(c.get("work_outcomes") or {}, ensure_ascii=False),
+        "  journal: " + str(c.get("reinforcement_notes") or ""),
+    ])
 
 
 def _build_exploration_outcomes(*, now_utc: datetime, days: int = 30) -> str:

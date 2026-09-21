@@ -102,6 +102,12 @@ def runtime_concurrency_status():
         if not isinstance(registry_status, dict):
             raise RuntimeError("runtime_registry.snapshot() returned non-dict payload.")
 
+        from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+        execution_receipts = get_dayflow_work_store().execution_status(unresolved_only=True)
+        from app.assistant.manager_runtime.execution import PROCESS_ID
+        from app.assistant.manager_runtime.execution_status import read_process_snapshots
+        from app.assistant.routine_manager.utils import status_dir
+        other_processes = read_process_snapshots(status_dir(), current_process_id=PROCESS_ID)
         generated_at_utc = datetime.now(timezone.utc).isoformat()
         summary = _build_summary(
             routine_status=routine_status,
@@ -115,6 +121,8 @@ def runtime_concurrency_status():
                 "summary": summary,
                 "routine_manager": routine_status,
                 "manager_invoker": manager_status,
+                "work_execution": execution_receipts,
+                "other_process_execution": other_processes,
                 "runtime_registry": registry_status,
             }
         )

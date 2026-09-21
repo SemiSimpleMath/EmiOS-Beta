@@ -106,3 +106,17 @@ def test_portfolio_history_does_not_reissue_consumed_question(task):
     assert "PRIOR QUESTION" in rendered
     assert "ASK THE USER:" not in rendered
     assert "ATTEMPTS HAVE NOT ACHIEVED" not in rendered
+
+
+@pytest.mark.parametrize("prior_failures, warns", [(0, False), (1, True), (2, True)])
+def test_finalizer_sees_retry_bound_before_current_judgment(prior_failures, warns):
+    from app.assistant.dayflow_orchestrator.work_context import render_view
+    from types import SimpleNamespace
+    rendered = render_view("finalizer_input", view=SimpleNamespace(
+        task=SimpleNamespace(id="reminder", title="Routine check-in", directive="Send once",
+                             success_kind="", status="done", result_error_code=""),
+        work=SimpleNamespace(failure_episode_count=prior_failures), records=[]),
+        result_text="Notification expired unanswered", repeat_failure_limit=2)
+    assert ("it reaches the retry bound (2)" in rendered) is warns
+    if warns:
+        assert "For unanswered contact, use STOP at the bound" in rendered

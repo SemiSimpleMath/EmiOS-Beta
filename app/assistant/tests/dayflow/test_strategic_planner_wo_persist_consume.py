@@ -58,7 +58,7 @@ def test_consumed_artifact_folds_into_goal_and_closes_item():
 
 
 def test_unconsumed_artifact_left_open():
-    """An admitted artifact NOT cited in any based_on is left open (sits as context)."""
+    """The handoff helper alone does not close intake lacking an explicit review."""
     seed_items([
         make_dayflow_message(item_id="email:newsletter", short_id=701, state="actionable",
                              summary="Weekly newsletter", source_type="email"),

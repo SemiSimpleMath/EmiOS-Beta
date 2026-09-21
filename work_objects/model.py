@@ -46,7 +46,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 # --------------------------------------------------------------------------- #
 # Open vocabularies — known values only; the model fields stay plain `str`.
@@ -192,6 +192,8 @@ class Edge(BaseModel):
 # WorkObject (the graph container)
 # --------------------------------------------------------------------------- #
 class WorkObject(BaseModel):
+    # Read-only runtime projection; excluded from graph persistence/serialization.
+    _execution: dict = PrivateAttr(default_factory=dict)
     model_config = ConfigDict(extra="forbid")
     id: str = Field(default_factory=lambda: new_id("work"))
     title: str = ""
@@ -306,6 +308,8 @@ class WorkObject(BaseModel):
     def is_ready(self, node: WorkNode, now: Optional[datetime] = None, *, ignore_external_wake: bool = False) -> bool:
         # proposed/waiting = gate-checkable (state_mover reads this to decide promotion);
         # actionable = already state_mover-promoted but not yet dispatched — still "ready".
+        if self.constraints.get("pending_work_closure"):
+            return False
         if node.status not in {"proposed", "waiting", "actionable"}:
             return False
         if self.is_work_unit(node) and (self.status != "active" or self.has_pending_revision()):

@@ -91,7 +91,8 @@ def respond_to_ticket():
         "action": "done" | "skip" | "later" | "acknowledge" | "willdo" | "no" | "accept" | "dismiss" | "answer",
         "user_text": "optional user explanation, OR the user's free-form answer for ask_user tickets",
         "snooze_minutes": 30,  // only used if action is "later"
-        "label": "the text of the button the user pressed, as this surface rendered it"
+        "label": "legacy button label",
+        "choice_id": "stored contextual choice ID when action is choice"
     }
 
     Actions:
@@ -118,6 +119,7 @@ def respond_to_ticket():
             user_text=user_text or None,
             snooze_minutes=snooze_minutes,
             label=label or None,
+            choice_id=data.get("choice_id") or None,
         )
 
         result = {

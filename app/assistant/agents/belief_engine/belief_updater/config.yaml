@@ -9,7 +9,7 @@ allowed_tools: []
 except_tools: []
 
 user_context_items:
-  - task
+  - update_domain
   - evidence_block
   - existing_beliefs_block
 

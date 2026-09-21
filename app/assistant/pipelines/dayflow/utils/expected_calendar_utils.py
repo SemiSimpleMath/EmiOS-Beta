@@ -213,11 +213,7 @@ def build_hour_grid(
 
 def render_hour_grid(slots: List[Dict[str, Any]]) -> str:
     """Render build_hour_grid() output as the scaffold the writer fills."""
-    lines = [
-        "Hour-by-hour scaffold. The 'Now (...)' slot is the CURRENT time; every "
-        "slot from there on is UPCOMING (not yet done). Write an entry for EVERY "
-        "slot below; (open) hours still get their timed beliefs or a brief ramp note:",
-    ]
+    lines = ["Hour-by-hour scaffold:"]
     for slot in slots:
         items = slot.get("items") or []
         if items:

@@ -58,7 +58,7 @@ orchestrator + worker managers import `work_objects.*`).
 | `discharge.py` | `discharge_node` / `drive_work` — drive one node through a worker manager; scope REQUIRED (caller-derived), session stamp after claim, result-as-evidence convention |
 | `runtime.py` | The work **contextvar** (`set_work_context` / `get_work_context`) binding graph tools to the active node |
 | `runtime_setup.py` | `ensure_manager_services()` loads `.env`, supplies missing `mam_instance_manager`, and preloads configs. Written for minimal test bootstrap, but also called by `discharge._ensure_registered`; not a test-only execution path |
-| `result_recorder.py` | Shared tool-result recorder. Preserves the directive, optionally attaches a pod, writes `done`/`failed`, then adds evidence. These are separate transactions; only the status write has the optional epoch check. Error type, `aborted`, `exit_state=error_exit`, or empty answer means failure. The finalizer judges meaning afterwards |
+| `result_recorder.py` | Shared tool-result recorder. Preserves the directive, optionally attaches a pod, writes `done`/`failed`, adds evidence in the same transaction. The epoch check, status, pod and evidence commit atomically. Error type, `aborted`, `exit_state=error_exit`, or empty answer means failure. The finalizer judges meaning afterwards |
 | `work_tools.py` | The ten `work_*` tools, built from one `_SPECS` table and injected straight into `tool_registry.registry` at runtime (synthesised contracts: domain `work_graph`, `min_authority` 0); also `pod_summary` and the unused `register_manager_as_tool` |
 | `tools.py` | `WorkGraphTools` — plain-Python op wrappers bound to ONE node, which the registered tools call, so a scripted agent can drive the graph with no LLM. Holds one read method the tool layer never exposes: `graph_neighbors` |
 | `scenarios/_scenario_scope.py` | DEV-ONLY harness scope — production authority always derives from the caller (room / task run) |
@@ -256,7 +256,8 @@ are caller-supplied data, not authenticated permissions.
   nonzero repair count after the first run means some writer bypassed the invariant.
   One exception inside the exception: a `dispatched` **ask** (`wake_kind=user_reply`) has
   a waiting tool call, but closure moots the question and it cascades too. Closure
-  does not cancel that thread or its ticket; the recorder skips its later result.
+  does not kill that thread or expire its ticket; abandonment requests cooperative
+  cancellation, and the recorder skips its later graph result.
   Boot repair selects terminal objects with startable nodes, so an object containing
   only a dispatched ask is not selected by that repair query. The same subtree cascade fires when any node
   reaches `done`/`closed`/`abandoned`/`superseded`: its unstarted descendants stop with
@@ -365,10 +366,13 @@ scenarios their declared scope; a missing scope raises):
    skipped entirely whenever the worker had already set its own status — so the caller
    recorded nothing at all, not even the evidence.
 
-`drive_work(store, work_id, *, scope_context, node_id=None)` is a legacy scenario
-helper. An explicit node must already be `dispatched`. The automatic branch selects
-ready nodes without claiming them, so `discharge_node` rejects its first candidate.
-Neither branch invokes the finalizer. It is not currently a working run-to-goal driver.
+`drive_work(store, work_id, *, scope_context, node_id=None)` is a bounded standalone
+scenario runner. It promotes ready main tasks, uses the standard atomic claim,
+discharge/result recorder and finalizer against the caller's store. It also judges
+already-recorded results. It stops for gates, failure or pending plan changes;
+it does not replan or retry. An explicit node may be ready, preclaimed or awaiting
+judgment. A worker's done result alone cannot finish the goal. Scenario finalization
+does not access the global Dayflow store or invoke concern delivery.
 
 **Dayflow dispatch is the WorkSession** (`dayflow_orchestrator/work_session.py`): a copy
 of the orchestrator room, open until its call returns. `open_session` does **not** branch on
@@ -381,17 +385,15 @@ switchboard named differs. The ticket branch used to be the exception — it sur
 parked the node on a `user_reply` wake and returned nothing, so the user's answer had to be
 reconstructed from the ticket store later.
 
-Supervision (`sweep_stuck_work_nodes`) reads the graph and applies **one rule**: nothing written to
-this node or its owned subtree for `ASK_WINDOW_HOURS * 3600 + 20 min` (80 minutes today) → `failed`.
-It consults **no** session liveness — a run blocked in a tool call writes nothing meanwhile, so a
-dead process and a wedged call are indistinguishable and want the same remedy — and the tolerance is
-derived from the ask window so a question the user has not answered yet is never failed out from
-under them. The session-ownership supervision this replaced left plumbing behind:
-`payload.session_id` is still written in three places and read by nothing, and
-`dispatch_sweeper._session_root_dispatched` has no callers. `session_alive_by_id` is the one live
-piece, used by `re_arm_inflight_asks()` at boot — which reconnects an ask that outlived its process
-from the ticket side, landing an answer already given or waiting out the remainder of the window on
-the ticket already on screen, rather than asking twice.
+Supervision (`sweep_stuck_work_nodes`) uses subtree inactivity past
+`ASK_WINDOW_HOURS * 3600 + 20 min` (80 minutes today) to record a failed result and
+revoke further execution in the same transaction. The finalizer judges that result.
+A live old call remains registered until it exits; durable attempt/call receipts
+hold replacement dispatch across the work object while execution or its external
+outcome is unresolved. Process death and a still-running call are tracked separately.
+Ask recovery reconnects the original ticket and matching epoch, skips another live
+process's owner, and records/finalizes its actual reply or expiry without re-asking.
+See EXECUTION_OWNERSHIP.md for the process identity and unknown-outcome rules.
 
 ### The worker's graph vocabulary
 
@@ -449,7 +451,7 @@ declare a DEV-ONLY `scenario_scope()` under `scenarios/`.
 | **worker** (via `work_*` tools + reconcile hook) | subtasks, evidence, artifacts, questions, defers | inside the job thread |
 | **finalizer** (`work_finalizer_node`) | `set_status` (`done → closed`; `→ failed`; `failed → proposed` on retry), `payload.finalizer` (verdict + outcome + route) | normal Dayflow producer of `closed`; not a store-level exclusivity rule; escalates repeated failure to `ask_user` |
 | **repair** (`work_repair_apply`) | — | RETIRED 2026-09-16; files remain, unwired. Judged failures carry the finalizer's route (retry / stop / new_approach / ask_user); abandoning a goal is the steward's |
-| **sweeper** (`sweep_stuck_work_nodes`) | `set_status` (`→ failed`) | dispatched main tasks with over 80 minutes of owned-history inactivity; no session-liveness check or finalizer invocation |
+| **sweeper** (`sweep_stuck_work_nodes`) | atomic `record_result` (`→ failed`) and execution revocation | dispatched main tasks with over 80 minutes of owned-history inactivity; ordinary pending finalization judges the timeout; old execution still blocks takeover |
 | **/work UI** | `edit_node`, `set_status`, `set_work_status`, node add/remove | owner's manual surface |
 
 Concern back-propagation: a WO carrying `constraints.concern_refs` reports its terminal
@@ -468,7 +470,8 @@ the audit trail per object), `/api/work-pod` (pod summary), and manual mutators
 (abandon, node status/edit/add/remove) that go through the same validated `apply()` as
 other apply callers. Object abandonment records the reason "owner abandoned via /work". `_get_store` falls back to `WORK_DB` on any live-store exception,
 which can hide a production-store failure; `/api/work` reports the actual `store.path`.
-Closing graph state does not cancel active threads or tickets.
+Abandonment requests cooperative cancellation. Closing graph state never proves
+an active thread exited and does not automatically expire its ticket.
 
 ## Deferred by design
 
@@ -491,3 +494,12 @@ Closing graph state does not cancel active threads or tickets.
 - `work_objects/README.md` / `DESIGN.md` — node taxonomy rationale, mission tier, worker-split design.
 - [14_PODS.md](14_PODS.md) — the pod scope wall the shared effort identity exists for.
 - [15_EMI_TEAM_AND_SCOPE.MD](15_EMI_TEAM_AND_SCOPE.md) — the scope model the room-derived session scope participates in.
+
+
+## Execution ownership update (2026-09-20)
+
+See [Execution ownership and cancellation](EXECUTION_OWNERSHIP.md) for the current
+invocation tree, immutable main-attempt binding, cancellation boundaries and durable
+takeover barrier. Timeout result recording now revokes further calls/worker writes;
+it does not mean the old thread exited. The two additive execution tables supplement
+the five graph tables. The finalizer remains responsible for judgment and failure counts.

@@ -103,6 +103,7 @@ def get_dayflow_work_store():
                 # store's own connection and log their own failures loudly.
                 _migrate_node_active_to_dispatched(store._conn)
                 _migrate_parked_asks_to_dispatched(store._conn)
+                store.reconcile_all_executions()
                 # Closure-cascade repair (2026-07-30 zombie-wake incident): terminal work
                 # objects created before closure cascaded may still hold startable nodes
                 # with armed wakes. Must run before any apply() touches those rows — the

@@ -1,0 +1,16 @@
+## Today's contexts and what has already happened
+{{ daily_context }}
+
+## Active belief catalog
+{{ belief_catalog | tojson(indent=2) }}
+
+## Historical weekly context
+{{ weekly_insights }}
+
+{% if selection_retry %}
+## Correct the previous invalid selection
+The previous response did not satisfy the selection contract. Reconsider the same
+complete catalog and return a complete valid selection using only allowed_ids.
+Do not omit relevant beliefs merely to avoid the error.
+{{ selection_retry | tojson }}
+{% endif %}

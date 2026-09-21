@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 class NodeWake(BaseModel):
     task_id: str = Field(description="The parked work-object node id EXACTLY as shown (work_id::node_id).")
+    source_item_id: str = Field(description="Exact item_id of the matching prepared intake source.")
     evidence: str = Field(
         description="The intake content that satisfies the wait — the gist of what arrived — so the "
         "worker resuming the node has what it needs to act.")

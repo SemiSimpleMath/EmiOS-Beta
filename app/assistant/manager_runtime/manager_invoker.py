@@ -72,6 +72,8 @@ class ManagerInvoker:
         room_id = self._extract_room_id(user_message, reply_to)
         base_display_name = display_name_for(canonical_name)
 
+        from app.assistant.manager_runtime.execution import REGISTRY
+        REGISTRY.check()
         mam = DI.mam_instance_manager
         record = mam.register(
             manager_instance=manager_instance,
@@ -102,6 +104,12 @@ class ManagerInvoker:
         except Exception:
             logger.debug("Failed to stash invocation_id on blackboard", exc_info=True)
 
+        try:
+            execution = REGISTRY.span("manager", canonical_name, span_id=record.invocation_id)
+            execution.__enter__()
+        except BaseException:
+            mam.unregister(record.invocation_id)
+            raise
         self._publish_invocation_started_event(record)
         try:
             normalized_message, immediate = self.preprocessor.preprocess(
@@ -124,7 +132,11 @@ class ManagerInvoker:
             )
             raise
         finally:
-            mam.unregister(record.invocation_id)
+            import sys
+            try:
+                execution.__exit__(*sys.exc_info())
+            finally:
+                mam.unregister(record.invocation_id)
 
     # ------------------------------------------------------------------
     # Helpers

@@ -20,18 +20,10 @@ exactly what every other consumer of the room gets), so a worker sees precisely
 what the orchestrator sees. The 2026-08-03 forward-email flounder — a worker
 blind to an email pod its goal referenced — is structurally impossible here.
 
-The session registry below is the in-flight liveness table, and the graph carries
-the durable join (``payload.session_id``). Both are now narrower than they look:
-``sweep_stuck_work_nodes`` was rewritten to a pure subtree-idle rule and reads
-NEITHER, so ``payload.session_id`` is written and never read, and the only live
-consumer of the registry is ``re_arm_inflight_asks`` below (via
-``session_alive_by_id``). ``session_alive`` and ``session_started_at`` have no
-production callers.
-
-Threads die with the process; the graph doesn't — after a restart no session is
-alive, so an in-flight ask is reconnected from its ticket (see
-``re_arm_inflight_asks``) and anything else is failed by the sweep for the
-architect to re-plan. (work_repair re-issued those until it retired 2026-09-16.)
+Session registration belongs to the execution registry. Durable attempts prevent
+replacement dispatch while old execution is running or an external outcome is unknown.
+Timeout records a failed result and revokes further calls/writes; it does not kill a
+thread. Existing ticket recovery reconnects the original question after restart.
 """
 from __future__ import annotations
 
@@ -45,8 +37,10 @@ logger = get_logger(__name__)
 _ROOM_ID = "dayflow_orchestrator"
 _SESSION_GRACE_SECONDS = 60
 
-_sessions_lock = threading.Lock()
-_live_sessions: dict = {}   # session_id -> {"thread": Thread, "started_at": datetime}
+from app.assistant.manager_runtime.execution import REGISTRY
+
+_sessions_lock = REGISTRY.sessions_lock
+_live_sessions: dict = REGISTRY.sessions   # session_id -> {"thread": Thread, "started_at": datetime}
 
 
 def session_id_for(work_id: str, node_id: str) -> str:
@@ -102,7 +96,7 @@ def room_session_scope(work_id: str, node_id: str):
 def _start_registered_thread(sid, thread, epoch, before_start=None):
     with _sessions_lock:
         current = _live_sessions.get(sid)
-        if current is not None and current.get("epoch") == epoch:
+        if current is not None and (current.get("epoch") == epoch or current["thread"].is_alive()):
             raise ValueError("dispatch attempt already has a registered session")
         _live_sessions[sid] = {"thread": thread, "started_at": datetime.now(timezone.utc), "epoch": epoch}
     try:
@@ -151,7 +145,14 @@ def open_session(store, work_id: str, node_id: str, delegate_to: str, *, expecte
         store.apply("set_status", {"work_id": work_id, "node_id": node_id,
                                    "status": node.status, "session_id": sid, "expected_dispatch_epoch": epoch},
                     actor="work_session")
-    _start_registered_thread(sid, thread, epoch, before_start=stamp_session)
+    from app.assistant.manager_runtime.execution import Owner
+    owner = Owner(store, work_id, node_id, epoch)
+    store.start_execution(owner)
+    try:
+        _start_registered_thread(sid, thread, epoch, before_start=stamp_session)
+    except BaseException:
+        REGISTRY.finish_owner(owner)
+        raise
     logger.info("[work_session] session %s started", sid)
 
 
@@ -164,7 +165,18 @@ def _record_dispatch_failure(store, work_id, node_id, epoch, detail):
         _finalize_recorded_result(work_id, node_id, expected_epoch=epoch)
 
 
-def _run_dispatch_room(store, work_id: str, node_id: str, sid: str, delegate_to: str, my_epoch: int) -> None:
+def _run_dispatch_room(store, work_id, node_id, sid, delegate_to, my_epoch):
+    from app.assistant.manager_runtime.execution import Owner, REGISTRY
+    owner = Owner(store, work_id, node_id, my_epoch)
+    try:
+        with REGISTRY.span("attempt", sid, owner=owner, attribution=node_id):
+            _run_dispatch_room_body(store, work_id, node_id, sid, delegate_to, my_epoch)
+    finally:
+        from app.assistant.dayflow_orchestrator.node_dispatch import signal_work_progress
+        REGISTRY.finish_owner(owner, on_finished=lambda: signal_work_progress(f"{work_id}::{node_id}"))
+
+
+def _run_dispatch_room_body(store, work_id: str, node_id: str, sid: str, delegate_to: str, my_epoch: int) -> None:
     """The session thread: open the dispatch room on this node and hold it until its call returns.
 
     ONE runner for every tool. There used to be two — an ask branch that called the ticket tool
@@ -222,7 +234,6 @@ def _run_dispatch_room(store, work_id: str, node_id: str, sid: str, delegate_to:
             entry = _live_sessions.get(sid)
             if entry is not None and entry.get("thread") is threading.current_thread():
                 _live_sessions.pop(sid, None)
-        signal_work_progress(ref)
 
 
 # --------------------------------------------------------------------------- #
@@ -237,6 +248,11 @@ def _record_and_finalize_ask_result(store, work_id: str, node_id: str, result, *
                               expected_epoch=expected_epoch, evidence_title="user response"):
         return  # A stale/ended call must not adjudicate its successor's result.
 
+    from app.assistant.manager_runtime.execution import Owner
+    node = store.load(work_id).nodes[node_id]
+    ticket_id = node.payload.get("ticket_id")
+    if ticket_id:
+        store.settle_recovered_ticket(Owner(store, work_id, node_id, expected_epoch), ticket_id)
     _finalize_recorded_result(work_id, node_id, expected_epoch=expected_epoch)
 
 
@@ -276,7 +292,13 @@ def recover_pending_finalizations() -> int:
     return recovered
 
 
-def _run_resume_ask_session(store, work_id: str, node_id: str, sid: str,
+def _run_resume_ask_session(store, work_id, node_id, sid, ticket_id, timeout_s, expected_epoch):
+    from app.assistant.manager_runtime.execution import Owner
+    with REGISTRY.span("ticket_recovery", sid, owner=Owner(store, work_id, node_id, expected_epoch), attribution=node_id, recovery=True):
+        _run_resume_ask_session_body(store, work_id, node_id, sid, ticket_id, timeout_s, expected_epoch)
+
+
+def _run_resume_ask_session_body(store, work_id: str, node_id: str, sid: str,
                             ticket_id: str, timeout_s: float, expected_epoch: int) -> None:
     """Wait out the REMAINING window of a question still live after a restart.
 
@@ -380,6 +402,9 @@ def re_arm_inflight_asks() -> int:
             if session_alive_by_id(session_id_for(work_id, node_id), epoch):
                 continue                      # a live thread still owns this call
 
+            from app.assistant.manager_runtime.execution import Owner
+            if store.execution_running(Owner(store, work_id, node_id, epoch)):
+                continue  # Another live process still owns the ticket wait.
             result = CreateDayflowTicketTool.result_for_ticket(ticket)
             if result is not None:
                 _record_and_finalize_ask_result(

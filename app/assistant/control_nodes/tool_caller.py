@@ -421,15 +421,19 @@ class ToolCaller(ControlNode):
 
         import time as _time
         _t0 = _time.monotonic()
-        if is_mcp_tool:
-            tool_result = execute_mcp_tool_call(
-                tool_name=tool_name,
-                tool_config=tool_config,
-                arguments=args_dict or {},
-                tool_registry=self.tool_registry,
-            )
-        else:
-            tool_result = tool_instance.execute(tool_message)
+        from app.assistant.manager_runtime.execution import tool_call
+        from app.assistant.lib.core_tools.manager_interface.manager_interface import ManagerInterface
+        with tool_call(tool_name, external=not isinstance(getattr(tool_instance, "manager_interface", tool_instance), ManagerInterface)) as execution_call:
+            if is_mcp_tool:
+                tool_result = execute_mcp_tool_call(
+                    tool_name=tool_name,
+                    tool_config=tool_config,
+                    arguments=args_dict or {},
+                    tool_registry=self.tool_registry,
+                )
+            else:
+                tool_result = tool_instance.execute(tool_message)
+            execution_call.result = tool_result
         _tool_timing_ms = (_time.monotonic() - _t0) * 1000
         self.blackboard.update_state_value("last_tool_timing_ms", _tool_timing_ms)
 

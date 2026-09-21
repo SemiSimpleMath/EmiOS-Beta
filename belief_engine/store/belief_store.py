@@ -208,17 +208,14 @@ class BeliefStore:
             session.close()
 
     def get_evidence(self, belief_id: str) -> List[EvidenceRecord]:
-        session = get_session()
-        try:
-            rows = (
-                session.query(BeliefEvidence)
-                .filter(BeliefEvidence.belief_id == belief_id)
-                .order_by(BeliefEvidence.created_at.desc())
-                .all()
-            )
-            return [self._orm_to_evidence(r) for r in rows]
-        finally:
-            session.close()
+        from belief_engine.matching.context import lineage
+        from belief_engine.matching.history import connection
+        from belief_engine.db.paths import belief_db_path
+        from dataclasses import fields
+        with connection(belief_db_path()) as conn:
+            _, evidence = lineage(conn, belief_id)
+        names = [f.name for f in fields(EvidenceRecord)]
+        return [EvidenceRecord(**{k: e.get(k) for k in names}) for e in evidence]
 
     def find_similar(
         self,
@@ -250,121 +247,59 @@ class BeliefStore:
     # ------------------------------------------------------------------
 
     def upsert_belief(
-        self,
-        req: BeliefUpsertRequest,
-        evidence: Optional[List[EvidenceInput]] = None,
+        self, req: BeliefUpsertRequest, evidence: Optional[List[EvidenceInput]] = None,
     ) -> BeliefRecord:
+        """Commit claim and evidence together; observation metadata comes only from sources.
+
+        Rewriting or rereading a claim is not a new observation. Source dates are not
+        replaced by processing time. Chroma is updated only after the SQLite commit.
         """
-        Create or update a belief by belief_key in one atomic statement.
-
-        On insert: a new row with observation_count=1.
-        On conflict (belief_key already exists): updates statement, confidence,
-        scope, status, conditions, last_confirmed, updated_at, and increments
-        observation_count by 1 at the DB level — no read-modify-write race.
-
-        Attaches any provided evidence records (each in its own short session).
-        """
-        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-
-        # A belief's domain must exist in configs/belief_domains.yaml: the nightly pipeline
-        # loops CONFIGURED domains, so a row outside them would get no recompute / reevaluate /
-        # canonicalize maintenance ever (the orphaning the `meal` domain was added to end).
+        from sqlalchemy import text
         from belief_engine.config import list_all_domain_ids
+        from belief_engine.decay import classify_kind_heuristic
         if req.domain not in list_all_domain_ids():
-            raise ValueError(
-                f"[BeliefStore] unknown belief domain {req.domain!r} for key={req.belief_key!r} — "
-                f"add it to configs/belief_domains.yaml first so the nightly maintenance covers it."
-            )
-
+            raise ValueError(f"Unknown belief domain: {req.domain!r}")
         now = _now_iso()
-        new_id = str(uuid.uuid4())  # used on insert; ignored on conflict
-
-        # Resolve kind for insert: use supplied or heuristic-classify so new
-        # rows always have a kind (drives decay half-life).
-        kind_value = req.kind
-        if kind_value is None:
-            from belief_engine.decay import classify_kind_heuristic
-            kind_value = classify_kind_heuristic(
-                belief_key=req.belief_key, domain=req.domain, scope=req.scope,
-            )
-
-        stmt = sqlite_insert(UserBelief).values(
-            id=new_id,
-            domain=req.domain,
-            belief_key=req.belief_key,
-            statement=req.statement,
-            confidence=req.confidence,
-            scope=req.scope,
-            status=req.status,
-            kind=kind_value,
-            conditions=json.dumps(req.conditions) if req.conditions else None,
-            observation_count=1,
-            first_observed=req.first_observed or now,
-            last_confirmed=req.last_confirmed or now,
-            created_at=now,
-            updated_at=now,
-        )
-        # On conflict: preserve existing kind unless caller explicitly supplies one.
-        # The COALESCE-style preserve is what differentiates "the LLM reclassified
-        # this belief's kind" from "the LLM didn't say anything about kind."
-        update_set = {
-            "statement":         stmt.excluded.statement,
-            "confidence":        stmt.excluded.confidence,
-            "scope":             stmt.excluded.scope,
-            "status":            stmt.excluded.status,
-            "conditions":        stmt.excluded.conditions,
-            "observation_count": UserBelief.observation_count + 1,
-            "last_confirmed":    stmt.excluded.last_confirmed,
-            "updated_at":        stmt.excluded.updated_at,
-        }
-        if req.kind is not None:
-            update_set["kind"] = stmt.excluded.kind
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["belief_key"],
-            set_=update_set,
-        )
-
         session = get_session()
         try:
-            session.execute(stmt)
+            session.execute(text('BEGIN IMMEDIATE'))
+            row = session.query(UserBelief).filter_by(belief_key=req.belief_key).one_or_none()
+            if row is None:
+                row = UserBelief(id=str(uuid.uuid4()), domain=req.domain, belief_key=req.belief_key,
+                    statement=req.statement, confidence=req.confidence, scope=req.scope, status=req.status,
+                    conditions=json.dumps(req.conditions) if req.conditions is not None else None,
+                    kind=req.kind or classify_kind_heuristic(belief_key=req.belief_key,domain=req.domain,scope=req.scope),
+                    observation_count=0, first_observed=None, last_confirmed=None,
+                    created_at=now, updated_at=now)
+                session.add(row)
+                session.flush()
+            elif not row.locked:
+                row.statement, row.confidence, row.scope, row.status = req.statement, req.confidence, req.scope, req.status
+                if req.conditions is not None:
+                    row.conditions = json.dumps(req.conditions)
+                if req.kind is not None:
+                    row.kind = req.kind
+                row.updated_at = now
+                session.flush()
+            belief_id = row.id
+            for ev in evidence or []:
+                self._append_evidence(session, belief_id, ev, now)
+            self._refresh_observation_metadata(session, belief_id)
             session.commit()
         except Exception:
             session.rollback()
-            logger.debug("[BeliefStore] upsert failed key=%s", req.belief_key, exc_info=True)
             raise
         finally:
             session.close()
-
-        # Read back the canonical row in a separate short session.
         belief = self.get_by_key(req.belief_key)
         if belief is None:
-            raise RuntimeError(f"[BeliefStore] upsert failed for key={req.belief_key!r}")
-
-        # Sync embedding (ChromaDB, no DB session).
-        self._chroma.upsert(
-            belief_id=belief.id,
-            statement=belief.statement,
-            domain=belief.domain,
-        )
-
-        # Attach evidence — each in its own short session.
-        for ev in (evidence or []):
-            self._insert_evidence(belief.id, ev, now)
-
-        # Stable short id at creation (no-op on an existing belief). Non-critical: a hiccup must not
-        # break belief creation, and the nightly backfill (assign_short_ids) recovers any miss.
+            raise RuntimeError(f'Committed belief missing: {req.belief_key}')
+        self._chroma.upsert(belief_id=belief.id, statement=belief.statement, domain=belief.domain)
         try:
             from belief_engine.identity import ensure_short_id
             ensure_short_id(belief.id)
         except Exception:
-            logger.warning("[BeliefStore] short-id assign failed key=%s", belief.belief_key, exc_info=True)
-
-        logger.info(
-            "[BeliefStore] upsert key=%s status=%s obs=%d",
-            belief.belief_key,
-            belief.status,
-            belief.observation_count,
-        )
+            logger.warning('Short-id assignment failed for %s',belief.belief_key,exc_info=True)
         return belief
 
     def add_evidence_to_existing(
@@ -379,13 +314,24 @@ class BeliefStore:
         belief if found and active (evidence attached); None if absent or deprecated
         so the caller can skip rather than fabricate.
         """
-        belief = self.get_by_key(belief_key)
-        if belief is None or belief.status == "deprecated":
-            return None
-        now = _now_iso()
-        for ev in (evidence or []):
-            self._insert_evidence(belief.id, ev, now)
-        return belief
+        from sqlalchemy import text
+        session = get_session()
+        try:
+            session.execute(text('BEGIN IMMEDIATE'))
+            row = session.query(UserBelief).filter_by(belief_key=belief_key).one_or_none()
+            if row is None or row.status == 'deprecated':
+                session.rollback()
+                return None
+            for ev in evidence or []:
+                self._append_evidence(session,row.id,ev,_now_iso())
+            self._refresh_observation_metadata(session,row.id)
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+        return self.get_by_key(belief_key)
 
     def deprecate(self, belief_key: str, *, reason: str = "") -> None:
         """
@@ -433,143 +379,12 @@ class BeliefStore:
                 source_type="deprecation",
                 source_date=datetime.now(timezone.utc).date().isoformat(),
                 signal_type="rejects",
-                summary=(f"Deprecated: {reason}" if reason else "Deprecated (no reason given)")[:800],
+                summary=(f"Deprecated: {reason}" if reason else "Deprecated (no reason given)"),
                 weight=1.0,
             ),
             now,
         )
         logger.info("[BeliefStore] deprecated key=%s reason=%s", belief_key, reason)
-
-    def merge_belief(
-        self,
-        *,
-        surviving_key: str,
-        surviving_statement: str,
-        surviving_confidence: str,
-        surviving_scope: str,
-        deprecated_keys: List[str],
-        domain: str,
-        merge_reasoning: str,
-    ) -> BeliefRecord:
-        """
-        Consolidate a cluster of near-duplicate beliefs into one canonical belief.
-
-        - Rewrites the surviving belief with the canonical statement.
-        - Attaches a canonicalization evidence record to the surviving belief so its
-          history shows the merge event and the combined observation weight.
-        - Deprecates all redundant beliefs and removes their Chroma embeddings.
-        - observation_count on the surviving belief is incremented by the sum of all
-          deprecated beliefs' observation counts (their support is transferred).
-        """
-        store = self
-
-        # Sum up observation counts from deprecated beliefs before deprecating them.
-        transferred_obs = 0
-        deprecated_statements: List[str] = []
-        for dk in deprecated_keys:
-            dep = store.get_by_key(dk)
-            if dep:
-                transferred_obs += dep.observation_count
-                deprecated_statements.append(f"{dk}: {dep.statement}")
-
-        # Rewrite surviving belief.
-        surviving = store.get_by_key(surviving_key)
-        if surviving is None:
-            # Surviving key may be one we're creating fresh from a cluster.
-            req = BeliefUpsertRequest(
-                domain=domain,
-                belief_key=surviving_key,
-                statement=surviving_statement,
-                confidence=surviving_confidence,
-                scope=surviving_scope,
-                status="active",
-                last_confirmed=datetime.now(timezone.utc).date().isoformat(),
-            )
-        else:
-            req = BeliefUpsertRequest(
-                domain=domain,
-                belief_key=surviving_key,
-                statement=surviving_statement,
-                confidence=surviving_confidence,
-                scope=surviving_scope,
-                status="active",
-                last_confirmed=datetime.now(timezone.utc).date().isoformat(),
-            )
-
-        surviving_record = store.upsert_belief(req)
-
-        # Boost observation count by transferred support. The increment is a
-        # SQL-level expression (UserBelief.observation_count + transferred_obs)
-        # so SQLite reads-and-adds in one statement — no read-modify-write race
-        # against another writer touching the same key.
-        if transferred_obs > 0:
-            now = _now_iso()
-            session = get_session()
-            try:
-                session.query(UserBelief).filter(
-                    UserBelief.belief_key == surviving_key
-                ).update(
-                    {"observation_count": UserBelief.observation_count + transferred_obs,
-                     "updated_at": now},
-                    synchronize_session=False,
-                )
-                session.commit()
-            except Exception:
-                session.rollback()
-                logger.debug("[BeliefStore] merge obs boost failed key=%s", surviving_key, exc_info=True)
-                raise
-            finally:
-                session.close()
-
-        # Attach a canonicalization evidence record.
-        merged_summary = (
-            f"Canonicalization merge: absorbed {len(deprecated_keys)} redundant belief(s). "
-            f"Reasoning: {merge_reasoning[:300]}"
-        )
-        if deprecated_statements:
-            merged_summary += " Absorbed: " + " | ".join(deprecated_statements)[:400]
-
-        surviving_record = store.get_by_key(surviving_key)
-        if surviving_record:
-            self._insert_evidence(
-                surviving_record.id,
-                EvidenceInput(
-                    source_type="canonicalization",
-                    source_date=datetime.now(timezone.utc).date().isoformat(),
-                    signal_type="confirms",
-                    summary=merged_summary[:800],
-                    weight=2.0 * len(deprecated_keys),
-                ),
-                _now_iso(),
-            )
-
-        # Deprecate redundant beliefs and remove their Chroma embeddings.
-        loser_ids = []
-        for dk in deprecated_keys:
-            store.deprecate(dk, reason=f"merged into {surviving_key}: {merge_reasoning[:200]}")
-            dep = store.get_by_key(dk)
-            if dep:
-                loser_ids.append(dep.id)
-                try:
-                    self._chroma.delete(dep.id)
-                except Exception as exc:
-                    logger.debug("[BeliefStore] chroma delete failed for %s: %s", dk, exc)
-
-        surviving_final = store.get_by_key(surviving_key)
-        if surviving_final is None:
-            raise RuntimeError(f"[BeliefStore] merge failed — surviving key {surviving_key!r} not found after write")
-
-        # Provenance: record each merge redirect (loser -> survivor) so a merged-away belief stays
-        # traceable (the deprecated row + its short id are kept).
-        from belief_engine.identity import record_merge
-        for lid in loser_ids:
-            record_merge(lid, surviving_final.id, merge_reasoning)
-
-        logger.info(
-            "[BeliefStore] merge complete surviving=%s deprecated=%s transferred_obs=%d",
-            surviving_key, deprecated_keys, transferred_obs,
-        )
-        return surviving_final
 
     def mark_contested(self, belief_key: str) -> None:
         now = _now_iso()
@@ -734,104 +549,73 @@ class BeliefStore:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _evidence_already_attached(belief_id: str, ev: EvidenceInput) -> bool:
-        """Is this exact observation already on this belief?
-
-        Identity is (belief_id, source_type, source_date, summary) — what the
-        observation IS, not when it was ingested. `created_at` is deliberately
-        excluded: the whole point is that re-reading the same source on a later
-        night must not count twice. NULL-safe via IS, since source_date can be
-        absent on manual rows.
-        """
-        from sqlalchemy import text as _sa_text
-
-        session = get_session()
+    def _append_evidence(session, belief_id: str, ev: EvidenceInput, now: str) -> bool:
+        """Insert an exact source record once within the caller's write transaction."""
+        from sqlalchemy import text
+        from belief_engine.decay import valence_from_signal_type, half_life_for_kind
+        parameters = dict(bid=belief_id, source_type=ev.source_type, source_date=ev.source_date,
+                          source_ref=ev.source_ref, signal_type=ev.signal_type, summary=ev.summary, raw_text=ev.raw_text)
+        existing = session.execute(text(
+            'SELECT id FROM belief_evidence WHERE belief_id=:bid AND source_type IS :source_type '
+            'AND source_date IS :source_date AND source_ref IS :source_ref AND signal_type IS :signal_type '
+            'AND summary IS :summary AND raw_text IS :raw_text LIMIT 1'), parameters).first()
+        if existing:
+            return False
+        import sqlite3
+        from belief_engine.matching.context import lineage
+        raw = session.connection().connection.driver_connection
+        previous_factory = raw.row_factory
         try:
-            row = session.execute(
-                _sa_text(
-                    "SELECT 1 FROM belief_evidence WHERE belief_id = :bid "
-                    "AND source_type IS :st AND source_date IS :sd AND summary IS :sm LIMIT 1"
-                ),
-                {"bid": belief_id, "st": ev.source_type, "sd": ev.source_date, "sm": ev.summary},
-            ).fetchone()
-            return row is not None
+            raw.row_factory = sqlite3.Row
+            _, inherited = lineage(raw,belief_id)
         finally:
-            session.close()
+            raw.row_factory = previous_factory
+        identity_fields = ('source_type','source_date','source_ref','signal_type','summary','raw_text')
+        if any(all(item.get(k) == getattr(ev,k) for k in identity_fields) for item in inherited):
+            return False
+        kind = session.execute(text('SELECT kind FROM user_beliefs WHERE id=:id'), {'id':belief_id}).scalar()
+        half_life = half_life_for_kind(kind)
+        session.add(BeliefEvidence(id=str(uuid.uuid4()),belief_id=belief_id,
+            source_type=ev.source_type,source_date=ev.source_date,source_ref=ev.source_ref,
+            signal_type=ev.signal_type,summary=ev.summary,raw_text=ev.raw_text,weight=ev.weight,
+            valence=ev.valence or valence_from_signal_type(ev.signal_type),
+            half_life_days_snapshot=half_life if half_life is not None else -1,
+            extracted_by=ev.extracted_by,created_at=now))
+        session.flush()
+        return True
+
+    @staticmethod
+    def _refresh_observation_metadata(session, belief_id: str) -> None:
+        """Count source observations, including merged provenance, in this transaction."""
+        import sqlite3
+        from sqlalchemy import text
+        from belief_engine.matching.context import observations
+        raw = session.connection().connection.driver_connection
+        previous_factory = raw.row_factory
+        try:
+            raw.row_factory = sqlite3.Row
+            sources = observations(raw, belief_id)
+        finally:
+            raw.row_factory = previous_factory
+        dated = [e['source_date'] for e in sources if e.get('source_date')]
+        confirmed = [e['source_date'] for e in sources if e.get('source_date')
+                     and (e.get('valence') == 'support' if e.get('valence') else e.get('signal_type') == 'confirms')]
+        session.execute(text('UPDATE user_beliefs SET observation_count=:count, '
+            'first_observed=COALESCE(:first,first_observed), last_confirmed=COALESCE(:last,last_confirmed) '
+            'WHERE id=:id'), {'count':len(sources), 'first':min(dated) if dated else None,
+                              'last':max(confirmed) if confirmed else None,'id':belief_id})
 
     def _insert_evidence(self, belief_id: str, ev: EvidenceInput, now: str) -> None:
-        """Insert a belief_evidence row with valence + half_life_snapshot derived.
-
-        - valence: caller can supply explicitly; falls back to mapping from
-          signal_type via belief_engine.decay.valence_from_signal_type.
-        - half_life_days_snapshot: looked up from the owning belief's `kind`,
-          so historical half-life changes don't retroactively reshape decay.
-
-        IDEMPOTENT on the observation itself (2026-09-11). One observation is
-        (belief, source_type, source_date, summary); re-presenting it attaches
-        nothing new. Collection deliberately re-reads its sources — the nightly
-        pass re-reads a window of finished daily-insight files, and the ticket
-        path re-tallies the same events — so without this guard the SAME
-        observation was inserted again on every run. Measured: 343 redundant
-        rows, one insight attached ten times, contributing 30 weight where it
-        earns 3. Confidence is the sum of decayed evidence weights against
-        ABSOLUTE bands (high is net > 4.0), so a re-read was silently
-        manufacturing the reconfirmation the decay model exists to require.
-
-        This preserves growth and discards only repetition: a tally's summary
-        carries its count, day-span and date range, so a fifth snooze reads as
-        different text and lands as new evidence, while an unchanged restatement
-        is recognised as the observation already held. A finished day's insight
-        text never changes, so it attaches once however often it is re-read.
-        """
-        from sqlalchemy import text as _sa_text
-        from belief_engine.decay import valence_from_signal_type, half_life_for_kind
-
-        resolved_valence = ev.valence or valence_from_signal_type(ev.signal_type)
-
-        if self._evidence_already_attached(belief_id, ev):
-            logger.debug(
-                "[BeliefStore] evidence already attached to %s (%s %s) — not re-inserting",
-                belief_id, ev.source_type, ev.source_date,
-            )
-            return
-
-        # Pull owning belief's kind for the half-life snapshot.
-        kind: Optional[str] = None
-        session_q = get_session()
-        try:
-            row = session_q.execute(
-                _sa_text("SELECT kind FROM user_beliefs WHERE id = :id"),
-                {"id": belief_id},
-            ).fetchone()
-            kind = row[0] if row else None
-        finally:
-            session_q.close()
-        half_life_snapshot = half_life_for_kind(kind)
-
-        ev_id = str(uuid.uuid4())
+        """Atomically attach source evidence and refresh observation metadata."""
+        from sqlalchemy import text
         session = get_session()
         try:
-            session.add(
-                BeliefEvidence(
-                    id=ev_id,
-                    belief_id=belief_id,
-                    source_type=ev.source_type,
-                    source_date=ev.source_date,
-                    source_ref=ev.source_ref,
-                    signal_type=ev.signal_type,
-                    summary=ev.summary,
-                    raw_text=ev.raw_text,
-                    weight=ev.weight,
-                    valence=resolved_valence,
-                    half_life_days_snapshot=half_life_snapshot,
-                    extracted_by=ev.extracted_by,
-                    created_at=now,
-                )
-            )
+            session.execute(text('BEGIN IMMEDIATE'))
+            self._append_evidence(session, belief_id, ev, now)
+            self._refresh_observation_metadata(session, belief_id)
             session.commit()
         except Exception:
             session.rollback()
-            logger.debug("[BeliefStore] insert_evidence failed belief_id=%s", belief_id, exc_info=True)
             raise
         finally:
             session.close()

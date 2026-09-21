@@ -202,6 +202,7 @@ class Ticket(Base):
             "action_type": self.action_type,
             "action_params": self.action_params,
             "trigger_context": self.trigger_context,
+            "response_choices": (self.trigger_context or {}).get("response_choices", []),
             "trigger_reason": self.trigger_reason,
             "status_effect": self.status_effect,
             "ask_user_id": self.ask_user_id,

@@ -133,6 +133,11 @@ class StateMoverPersistNode(ControlNode):
             return
         from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
         store = get_dayflow_work_store()
+        from uuid import uuid4
+        candidates = {c["task_id"]: c for c in
+                      (self.blackboard.get_state_value("waiting_work_nodes", []) or [])}
+        sources = {s["item_id"]: s for s in
+                   (self.blackboard.get_state_value("work_wait_intake", []) or [])}
         woken = []
         for m in node_wakes:
             if not isinstance(m, dict):
@@ -151,15 +156,25 @@ class StateMoverPersistNode(ControlNode):
                 evidence = str(m.get("evidence") or "").strip()
                 if not evidence:
                     raise ValueError("External wake requires arrival evidence")
-                new_content = (node.content or "").rstrip() + f"\n\n[Awaited event arrived] {evidence}"
-                # WorkStore.batch commits both mutations and the audit event together.
-                # The version fence also rejects changes since this node was loaded.
+                candidate = candidates.get(tid)
+                source = sources.get(str(m.get("source_item_id") or ""))
+                if not candidate or not source:
+                    raise ValueError("External wake requires a prepared task and exact intake source")
+                if (node.wake_kind != candidate["wake_kind"]
+                        or node.wake_ref != candidate["waiting_for"]):
+                    raise ValueError("External wake condition changed after matching preparation")
+                # Gate and attributed evidence commit together, fenced at the pre-LLM snapshot.
                 store.apply("batch", {
-                    "work_id": work_id, "expected_updated_at": wo.updated_at.isoformat(),
+                    "work_id": work_id, "expected_updated_at": candidate["work_version"],
                     "operations": [
                         {"op": "defer_node", "data": {"node_id": node_id, "wake_kind": None}},
-                        {"op": "set_status", "data": {"node_id": node_id,
-                            "status": node.status, "content": new_content}},
+                        {"op": "add_node", "data": {
+                            "id": "wake_" + uuid4().hex, "parent_id": node_id,
+                            "type": "evidence", "title": source.get("subject") or source["item_id"],
+                            "content": evidence, "pod_ref": source.get("pod_id") or None,
+                            "payload": {"external_source": dict(source),
+                                        "context_role": "external_wake",
+                                        "matched_condition": candidate["waiting_for"]}}},
                     ],
                 }, actor="state_mover")
                 woken.append(tid)

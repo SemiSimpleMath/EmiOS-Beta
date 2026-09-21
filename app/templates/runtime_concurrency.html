@@ -267,6 +267,12 @@
         </div>
 
         <div class="section">
+            <h2>Work execution</h2>
+            <p class="muted">Actual calls in this process and fresh reports from other live processes. Helpers show attribution within a main task. Cancelling does not mean exited.</p>
+            <div id="execution-tree"></div>
+            <details><summary>Unresolved durable attempts and calls (all processes)</summary><pre id="execution-receipts" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details>
+        </div>
+        <div class="section">
             <h2>Registered Threads</h2>
             <div class="table-wrap">
                 <table>
@@ -317,6 +323,7 @@
         let pollTimer = null;
 
         const KNOWN_UNREGISTERED_PATTERNS = [
+            "execution-status-publisher",
             "MainThread",
             "APScheduler",
             "_monitor",
@@ -427,6 +434,21 @@
         function render(payload) {
             const summary = payload.summary || {};
             const manager = payload.manager_invoker || {};
+            const tree = document.getElementById("execution-tree");
+            tree.replaceChildren();
+            const execution = manager.execution || {};
+            const spans = [...(execution.active || []), ...(payload.other_process_execution || []).flatMap(process => process.active || [])];
+            const rows = new Map();
+            for (const span of spans) {
+                const row = document.createElement("div");
+                row.style.cssText = "margin:6px 0 6px 16px;border-left:2px solid #374151;padding-left:8px;overflow-wrap:anywhere";
+                const own = span.owner;
+                row.textContent = `${span.kind}: ${span.name} — ${span.state} | ${own ? `${own.work_id} / ${own.main_node_id} / attempt ${own.dispatch_epoch}` : "No work assignment"}${span.attribution_node_id ? ` | attribution: ${span.attribution_node_id}` : ""}`;
+                rows.set(span.id, row);
+            }
+            for (const span of spans) (rows.get(span.parent_id) || tree).appendChild(rows.get(span.id));
+            if (!spans.length) tree.textContent = "No active calls in this process.";
+            document.getElementById("execution-receipts").textContent = JSON.stringify(payload.work_execution || {}, null, 2);
             const registry = payload.runtime_registry || {};
             const invocations = Array.isArray(manager.active_invocations) ? manager.active_invocations : [];
             const threads = Array.isArray(registry.threads) ? registry.threads : [];
@@ -455,12 +477,16 @@
             document.getElementById("executor-running").textContent = String(safeNum(summary.executor_tasks_running, 0));
             document.getElementById("executor-saturation").textContent = `Max saturation: ${fmtPct(summary.max_executor_saturation_ratio)}`;
 
-            const health = chipClassForHealth(summary, diagnostics);
+            const uncertainCalls = ((payload.work_execution || {}).calls || []).filter(call => call.state === "unknown").length;
+            const cancelling = spans.filter(span => span.state === "cancelling").length;
+            const health = uncertainCalls || cancelling ? {cls: "warn", text: "Execution held"} : chipClassForHealth(summary, diagnostics);
             const healthChip = document.getElementById("health-chip");
             healthChip.className = `chip ${health.cls}`;
             healthChip.textContent = health.text;
 
             const issues = [];
+            if (uncertainCalls) issues.push({cls: "warn", text: `${uncertainCalls} external call(s) have unknown outcomes. Replacement work is held pending reconciliation.`});
+            if (cancelling) issues.push({cls: "warn", text: `${cancelling} execution span(s) are cancelling and have not exited.`});
             const routineLevel = String(summary.routine_capacity_level || "ok").toLowerCase();
             if (routineLevel === "critical") {
                 issues.push({ cls: "bad", text: `Routine lane is critical (${fmtPct(summary.routine_saturation_ratio)}).` });

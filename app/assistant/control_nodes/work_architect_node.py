@@ -88,14 +88,25 @@ def _duplicate_pairs(data: dict) -> dict[str, str]:
     The form carries a LIST of pairs because OpenAI structured output rejects a free-form object;
     the graph writer wants the lookup, so the shape is converted once, here.
     """
+    pairs = data.get("duplicate_of")
+    if pairs is None:
+        return {}
+    if not isinstance(pairs, list):
+        raise ValueError("architect: duplicate_of must be a list of pairs")
     out: dict[str, str] = {}
-    for pair in (data.get("duplicate_of") or []):
+    for pair in pairs:
         if not isinstance(pair, dict):
-            continue
-        dup = str(pair.get("duplicate_node_id") or "").strip()
-        keep = str(pair.get("keep_node_id") or "").strip()
-        if dup and keep and dup != keep:
-            out[dup] = keep
+            raise ValueError("architect: duplicate_of contains a malformed pair")
+        dup = pair.get("duplicate_node_id")
+        keep = pair.get("keep_node_id")
+        if not isinstance(dup, str) or not isinstance(keep, str):
+            raise ValueError("architect: duplicate pair IDs must be strings")
+        dup, keep = dup.strip(), keep.strip()
+        if not dup or not keep or dup == keep:
+            raise ValueError("architect: duplicate pair requires distinct nonempty task IDs")
+        if dup in out:
+            raise ValueError(f"architect: duplicate task {dup!r} is listed more than once")
+        out[dup] = keep
     return out
 
 

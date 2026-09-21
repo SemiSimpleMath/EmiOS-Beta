@@ -7,8 +7,8 @@ Applies the evaluator's output to the dayflow WorkObject store: mint new work ob
 It also CONSUMES intake: for each work object created or changed this pass, the intake items the evaluator cited
 in its `based_on` have their content folded into the work object's goal (so the worker sees the
 originating intake, not just the one-line objective) and are then closed (state -> closed, reason
-"converted_to_work_object") so nothing else acts on them. Intake the evaluator did not convert stays
-open as context. The work-object analogue of planner_persist_node.
+"converted_to_work_object"). Every other presented item needs an explicit no-action or timed
+deferral review. Missing/failed decisions remain pending. The work-object analogue of planner_persist_node.
 
 Inert until the dayflow manager's state_map routes to it.
 """
@@ -26,6 +26,11 @@ class StrategicPlannerWoPersistNode(ControlNode):
             "complete_work_ids": self.blackboard.get_state_value("complete_work_ids", []) or [],
             "abandon_work_ids": self.blackboard.get_state_value("abandon_work_ids", []) or [],
         }
+        from app.assistant.dayflow_orchestrator.intake_review import prepare_reviews
+        from app.assistant.dayflow_orchestrator.dayflow_item_writer import write_intake_reviews
+        admitted = self.blackboard.get_state_value("admitted_artifacts", []) or []
+        reviews = prepare_reviews(admitted, output["new_or_changed"],
+                                  self.blackboard.get_state_value("intake_reviews", []) or [])
         result = {"created": [], "changed": [], "completed": [], "abandoned": []}
         try:
             from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
@@ -46,6 +51,9 @@ class StrategicPlannerWoPersistNode(ControlNode):
             logger.error("[%s] consumed-item close failed: %s", self.name, e)
             logger.debug("[%s] consumed-item close exception", self.name, exc_info=True)
             raise
+
+        write_intake_reviews(reviews,
+            self.blackboard.get_state_value("intake_review_snapshots", {}) or {}, caller=self.name)
 
         # replan_work_ids flows on to the architect (re-plan an existing work object's graph).
         # (advance is gone — work_execution runs every ready node; it never gated on it.)
@@ -82,4 +90,5 @@ class StrategicPlannerWoPersistNode(ControlNode):
                 store.apply("revise_goal", goal_update(wo, sources=sources), actor="steward")
             for source in sources:
                 write_dayflow_item(source["item_id"], state="closed",
-                                   reason=f"converted_to_work_object:{wid}", caller=self.name)
+                                   reason=f"converted_to_work_object:{wid}", caller=self.name,
+                                   updates={"evaluator_pending": False, "evaluator_review": {"outcome": "transferred", "work_id": wid}})

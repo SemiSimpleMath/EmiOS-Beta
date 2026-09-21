@@ -61,6 +61,19 @@ def record_tool_result(store, work_id: str, node_id: str, result, *, actor: str,
     data = getattr(result, "data", None) or {}
     pod_id = next((str(r.get("pod_id")) for r in (data.get("pod_references") or [])
                    if isinstance(r, dict) and r.get("pod_id")), None)
+    # Only the ticket tool / its recovery path may attribute a tool result to the user.
+    # Never infer this from the result's prose or from an arbitrary manager's fields.
+    user_reply = None
+    if (actor in {"create_dayflow_ticket", "ask"}
+            and getattr(result, "result_type", "") == "ticket_response"
+            and data.get("ticket_id") and data.get("action") not in {"timeout", "created", "pending"}
+            and (data.get("user_text") or data.get("response_details"))):
+        from copy import deepcopy
+        user_reply = deepcopy({"ticket_id": data["ticket_id"],
+            "question": data.get("question") or data.get("title") or "",
+            "action": data.get("action") or "", "user_text": data.get("user_text") or "",
+            "responded_at": data.get("responded_at") or "",
+            "response_details": data.get("response_details") or {}})
     answer = _answer_text(result)
     failed = _is_failure(result) or not answer
     if not answer:
@@ -69,7 +82,7 @@ def record_tool_result(store, work_id: str, node_id: str, result, *, actor: str,
         store.apply("record_result", {
             "work_id": work_id, "node_id": node_id,
             "expected_dispatch_epoch": expected_epoch, "idle_before": idle_before,
-            "evidence_id": new_id("result"), "answer": answer,
+            "evidence_id": new_id("result"), "answer": answer, "user_reply": user_reply,
             "status": "failed" if failed else "done", "pod_ref": pod_id,
             "abort_policy": data.get("abort_policy"), "error_code": data.get("error_code"),
             "title": evidence_title or ("tool failure (why)" if failed else "tool result"),

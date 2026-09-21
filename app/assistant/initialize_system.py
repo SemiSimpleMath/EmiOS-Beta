@@ -107,6 +107,9 @@ def initialize_system():
     from app.assistant.manager_runtime.mailbox import Mailbox
     ServiceLocator.register("mailbox", Mailbox())
     from app.assistant.manager_runtime.mam_instance_manager import MAMInstanceManager
+    from app.assistant.manager_runtime.execution import REGISTRY
+    from app.assistant.manager_runtime.execution_status import start_publication
+    start_publication(REGISTRY)
     ServiceLocator.register("mam_instance_manager", MAMInstanceManager(
         resource_manager=DI.resource_manager,
     ))

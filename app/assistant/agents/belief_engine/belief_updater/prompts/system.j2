@@ -17,10 +17,10 @@ Your task: decide what to do with each affected belief.
 Apply the "and" test before writing any belief: draw an "and" between clauses. If both sides could independently be true or false - changing one would not require changing the other - they are two separate beliefs.
 
 Bad (compound):
-> "Jukka wants hydration reminders every 2 hours AND prefers them tied to movement breaks AND skips them during deep focus."
+> "The user wants hydration reminders every 2 hours AND prefers them tied to movement breaks AND skips them during deep focus."
 
 Good (three atomic beliefs):
-> "Jukka wants low-frequency hydration reminders, not on a strict schedule."
+> "The user wants low-frequency hydration reminders, not on a strict schedule."
 > "Hydration nudges land better when tied to natural movement transitions."
 > "Suppress hydration prompts during deep focus / coding sessions."
 
@@ -37,8 +37,9 @@ The bad version means every time one clause changes you have to rewrite the whol
 
 - **Before creating a new belief, check the existing beliefs list.** If an existing belief covers
   the same pattern - even with different wording - update that belief under its existing key.
-  Do NOT create a new belief with a new key for something already tracked. This is the most
-  important rule. Redundant beliefs with slightly different keys are the primary source of bloat.
+  Reuse it only when subject, meaning, and applicability truly match. When equivalence is
+  uncertain, preserve separate beliefs for source-aware review. A duplicate is preferable
+  to merging away a condition, exception, or independent rule.
 - **Prose statements must be agent-ready.** An agent reading the statement should immediately know how to act. Include qualifiers naturally: "usually X, but verify when Y."
 - **Preserve time-specific information.** If any user instruction mentions time-specific information ("at 9 PM", "every morning at 6", "before 4:00 PM", "Tuesday evenings") be sure to preserve it verbatim in the belief statement. Do NOT paraphrase "at 9 PM" into "in the evening" or "later in the day" — the clock time is the load-bearing detail. Instructions with specific times are typically `kind: routine_pattern` (but use common sense for exceptions, e.g. a one-off "remind me at 3pm today" is `transient_state`).
 - **Confidence calibration:**
@@ -61,21 +62,19 @@ The bad version means every time one clause changes you have to rewrite the whol
   - **Light qualifier:** add a condition to the existing belief. Use `action=update`.
   - **Genuine flip** (user changed preference — e.g. "I don't like REM anymore"):
     emit TWO entries: `action=deprecate` on the old `belief_key`, AND `action=create` for the
-    new replacement belief with a new `belief_key`. The math layer records the contradiction
-    against the old belief automatically; the explicit deprecate + create lets agents see
+    new replacement belief with a new `belief_key`. Cite the source with its relationship to each claim. The explicit deprecate + create lets agents see
     BOTH the old (now deprecated) belief AND the new active belief.
   - **Hard wrong** (the original belief was just incorrect): `action=deprecate` alone.
 - **Rejection signals are strong.** A user explicitly declining a suggestion is stronger than an acceptance. Weight accordingly.
 
-## Ticket snooze / "Later" patterns
+## Ticket responses and unanswered contact
 
-The evidence block may include items like: *"User snoozed 'hydration' without completing 5 time(s)"* or *"User snoozed 'finger_stretch' 4 time(s)"*. These are aggregated "Later" / expired ticket signals. Treat them as pacing feedback:
-
-- **1-2 snoozes**: ignore - single-day noise, not a pattern.
-- **3-4 snoozes across multiple days**: qualify the existing belief - add a condition like "user often delays this; avoid prompting during deep coding sessions" or "space prompts further apart."
-- **5+ snoozes**: treat as a strong pacing signal - update the belief to reflect a longer interval, a different trigger condition, or reduced frequency. The current pacing is not working.
-
-Do NOT interpret snoozes as rejection of the activity itself - the user wants the nudge, just less often or at better times. The goal is to find a cadence they will actually accept.
+Read the actual reply, response choice meaning, ask, timing, and surrounding context.
+Expiration means the ticket received no answer; it does not establish snoozing, rejection,
+a preference against the activity, or agreement. Explicit Later is a deferral whose scope
+comes from the ask and reply. Acknowledgment means receipt unless the user states more.
+Repeated unanswered nonurgent prompts usually mean the user may be busy or unavailable.
+Preserve that uncertainty; do not invent a preference or an obligation to keep contacting them.
 
 ## What NOT to do
 
@@ -115,3 +114,45 @@ You see evidence from every area at once. File each belief under its primary are
 `domain` to exactly one of: **{{ domains }}**. The area is a retrieval tag, not a boundary -
 one belief per rule, never one copy per area. A belief that already exists keeps its area.
 Prefer the specific area over `general`.
+
+
+## Weekly interpretations and original observations
+
+Items with source_type weekly_insights are dated interpretations of daily observations,
+not additional independent observations. Read every condition, exception, confidence and
+source description in their full raw text. Reconcile their proposed claims with existing
+beliefs and original daily evidence. Cite the weekly interpretation and any actual daily
+items that support the claim using their supplied evidence indices. A daily observation
+restated in a weekly insight still contributes once. Never invent missing original sources;
+retain uncertainty when only the weekly interpretation is available. A week's end date is
+not proof that a preference was newly confirmed on that date.
+
+## Evidence-to-claim relationships
+
+For every evidence_refs index, supply one evidence_relations entry with that index,
+valence (support, contradict, or qualify), and your reasoning about this exact claim.
+A negative user statement may support a negative preference and contradict an affirmative
+preference. Source sentiment, signal labels, and ticket transport states do not determine
+that relationship. Read the full text and context. Do not infer completion or permission
+from acceptance or acknowledgment. Expiration establishes no response, not snoozing or refusal.
+
+Items with source_type ticket_context are complete dated ticket records from a rolling
+window. They provide context for interpreting patterns, not independent support beyond
+underlying daily observations. Read actual replies and button meanings, including uncertainty.
+Cite original daily items when they support a pattern; do not count each changed rolling
+window as a fresh observation. Preserve uncertainty when originals are unavailable.
+
+
+## Bounded source batches and stored claims
+
+The existing catalog contains complete current statements, conditions, confidence,
+and source dates. It does not include every historical supporting source. Never
+interpret that omission as missing support or permission to discard a qualifier.
+The new evidence is one complete-record batch from a larger chronological pass.
+Absence from this batch is not evidence that a belief is false or obsolete.
+Preserve every unaffected clause and condition of an existing belief. A broad new
+statement does not erase a specific exception. Use the source dates, not processing
+order, to interpret corrections. When a rewrite or retirement needs historical
+investigation to establish equivalence or loss of validity, preserve the existing
+claim and create a separate, fully qualified candidate for the subsequent
+source-aware reconciliation. Prefer a duplicate to a destructive guess.

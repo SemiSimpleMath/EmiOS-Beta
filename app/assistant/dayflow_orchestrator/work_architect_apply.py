@@ -53,39 +53,35 @@ def _work_ns(work_id: str) -> str:
     return work_id.split("_")[-1][:6]
 
 
-def _dedupe_prunes(wo, duplicate_of: Dict[str, str] | None, goal_id: str) -> Dict[str, str]:
-    """The subset of `duplicate_of` that is safe to prune: {dup_id: kept_id}.
+def _dedupe_prunes(wo, duplicate_of: Dict[str, str] | None, goal_id: str,
+                   abandon_node_ids=()) -> Dict[str, str]:
+    """Validate the ENTIRE duplicate mapping before preparing a revision.
 
-    Abandoning a duplicate is not the same act as abandoning queued work, which is what the churn
-    fence exists to refuse — a duplicate's work is not lost, it is consolidated onto the twin that
-    survives. So these prunes are licensed, but ONLY once that twin is verified to exist here and
-    still be able to run. The check is id-based: the architect names which node it keeps, and this
-    confirms it, rather than deciding for itself that two nodes mean the same thing.
-
-    A duplicate parked on a future wake is exactly the case that matters — both copies of one
-    delivery, armed to fire — and is precisely what the unlicensed fence would refuse.
+    Only existing unfinished main tasks may be consolidated. Each duplicate must
+    name a distinct live survivor which this revision keeps. Semantic equivalence
+    is the architect's judgment; identity, lifecycle and survival are checked here.
+    Invalid entries reject the revision instead of disappearing from its result.
     """
     out: Dict[str, str] = {}
     for dup, keep in (duplicate_of or {}).items():
         dup, keep = str(dup or "").strip(), str(keep or "").strip()
         if not dup or not keep or dup == keep:
-            continue
+            raise ValueError("architect: duplicate mapping requires two distinct nonempty task IDs")
+        if dup in out:
+            raise ValueError(f"architect: duplicate task {dup!r} is mapped more than once")
         if dup == goal_id or keep == goal_id:
-            logger.warning("apply_architect_dag: refusing to deduplicate the goal node (%s->%s)", dup, keep)
-            continue
-        if dup not in wo.nodes:
-            logger.warning("apply_architect_dag: duplicate %s is not in this graph — ignored", dup)
-            continue
-        kept = wo.nodes.get(keep)
-        if kept is None:
-            logger.warning("apply_architect_dag: %s claims to duplicate %s, which is not in this "
-                           "graph — NOT pruned (the work would be lost)", dup, keep)
-            continue
-        if kept.status in _ABANDON_SKIP:
-            logger.warning("apply_architect_dag: %s claims to duplicate %s, which is already %s — "
-                           "NOT pruned (nothing would be left to run)", dup, keep, kept.status)
-            continue
+            raise ValueError("architect: cannot deduplicate the goal node")
+        for nid in (dup, keep):
+            node = wo.nodes.get(nid)
+            if node is None or not wo.is_work_unit(node):
+                raise ValueError(f"architect: duplicate mapping names unknown or non-main task {nid!r}")
+            if node.status in _ABANDON_SKIP:
+                raise ValueError(f"architect: duplicate mapping names finished task {nid!r} ({node.status})")
         out[dup] = keep
+    dropping = set(out) | {str(nid).strip() for nid in (abandon_node_ids or [])}
+    for dup, keep in out.items():
+        if keep in dropping:
+            raise ValueError(f"architect: duplicate {dup!r} retains {keep!r}, which this revision also drops")
     return out
 
 
@@ -128,7 +124,7 @@ def apply_architect_dag(store, work_id: str, nodes: List[Dict[str, Any]],
     # 0) PRUNE pass (re-plan) — abandon the named moot nodes + their un-finished subtrees.
     #    Duplicates are pruned here too, but carry their OWN licence and their own epitaph: the
     #    node is abandoned rather than deleted, so the graph keeps the record of the duplication.
-    dupes = _dedupe_prunes(wo, duplicate_of, goal_id)
+    dupes = _dedupe_prunes(wo, duplicate_of, goal_id, abandon_node_ids)
     abandoned: List[str] = []
     deduplicated: List[str] = []
     seen: set[str] = set()

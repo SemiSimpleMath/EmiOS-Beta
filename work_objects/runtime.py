@@ -20,16 +20,43 @@ if TYPE_CHECKING:
 _CURRENT: contextvars.ContextVar = contextvars.ContextVar("work_context", default=None)
 
 
-@dataclass
+@dataclass(frozen=True)
 class WorkContext:
     store: "WorkStore"
     work_id: str
     node_id: str            # the node the running agent owns
     actor: str
+    owner: object
 
 
 def set_work_context(store, work_id: str, node_id: str, actor: str) -> contextvars.Token:
-    return _CURRENT.set(WorkContext(store=store, work_id=work_id, node_id=node_id, actor=actor))
+    from app.assistant.manager_runtime.execution import Owner, current_owner, REGISTRY
+    REGISTRY.check()
+    parent = _CURRENT.get()
+    owner = parent.owner if parent else current_owner()
+    wo = store.load(work_id)
+    node = wo.nodes[node_id]
+    ancestry, seen = set(), set()
+    while node is not None and node.id not in seen:
+        seen.add(node.id)
+        ancestry.add(node.id)
+        if wo.is_work_unit(node):
+            break
+        node = wo.nodes.get(node.parent_id)
+    if node is None or not wo.is_work_unit(node):
+        raise ValueError("work context must belong to a main task")
+    if owner:
+        if owner.store is not store or owner.work_id != work_id or owner.main_node_id not in ancestry:
+            raise ValueError("cannot transfer an execution to another work attempt")
+    else:
+        owner = Owner(store, work_id, node.id, int(node.payload.get("dispatch_epoch") or 0))
+    with store._lock:
+        store._execution_validate(owner, wo)
+    return _CURRENT.set(WorkContext(store, work_id, node_id, actor, owner))
+
+
+def peek_work_context():
+    return _CURRENT.get()
 
 
 def get_work_context() -> WorkContext:

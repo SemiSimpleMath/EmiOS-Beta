@@ -56,8 +56,9 @@ Health: {{ health_status_summary }}
 {%- if recent_ticket_replies %}
 
 ## TICKET REPLIES (user directives — newest first; a later reply supersedes an earlier one about the same topic)
-*The user's written words are the authoritative signal wherever present. The label is just the button they clicked: ACCEPTED = agrees with the direction; ACKNOWLEDGED = received it — the written line carries the actual verdict (it may confirm, correct, defer, or decline); DECLINED = ABANDON the related work object; SNOOZED = revisit at the stated time.*
+*The user's written words are the authoritative signal wherever present. The label is just the button they clicked: ACCEPTED = response recorded, not necessarily approval; ACKNOWLEDGED = received it — the written line carries the actual verdict (it may confirm, correct, defer, or decline); DECLINED = ABANDON the related work object; SNOOZED = revisit at the stated time.*
 {%- for t in recent_ticket_replies %}
+{% set response_details = t.get('response_details', {}) %}{% include 'shared/work/response_details.j2' %}
 - [{{ t.get("responded_at_local","") }}] {{ t.get("action_label","") }}: {{ t.get("title","") }}{% if t.get("work_ref") %} [{{ t.get("work_ref") }}]{% endif %}{% if t.get("user_comment") %} — user: "{{ t.get("user_comment") }}"{% endif %}{% if t.get("snooze_until_local") %} (eligible again {{ t.get("snooze_until_local") }}){% endif %}
 {%- endfor %}
 {%- endif %}
@@ -83,6 +84,13 @@ Source dates below are the original dates, not the time this item entered this p
 {%- set meta = m.get("metadata", {}) %}
 - [{{ meta.get("short_id", meta.get("item_id","")) }}] {% if meta.get("source_type","") == "email" %}Email from {{ meta.get("email_sender","Unknown") }}: "{{ meta.get("email_subject", meta.get("summary","")) }}"{% if meta.get("email_summary") %} — {{ meta.get("email_summary") }}{% endif %}{% else %}{{ meta.get("summary","(no summary)") }} ({{ meta.get("source_type","") }}){% endif %}
   source date: {{ meta.get("created_at") or m.get("timestamp") or "unknown; do not assume current" }}
+{%- if meta.get("pod_id") %}
+  full source: {{ meta.get("pod_id") }}
+{%- endif %}
+{%- if meta.get("evaluator_review", {}).get("outcome") == "defer" %}
+  prior deferral: {{ meta.evaluator_review.reason }}
+  reconsideration due: {{ meta.evaluator_review.reconsider_at }}
+{%- endif %}
 {%- if meta.get("source_type","") == "email" and meta.get("email_body_excerpt") %}
   body:
     {{ meta.get("email_body_excerpt") | replace("\n", "\n    ") }}

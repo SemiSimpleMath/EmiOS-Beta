@@ -26,13 +26,39 @@ def persist_steward_output(store, output: Dict[str, Any], *, admitted_artifacts=
     complete/abandon ids. Returns a summary {created, changed, completed, abandoned}."""
     from app.assistant.dayflow_orchestrator.work_intake import source_records, goal_update
     from app.assistant.dayflow_orchestrator.work_context import render_view
+    # Closure intent must survive a failed graph write or a lost tick blackboard.
+    requests = []
+    for key, status, reason in (
+        ("complete_work_ids", "done", "steward: objective judged complete against current context"),
+        ("abandon_work_ids", "abandoned", "steward: objective dropped (superseded, declined, or no longer relevant)"),
+    ):
+        for wid in dict.fromkeys(str(w).strip() for w in output.get(key, []) or []):
+            requests.append({"work_id": wid, "status": status, "reason": reason})
+    closing = {r["work_id"] for r in requests}
+    closing_specs = [spec for spec in output.get("new_or_changed", []) or []
+                     if isinstance(spec, dict) and str(spec.get("work_id") or "").strip() in closing
+                     and str(spec.get("objective") or "").strip()]
+    goal_updates = {}
+    for spec in closing_specs:
+        wid = str(spec["work_id"]).strip()
+        if wid in goal_updates:
+            raise ValueError("Duplicate objective update for closing work object")
+        goal_updates[wid] = goal_update(store.load(wid), objective=str(spec["objective"]).strip(),
+            sources=source_records(admitted_artifacts, spec.get("based_on") or []),
+            success_criteria=spec.get("success_criteria"))
+    store.queue_work_closures(requests, goal_updates=goal_updates)
+    closures = recover_pending_work_closures(store)
+    completed, abandoned = closures["completed"], closures["abandoned"]
     created: List[Dict[str, str]] = []
-    changed_records = []
-    changed: List[str] = []
+    changed_records = [{"work_id": str(spec["work_id"]).strip(), "based_on": list(spec.get("based_on") or [])}
+                       for spec in closing_specs]
+    changed: List[str] = list(goal_updates)
     for spec in output.get("new_or_changed", []) or []:
         if not isinstance(spec, dict):
             continue
         work_id = str(spec.get("work_id") or "").strip()
+        if work_id in goal_updates:
+            continue  # Source/objective update committed with its terminal intent.
         objective = str(spec.get("objective") or "").strip()
         rationale = str(spec.get("rationale") or "").strip()
         if not objective:
@@ -66,30 +92,32 @@ def persist_steward_output(store, output: Dict[str, Any], *, admitted_artifacts=
             changed.append(work_id)
             changed_records.append({"work_id": work_id, "based_on": list(spec.get("based_on") or [])})
 
-    from app.assistant.subconscious.concern_feedback import propagate_work_outcome
-
-    completed: List[str] = []
-    for work_id in output.get("complete_work_ids", []) or []:
-        work_id = str(work_id).strip()
-        try:
-            store.apply("set_work_status", {"work_id": work_id, "status": "done",
-                                            "reason": "steward: objective judged complete against current context"},
-                        actor="steward")
-            completed.append(work_id)
-            propagate_work_outcome(store, work_id, "done")
-        except Exception as e:
-            logger.warning("persist: could not complete work object %s: %s", work_id, e)
-
-    abandoned: List[str] = []
-    for work_id in output.get("abandon_work_ids", []) or []:
-        work_id = str(work_id).strip()
-        try:
-            store.apply("set_work_status", {"work_id": work_id, "status": "abandoned",
-                                            "reason": "steward: objective dropped (superseded, declined, or no longer relevant)"},
-                        actor="steward")
-            abandoned.append(work_id)
-            propagate_work_outcome(store, work_id, "abandoned")
-        except Exception as e:
-            logger.warning("persist: could not abandon work object %s: %s", work_id, e)
-
     return {"created": created, "changed": changed, "changed_records": changed_records, "completed": completed, "abandoned": abandoned}
+
+
+def recover_pending_work_closures(store):
+    """Retry saved terminal decisions before new evaluation or work creation.
+
+    Closure errors stop the pass. Concern feedback is a separate best-effort
+    post-commit side effect; it cannot undo or mislabel a successful closure.
+    """
+    from app.assistant.subconscious.concern_feedback import propagate_work_outcome
+    result = {"completed": [], "abandoned": []}
+    for request in store.pending_work_closures():
+        wid, status = request["work_id"], request["status"]
+        try:
+            store.apply("set_work_status", {"work_id": wid, "status": status,
+                                           "reason": request["reason"]}, actor="steward")
+        except Exception:
+            logger.error("persist: closure failed for %s (%s); intent remains pending",
+                         wid, status, exc_info=True)
+            raise
+        result["completed" if status == "done" else "abandoned"].append(wid)
+        try:
+            propagate_work_outcome(store, wid, status)
+        except Exception:
+            # The helper normally logs its own failures; preserve this boundary
+            # even if an unexpected caller/dependency error escapes it.
+            logger.error("persist: work %s committed %s; concern feedback failed",
+                         wid, status, exc_info=True)
+    return result

@@ -526,7 +526,7 @@ class TicketManager:
         `user_text` for a responded state. The answer was in the database and unreachable.
 
         Same source of truth as the write path (_ALLOWED_TRANSITIONS), including the
-        same-state no-op that _transition_state_in_session treats as success.
+        same-state eligibility. The write path additionally requires supplied fields to match.
         """
         current = str(current_state or "").strip()
         if current == new_state.value:
@@ -545,7 +545,8 @@ class TicketManager:
         old_state = ticket.state
 
         if old_state == new_state.value:
-            return True
+            # Identical state is not permission to silently discard different reply fields.
+            return all(getattr(ticket, key, None) == value for key, value in transition_kwargs.items())
 
         allowed = _ALLOWED_TRANSITIONS.get(old_state, frozenset())
         if new_state.value not in allowed:

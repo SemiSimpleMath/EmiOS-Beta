@@ -9,7 +9,7 @@ validates structure, then commits the event and graph together. Each apply is
 one SQLite write transaction acquired before reading the graph. The instance RLock
 protects its connection; SQLite serializes other connections. Multiple apply calls
 are not one transaction.
-Boot migrations and closure repair also write state outside apply.
+Closure intent batches, boot migrations and closure repair also write state outside apply.
 """
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ def _cascade_abandon_startable(wo: WorkObject, now: str, reason: str) -> int:
     path can resurrect it (validate() enforces the invariant). In-flight ``dispatched``
     WORKER nodes are left to land their result — inert in a terminal object, and the sweep
     skips terminal work objects. A dispatched ASK (wake_kind=user_reply) cascades too:
-    closure moots the question. This does not cancel its waiting thread or ticket;
+    closure moots the question. This does not kill its waiting thread or expire its ticket;
     a later result is skipped by the recorder after abandonment. Idempotent; returns the number of nodes cascaded."""
     count = 0
     for node in wo.nodes.values():
@@ -93,7 +93,7 @@ def _cascade_abandon_subtree(wo: WorkObject, node_id: str, now: str, reason: str
     Same shape as `_cascade_abandon_startable` but scoped to one subtree, and with the same
     exemption: an in-flight ``dispatched`` WORKER node is left to land its result rather
     than being orphaned mid-call. A dispatched ASK (wake_kind=user_reply) cascades
-    because the parent's completion moots it; its waiting thread is not cancelled.
+    because the parent's completion moots it; the cascade does not kill its waiting thread.
     """
     count = 0
     for node in _descendants(wo, node_id):
@@ -262,7 +262,13 @@ class StaleResult(ValueError):
     """This result belongs to an ended or superseded attempt."""
 
 
-class WorkStore:
+from work_objects.execution_store import ExecutionStoreMixin, SCHEMA as EXECUTION_SCHEMA
+
+
+from work_objects.concern_outbox import ConcernOutboxMixin, SCHEMA as CONCERN_FEEDBACK_SCHEMA
+
+
+class WorkStore(ConcernOutboxMixin, ExecutionStoreMixin):
     def __init__(self, path: str = "work_objects/work.db", busy_timeout_ms: int = 10_000):
         self.path = path
         # Single-writer model: one connection shared across threads, with ALL access
@@ -276,7 +282,7 @@ class WorkStore:
         # On a shared DB (dayflow's store lives in emi.db) a write must wait for
         # the main application writer instead of failing "database is locked".
         self._conn.execute(f"PRAGMA busy_timeout={int(busy_timeout_ms)}")
-        self._conn.executescript(SCHEMA_SQL)
+        self._conn.executescript(SCHEMA_SQL + EXECUTION_SCHEMA + CONCERN_FEEDBACK_SCHEMA)
 
     def close(self) -> None:
         self._conn.close()
@@ -315,6 +321,9 @@ class WorkStore:
                 relation=erow["relation"], created_at=erow["created_at"],
                 payload=json.loads(erow["payload"] or "{}"),
             ))
+        wo._execution = self.execution_status(work_id, unresolved_only=True)
+        wo._execution["recent_results"] = [dict(row) for row in self._conn.execute(
+            "SELECT node_id,epoch,tool_name,state,detail,updated_at FROM work_execution_calls WHERE work_id=? AND detail IS NOT NULL ORDER BY updated_at DESC LIMIT 20", (work_id,))]
         return wo
 
     def events(self, work_id: str) -> list[dict[str, Any]]:
@@ -376,30 +385,102 @@ class WorkStore:
         # pydantic coerces ISO strings -> datetime and 0/1 -> bool.
         return WorkNode(**d)
 
-    # ------------------------- write (one entrypoint) ------------------------- #
+    # ------------------------- validated writes ------------------------- #
+    def queue_work_closures(self, requests, *, goal_updates=None, actor="steward"):
+        """Commit all closure intents before attempting any terminal graph mutation.
+
+        Stored in existing graph metadata; no new schema. A failed terminal write
+        leaves its intent and execution barrier intact for the next planning pass.
+        """
+        if not requests:
+            return
+        from work_objects.runtime import peek_work_context
+        if peek_work_context() is not None:
+            raise ValueError("workers cannot queue portfolio closures")
+        now = utcnow().isoformat()
+        with self._lock, self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
+            seen = set()
+            for request in requests:
+                wid = str(request.get("work_id") or "").strip()
+                target = request.get("status")
+                reason = str(request.get("reason") or "").strip()
+                if not wid or wid in seen or target not in {"done", "abandoned"} or not reason:
+                    raise ValueError("Invalid or conflicting work closure request")
+                seen.add(wid)
+                wo = self._load(wid)
+                pending = wo.constraints.get("pending_work_closure")
+                if pending:
+                    if pending["status"] != target:
+                        raise ValueError(f"Conflicting pending closure for {wid}")
+                    continue
+                if wid in (goal_updates or {}):
+                    # Preserve same-pass source handoffs before making the goal terminal.
+                    self._op_revise_goal(wo, goal_updates[wid], now, actor)
+                intent = {"work_id": wid, "status": target, "reason": reason, "requested_at": now}
+                wo.constraints["pending_work_closure"] = intent
+                self._conn.execute("INSERT INTO events(work_id, ts, actor, op, data) VALUES(?,?,?,?,?)",
+                                   (wid, now, actor, "request_work_closure", json.dumps(intent)))
+                self._persist(wo, now)
+
+    def pending_work_closures(self):
+        """Read durable requests without loading unrelated graphs."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT constraints FROM work_objects "
+                "WHERE json_extract(constraints, '$.pending_work_closure') IS NOT NULL ORDER BY id")
+            return [json.loads(row[0])["pending_work_closure"] for row in rows]
+
     def apply(self, op: str, data: dict, actor: Optional[str] = None,
               work_id: Optional[str] = None) -> WorkObject:
         handler = self._HANDLERS.get(op)
         if handler is None:
             raise ValueError(f"unknown op {op!r}")
+        if op == "claim_task":
+            self.reconcile_execution(work_id or data["work_id"])
         now = utcnow().isoformat()
         with self._lock, self._conn:  # serialize writers; atomic event + projection
             self._conn.execute("BEGIN IMMEDIATE")  # fence the read, not only the later write
+            previous_status = None
             if op == "create_work_object":
+                from work_objects.runtime import peek_work_context
+                if peek_work_context() is not None:
+                    raise ValueError("workers cannot create independent work objects")
                 wo = handler(self, None, data, now, actor)
             else:
                 wid = work_id or data.get("work_id")
                 if not wid:
                     raise ValueError(f"op {op!r} requires work_id")
                 wo = self._load(wid)
+                previous_status = wo.status
+                if (wo.constraints.get("pending_work_closure")
+                        and op not in {"set_work_status", "record_result", "finalize_task"}):
+                    from work_objects.execution_store import ExecutionBlocked
+                    raise ExecutionBlocked("work closure is pending; execution and revision are blocked")
+                from work_objects.runtime import peek_work_context
+                ctx = peek_work_context()
+                if ctx is not None:
+                    if ctx.store is not self or ctx.work_id != wid:
+                        raise ValueError("worker cannot write outside its work object")
+                    self._execution_validate(ctx.owner, wo)
                 handler(self, wo, data, now, actor)
             self._rollup(wo, now)               # derived WorkObject.status (auto-close cascades)
+            execution_revoked = self._execution_after_mutation(wo, op, data, actor)
             wo.validate()                       # invariants — after rollup so they see the final state
             self._conn.execute(
                 "INSERT INTO events(work_id, ts, actor, op, data) VALUES(?,?,?,?,?)",
                 (wo.id, now, actor, op, json.dumps(data, default=str)),
             )
             self._persist(wo, now)
+            self._queue_concern_feedback(wo, previous_status, now)
+        if execution_revoked:
+            from app.assistant.manager_runtime.execution import REGISTRY
+            with REGISTRY.lock:
+                owners = {s.owner for s in REGISTRY.active.values()
+                          if s.owner and s.owner.store is self and s.owner.work_id == wo.id}
+            for owner in owners:
+                if self.execution_revoked(owner):
+                    REGISTRY.cancel_owner(owner, "task abandoned or timed out")
         return wo
 
     def _op_batch(self, wo, data, now, actor=None):
@@ -481,6 +562,7 @@ class WorkStore:
             raise ValueError("dispatch: task is no longer actionable and ready")
         if node.wake_kind in {"event", "signal"}:
             raise ValueError("dispatch: external wake has not been satisfied")
+        self._execution_claim(wo.id, node.id, int(node.payload.get("dispatch_epoch") or 0) + 1)
         self._op_set_status(wo, {"node_id": node.id, "status": "dispatched"}, now, actor)
 
     def _op_finalize_task(self, wo, data, now, actor=None):
@@ -553,7 +635,8 @@ class WorkStore:
         self._op_add_node(wo, {
             "id": data["evidence_id"], "type": "evidence", "parent_id": node.id,
             "status": "assumed", "created_by": actor, "title": data["title"],
-            "content": data["answer"], "payload": {"dispatch_epoch": epoch},
+            "content": data["answer"], "payload": {"dispatch_epoch": epoch,
+                **({"user_reply": data["user_reply"]} if data.get("user_reply") else {})},
         }, now, actor)
         self._op_set_status(wo, {"node_id": node.id, "status": data["status"]}, now, actor)
         node.payload["result_abort_policy"] = data.get("abort_policy")
@@ -896,6 +979,9 @@ class WorkStore:
         is mirrored terminal and every still-startable node is cascade-abandoned with its wake cleared,
         so a closed object can never fire again (validate() enforces)."""
         target = data["status"]
+        pending = wo.constraints.get("pending_work_closure")
+        if pending and target != pending["status"]:
+            raise ValueError("work status conflicts with pending closure")
         if target not in ("active", "done", "abandoned", "blocked"):
             raise ValueError(f"set_work_status: bad status {target!r}")
         if target in ("done", "abandoned"):
@@ -905,6 +991,8 @@ class WorkStore:
                     f"set_work_status: terminal status {target!r} for {wo.id!r} "
                     f"requires a non-empty 'reason'")
             wo.constraints["terminal"] = {"status": target, "reason": reason, "at": now}
+            # Removed in the same commit as closure; rollback preserves the request.
+            wo.constraints.pop("pending_work_closure", None)
         wo.status = target
         if target in ("done", "abandoned"):
             goal = wo.nodes.get(wo.goal_node_id or "")

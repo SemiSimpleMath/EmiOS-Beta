@@ -7,6 +7,9 @@ Historical failure totals do not request another user decision. Follow current f
 {% if work.pending_replan %}PENDING ARCHITECT REVISION: apply the finalizer instruction before further dispatch.
 {% endif %}{% if work.unrun %}STILL UNRUN ({{ work.unrun }}): completing this work object would DISCARD these outstanding tasks.
 {% endif %}
+{% include 'shared/work/execution_state.j2' %}
+SOURCE CONTEXT
+{% with sources = work.sources | default([]), compact_sources = true %}{% include 'shared/work/source_context.j2' %}{% endwith %}
 TASKS (main assignments only)
 {% for task in work.tasks %}
 - [{{ task.status }}] {{ task.id }} | {{ task.title }}

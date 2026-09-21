@@ -437,3 +437,45 @@ def write_dayflow_items_batch(
         len(records), len(existing_meta), caller,
     )
     return len(records)
+
+
+def write_intake_reviews(reviews, snapshots, *, caller="evaluator"):
+    """Atomically record prepared reviews, refusing decisions about changed intake.
+
+    The snapshot is captured before model evaluation. Conditional writes additionally
+    fence concurrent processes. This transaction does not include work-object handoffs.
+    """
+    from sqlalchemy import cast, Text, update
+    if not reviews:
+        return
+    now = datetime.now(timezone.utc)
+    with get_db_manager().transaction(op=f"dayflow.intake_reviews:{caller}") as session:
+        for review in reviews:
+            item_id = review["item_id"]
+            result = session.execute(select(UnifiedLog2026, cast(UnifiedLog2026.metadata_json, Text).label("raw_metadata"))
+                .where(UnifiedLog2026.id == item_id)
+                .where(UnifiedLog2026.source == DAYFLOW_ITEM_SOURCE)
+                .where(UnifiedLog2026.room_id == DAYFLOW_ROOM_ID)).one_or_none()
+            if result is None:
+                raise ValueError(f"Reviewed intake disappeared: {item_id}")
+            row, raw = result
+            meta = _read_metadata(row)
+            if (meta != snapshots.get(item_id) or meta.get("state") != "artifact"
+                    or meta.get("evaluator_pending") is not True):
+                raise ValueError(f"Reviewed intake changed since preparation: {item_id}")
+            closed = review["outcome"] == "no_action"
+            state = "closed" if closed else "artifact"
+            _validate_transition(item_id, meta["state"], state, caller)
+            meta.update(state=state, evaluator_pending=not closed,
+                        state_reason=f"evaluator_{review['outcome']}:{review['reason']}",
+                        evaluator_review={**review, "reviewed_at": now.isoformat()},
+                        last_reviewed_at=now.isoformat())
+            written = session.execute(update(UnifiedLog2026)
+                .where(UnifiedLog2026.id == item_id)
+                .where(cast(UnifiedLog2026.metadata_json, Text) == raw)
+                .values(metadata_json=meta, timestamp=now)
+                .execution_options(synchronize_session=False))
+            if written.rowcount != 1:
+                raise ValueError(f"Concurrent intake change: {item_id}")
+            logger.info("intake review | item=%s | outcome=%s | caller=%s",
+                        item_id, review["outcome"], caller)

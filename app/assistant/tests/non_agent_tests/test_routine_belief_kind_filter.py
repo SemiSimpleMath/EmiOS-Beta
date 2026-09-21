@@ -1,19 +1,10 @@
-"""Guard: the daily-routine writer only gets schedule-shaping beliefs.
-
-The dayflow_routine_writer was fed all ~826 active beliefs, so the actual routine
-items (a weekly timesheet, AC anchors) drowned under 416 background preferences +
-101 one-off episodic facts. It now scopes to routine-relevant `kind`s
-(routine_pattern + durable_fact). Importance rises organically from evidence
-ranking — there is no hardcoded pin list.
-
-Hermetic — renders from a fixture entry list, no live export file. Pre-push guard.
-"""
+"""Relevance is selected by an LLM; kind/tag metadata must not hide context."""
 from __future__ import annotations
 
 import app.assistant.pipelines.dayflow.steps.dayflow_routine_stage as drs
 
 
-def test_routine_block_scopes_to_routine_kinds():
+def test_routine_block_preserves_all_active_kinds_for_selection():
     entries = [
         {"belief_key": "admin.timesheets.weekly_monday", "domain": "routine", "kind": "routine_pattern",
          "confidence": "high", "status": "active",
@@ -34,17 +25,15 @@ def test_routine_block_scopes_to_routine_kinds():
     # routine-shaping kinds kept (incl. the symptom belief)
     assert "Weekly timesheets" in out
     assert "Set AC to 70F at 21:00" in out
-    assert "Home address baseline fact" in out          # durable_fact kept
-    # noise kinds dropped
-    assert "Avoid mustard" not in out                   # stable_preference
-    assert "Cancel the Coursera" not in out             # episodic_context
-    assert "A deprecated routine" not in out            # deprecated never included
+    assert "Home address baseline fact" in out
+    # Preferences and episodic context remain available to the relevance agent.
+    assert "Avoid mustard" in out
+    assert "Cancel the Coursera" in out
+    assert "A deprecated routine" not in out
 
 
 def test_routine_block_admits_routine_tagged_regardless_of_kind():
-    """A recurring schedule that `kind` mislabels a preference (the 6 AM AC step-up) is still
-    admitted when it carries a routine/home_automation TAG. `kind` is the decay axis; tags are
-    the routing axis. Preferences WITHOUT a routine tag (mustard) still stay out."""
+    """Tags provide context but do not hide untagged or differently tagged preferences."""
     entries = [
         {"belief_key": "routine.ac_morning", "domain": "routine", "kind": "stable_preference",
          "tags": ["home_automation", "routine", "schedule"], "status": "active",
@@ -53,5 +42,5 @@ def test_routine_block_admits_routine_tagged_regardless_of_kind():
          "tags": ["food"], "status": "active", "statement": "Avoid mustard on family sandwiches."},
     ]
     out = drs._render_belief_block(entries)
-    assert "75F at 06:00" in out          # stable_preference, but routine/home_automation-tagged -> admitted
-    assert "Avoid mustard" not in out     # stable_preference, only food-tagged -> still dropped
+    assert "75F at 06:00" in out
+    assert "Avoid mustard" in out

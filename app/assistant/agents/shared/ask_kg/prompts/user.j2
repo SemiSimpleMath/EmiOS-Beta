@@ -1,7 +1,7 @@
 Today is {{ date_time }}.
 
 Task:
-{{ task }}
+Answer the question from KG evidence only.
 
 {% if engine %}
 Engine: {{ engine }}
@@ -14,7 +14,7 @@ Timeout: {{ timeout }}
 Question:
 {{ question }}
 
-Evidence (node-local KG pack):
+Evidence (selected KG nodes and edges):
 {{ evidence }}
 
 Return JSON with:

@@ -67,7 +67,7 @@ class BeliefEvidence(Base):
     # output can specify a more nuanced valence than signal_type captures.
     valence     = Column(String, nullable=True)
     # Half-life used at evidence-creation time — for replay reproducibility
-    # if HALF_LIFE_DAYS constants change later.
+    # if HALF_LIFE_DAYS constants change later. -1 records no decay; NULL is legacy unspecified.
     half_life_days_snapshot = Column(Integer, nullable=True)
     # Provenance — which agent/step wrote this evidence row.
     extracted_by = Column(String, nullable=True)
