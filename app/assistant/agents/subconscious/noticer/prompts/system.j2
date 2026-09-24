@@ -336,6 +336,26 @@ HARD RULES
 8. Don't lecture. State concerns flatly. Reasoning lives in `notes`.
 9. Resolution evidence is held to the same standard as observation
    evidence — point to specific recent items demonstrating absence.
+10. ANCHOR a new concern to the thing it is about, whenever there is one.
+   Calendar lines carry their identity in square brackets, like
+   `- [calendar:abc123_20260918T150000Z] Makeup Picture Day @ ...`.
+   If a concern is about that event, copy that token verbatim into `anchor`.
+   Copy it — never rewrite a title or a date into one, and never invent a
+   token you were not shown. An anchor you made up is worse than none.
+   Leave `anchor` null when the concern is about a pattern with no single
+   underlying item ("sleep has been poor", "work stress is recurring").
+
+   WHY THIS MATTERS TO YOU. When the owner declines a concern, or you
+   accept one as chronic, that decision is stored against the anchor. The
+   next tick still shows you the evidence that produced the concern — the
+   calendar event has not moved — so you would otherwise re-derive the
+   same worry and file it under a new id, and the owner would be asked
+   about something they already settled. The anchor is what carries their
+   answer forward. A re-mint of a settled anchor is refused and logged
+   against the original, so it costs you a tick and tells you nothing.
+   Anchor the instance you were shown: this Friday's event and next
+   year's are different tokens, so a decline about one correctly says
+   nothing about the other.
 
 ============================================================
 OUTPUT

@@ -1,9 +1,52 @@
 # TODO — concern continuity: a decline should outlive the concern it was given about
 
-**Status: NOT BUILT.** Investigated 2026-09-19, evidence refreshed 2026-09-24.
-This is a design gap, not a bug. The bug that used to sit on top of it — the user's words
-never reaching the concern at all — **is fixed**; see the last section so the two are not
-confused.
+**Status: OPTION A IMPLEMENTED 2026-09-24** (calendar anchors). Investigated 2026-09-19.
+The bug that used to sit on top of this — the owner's words never reaching the concern at all
+— was fixed separately; see "What already mitigates it" so the two are not confused.
+
+## What shipped
+
+A concern may now carry an **`anchor`**: the identity of the thing it is about, as opposed to
+the identity of the noticing.
+
+- **The context supplies real ids.** The calendar tool's human-readable `content` carries no
+  event id (it is written for planners reading prose), while the ids ride on its `data_list`.
+  `context_builder._with_calendar_anchors` prefixes each rendered event line with
+  `[calendar:<event id>]`, rewriting the tool's own output rather than reimplementing its
+  formatting, so location, attendees and description survive. The shared calendar tool is
+  untouched.
+- **The anchor is the per-INSTANCE id** (the fetch passes `single_events=True`), so this
+  year's picture day and next year's are different anchors. A decline expires by construction
+  instead of needing an expiry rule, which was an open question in the original write-up.
+- **The form has an optional `anchor`**, described as a token to COPY and never to invent or
+  paraphrase from a title. Null for patterns with no single underlying item.
+- **`persist` enforces it.** `_settled_anchors` collects anchors carrying a standing ruling
+  across every bucket, and a new concern whose anchor is already settled is refused. The
+  attempt is journalled on the concern that ruled, with a `suppressed_remint_count`, so the
+  suppression is auditable and the next tick's recently-closed section shows the worry came
+  back rather than hiding it.
+
+**A standing ruling is exactly two things:** an owner decline (`user_declined_at_utc`) or
+`accept_chronic`. **`resolved` is deliberately excluded** — resolved means the need was met or
+the moment passed, not refused, so monthly timesheets and the dogs' medication keep minting per
+cycle. Suppressing those would have broken the feature to fix the bug.
+
+15 tests in `app/assistant/tests/dayflow/test_concern_anchor_continuity.py`, including the real
+picture-day case, the recurring-obligation case that must NOT be suppressed, and legacy
+unanchored concerns.
+
+### What is still open
+
+- **Calendar anchors only.** Pods and chat clusters already appear in evidence as real ids
+  (`datapod:chat_cluster:…`), so extending is mechanical, but it is not done. A concern
+  anchored to a pod rather than an event gets no guard yet.
+- **Every concern already in the register has no anchor**, so the guard applies to new
+  concerns from here. Nothing backfills.
+- **The model has to copy the token correctly.** A missed copy means no suppression, which is
+  the safe direction. A copy of the wrong settled anchor would wrongly suppress one concern;
+  the risk is small and the journal makes it visible.
+- **Option B is unbuilt and may still be wanted** for recurring worries that anchor to
+  nothing ("work stress has been recurring"). Those remain re-mintable.
 
 ## The problem in one line
 

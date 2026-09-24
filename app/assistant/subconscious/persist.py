@@ -147,6 +147,45 @@ def apply_noticer_output(
         )
 
 
+def _journal_on(concern: Dict[str, Any], now_iso: str, line: str) -> None:
+    """Append one dated line to a concern's journal, respecting the journal cap."""
+    concern["reinforcement_notes"] = (
+        (concern.get("reinforcement_notes") or "") + f"\n[{now_iso}] {line}")
+    _trim_journal(concern)
+
+
+def _settled_anchors(register: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Anchor -> the concern carrying the owner's standing ruling about it.
+
+    A ruling is one of exactly two things, and the narrowness is the point:
+
+      * ``user_declined_at_utc`` — the owner said no to this thing.
+      * ``chronic`` (accept_chronic) — a standing decision that the pattern is real but not
+        worth tick-by-tick attention.
+
+    Deliberately NOT included:
+
+      * ``resolved`` — a resolved concern means the need was MET or the moment passed, which
+        is no reason to refuse the next one. Monthly timesheets and the dogs' medication
+        legitimately mint again each cycle, and suppressing those would break the feature to
+        fix the bug.
+      * dormant for any other reason — only an explicit ruling suppresses.
+
+    Scanned across every bucket because a ruling outlives the bucket a concern sits in: a
+    declined concern is parked dormant, and dormant was exactly where the old dedup did not
+    look. Later buckets win on a duplicate anchor so the freshest ruling is the one enforced.
+    """
+    settled: Dict[str, Dict[str, Any]] = {}
+    for bucket in ("resolved", "dormant", "addressing", "active"):
+        for c in register.get(bucket) or []:
+            anchor = str(c.get("anchor") or "").strip()
+            if not anchor:
+                continue
+            if c.get("user_declined_at_utc") or c.get("chronic"):
+                settled[anchor] = c
+    return settled
+
+
 def _apply_noticer_output_locked(
     output: Dict[str, Any],
     *,
@@ -177,12 +216,37 @@ def _apply_noticer_output_locked(
             if cid:
                 by_id[cid] = c
 
+    # Anchors the owner has already ruled on, across EVERY bucket. A concern_id is the
+    # identity of the noticing; an anchor is the identity of the thing noticed. Deduping on
+    # the former alone is what let a declined concern come straight back under a fresh UUID:
+    # the evidence that produced it is still in context next tick, so the same worry is
+    # re-derived, and a new id never collides.
+    settled = _settled_anchors(register)
+
     # 1. New concerns → active
     for c in new_concerns:
         # Best-effort: skip if same concern_id already exists (idempotent reruns)
         cid = c.get("concern_id")
         if cid and cid in by_id:
             logger.info("[noticer.persist] new_concern %s already exists; skipping", cid)
+            continue
+        anchor = str(c.get("anchor") or "").strip()
+        prior = settled.get(anchor) if anchor else None
+        if prior is not None:
+            # The owner settled this exact thing. Record the attempt ON THE PRIOR concern so
+            # the suppression is auditable rather than silent, and so the next tick's
+            # recently-closed section shows that the worry came back.
+            ruling = ("declined" if prior.get("user_declined_at_utc")
+                      else "accepted as chronic")
+            _journal_on(prior, now_utc_iso,
+                        f"SUPPRESSED a re-mint of this ({ruling}): {str(c.get('title') or '')[:160]}")
+            prior["suppressed_remint_count"] = int(prior.get("suppressed_remint_count") or 0) + 1
+            prior["suppressed_remint_at_utc"] = now_utc_iso
+            logger.info(
+                "[noticer.persist] new_concern %s SUPPRESSED — anchor %s was already %s on "
+                "concern %s (%r)",
+                cid, anchor, ruling, prior.get("concern_id"), str(c.get("title") or "")[:80],
+            )
             continue
         register.setdefault("active", []).append(c)
 

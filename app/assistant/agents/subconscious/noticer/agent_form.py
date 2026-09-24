@@ -64,6 +64,18 @@ class Concern(BaseModel):
     )
     notes: str = Field(max_length=600, description="Reasoning. Why this matters. NOT a proposal.")
     first_observed: str = Field(description="ISO datetime when this concern was first crystallized.")
+    anchor: Optional[str] = Field(
+        default=None,
+        description=(
+            "The IDENTITY OF THE THING this concern is about, copied verbatim from the "
+            "context — e.g. the `calendar:<id>` token shown in square brackets on a calendar "
+            "line. Null when the concern is about a pattern with no single underlying item "
+            "(recurring stress, poor sleep). NEVER invent one and never paraphrase a title "
+            "into one: an anchor is an id you were shown, not a description you wrote. It is "
+            "what lets a decline you were given about one concern survive into the next one "
+            "about the same thing."
+        ),
+    )
 
 
 class ConcernReinforcement(BaseModel):

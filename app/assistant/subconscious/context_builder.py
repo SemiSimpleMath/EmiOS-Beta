@@ -372,8 +372,65 @@ def _build_calendar_30_90d(*, now_local: datetime) -> str:
     return _fetch_calendar_text(start, end, label="30-90 day horizon")
 
 
+def _anchor_for_calendar_event(event: Dict[str, Any]) -> str:
+    """The stable anchor token for one calendar event: ``calendar:<google event id>``.
+
+    An ANCHOR is the identity of the thing in the world that a concern is about, as opposed
+    to the identity of the noticing. It exists so that declining a concern can outlive the
+    concern_id it was given about: `persist` refuses to re-mint a concern whose anchor matches
+    one the owner already declined, and a fresh UUID can no longer walk around that decision.
+
+    The id is the per-INSTANCE id (the fetch passes single_events=True), so this Friday's
+    picture day and next year's are different anchors and a decline about one says nothing
+    about the other. That expiry-by-construction is the reason to anchor on the instance
+    rather than on the recurring series.
+    """
+    return f"calendar:{str(event.get('id') or '').strip()}"
+
+
+def _with_calendar_anchors(content: str, events: List[Dict[str, Any]]) -> str:
+    """Prefix each rendered event line with its anchor token.
+
+    The calendar tool renders one line per event as ``- <title> @ <start> …`` and dedups by
+    title, so a title maps to exactly one rendered line within a fetch. That makes title the
+    tool's OWN join key, and reusing it here is a deterministic rewrite of the tool's output
+    rather than a second opinion about what the line means.
+
+    Deliberately a rewrite and not a reimplementation: the tool's line carries location,
+    meeting link, attendees and description, all of which the noticer reads. Building our own
+    line would silently drop them.
+    """
+    by_title: Dict[str, str] = {}
+    for ev in events:
+        title = str(ev.get("summary") or "").strip()
+        anchor = _anchor_for_calendar_event(ev)
+        if title and anchor != "calendar:" and title.lower() not in by_title:
+            by_title[title.lower()] = anchor
+    if not by_title:
+        return content
+
+    out: List[str] = []
+    for line in content.split("\n"):
+        if not line.startswith("- "):
+            out.append(line)
+            continue
+        # The tool writes "- <title> @ <start>…"; split on the first " @ " it added, and fall
+        # through to the whole remainder when an event had no start to render.
+        body = line[2:]
+        title = body.split(" @ ", 1)[0].strip()
+        anchor = by_title.get(title.lower())
+        out.append(f"- [{anchor}] {body}" if anchor else line)
+    return "\n".join(out)
+
+
 def _fetch_calendar_text(start_local: datetime, end_local: datetime, *, label: str) -> str:
-    """Invoke the get_calendar_events tool and format the result."""
+    """Invoke the get_calendar_events tool and format the result.
+
+    Each event line is prefixed with its ``calendar:<id>`` anchor so a concern about a dated
+    event can cite the event itself. The tool's human-readable `content` carries no id (it is
+    written for planners reading prose), while the ids ride on `data_list` — so the anchors are
+    added here rather than by changing a tool every other agent shares.
+    """
     try:
         from app.assistant.utils.pydantic_classes import ToolMessage
         cls = DI.tool_registry.get_tool_class("get_calendar_events")
@@ -398,7 +455,19 @@ def _fetch_calendar_text(start_local: datetime, end_local: datetime, *, label: s
     content = (getattr(result, "content", None) or "").strip()
     if not content:
         return _NO_DATA_FMT.format(kind=f"calendar ({label})")
-    return content
+
+    events = getattr(result, "data_list", None)
+    if not isinstance(events, list):
+        # The ids live only here. Losing them costs the anchors, which costs the re-mint
+        # guard — so it is an ERROR, not a shrug. The calendar text is still returned,
+        # because a noticer with no calendar at all is strictly worse than one whose
+        # concerns cannot be anchored; persist simply cannot dedup what carries no anchor.
+        logger.error(
+            "[noticer.context] calendar (%s) returned no data_list — concerns from this "
+            "fetch will carry NO anchor and cannot be matched against a declined one", label,
+        )
+        return content
+    return _with_calendar_anchors(content, events)
 
 
 def _build_sleep_log() -> str:
