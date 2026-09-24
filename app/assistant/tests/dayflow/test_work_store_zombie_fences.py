@@ -131,8 +131,13 @@ class TestClaimGuard:
         node = WorkNode(id="n1", work_id="wo", type="subtask", parent_id="goal",
                         status=status, payload={"dispatch_epoch": 1})
         wo = WorkObject(id="wo", title="claim", goal_node_id="goal", nodes={"n1": node})
+        # start_execution is part of the store contract open_session relies on — the real
+        # WorkStore gets it from ExecutionStoreMixin. A double that omits a method the
+        # production caller invokes fails on the method, not on the behaviour under test,
+        # which is how these two went red without anything being wrong with the claim gate.
         return SimpleNamespace(load=lambda wid: wo,
-                               apply=lambda *a, **k: applies.append((a, k))), applies
+                               apply=lambda *a, **k: applies.append((a, k)),
+                               start_execution=lambda owner: None), applies
 
     def test_unclaimed_node_is_refused(self, monkeypatch):
         from app.assistant.dayflow_orchestrator import work_session as ws

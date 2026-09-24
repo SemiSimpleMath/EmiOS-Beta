@@ -222,8 +222,16 @@ def test_the_architect_is_told_when_the_goal_keeps_failing(store):
         _set(store, wo.id, nid, "failed")
         _judge_not_achieved(store, wo.id, nid)
     rendered = _render_existing_graph(store.load(wo.id))
-    assert "2 ATTEMPTS HAVE NOT ACHIEVED THIS GOAL" in rendered
-    assert "ask whether" in rendered
+    # The goal-level tally still reaches the architect — the point of this test — but under
+    # the phrasing the Jinja projections standardized on (2026-09-19). The count is what
+    # survives replanning: the node that kept failing gets abandoned and replaced, so every
+    # per-node counter reads zero while the goal has been failing at the same thing all day.
+    assert "goal failures judged by finalizer: 2" in rendered
+    # What the tally must NOT do is send the architect back to the user. The old render told
+    # it to "ask whether to keep going", which is how a settled question got re-asked; the
+    # current one says so explicitly and routes through the finalizer's instruction instead.
+    assert "do not re-ask a resolved question because of this tally" in rendered
+    assert "NEXT: ask_user" in rendered
 
 
 def test_one_failure_is_not_worth_shouting_about(store):
