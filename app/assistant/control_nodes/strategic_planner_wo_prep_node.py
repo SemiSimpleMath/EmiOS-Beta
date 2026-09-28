@@ -214,6 +214,8 @@ class StrategicPlannerWoPrepNode(ControlNode):
         recover_pending_work_closures(store)
         from app.assistant.subconscious.concern_feedback import recover_pending_concern_feedback
         recover_pending_concern_feedback(store)
+        from belief_engine.work_feedback import recover_pending_belief_feedback
+        recover_pending_belief_feedback(store)
         from app.assistant.dayflow_orchestrator.work_intake import reconcile_transferred_intake
         remaining = reconcile_transferred_intake(store, list(inbox.values()))
         self.blackboard.update_state_value("admitted_artifacts", remaining)
@@ -240,6 +242,11 @@ class StrategicPlannerWoPrepNode(ControlNode):
         self.blackboard.update_state_value("work_portfolio", portfolio)
         self.blackboard.update_state_value("recent_completed_work", recent_completed)
         self.blackboard.update_state_value("recent_abandoned_work", recent_abandoned)
+
+        from datetime import datetime, timezone
+        from app.assistant.dayflow_orchestrator.communication_context import scheduled_reminder_history
+        self.blackboard.update_state_value("scheduled_reminder_history",
+                                           scheduled_reminder_history(datetime.now(timezone.utc)))
 
         # 2) Situational context — reuse strategic_planner_prep_node's proven builders.
         try:

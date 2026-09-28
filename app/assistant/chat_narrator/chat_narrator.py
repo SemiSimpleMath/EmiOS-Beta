@@ -174,7 +174,7 @@ class ChatNarrator:
     def _on_invocation_started(self, message: Message) -> None:
         """Handle a ``manager_invocation_started`` event.
 
-        Publishes ``Delegating to <Name>.`` in chat for any named worker.
+        Publishes the assigned task title for work invocations, otherwise a delegation notice.
         Silent for unnamed workers, disabled narration, or any failure
         in the chain — never breaks the firing manager.
 
@@ -206,11 +206,10 @@ class ChatNarrator:
             if not cfg["enabled"]:
                 return
             reply_to = data.get("reply_to") if isinstance(data.get("reply_to"), dict) else None
-            self._publish_chat(
-                sender=display_name,
-                text=f"Delegating to {display_name}.",
-                reply_to=reply_to,
-            )
+            from app.assistant.dayflow_orchestrator.work_context import render_view
+            text = render_view("worker_started", display_name=display_name,
+                               task_title=data.get("task_title") or "").strip()
+            self._publish_chat(sender=display_name, text=text, reply_to=reply_to)
         except Exception:
             logger.debug(
                 "ChatNarrator._on_invocation_started failed", exc_info=True,

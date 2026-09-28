@@ -1,0 +1,17 @@
+# Checks ONE newly extracted atomic belief against the existing beliefs, each shown with where it
+# came from, and decides: same / refines / contradicts / new. Step 3 of
+# docs/design/belief_intake_redesign_2026-09-26.md.
+#
+# It DECIDES only. Candidates carry local ids restored by code; nothing is written to the belief
+# store. Not wired into any pipeline yet — exercised by
+# app/assistant/tests/agent_tests/belief_dedup/run_dedup.py.
+name: belief_engine::belief_dedup
+class_name: Agent
+llm_params:
+  llm_provider: openai
+  engine: gpt-5.6-luna
+  model_tier: strong
+allowed_tools: []
+except_tools: []
+user_context_items: [new_belief, existing_beliefs]
+system_context_items: [resource_user_data]

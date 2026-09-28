@@ -1,0 +1,25 @@
+# Rewrites ONE belief as one or more ATOMIC beliefs.
+#
+# Why this exists: a belief that bundles several claims cannot be merged, decayed or
+# contradicted precisely. Two bundles that overlap partially are judged `specialises` by the
+# matcher, which writes a receipt and does nothing — 105 such pairs sit unresolved in the store,
+# while only 2 pairs have ever merged. Atoms turn those dead-end comparisons into clean
+# same/different judgments. The Seyfarth cluster is the worked example: ten overlapping beliefs,
+# ~800 words, three separate statements of one safety boundary, none of which can converge.
+#
+# It DECIDES only. Control code validates the output against the supplied evidence and writes
+# through BeliefStore; owner-locked beliefs never reach it.
+name: belief_engine::belief_atomizer
+class_name: Agent
+llm_params:
+  llm_provider: openai
+  engine: gpt-5.6-luna
+  model_tier: strong
+allowed_tools: []
+except_tools: []
+# Entity scanning serves reference resolution: an atom has to stand alone, so "the kids" or
+# "the school" must name who is meant. entity_card_level 0 keeps it to headers.
+entity_scan_keys: [belief, evidence]
+entity_card_level: 0
+user_context_items: [belief, evidence]
+system_context_items: [resource_user_data]

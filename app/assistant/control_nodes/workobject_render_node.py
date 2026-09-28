@@ -2,7 +2,7 @@
 WorkObjectRenderNode — the pre-node that runs before every WorkerPlanner turn.
 
 It loads the WorkObject node the planner owns and renders it (its node, its checklist
-= child subtask nodes, recorded outputs, resolved dependencies, and the work tree)
+= child subtask nodes, recorded outputs, and the main-task title index)
 into `work_projection` on the blackboard; the planner's user.j2 renders that. Re-runs
 each cycle so the planner always sees the CURRENT node state (subtasks it just added,
 statuses it just changed) — current-state + the inherited recent_history together.

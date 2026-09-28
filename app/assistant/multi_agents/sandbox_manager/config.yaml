@@ -67,6 +67,10 @@ control_nodes:
 # skill discovery). NO cross-manager calls.
 tools:
   allowed_tools:
+    - work_graph_summary
+    - work_graph_search
+    - work_graph_peek
+    - work_artifact_fetch
     - execute_code
     - pod_search
     - pod_fetch

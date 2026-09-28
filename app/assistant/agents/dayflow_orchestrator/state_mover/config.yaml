@@ -13,6 +13,7 @@ entity_scan_keys: [planner_summary]
 entity_card_level: 0
 
 user_context_items:
+  - scheduled_reminder_history
   - date_time
   - day_of_week
   - ready_work_nodes

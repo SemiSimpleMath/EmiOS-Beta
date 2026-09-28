@@ -655,3 +655,27 @@ If setup is incomplete or history is empty, the scheduler skips agent execution
 and keeps a fallback readiness check in 30 minutes. The existing scheduling helper
 preserves earlier external wakes and does not add jobs after stop. This prevents a
 first-run readiness skip from consuming the only periodic tick.
+
+
+### Fixed scheduler reminder context
+
+Dayflow's steward, architect, and state mover now share the independent fixed
+scheduler's recent outbound reminder records. Both planning ticks and timed node
+wakes refresh this context. `communication_context.scheduled_reminder_history`
+reads the last 18 hours from `unified_log_2026` (`scheduler_reminder`, master room,
+outbound), with explicit UTC window endpoints, stable record IDs and full text.
+It uses the existing source/timestamp index; there is no extra LLM call, database
+write, or ordinary chat-path operation. `shared/work/scheduled_reminders.j2`
+contains the interpretation guidance.
+
+The reminder handler records a message **before** delivery. This context therefore
+means a message was prepared/persisted, not delivered, read, acknowledged, or acted
+on. Query failure renders as unavailable, distinct from an empty window. The
+history supplements existing exact ticket replies and work/finalizer history.
+The model judges relevance: similar wording or overlap does not mechanically
+suppress a dynamic reminder, close a task, or change an APScheduler job.
+
+This first slice does not expose future scheduler jobs or prove successful delivery.
+It does not join cron fallback tickets to log rows, infer replies from nearby chat,
+or unify every transport's history. The time window bounds the query; messages
+within it are not clipped or semantically merged.

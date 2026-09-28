@@ -115,6 +115,8 @@ class StateMoverPrepNode(ControlNode):
         self.blackboard.update_state_value("active_plan_synopses", plan_synopses)
         self.blackboard.update_state_value("recent_dayflow_chat_history", chat_history)
         self.blackboard.update_state_value("recent_responded_tickets", responded_tickets)
+        from app.assistant.dayflow_orchestrator.communication_context import scheduled_reminder_history
+        self.blackboard.update_state_value("scheduled_reminder_history", scheduled_reminder_history(now_utc))
 
         # Work-object nodes parked on an external event — the state_mover wakes these (it replaces the
         # standalone event_waker). The graph handles their time/dependency gates; only the event match is

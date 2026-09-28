@@ -60,9 +60,11 @@ class TaskRoutineRunner:
         failed = run_status in ("failed", "stalled")
         message = ""
         if failed:
-            from app.assistant.task_runtime.task_runner import failure_reason
-            from app.assistant.task_runtime.task_store import get_task_work_store
-            message = f"task run {run_status}: {failure_reason(get_task_work_store(), work_id)}"
+            # The reason comes from the run itself. Re-deriving it here used to read the graph
+            # AFTER entry abandoned the work object, and the closure cascade had already
+            # overwritten the failed node — so a real error was reported as a phantom
+            # "no failed node recorded (stalled graph)" (2026-09-13 morning_briefing).
+            message = f"task run {run_status}: {result.get('failure_reason') or '(no reason recorded)'}"
         return RoutineRunResult(
             status="error" if failed else "success",
             message=message,

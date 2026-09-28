@@ -68,6 +68,10 @@ control_nodes:
 
 tools:
   allowed_tools:
+    - work_graph_summary
+    - work_graph_search
+    - work_graph_peek
+    - work_artifact_fetch
     - ask_user
     - find_tool
     - install_tool
@@ -80,6 +84,10 @@ tools:
 scope_contract:
   tools:
     allowed_tools:
+      - work_graph_summary
+      - work_graph_search
+      - work_graph_peek
+      - work_artifact_fetch
       - ask_user
       - find_tool
       - install_tool

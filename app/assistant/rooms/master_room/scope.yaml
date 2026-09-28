@@ -34,6 +34,10 @@ tools:
     # leaves stay reachable through those managers.
     emi_team_manager:
       allow:
+        - work_graph_summary
+        - work_graph_search
+        - work_graph_peek
+        - work_artifact_fetch
         - personal_admin_manager
         - devices_manager
         - web_manager

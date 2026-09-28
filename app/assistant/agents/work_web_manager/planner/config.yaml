@@ -1,7 +1,7 @@
 # work_web_manager::planner — web::planner's research agent (its model, tools, notebook, skills) adapted
 # to OWN a WorkObject graph node. Deltas vs app/assistant/agents/web/planner/config.yaml:
 #   class_name: Planner -> WorkPlanner       (mirrors checklist -> subtask nodes + findings_to_pod -> pods)
-#   + work_graph_peek / work_graph_search    (hydrate a ·has-output node before searching)
+#   + work_graph_peek / work_graph_search    (inspect relevant task outputs before searching)
 #   user_context_items: work_projection (the render node injects YOUR NODE + checklist with [id]s)
 #                       replaces task / information / checklist — the graph IS the task + checklist now.
 # The prompts (system.j2 / user.j2) are derived from web/planner's — see their headers, keep in sync.
@@ -27,7 +27,7 @@ allowed_tools:
   - web_modal_scan
   - find_tool
   - ask_user
-  # read-only graph tools: hydrate another node's output (·has-output in THE WORK TREE) before searching
+  # read-only graph tools: inspect another task and hydrate its artifacts before searching
   - work_graph_peek
   - work_graph_search
 

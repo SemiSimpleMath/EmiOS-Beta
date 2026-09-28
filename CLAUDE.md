@@ -259,3 +259,21 @@ recovers pending receipts. Register writes are receipt-idempotent; acknowledge o
 after every linked concern is updated. Preserve `work_outcomes` in concern context,
 including attributed user replies and finalizer judgments. A completed notification
 does not prove the underlying need resolved. Noticer recurrence policy lives in Jinja.
+
+
+### Belief outcome delivery
+
+A belief that caused work receives that work's outcome, by the same contract as concerns.
+`based_on: ["belief:<belief_key>"]` is lifted into `constraints.belief_refs` at creation —
+keyed by belief_key, never row id, so a merge retiring an id still resolves. Belief-linked
+terminal transitions enqueue `work_belief_feedback` in the same WorkStore transaction;
+`belief_engine/work_feedback.py` delivers post-commit from finalization, closure and evaluator
+prep. `belief_engine::work_outcome` decides `no_change`/`resolve`/`revise` with a valence; the
+control code writes through BeliefStore and honours owner locks there, not in the agent. The
+outcome attaches as evidence (`source_type='work_outcome'`, `source_ref=<work_id>`), which is
+both the reverse link and the idempotency fence. A delivery is not an outcome: a success
+criterion naming an act closes the objective while the need is still open, so a criterion states
+the OUTCOME and carries a source's own completion condition ("until he books it") verbatim.
+Recurrence is the finalizer/architect loop re-deciding the next attempt, never a schedule
+grammar. A belief_key retired by a merge is logged and skipped; merge-following is not
+implemented.

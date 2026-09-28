@@ -99,14 +99,12 @@ result to the user has failed its purpose: the answer must not sit unread inside
 the final hand-back, distinct from a mid-task question to the user.
 
 ## Passing findings between nodes
-A worker can READ the whole graph — work_graph_summary (index), work_graph_search (find by content),
-and work_graph_peek (read any node's full body) — and for a node it `depends_on`, that upstream node's
-PRODUCED outputs (findings/artifacts) are surfaced in its view automatically. Workers are NOT blind to
-each other's results. When a later node consumes an earlier node's output (a finding / pod id, a chosen
-option, a drafted text): wire `depends_on` (it orders the node AND surfaces the upstream's produced
-outputs), and name what to reuse in the later node's `detail` ("use the recommendation from the research
-node") so the worker knows which node to peek. Don't paste the whole result into `detail` — point at it;
-the worker pulls it from the graph.
+Workers initially see main-task titles, IDs and statuses, plus their own task and history.
+They can use work_graph_peek to read a selected task and its artifact titles/IDs, then
+work_artifact_fetch to read a selected artifact completely, including a linked pod.
+Name the earlier node and what to reuse in the consuming task's detail; do not paste its body.
+Use depends_on when execution requires that task to finish. Reading retained output from an
+abandoned attempt does not require a new completion dependency. Existing outputs remain readable.
 
 ## Carry the pod id down
 When the goal names a pod — `[full content: datapod:email:<id> — open with pod_fetch]` in its

@@ -19,5 +19,6 @@ user_context_items:
   - seeds
   - primary_user
   - visitor_label
+  - recent_chat_context
 
 system_context_items: []

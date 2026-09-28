@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import heapq
 import math
+import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -167,6 +168,7 @@ def _bfs_from_seed(
     depth: int,
     max_nodes: int,
     seed_node_ids: Optional[List[str]] = None,
+    deadline: Optional[float] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """
     Priority-BFS from a single seed node.
@@ -179,6 +181,11 @@ def _bfs_from_seed(
       their edges processed.  This matters for high-degree seeds (e.g. the primary user
       node with 1000+ edges): we visit all hop=1 neighbours but only expand the best
       `max_nodes` of them at hop=2.
+    - `deadline` (time.monotonic()) bounds wall time: once passed, expansion stops and
+      what has been visited so far is returned. Seeded on the primary user alone, an
+      unbounded walk activated 6,412 nodes in 1h54m on 2026-09-27 (every edge costs two
+      degree COUNT queries), on a background thread that also held the pipeline's
+      per-owner lock.
 
     Returns a dict: node_id -> {
         "activation": float,   # strongest activation along any path from seed
@@ -195,6 +202,13 @@ def _bfs_from_seed(
     expand_count = 0
 
     while heap:
+        if deadline is not None and time.monotonic() > deadline:
+            logger.warning(
+                "kg_convergence: wall budget exhausted in BFS from %s after expanding %d nodes "
+                "(%d visited, %d still queued); returning the partial result",
+                seed_id, expand_count, len(visited), len(heap),
+            )
+            break
         neg_act, current_id, current_hop = heapq.heappop(heap)
         current_activation = -neg_act
 
@@ -390,6 +404,7 @@ def multi_seed_activation(
     second_wave_seeds: int = DEFAULT_SECOND_WAVE_SEEDS,
     second_wave_depth: int = DEFAULT_SECOND_WAVE_DEPTH,
     exclude_seed_nodes_from_output: bool = True,
+    deadline: Optional[float] = None,
 ) -> ConvergenceResult:
     """
     Run multi-seed BFS activation and return convergence-scored nodes.
@@ -402,6 +417,8 @@ def multi_seed_activation(
         second_wave_seeds:             How many top convergence nodes to use as seeds for wave 2.
         second_wave_depth:             BFS depth for the second expansion wave.
         exclude_seed_nodes_from_output: Don't return the seeds themselves in the results.
+        deadline:                      time.monotonic() value after which the walks stop and
+                                       return partial results; wave 2 is skipped once passed.
 
     Returns:
         ConvergenceResult with convergence_nodes, all_activated_nodes, second_wave_nodes.
@@ -428,7 +445,8 @@ def multi_seed_activation(
     # per_seed[seed_id][node_id] = {activation, hop}
     per_seed: Dict[str, Dict[str, Dict[str, Any]]] = {}
     for seed_id in seed_node_ids:
-        per_seed[seed_id] = _bfs_from_seed(session, seed_id, depth, MAX_EXPAND_PER_SEED, seed_node_ids=seed_node_ids)
+        per_seed[seed_id] = _bfs_from_seed(session, seed_id, depth, MAX_EXPAND_PER_SEED,
+                                           seed_node_ids=seed_node_ids, deadline=deadline)
         logger.info(
             "kg_convergence: seed '%s' activated %d nodes",
             seed_labels.get(seed_id, seed_id),
@@ -478,7 +496,9 @@ def multi_seed_activation(
     # visited nodes — otherwise everything Jukka's BFS touched is excluded and
     # the second wave finds nothing.
     second_wave_nodes: List[ScoredNode] = []
-    if convergence_nodes and second_wave_seeds > 0:
+    if deadline is not None and time.monotonic() > deadline:
+        logger.warning("kg_convergence: wall budget exhausted after wave 1; skipping wave 2")
+    elif convergence_nodes and second_wave_seeds > 0:
         # Use ALL convergence nodes as wave-2 seeds (not just top-N) so that
         # lower-ranked but interesting nodes like Varadarajan also get expanded.
         wave2_seeds = [n.node_id for n in convergence_nodes]
@@ -488,7 +508,8 @@ def multi_seed_activation(
         wave2_per_seed: Dict[str, Dict[str, Dict[str, Any]]] = {}
         for seed_id in wave2_seeds:
             wave2_per_seed[seed_id] = _bfs_from_seed(
-                session, seed_id, second_wave_depth, MAX_EXPAND_PER_SEED, seed_node_ids=seed_node_ids
+                session, seed_id, second_wave_depth, MAX_EXPAND_PER_SEED, seed_node_ids=seed_node_ids,
+                deadline=deadline,
             )
 
         wave2_merged: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)

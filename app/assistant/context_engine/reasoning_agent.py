@@ -24,10 +24,11 @@ logger = get_logger(__name__)
 
 _REASONING_TASK_TEMPLATE = """\
 The user said: "{user_message}"
-
+{conversation}
 You have been given a pre-computed situation dossier about {subject} \
 and their connection to {primary_user}. Your job is to think through what needs to \
-happen for this situation.
+happen for this situation. The conversation above is what the message refers to; the \
+Knowledge Graph holds what was recorded before today.
 
 {dossier}
 
@@ -77,8 +78,11 @@ def run_reasoning_agent(
     visitor_seeds = [s for s in brief.seeds if s.lower() != primary_user.lower()]
     subject = visitor_seeds[0] if visitor_seeds else brief.seeds[0]
 
+    conversation = (f"\nRecent conversation this message belongs to:\n{brief.recent_chat_context}\n"
+                    if brief.recent_chat_context else "")
     task = _REASONING_TASK_TEMPLATE.format(
         user_message=brief.user_message,
+        conversation=conversation,
         subject=subject,
         primary_user=primary_user,
         dossier=brief.situation_brief,

@@ -94,16 +94,39 @@ class BeliefEnginePipeline:
         ]
 
         overall_status = "success"
+        # Per-item failures a step tolerated. The run still succeeds (so downstream steps and
+        # the export are not lost to one bad row), but they are carried out to the run record
+        # and logged at ERROR, so a tolerated failure is never a silent one.
+        tolerated: list = []
         for step in steps:
             t0 = time.monotonic()
             try:
                 logger.info("[BeliefEnginePipeline:%s] >> %s", run_id, step.name)
                 details = step.run(ctx)
-                if isinstance(details, dict) and (details.get("status") in ("error", "partial_error") or details.get("stats", {}).get("errors", 0) or details.get("errors", 0)):
+                incomplete = isinstance(details, dict) and (
+                    details.get("status") in ("error", "partial_error")
+                    or details.get("stats", {}).get("errors", 0) or details.get("errors", 0))
+                # A step may declare that its per-item failures are tolerated: the items were
+                # skipped, not written, and named in the step's own ERROR summary. The run then
+                # continues so one bad row cannot cost the whole pass (and, after three, the
+                # routine itself). Any step that does NOT declare this still aborts as before —
+                # tolerance is opt-in per step, never inferred from the error count.
+                tolerated_here = incomplete and bool(details.get("incomplete_tolerated"))
+                if incomplete and not tolerated_here:
                     raise RuntimeError(f"{step.name} reported incomplete processing: {details}")
                 elapsed = time.monotonic() - t0
-                step_results.append({"step": step.name, "status": "success", "duration_s": round(elapsed, 2), "result": details})
-                logger.info("[BeliefEnginePipeline:%s] << %s OK (%.1fs)", run_id, step.name, elapsed)
+                if tolerated_here:
+                    tolerated.append({"step": step.name,
+                                      "failed_items": details.get("failed_beliefs") or details})
+                    logger.error(
+                        "[BeliefEnginePipeline:%s] %s COMPLETED WITH TOLERATED FAILURES (%.1fs) — the run "
+                        "continues; skipped items: %s",
+                        run_id, step.name, elapsed, details.get("failed_beliefs") or details)
+                step_results.append({"step": step.name,
+                                     "status": "success_with_tolerated_failures" if tolerated_here else "success",
+                                     "duration_s": round(elapsed, 2), "result": details})
+                if not tolerated_here:
+                    logger.info("[BeliefEnginePipeline:%s] << %s OK (%.1fs)", run_id, step.name, elapsed)
             except Exception as exc:
                 elapsed = time.monotonic() - t0
                 overall_status = "error"
@@ -122,6 +145,7 @@ class BeliefEnginePipeline:
             "run_id": run_id,
             "domain": self.label,
             "status": overall_status,
+            "tolerated_failures": tolerated,
             "started_at_utc": started,
             "finished_at_utc": finished,
             "steps": step_results,

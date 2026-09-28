@@ -60,6 +60,10 @@ control_nodes:
 # a deliberate widening of capability.
 tools:
   allowed_tools:
+    - work_graph_summary
+    - work_graph_search
+    - work_graph_peek
+    - work_artifact_fetch
     - run_shell
     - ask_user
     - mint_pod_from_path

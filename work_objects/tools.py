@@ -41,10 +41,10 @@ class WorkGraphTools:
         """One line per node (id/type/status/title). The default context is small;
         this is how the agent surveys the rest without pulling full bodies."""
         wo = self.store.load(self.work_id)
-        nodes = list(wo.nodes.values())
+        nodes = [n for n in wo.nodes.values() if wo.is_work_unit(n)]
         if subtree_only:
             keep = self._subtree_ids(wo, self.node_id)
-            nodes = [n for n in nodes if n.id in keep]
+            nodes = [n for n in wo.nodes.values() if n.id in keep]
         return [self._summ(n) for n in nodes]
 
     def graph_peek(self, node_id: str) -> dict:
@@ -53,7 +53,9 @@ class WorkGraphTools:
         n = wo.nodes.get(node_id)
         if n is None:
             raise KeyError(f"graph_peek: node {node_id!r} not found")
+        from work_objects.read_context import artifact_index
         return {
+            "artifacts": artifact_index(wo, node_id),
             "id": n.id, "type": n.type, "status": n.status, "title": n.title,
             "content": n.content, "payload": n.payload, "pod_ref": n.pod_ref,
             "satisfied_when_kind": n.satisfied_when_kind, "owner_agent": n.owner_agent,

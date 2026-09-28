@@ -162,6 +162,12 @@ Entity context:
 ########## GOOD TO BRING UP WITH {{ (resource_user_data.first_name or "user") | upper }} IF IT FITS NATURALLY ##########
 {{ chat_nudges }}
 {%- endif %}
+{%- if relevant_beliefs %}
+
+########## WHAT {{ assistant_name | upper }} KNOWS ABOUT {{ (resource_user_data.first_name or "the user") | upper }} (may or may not be relevant) ##########
+*Beliefs formed from earlier days, each with the day it was last seen. One shapes the reply when it changes what a good reply is; when the latest message says otherwise, the message wins.*
+{{ relevant_beliefs }}
+{%- endif %}
 {%- if chat_memory %}
 
 ########## PAST CONVERSATIONS (RAG — may or may not be relevant) ##########

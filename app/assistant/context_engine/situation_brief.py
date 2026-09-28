@@ -45,6 +45,11 @@ class SituationBrief(BaseModel):
     # Activation inputs
     user_message: str
     seeds: List[str]
+    # The recent conversation the message belongs to — what "it", "that", "he" refer to. The
+    # KG is written nightly and cannot hold anything said today, so every stage after
+    # chat_scan needs this alongside the message (2026-09-27: without it, "Was it poisoned
+    # you think?" became a two-hour KG hunt for an unknown "it").
+    recent_chat_context: Optional[str] = None
 
     # Stage outputs
     kg_briefing: str

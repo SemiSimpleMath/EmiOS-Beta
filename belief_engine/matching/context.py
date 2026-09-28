@@ -111,12 +111,19 @@ def observations(conn, belief_id):
     return list(unique.values())
 
 
-def pages(records, max_chars=48000):
-    """Bound batches between whole records. An oversized record is sent whole."""
+def pages(records, max_chars=48000, max_items=None):
+    """Bound batches between whole records. An oversized record is sent whole.
+
+    `max_items` additionally caps how many records share a page. Char bounding alone cannot
+    express the evidence-page reviewer's real burden: it must echo one finding per fragment
+    id, and that scales with COUNT, not size. A 36,000-char page of small records carried
+    30-38 fragments, and the exact-echo contract broke there (2026-09-25). Callers with no
+    per-record obligation leave it None and keep the pure char behaviour.
+    """
     batch, size = [], 0
     for record in records:
         length = len(encode(record))
-        if batch and size + length > max_chars:
+        if batch and (size + length > max_chars or (max_items is not None and len(batch) >= max_items)):
             yield batch
             batch, size = [], 0
         batch.append(record)

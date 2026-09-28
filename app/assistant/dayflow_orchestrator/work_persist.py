@@ -70,12 +70,20 @@ def persist_steward_output(store, output: Dict[str, Any], *, admitted_artifacts=
             # outcome to the register (concern_feedback.propagate_work_outcome).
             concern_refs = [str(b).strip() for b in (spec.get("based_on") or [])
                             if str(b).strip().startswith("concern:")]
+            # Belief provenance rides constraints for the same reason: a belief that caused
+            # this work wants the outcome back. Stored as the belief_key, not the row id —
+            # a merge deprecates the losing id but the surviving key still resolves.
+            belief_refs = [str(b).strip()[len("belief:"):].strip()
+                           for b in (spec.get("based_on") or [])
+                           if str(b).strip().startswith("belief:")
+                           and str(b).strip()[len("belief:"):].strip()]
             wo = store.apply("create_work_object", {
                 "title": objective[:80],
                 "goal_content": render_view("goal_content", objective=objective, sources=sources,
                                             success_criteria=str(spec.get("success_criteria") or "").strip()),
                 "satisfied_when_kind": "all_owned_children_done",
-                "constraints": {"concern_refs": concern_refs, "objective": objective,
+                "constraints": {"concern_refs": concern_refs, "belief_refs": belief_refs,
+                                "objective": objective,
                                 "source_intake": sources, "rationale": rationale,
                                 "success_criteria": str(spec.get("success_criteria") or "").strip()},
             }, actor="steward")
@@ -119,5 +127,11 @@ def recover_pending_work_closures(store):
             # The helper normally logs its own failures; preserve this boundary
             # even if an unexpected caller/dependency error escapes it.
             logger.error("persist: work %s committed %s; concern feedback failed",
+                         wid, status, exc_info=True)
+        try:
+            from belief_engine.work_feedback import propagate_work_outcome_to_beliefs
+            propagate_work_outcome_to_beliefs(store, wid, status)
+        except Exception:
+            logger.error("persist: work %s committed %s; belief feedback failed",
                          wid, status, exc_info=True)
     return result

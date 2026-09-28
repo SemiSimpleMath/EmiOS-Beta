@@ -122,6 +122,36 @@ class BeliefEngineAdapter:
             )
         successes, failures = 1, 0
 
+        # A tolerated per-item failure does not fail the run, so it would otherwise leave no
+        # trace above the pipeline. Repeat it at ERROR here and carry it in the run record.
+        tolerated = result.get("tolerated_failures") or []
+        if tolerated:
+            logger.error(
+                "[BeliefEngineAdapter:%s] global pass SUCCEEDED WITH TOLERATED FAILURES — these items "
+                "were skipped and not written, and will be retried on the next run: %s",
+                parent_run_id, tolerated,
+            )
+
+        # A one-off slip heals on the next run, so only a belief failing REPEATEDLY is worth
+        # interrupting him for. Skipped when the update step did not run at all, so an
+        # evidence-free night cannot clear a real streak.
+        update = result.get("belief_update") or {}
+        persistent: List[Dict[str, Any]] = []
+        if update.get("status") != "skipped":
+            from belief_engine.db.paths import belief_db_path
+            from belief_engine.pipeline import tolerated_failures
+            failed_beliefs = [f for t in tolerated for f in (t.get("failed_items") or [])
+                              if isinstance(f, dict)]
+            persistent = tolerated_failures.record_run(belief_db_path(), failed_beliefs)
+            if persistent:
+                logger.error(
+                    "[BeliefEngineAdapter:%s] %d belief(s) have now failed %d+ consecutive runs "
+                    "and are not being recorded: %s",
+                    parent_run_id, len(persistent), tolerated_failures.THRESHOLD,
+                    [row["belief_key"] for row in persistent],
+                )
+                tolerated_failures.surface_ticket(persistent)
+
         out_path = export_beliefs()
         logger.info(
             "[BeliefEngineAdapter:%s] export complete -> %s",
@@ -135,6 +165,8 @@ class BeliefEngineAdapter:
             "status": "success",
             "successes": successes,
             "failures": failures,
+            "tolerated_failures": tolerated,
+            "persistent_failures": persistent,
             "results": results,
             "export_path": str(out_path),
         }

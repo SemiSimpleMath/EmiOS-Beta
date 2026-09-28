@@ -150,6 +150,7 @@ class UpdateBeliefsStep:
         from types import SimpleNamespace
         total = {k: 0 for k in ("created", "updated", "deprecated", "no_change", "errors", "contested")}
         contested = []
+        failed: List[dict] = []
         batches = 0
         def process(items):
             nonlocal batches
@@ -168,14 +169,27 @@ class UpdateBeliefsStep:
             for key, value in result.get('stats', {}).items():
                 total[key] += value
             contested.extend(result.get('contested_keys', []))
-            if total['errors']:
-                raise RuntimeError(f"Belief update batch failed: {result}")
+            # One malformed belief output used to abort the whole global pass here, and three
+            # aborts auto-disabled the routine (2026-09-25: a single hallucinated evidence_ref
+            # set killed a run that had already written a belief). A bad row is now tolerated
+            # per belief: it is NOT written, it is counted, and it is named in the loud summary
+            # below. The stats stay truthful — nothing is hidden from the pipeline's gate; the
+            # step declares the tolerance explicitly instead.
+            failed.extend(result.get('failed_beliefs', []))
         records = sorted(bundle.items, key=lambda item: (item.source_date, item.source_ref or ''))
         for page in pages([{'position':i,'item':asdict(item)} for i,item in enumerate(records)], max_chars=48000):
             process([records[r['position']] for r in page])
+        if failed:
+            logger.error(
+                "[UpdateBeliefsStep] TOLERATED %d malformed belief output(s) of %d batch(es) — the pass "
+                "continued and these beliefs were NOT written: %s",
+                len(failed), batches,
+                "; ".join(f"{f.get('belief_key')} ({f.get('error')})" for f in failed),
+            )
         ctx.belief_update_result = {'status':'ok','domain':self.domain or 'global',
                                   'stats':total,'contested_keys':list(dict.fromkeys(contested)),
-                                  'batches':batches}
+                                  'batches':batches,'failed_beliefs':failed,
+                                  'incomplete_tolerated':bool(failed)}
         return ctx.belief_update_result
 
     def _run_batch(self, ctx: Any) -> dict:
@@ -226,6 +240,9 @@ class UpdateBeliefsStep:
                  "contested": 0}
         # Beliefs that need re-evaluation (confidence dropped or explicitly contested)
         contested_keys: List[str] = []
+        # Which belief outputs were rejected, so the caller's summary can name them rather
+        # than reporting a bare count nobody can act on.
+        failed_beliefs: List[dict] = []
         today_iso = datetime.now(timezone.utc).date().isoformat()
 
         _CONFIDENCE_RANK = {"high": 2, "medium": 1, "low": 0}
@@ -360,6 +377,9 @@ class UpdateBeliefsStep:
                 )
             except Exception as exc:
                 stats["errors"] += 1
+                failed_beliefs.append({"belief_key": bo.get("belief_key", "?"),
+                                       "action": bo.get("action", "?"),
+                                       "error": str(exc)[:200]})
                 logger.exception(
                     "[UpdateBeliefsStep] failed processing belief key=%s: %s",
                     bo.get("belief_key", "?"), exc,
@@ -371,5 +391,6 @@ class UpdateBeliefsStep:
             "domain": label,
             "stats": stats,
             "contested_keys": contested_keys,
+            "failed_beliefs": failed_beliefs,
         }
         return ctx.belief_update_result

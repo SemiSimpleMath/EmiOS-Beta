@@ -32,11 +32,22 @@ class WorkObjectSpec(BaseModel):
         "single notify, nothing to execute; e.g. 'walk the dogs', a dentist appointment); (b) work YOU "
         "carry out via tools/managers; or (c) a result to research/produce and hand back. Give the "
         "architect the intent and context a human would need to design the right graph.")
-    success_criteria: str = Field(default="", description="How to know the objective is fully met.")
+    success_criteria: str = Field(
+        default="",
+        description="How to know the objective is fully met — the OUTCOME, not the act. 'the owner "
+        "receives a reminder on October 1' is satisfied by sending one message even if nothing he "
+        "wanted has happened, so the objective closes while the need is still open. When the source "
+        "names the condition under which it is done ('until he books it', 'until it is scheduled', "
+        "'until she replies'), that condition IS the criterion — carry it in, so the work cannot be "
+        "judged complete before it. Name a delivery only when delivering is genuinely the whole "
+        "point, such as a boundary announcement or a one-off heads-up.")
     based_on: List[str] = Field(
         default_factory=list,
         description="Provenance — ids of the sources prompting this (artifact_id of an email/item, a "
-        "subconscious concern, a belief). Leave EMPTY if it is your own original observation.")
+        "subconscious concern, a belief). Prefix a concern with `concern:` and a belief with "
+        "`belief:<belief_key>`: both are recorded on the work object so that when it closes, the "
+        "outcome flows back to the source that asked for it. Leave EMPTY if it is your own original "
+        "observation.")
 
 
 class IntakeReview(BaseModel):

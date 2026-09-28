@@ -69,6 +69,11 @@ def _ensure_defaults_registered() -> None:
         "belief_engine.pipeline.routine_adapter", fromlist=["BeliefEngineAdapter"]
     ).BeliefEngineAdapter())
 
+    # New belief intake in SHADOW MODE: writes belief_intake_* tables only; no reader uses them.
+    _try_register("belief_intake", lambda: __import__(
+        "belief_engine.intake.routine_adapter", fromlist=["BeliefIntakeAdapter"]
+    ).BeliefIntakeAdapter())
+
     _try_register("belief_engine_export", lambda: __import__(
         "belief_engine.pipeline.routine_adapter", fromlist=["BeliefEngineExportAdapter"]
     ).BeliefEngineExportAdapter())

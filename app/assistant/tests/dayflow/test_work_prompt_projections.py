@@ -175,3 +175,45 @@ def test_worker_refresh_failure_stops_decision_and_clears_old_context(monkeypatc
     with pytest.raises(OSError, match="synthetic store read failure"):
         WorkPlanner._refresh_work_projection(planner)
     assert not planner.blackboard.get_state_value("work_projection")
+
+
+def test_worker_does_not_see_own_dispatch_as_hold():
+    wo = complex_work()
+    wo.nodes['repair'].payload['dispatch_epoch'] = 3
+    wo._execution = {
+        'attempts': [{'node_id': 'repair', 'epoch': 3, 'state': 'running', 'revoked': False}],
+        'calls': [{'node_id': 'repair', 'epoch': 3, 'state': 'in_flight', 'tool_name': 'work_emi_team_manager'}],
+    }
+    for node_id in ('repair', 'private_helper'):
+        text = render_view('worker', view=worker_data(wo, node_id))
+        assert 'Further dispatch' not in text
+        assert 'EXECUTION OWNERSHIP' not in text
+    # Rendering worker views must not mutate scheduler/strategic state.
+    strategic = render_view('execution_state', work=work_data(wo))
+    assert 'Further dispatch' in strategic
+    assert 'work_emi_team_manager' in strategic
+
+
+def test_worker_keeps_other_and_uncertain_execution_visible():
+    wo = complex_work()
+    wo.nodes['repair'].payload['dispatch_epoch'] = 3
+    wo._execution = {'attempts': [], 'calls': [
+        {'node_id': 'repair', 'epoch': 2, 'state': 'in_flight', 'tool_name': 'older_attempt'},
+        {'node_id': 'audit', 'epoch': 1, 'state': 'in_flight', 'tool_name': 'other_task'},
+        {'node_id': 'repair', 'epoch': 3, 'state': 'unknown', 'tool_name': 'uncertain_action'},
+    ]}
+    text = render_view('worker', view=worker_data(wo, 'repair'))
+    for name in ('older_attempt', 'other_task', 'uncertain_action'):
+        assert name in text
+
+
+def test_worker_keeps_cancellation_visible():
+    wo = complex_work()
+    wo.nodes['repair'].payload['dispatch_epoch'] = 3
+    wo._execution = {
+        'attempts': [{'node_id': 'repair', 'epoch': 3, 'state': 'running', 'revoked': True, 'reason': 'user stopped'}],
+        'calls': [{'node_id': 'repair', 'epoch': 3, 'state': 'in_flight', 'tool_name': 'pending_call'}],
+    }
+    text = render_view('worker', view=worker_data(wo, 'repair'))
+    assert 'cancellation requested: user stopped' in text
+    assert 'pending_call' in text

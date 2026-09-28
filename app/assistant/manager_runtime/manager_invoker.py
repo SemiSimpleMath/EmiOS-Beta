@@ -154,12 +154,20 @@ class ManagerInvoker:
         """
         try:
             from app.assistant.ServiceLocator.service_locator import DI
+            from work_objects.runtime import peek_work_context
+            work_context = {}
+            ctx = peek_work_context()
+            if ctx is not None:
+                node = ctx.store.load(ctx.work_id).nodes[ctx.node_id]
+                work_context = {"work_id": ctx.work_id, "node_id": ctx.node_id,
+                                "task_title": node.title or node.content}
             DI.event_hub.publish(
                 Message(
                     sender="manager_invoker",
                     receiver=None,
                     event_topic="manager_invocation_started",
                     data={
+                        **work_context,
                         "manager_name": record.manager_name,
                         "manager_instance_name": record.manager_instance_name,
                         "base_display_name": record.base_display_name,

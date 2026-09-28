@@ -47,6 +47,10 @@ control_nodes:
 # if no, hand off to weekly_meal_planner.
 tools:
   allowed_tools:
+    - work_graph_summary
+    - work_graph_search
+    - work_graph_peek
+    - work_artifact_fetch
     - meal_research_manager
   except_tools: []
 

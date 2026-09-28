@@ -59,6 +59,10 @@ control_nodes:
 
 tools:
   allowed_tools:
+    - work_graph_summary
+    - work_graph_search
+    - work_graph_peek
+    - work_artifact_fetch
     # --- Playwright bundled action tools (action + ref snapshot) ---
     - web_navigate_snapshot
     - web_navigate_back_snapshot

@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 
 
 class AgentForm(BaseModel):
+    participation_reason: str = Field(default="", description="Brief addressee assessment and evidence for replying, delegating, or staying silent. Internal metadata, not a chat reply.")
     chat_response: str = Field(default="", description="Direct room reply when no planner run is needed.")
     no_op_tf: bool = Field(
         default=False,

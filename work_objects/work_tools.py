@@ -1,10 +1,10 @@
 """
-work_objects.work_tools — the WorkGraph ops as real, registered BaseTools.
+work_objects.work_tools â€” the WorkGraph ops as real, registered BaseTools.
 
 These wrap the same logic as work_objects.tools.WorkGraphTools, but as live
 tools the standard tool_caller dispatches. Each reads the active node from
 runtime.get_work_context() (set by the WorkManager) and returns a ToolResult.
-register_work_tools(DI.tool_registry) injects them at RUNTIME — nothing is added
+register_work_tools(DI.tool_registry) injects them at RUNTIME â€” nothing is added
 under app/, so work_objects stays isolated while fully reusing the runtime.
 
 This module imports app.*, so any caller must bootstrap DI first
@@ -29,7 +29,7 @@ from work_objects.tools import WorkGraphTools
 
 
 def pod_summary(pod_ref: str) -> str:
-    """A one-line summary of a pod — its one_liner (headline) + id. Use this ANYWHERE a pod surfaces
+    """A one-line summary of a pod â€” its one_liner (headline) + id. Use this ANYWHERE a pod surfaces
     (a handoff return, a graph peek, the render projection) so a viewer always sees WHAT the pod is,
     never a bare `datapod:...` id. Returns '' for no ref; the id alone if the pod has no one_liner."""
     if not pod_ref:
@@ -109,7 +109,7 @@ def _add_subtask(t, a):
     nid = t.add_subtask(a["title"], a.get("content", ""), a.get("satisfied_when_kind"),
                         a.get("owner_agent"), a.get("depends_on"))
     # Feed the running decomposition back so the agent (whose projection is frozen
-    # at loop entry) sees what it already added — avoids duplicates + knows when done.
+    # at loop entry) sees what it already added â€” avoids duplicates + knows when done.
     kids = [f"[{s['id']}] {s['title']}" for s in t.graph_summary(subtree_only=True) if s["id"] != t.node_id]
     return ToolResult(
         content=(f"Added subtask '{a['title']}' (id {nid}). Your node now has {len(kids)} subtask(s): "
@@ -132,7 +132,7 @@ def _produce_artifact(t, a):
     nid = t.produce_artifact(a["title"], a["pod_ref"])
     return ToolResult(
         content=(f"Produced artifact '{a['title']}' (id {nid}). The deliverable is recorded. "
-                 "If this node's task is now complete, call work_finish(status=satisfied) — do NOT re-produce it."),
+                 "If this node's task is now complete, call work_finish(status=satisfied) â€” do NOT re-produce it."),
         data={"node_id": nid},
     )
 
@@ -159,7 +159,7 @@ def _finish(t, a):
 
     This used to write the node's terminal status directly (mark_satisfied -> `done`), which made
     the worker the one caller that could pre-empt its own dispatcher: the node was already terminal
-    when the manager returned, so the recorder wrote nothing — not the status, not the epoch fence,
+    when the manager returned, so the recorder wrote nothing â€” not the status, not the epoch fence,
     and not the result evidence. The verdict is part of the RESULT now; the work_finalizer judges it
     along with everything else the node produced.
     """
@@ -170,33 +170,45 @@ def _finish(t, a):
     t.record_finding(line, None, None)
     return ToolResult(
         content=(f"Verdict recorded: {phrase}. It is part of your result and the work_finalizer "
-                 f"judges it. Stop working this node now — return_control."),
+                 f"judges it. Stop working this node now â€” return_control."),
         data={"status": status},
     )
 
 
 def _graph_search(t, a):
     hits = t.graph_search(a["query"])
-    return ToolResult(content=f"{len(hits)} match(es)", data={"results": hits})
+    from app.assistant.dayflow_orchestrator.work_context import render_view
+    return ToolResult(content=render_view("task_index", tasks=hits), data={"results": hits})
 
 
 def _graph_peek(t, a):
     node = t.graph_peek(a["node_id"])
-    # Surface the node's CONTENT in the result TEXT (not just the title) so the agent sees a
-    # deliverable's body when it peeks — otherwise it re-peeks blind. If the result lives in a pod,
-    # show the pod's SUMMARY (one_liner), never a bare datapod:... id.
-    body = (node.get("content") or "").strip()
-    if not body and node.get("pod_ref"):
-        body = pod_summary(node["pod_ref"])
-    summary = node.get("title", "")
-    if body:
-        summary = f"{summary} -> {body}"
-    return ToolResult(content=summary, data=node)
+    # Show node details and output headers; artifact_fetch loads full outputs.
+    from app.assistant.dayflow_orchestrator.work_context import render_view
+    return ToolResult(content=render_view("hydrated_node", node=node), data=node)
 
+
+def _artifact_fetch(t, a, message):
+    node = t.graph_peek(a["artifact_id"])
+    if node["type"] in {"goal", "subtask"}:
+        raise ValueError("Expected an artifact/evidence ID from a node's artifact index")
+    from app.assistant.dayflow_orchestrator.work_context import render_view
+    text = render_view("hydrated_artifact", artifact=node)
+    data = {"artifact": node}
+    if node.get("pod_ref"):
+        from app.assistant.lib.core_tools.pod_store.pod_store_tool import PodStoreTool
+        result = PodStoreTool().handle_pod_fetch({"pod_ids": [node["pod_ref"]]}, message)
+        return ToolResult(result_type=result.result_type if (result.data or {}).get("pods") else "error", content=text + "\n" + (result.content or ""),
+                          data={**data, "pod_result": result.data})
+    return ToolResult(content=text, data=data)
+
+class artifact_fetch_args(BaseModel):
+    artifact_id: str
 
 def _graph_summary(t, a):
     rows = t.graph_summary(a.get("subtree_only", False))
-    return ToolResult(content=f"{len(rows)} node(s)", data={"nodes": rows})
+    from app.assistant.dayflow_orchestrator.work_context import render_view
+    return ToolResult(content=render_view("task_index", tasks=rows), data={"nodes": rows})
 
 
 # ----------------------------- specs ----------------------------- #
@@ -204,7 +216,7 @@ def _graph_summary(t, a):
 class _Spec:
     name: str
     args_model: type
-    handler: Callable[[WorkGraphTools, dict], ToolResult]
+    handler: Optional[Callable[[WorkGraphTools, dict], ToolResult]]
     description: str
 
 
@@ -215,9 +227,10 @@ _SPECS = [
     _Spec("work_produce_artifact", produce_artifact_args, _produce_artifact, "Produce the deliverable as an Artifact node referencing a pod."),
     _Spec("work_ask_question", ask_question_args, _ask_question, "Open a Question (blocks=true makes my node depend on it)."),
     _Spec("work_defer", defer_args, _defer, "Park my node with a wake condition ('too hard now / wait for X')."),
-    _Spec("work_finish", finish_args, _finish, "State your verdict on this node — satisfied | failed | abandoned — then return_control. Recorded as part of your result; the work_finalizer judges it."),
+    _Spec("work_finish", finish_args, _finish, "State your verdict on this node â€” satisfied | failed | abandoned â€” then return_control. Recorded as part of your result; the work_finalizer judges it."),
     _Spec("work_graph_search", graph_search_args, _graph_search, "Find nodes by substring of title/content."),
-    _Spec("work_graph_peek", graph_peek_args, _graph_peek, "Read one node's full body."),
+    _Spec("work_artifact_fetch", artifact_fetch_args, None, "Read the complete content of an artifact ID from work_graph_peek, including its linked pod."),
+    _Spec("work_graph_peek", graph_peek_args, _graph_peek, "Read a task node and its artifact titles/IDs. Use work_artifact_fetch to read selected output content."),
     _Spec("work_graph_summary", graph_summary_args, _graph_summary, "One-line index of nodes (drill down with peek)."),
 ]
 
@@ -229,6 +242,8 @@ def _make_tool_class(spec: _Spec) -> type:
     def execute(self, tool_message: ToolMessage) -> ToolResult:
         args = (tool_message.tool_data or {}).get("arguments", {}) or {}
         try:
+            if spec.name == "work_artifact_fetch":
+                return _artifact_fetch(_bound(), args, tool_message)
             return spec.handler(_bound(), args)
         except Exception as e:
             # recoverable: surface to the agent (loud), don't kill the manager loop
@@ -271,11 +286,11 @@ def register_work_tools(tool_registry) -> list[str]:
 
 
 def register_manager_as_tool(tool_registry, manager_name: str, description: str, metadata: dict) -> None:
-    """Expose a manager as a callable tool — the SAME manager-as-tool wrapper the static
+    """Expose a manager as a callable tool â€” the SAME manager-as-tool wrapper the static
     `app/.../tools/<name>/` dirs use (a thin BaseTool that defers to ManagerInterface;
     args task+information). Registered at runtime so node managers stay out of app/.
     The node-handoff (run ON a fresh child node) is applied generically inside
-    ManagerInterface for node_aware managers — this wrapper is identical to web_manager's."""
+    ManagerInterface for node_aware managers â€” this wrapper is identical to web_manager's."""
     iface = ManagerInterface(manager_name)
 
     def execute(self, tool_message: ToolMessage) -> ToolResult:

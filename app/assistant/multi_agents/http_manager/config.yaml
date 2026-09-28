@@ -68,6 +68,10 @@ control_nodes:
 # personal_admin) — multi-domain orchestration is emi_team's job.
 tools:
   allowed_tools:
+    - work_graph_summary
+    - work_graph_search
+    - work_graph_peek
+    - work_artifact_fetch
     - http_request
     - bluesky_timeline
     - bluesky_hydrate_post

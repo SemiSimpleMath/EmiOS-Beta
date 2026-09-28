@@ -245,8 +245,30 @@ class RoutineManager:
                 routine.routine_id,
                 reason,
             )
-            self._run_in_thread(routine)
+            self._run_in_thread(routine, target_date=self._daily_slot_target_date(routine, now_local))
         self._publish_runtime_status(config=config)
+
+    @staticmethod
+    def _daily_slot_target_date(routine: RoutineConfig, now_local: datetime) -> Optional[str]:
+        """The pipeline day a daily routine's SLOT stands for, so a late run does the slot's work.
+
+        A daily slot fires when its time has passed and it has not succeeded today — at startup
+        that can be hours late. A date-based pipeline left to pick its own day then takes the day
+        containing *now*: on 2026-09-27 a 14:38 restart ran the 00:05 daily_insights slot against
+        the day in progress, and at the real 00:05 the runner found the day's steps already done
+        and did nothing, freezing the day at its 14:39 snapshot. The slot's own boundary date
+        (00:05 → the day that just ended) is the day it was scheduled to process, on time or late.
+        Routines whose pipelines ignore target_date are unaffected.
+        """
+        if str(routine.run_policy.get("type") or "").strip().lower() != "daily":
+            return None
+        try:
+            hour_str, min_str = str(routine.run_policy.get("time_local") or "").strip().split(":", 1)
+            slot_local = now_local.replace(hour=int(hour_str), minute=int(min_str), second=0, microsecond=0)
+        except ValueError:
+            return None          # _should_run already refused a malformed time_local
+        from app.assistant.pipelines.context import boundary_date_local_str
+        return boundary_date_local_str(slot_local)
 
     # ---------------------------------------------------------------------
     # Config + State
@@ -1248,10 +1270,11 @@ class RoutineManager:
     # Execution
     # ---------------------------------------------------------------------
 
-    def _run_in_thread(self, routine: RoutineConfig, *, event_message: Any = None) -> None:
+    def _run_in_thread(self, routine: RoutineConfig, *, event_message: Any = None,
+                       target_date: Optional[str] = None) -> None:
         def _target():
             try:
-                self._execute_routine(routine, event_message=event_message)
+                self._execute_routine(routine, event_message=event_message, target_date=target_date)
             finally:
                 with self._lock:
                     self._running.discard(routine.routine_id)

@@ -1,11 +1,14 @@
 """Dependency results must reach the consumers that build on them (2026-08-20).
 
-The worker projection's DEPENDENCIES section inlined outputs ONLY via `produces`
+Historical regression: the worker projection inlined outputs ONLY via `produces`
 edges — but the live writers (WorkPlanner findings, discharge manager-results)
 land evidence as parent-linked children and never mint produces edges. Every
 worker saw its dependencies as bare titles over an empty list ("already solved
 — do NOT peek"), improvised (ask_kg for PR findings), and the architect churned
 replans against the same blind spot (PR #16 WO, v2..v6).
+
+The September 22 contract uses progressive reads: the initial view contains titles,
+then task peeks expose artifact headers and selected outputs can be read in full.
 
 Also guarded here: the full-report pod-id walk that puts the /research/<pod_id>
 link on delivery tickets, the portfolio's STILL UNRUN line (the steward completed
@@ -48,7 +51,7 @@ def _edge(store, wid, src, dst, relation="depends_on"):
 
 class TestDependencyProjection:
 
-    def test_parent_linked_evidence_is_inlined(self):
+    def test_parent_linked_evidence_is_discoverable(self):
         """The regression: findings/manager-results are parent-linked children."""
         store = _store()
         wid, gid = _mk_wo(store)
@@ -61,10 +64,14 @@ class TestDependencyProjection:
         _edge(store, wid, "inspect", "assess")
 
         view = render_work_projection(store.load(wid), "assess")
-        assert "FINDING-ALPHA" in view
+        assert "FINDING-ALPHA" not in view
+        from work_objects.tools import WorkGraphTools
+        reader = WorkGraphTools(store, wid, "assess", "test")
+        assert "ev1" in {a["id"] for a in reader.graph_peek("inspect")["artifacts"]}
+        assert "FINDING-ALPHA" in reader.graph_peek("ev1")["content"]
         assert "do NOT peek" not in view
 
-    def test_produces_linked_evidence_still_inlined(self):
+    def test_produces_linked_evidence_is_discoverable(self):
         store = _store()
         wid, gid = _mk_wo(store)
         _add(store, wid, "gather", parent=gid, title="Gather data")
@@ -75,7 +82,11 @@ class TestDependencyProjection:
         _edge(store, wid, "gather", "use")
 
         view = render_work_projection(store.load(wid), "use")
-        assert "PRODUCED-BETA" in view
+        assert "PRODUCED-BETA" not in view
+        from work_objects.tools import WorkGraphTools
+        reader = WorkGraphTools(store, wid, "use", "test")
+        assert "ev_p" in {a["id"] for a in reader.graph_peek("gather")["artifacts"]}
+        assert "PRODUCED-BETA" in reader.graph_peek("ev_p")["content"]
 
     def test_bare_dependency_shows_its_own_record_or_says_so(self):
         store = _store()
@@ -88,8 +99,11 @@ class TestDependencyProjection:
         _edge(store, wid, "step_empty", "consumer")
 
         view = render_work_projection(store.load(wid), "consumer")
-        assert "RECORD-GAMMA" in view
-        assert "no recorded result" in view
+        assert "RECORD-GAMMA" not in view
+        from work_objects.tools import WorkGraphTools
+        reader = WorkGraphTools(store, wid, "consumer", "test")
+        assert "RECORD-GAMMA" in reader.graph_peek("step_with_record")["content"]
+        assert reader.graph_peek("step_empty")["artifacts"] == []
 
     def test_discharge_dependency_fold_is_untruncated(self):
         long_finding = "LONGTOKEN " + ("x" * 800) + " ENDTOKEN"

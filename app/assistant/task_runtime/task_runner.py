@@ -113,7 +113,7 @@ def _run_action_node(store, work_id: str, node_id: str, scope=None) -> None:
     node = store.load(work_id).nodes[node_id]
     executor = str(node.payload.get("executor") or "").strip() or "work_emi_team_manager"
     try:
-        discharge_node(store, work_id, node_id, manager_name=executor, scope_context=scope)
+        result = discharge_node(store, work_id, node_id, manager_name=executor, scope_context=scope)
     except Exception as e:
         logger.error("[task_runner] action node %s::%s failed: %s", work_id, node_id, e)
         cur = store.load(work_id).nodes.get(node_id)
@@ -121,6 +121,14 @@ def _run_action_node(store, work_id: str, node_id: str, scope=None) -> None:
             store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "failed",
                                        "content": str(e)[:500]}, actor="task_runner")
         return
+    # An action node's `produces` used to be dropped on the floor: result_recorder writes the
+    # manager's answer as evidence with no `data_id`, so the fact was never keyed and every
+    # downstream `${artifact}` referencing it stayed an unsubstituted literal. In the
+    # morning_briefing that silently cost the compile step its CNN/BBC headlines — the briefing
+    # was assembled with the text "${artifact_1}" where the scrape should have been.
+    if result is not None:
+        from app.assistant.task_runtime.tool_executor import write_produced_output
+        write_produced_output(store, work_id, node, result, tool_name=executor)
     cur = store.load(work_id).nodes.get(node_id)
     if cur is not None and cur.status == "done":
         store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "closed",

@@ -68,6 +68,10 @@ objects that are simply progressing re-plan on their own as steps complete — d
 - Pay particular attention to the **ROUTINE** section — it is authoritative for *when* the user wants
   things to happen. A clock-anchored routine item (e.g. a nightly cooling setpoint) is a real work
   object to create when it is due, even with nothing else going on.
+- The routine's clock-anchored items — a setpoint, a scheduled device action, a boundary
+  announcement — are work. Its flags, watch items and guidance are context for judging timing and
+  wording. Something the user asked for reaches you as intake or a ticket and becomes work that way;
+  a watch item the routine writer drew from the day's conversation stays guidance.
 - You can create a work object that lies dormant until a later time and cancel it if it stops being
   needed — so there is no harm creating ahead for something the routine shows.
 

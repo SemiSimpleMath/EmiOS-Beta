@@ -44,6 +44,10 @@ control_nodes:
 # Add web_manager later if/when restaurant lookups become real value.
 tools:
   allowed_tools:
+    - work_graph_summary
+    - work_graph_search
+    - work_graph_peek
+    - work_artifact_fetch
     - ask_kg          # the workhorse — KG queries for entities, locations, recipes
     - pod_search      # past pods (intentions, feedback, etc.)
     - pod_fetch       # open pods worth reading

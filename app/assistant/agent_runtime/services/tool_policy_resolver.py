@@ -54,6 +54,12 @@ class ToolPolicyResolver:
 
         if allow_all:
             allowed_tools = set(self._tool_registry.list_tools())
+        from work_objects.read_context import active_read_tools
+        work_reads = active_read_tools() if allowed_tools_raw else frozenset()
+        from work_objects.read_context import READ_TOOLS
+        if not work_reads:
+            allowed_tools.difference_update(READ_TOOLS)
+        allowed_tools.update(work_reads)
         except_tools = set(agent_config.get("except_tools", []))
         all_available_tools = set(self._tool_registry.list_tools())
         valid_tools = [tool for tool in allowed_tools if tool in all_available_tools and tool not in except_tools]
@@ -119,7 +125,9 @@ class ToolPolicyResolver:
         # fall back to the full allowed set (that would surface tools the scope
         # deliberately narrowed away). Agents that can be narrowed keep find_tool
         # in always_show, so an empty visible list is never a dead end.
-        return [t for t in visible_raw if isinstance(t, str) and t in allowed_set]
+        from work_objects.read_context import active_read_tools
+        return list(dict.fromkeys([t for t in visible_raw if isinstance(t, str) and t in allowed_set]
+                                  + sorted(allowed_set & active_read_tools())))
 
     def get_tool_descriptions(self) -> Dict[str, str]:
         """Return tool descriptions for visible tools."""

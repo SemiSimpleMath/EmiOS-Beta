@@ -51,7 +51,8 @@ def execute_claimed_tool_node(store, work_id: str, node_id: str, scope,
             name = str(spec.get("tool") or "").strip()
             if not name:
                 raise ValueError(f"tool node {node_id}: tool spec missing 'tool'")
-            args = _substitute_args(_coerce_args(spec), facts, last)
+            args = _substitute_args(_coerce_args(spec), facts, last,
+                                    text_args=_declared_text_args(name))
             _gate(name, scope, scope_contract_enforced)                    # #4 — the gate task_ir lacked
             tool_cls = DI.tool_registry.get_tool_class(name)
             if tool_cls is None:
@@ -69,7 +70,8 @@ def execute_claimed_tool_node(store, work_id: str, node_id: str, scope,
                 raise RuntimeError(f"tool '{name}' errored: {str(result.content or '')[:300]}")
             last = result
 
-        _write_output(store, work_id, node, last)
+        write_produced_output(store, work_id, node, last,
+                              tool_name=str((node.payload.get("tools") or [{}])[-1].get("tool") or ""))
         if node.payload.get("is_loop"):
             _record_loop_iteration(store, work_id, node_id)
         if _rearm_if_incomplete(store, work_id, node_id):
@@ -167,12 +169,56 @@ def _gate(tool_name: str, scope, scope_contract_enforced: bool) -> None:
         raise PermissionError(reason)
 
 
-def _write_output(store, work_id: str, node, last: ToolResult | None) -> None:
-    """Record the node's produced output as evidence child node(s) keyed by data_id (the #3 convention)."""
+def _declared_text_args(tool_name: str) -> set:
+    """Argument names the tool's own contract declares as text.
+
+    A `${fact}` placeholder always sits inside a JSON string in `args_json` — JSON cannot
+    express an unquoted substitution — so a structured fact resolved whole into one of these
+    has to be serialised. Handing `write_text_file` a dict for its declared-string `content`
+    is what killed three morning_briefing runs on 2026-09-13, reported as
+    "Missing required argument: content" for an argument that was present but the wrong type.
+    Arguments a tool declares as `object` still receive the structure untouched.
+    """
+    cfg = DI.tool_registry.get_tool(tool_name) or {}
+    contract = cfg.get("tool_contract") or {}
+    return {str(i.get("name")) for i in (contract.get("inputs") or [])
+            if str(i.get("type") or "").strip().lower() in ("string", "text")}
+
+
+def _declared_payload_key(tool_name: str) -> str:
+    """The single `data.<key>` object a tool's contract declares as its payload, if any.
+
+    Some tools return a provenance ENVELOPE in `data` rather than their result:
+    `invoke_agent` declares `data.agent_output` as the structured output and puts
+    `data.agent_name` beside it. Recording the envelope as the artifact stored the wrapper —
+    so the briefing file would have carried `agent_name` around the actual briefing — and
+    obscured what downstream steps consume. Driven entirely by the declared contract; a tool
+    that declares no such payload keeps `data` as-is.
+    """
+    cfg = DI.tool_registry.get_tool(tool_name) or {}
+    contract = cfg.get("tool_contract") or {}
+    keys = [str(o.get("path"))[len("data."):] for o in (contract.get("outputs") or [])
+            if str(o.get("path") or "").startswith("data.")
+            and str(o.get("type") or "").strip().lower() == "object"]
+    return keys[0] if len(keys) == 1 else ""
+
+
+def _payload_of(tool_name: str, last: ToolResult) -> Any:
+    key = _declared_payload_key(tool_name)
+    data = last.data if isinstance(last.data, dict) else None
+    if key and data and key in data:
+        return data[key]
+    return data if data else (last.content or "")
+
+
+def write_produced_output(store, work_id: str, node, last: ToolResult | None,
+                          tool_name: str = "") -> None:
+    """Record the node's produced output as evidence child node(s) keyed by data_id (the #3
+    convention). Shared with the action-node path, whose `produces` was previously dropped."""
     produces = node.payload.get("produces") or []
     if not produces or last is None:
         return
-    value: Any = last.data if isinstance(last.data, dict) and last.data else (last.content or "")
+    value: Any = _payload_of(tool_name, last)
     for data_id in produces:
         store.apply("add_node", {
             "work_id": work_id, "id": new_id("ev"), "type": "evidence", "parent_id": node.id,
@@ -198,7 +244,8 @@ def _coerce_args(spec: dict) -> dict:
 
 # --- arg substitution (copied from the former task-IR tool-sequence executor; owned here) ---
 
-def _substitute_args(args: dict[str, Any], facts: dict[str, Any], last: ToolResult | None) -> dict[str, Any]:
+def _substitute_args(args: dict[str, Any], facts: dict[str, Any], last: ToolResult | None,
+                     text_args: set | None = None) -> dict[str, Any]:
     values = dict(facts)
     if last is not None:
         values["prev_result"] = last.content or ""
@@ -227,7 +274,16 @@ def _substitute_args(args: dict[str, Any], facts: dict[str, Any], last: ToolResu
             return [_resolve(item) for item in v]
         return v
 
-    return {k: _resolve(v) for k, v in args.items()}
+    out: dict[str, Any] = {}
+    for key, raw in args.items():
+        value = _resolve(raw)
+        # The tool declared this argument as text, so give it text. Only whole-value
+        # substitutions can arrive structured — a placeholder embedded in a larger string is
+        # already serialised above — and an argument declared `object` is left untouched.
+        if text_args and key in text_args and value is not None and not isinstance(value, str):
+            value = json.dumps(value, ensure_ascii=False, indent=2, default=str)
+        out[key] = value
+    return out
 
 
 def _resolve_dynamic_time_vars(text: str) -> str:

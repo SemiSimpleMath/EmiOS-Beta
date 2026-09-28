@@ -49,6 +49,10 @@ control_nodes:
 
 tools:
   allowed_tools:
+    - work_graph_summary
+    - work_graph_search
+    - work_graph_peek
+    - work_artifact_fetch
     - nest_home_control
     - lights_control
     - ring_camera_control
@@ -58,6 +62,10 @@ tools:
 scope_contract:
   tools:
     allowed_tools:
+      - work_graph_summary
+      - work_graph_search
+      - work_graph_peek
+      - work_artifact_fetch
       - nest_home_control
       - lights_control
       - ring_camera_control

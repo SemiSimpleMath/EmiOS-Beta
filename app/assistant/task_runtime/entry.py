@@ -61,7 +61,17 @@ def _resolve_store_scope(store, scope, task_id: str):
     return store, scope
 
 
-def _after_drive(store, work_id: str, status: str) -> None:
+def _after_drive(store, work_id: str, status: str) -> str:
+    """Finish a drive and return WHY it died ("" for a healthy one).
+
+    The reason must be read BEFORE the abandon below. `set_work_status` cascades every
+    still-startable node to `abandoned`, and `failed` is startable — so abandoning first
+    erases the very node `failure_reason()` looks for, and it then falls back to
+    "no failed node recorded (stalled graph)". That is what three morning_briefing runs
+    reported on 2026-09-13 while their real error — a `write_text_file` content type
+    mismatch, recorded correctly on the node — was overwritten six milliseconds earlier.
+    """
+    reason = ""
     if status == "parked":
         from app.assistant.task_runtime.task_scheduler import arm_task_wake
         arm_task_wake(store, work_id)   # base timing engine, not dayflow
@@ -70,12 +80,16 @@ def _after_drive(store, work_id: str, status: str) -> None:
         from app.assistant.task_runtime.task_events import cancel_task_watches
         cancel_task_watches(work_id)
         if status in ("failed", "stalled"):
+            from app.assistant.task_runtime.task_runner import failure_reason
+            reason = failure_reason(store, work_id)
             # A dead run is TERMINAL — a retry is a fresh instance. Leaving it `active`
             # accumulated permanent residue the boot re-arm rescanned forever
-            # (2026-07-12 incident: three stuck-active morning_briefing husks).
+            # (2026-07-12 incident: three stuck-active morning_briefing husks). The reason
+            # is carried into the terminal write so the graph keeps it too.
             store.apply("set_work_status", {"work_id": work_id, "status": "abandoned",
-                                            "reason": "task runner: run cancelled/failed at entry"},
+                                            "reason": f"task runner: run {status} — {reason}"[:500]},
                         actor="task_runner")
+    return reason
 
 
 def start_task_run(template: dict, *, store=None, scope=None, scope_contract_enforced: bool = True) -> dict:
@@ -92,8 +106,8 @@ def start_task_run(template: dict, *, store=None, scope=None, scope_contract_enf
     register_task_watches(store, work_id)
     with _run_lock(work_id):
         status = drive(store, work_id, scope=scope, scope_contract_enforced=scope_contract_enforced)
-        _after_drive(store, work_id, status)
-    return {"work_id": work_id, "status": status}
+        reason = _after_drive(store, work_id, status)
+    return {"work_id": work_id, "status": status, "failure_reason": reason}
 
 
 def _record_event(store, work_id: str, event_name: str) -> None:
@@ -132,5 +146,5 @@ def resume_task_run(work_id: str, *, store=None, scope=None, observed_event: str
             _record_event(store, work_id, observed_event)
             _promote_event_waiters(store, work_id, observed_event)
         status = drive(store, work_id, scope=scope, scope_contract_enforced=scope_contract_enforced)
-        _after_drive(store, work_id, status)
-    return {"work_id": work_id, "status": status}
+        reason = _after_drive(store, work_id, status)
+    return {"work_id": work_id, "status": status, "failure_reason": reason}

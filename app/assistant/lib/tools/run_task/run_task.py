@@ -122,9 +122,9 @@ class RunTaskTool(BaseTool):
             # success with the outcome buried in data made every machine consumer (including
             # this runtime's own error taxonomy) see green (verification finding). The failed
             # node's recorded error rides along so the caller sees WHY.
-            from app.assistant.task_runtime.task_runner import failure_reason
-            from app.assistant.task_runtime.task_store import get_task_work_store
-            reason = failure_reason(get_task_work_store(), work_id)
+            # Read from the run, not from the graph: by the time we get here entry has
+            # abandoned the work object and the cascade has overwritten the failed node.
+            reason = str(result.get("failure_reason") or "(no reason recorded)")
             return make_tool_error(
                 error_code=f"task_run_{status}",
                 message=f"{human} {reason}",

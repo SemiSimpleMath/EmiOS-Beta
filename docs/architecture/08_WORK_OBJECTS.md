@@ -61,6 +61,8 @@ orchestrator + worker managers import `work_objects.*`).
 | `result_recorder.py` | Shared tool-result recorder. Preserves the directive, optionally attaches a pod, writes `done`/`failed`, adds evidence in the same transaction. The epoch check, status, pod and evidence commit atomically. Error type, `aborted`, `exit_state=error_exit`, or empty answer means failure. The finalizer judges meaning afterwards |
 | `work_tools.py` | The ten `work_*` tools, built from one `_SPECS` table and injected straight into `tool_registry.registry` at runtime (synthesised contracts: domain `work_graph`, `min_authority` 0); also `pod_summary` and the unused `register_manager_as_tool` |
 | `tools.py` | `WorkGraphTools` — plain-Python op wrappers bound to ONE node, which the registered tools call, so a scripted agent can drive the graph with no LLM. Holds one read method the tool layer never exposes: `graph_neighbors` |
+| `concern_outbox.py` | `ConcernOutboxMixin` + `work_concern_feedback` — a durable outcome receipt for each concern-linked terminal transition, written in the closing transaction. Local SQLite only; no application callbacks |
+| `belief_outbox.py` | `BeliefOutboxMixin` + `work_belief_feedback` — the same contract for beliefs (2026-09-25). See *Outcome delivery to the sources that caused work* below |
 | `scenarios/_scenario_scope.py` | DEV-ONLY harness scope — production authority always derives from the caller (room / task run) |
 | `ui/blueprint.py` | The `/work` editor (list, graph view, event log, manual node edits) |
 | `README.md`, `DESIGN.md`, `EMI_TEAM_VS_WORK.md` | Design docs — node taxonomy, mission tier, worker split |
@@ -91,7 +93,8 @@ The two migrations are worth knowing because they encode two model changes:
 ### WorkObject — the graph container
 
 `status = active | done | abandoned | blocked`, a `goal_node_id`, `constraints` (a JSON
-bag for goal-level budget/deadline/values — and `concern_refs`, see below), plus the
+bag for goal-level budget/deadline/values — and the source-provenance lists `concern_refs` /
+`belief_refs`, see below), plus the
 in-memory projection (`nodes: dict`, `edges: list`). A future rename of the container
 statuses to `open/closed` is noted in the code but not done.
 
@@ -503,3 +506,86 @@ invocation tree, immutable main-attempt binding, cancellation boundaries and dur
 takeover barrier. Timeout result recording now revokes further calls/worker writes;
 it does not mean the old thread exited. The two additive execution tables supplement
 the five graph tables. The finalizer remains responsible for judgment and failure counts.
+
+
+## Progressive worker reads (September 22, 2026)
+
+Workers receive their own complete task, checklist and owned history, alongside a
+main-task title/ID/status index. Other task bodies and artifact bodies are not
+automatically expanded. `work_graph_peek(node_id)` opens task details and artifact
+headers; `work_artifact_fetch(artifact_id)` retrieves complete stored evidence and
+any linked pod through the existing scoped pod reader. Abandoned tasks retain outputs.
+`work_graph_summary` refreshes the index; `work_graph_search` finds matching headers.
+
+Tool-enabled specialists invoked within WorkContext receive the same view through
+PromptBuilder and the four read tools through ToolPolicyResolver. Manager grants,
+scope ceilings and explicit denials still apply. Reads are bound to the current work
+object; they do not grant mutations on sibling tasks. Ordinary chat has no work view.
+All worker instructions live in shared Jinja templates under agents/shared/work/.
+
+Validation: isolated real-model work_emi_team_manager run given only “Email the fridge
+research to the user.” selected research-a, peeked its artifact index, fetched artifact-a
+and its pod, then delegated delivery. Email was a test stub; no external mail was sent.
+
+Work personal admin: `work_personal_admin_manager` uses the standard node-aware
+ManagerInterface handoff, WorkPlanner reconciliation and workobject_render_node.
+Its planner reuses personal-admin identity/account resources and base prompts.
+Delegated workers also receive their owning main task and complete recorded provenance,
+while unrelated tasks remain title-only until hydrated. Dayflow's work_emi roster routes
+personal administration to this work variant. The helper is provenance, not a new assignment.
+
+Worker execution projection excludes its owning main task's current, non-revoked
+running/reserved attempt and in-flight calls. Delegated provenance workers use that
+same owning task and epoch. This prevents self-dispatch holds. Strategic views keep
+the full execution state; workers retain older/other execution, cancellation and
+unknown outcomes. Runtime ownership guards and stored receipts are unchanged.
+
+## Outcome delivery to the sources that caused work (September 25, 2026)
+
+Two things can ask for work to exist and then need to know how it ended: a **subconscious
+concern** and a **belief**. Both ride the same contract, and the belief lane is a deliberate
+mirror of the concern lane rather than a second pattern.
+
+**Provenance in.** The steward's `based_on` carries prefixed source ids. At creation
+`work_persist` lifts `concern:` entries into `constraints.concern_refs` and `belief:` entries
+into `constraints.belief_refs`. Beliefs are stored as the **belief_key with the prefix stripped**,
+never the row id: a merge deprecates the losing id, but the surviving key still resolves through
+`BeliefStore.get_by_key`.
+
+**Outcome back.** A terminal transition (`done` / `abandoned`, including automatic rollup) writes
+a receipt row **inside the same transaction as the status change** — `work_concern_feedback` via
+`ConcernOutboxMixin`, `work_belief_feedback` via `BeliefOutboxMixin`. A crash between "work
+closed" and "source updated" therefore leaves a pending receipt, not a silent divergence. The
+store itself makes no application calls; delivery is post-commit and best-effort, and a failed
+delivery never rolls back completed work.
+
+The belief receipt carries the objective, the **success criteria the work closed against**, each
+main task's finalizer verdict, and attributed user replies. Carrying the criterion is the point:
+the reader has to be able to see that a delivery satisfied the *work* while the belief's own
+condition was stricter.
+
+**Delivery sites** (identical for both lanes): `work_finalizer_node` after an atomic
+finalization, `work_persist.recover_pending_work_closures` after an explicit steward closure, and
+`strategic_planner_wo_prep_node` as crash recovery before the next planning pass.
+
+**Who decides what it means.** `belief_engine::work_outcome` returns `no_change` | `resolve` |
+`revise` per belief, with a valence and reasoning. It decides only —
+`belief_engine/work_feedback.py` writes through `BeliefStore`, downgrades `resolve`/`revise` to
+evidence-only for an owner-locked belief (as `update_beliefs` does), and refuses an unknown or
+omitted `belief_key`, an invalid action or valence, or a `revise` with no statement. The outcome
+attaches as evidence with `source_type='work_outcome'` and `source_ref=<work_id>`, which is both
+the reverse link and the idempotency fence: a redelivered receipt is detected before the model is
+consulted.
+
+**The doctrine this encodes.** A delivery is not an outcome. A success criterion that names an act
+("the owner receives one reminder on October 1") is satisfied by sending a message even when nothing
+the source wanted has happened, so the objective closes while the need is still open — the
+2026-09-25 annual-physical case, where the belief said "do not treat the request as completed
+until he confirms it is scheduled" and the work object closed on one delivery. A criterion states
+the outcome and carries a source's own completion condition verbatim. Recurrence then comes from
+the existing loop — finalizer judges the goal unmet, `failed` reaches the architect, which picks
+the next attempt, and `_REPEAT_FAILURE_LIMIT` escalates to `ask_user` — and never from a schedule
+grammar.
+
+**Known limit.** A `belief_key` retired by a merge is logged at ERROR and skipped so the outbox
+cannot wedge; the lane does not follow merges to the surviving key.

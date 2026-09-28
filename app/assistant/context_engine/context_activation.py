@@ -105,8 +105,9 @@ def _synthesise_brief(
     user_message: str,
     seeds: List[str],
     primary_user: str,
+    recent_chat_context: Optional[str] = None,
 ) -> str:
-    """Single Gemini call: KG briefing → markdown dossier."""
+    """One dossier_writer call: KG briefing + the recent conversation → markdown dossier."""
     visitor_seeds = [s for s in seeds if s.lower() != primary_user.lower()]
     visitor_label = visitor_seeds[0] if visitor_seeds else seeds[0]
 
@@ -156,6 +157,7 @@ For each: who, what connection is missing, and why it matters.
     agent.blackboard.update_state_value("seeds", ", ".join(seeds))
     agent.blackboard.update_state_value("primary_user", primary_user)
     agent.blackboard.update_state_value("visitor_label", visitor_label)
+    agent.blackboard.update_state_value("recent_chat_context", recent_chat_context or "")
 
     msg = Message(agent_input={
         "user_message": user_message,
@@ -163,6 +165,7 @@ For each: who, what connection is missing, and why it matters.
         "seeds": ", ".join(seeds),
         "primary_user": primary_user,
         "visitor_label": visitor_label,
+        "recent_chat_context": recent_chat_context or "",
     })
     result = agent.action_handler(msg)
     data = getattr(result, "data", None)
@@ -193,6 +196,8 @@ def run_context_activation(
     importance_threshold: float = CONTEXT_ACTIVATION_THRESHOLD,
     second_wave_importance: float = CONTEXT_ACTIVATION_SECOND_WAVE_THRESHOLD,
     second_wave_max: int = DEFAULT_SECOND_WAVE_MAX,
+    recent_chat_context: Optional[str] = None,
+    deadline: Optional[float] = None,
 ) -> ActivationResult:
     """
     Run KG activation for the given seeds and synthesise a situation brief.
@@ -202,6 +207,9 @@ def run_context_activation(
         user_message:      The original user message that triggered activation.
         primary_user:      Label of the primary user node in the KG.
         owner_id:          KG owner identifier used for session scoping.
+        recent_chat_context: The conversation the message belongs to; the dossier writer
+                           reads it so "it"/"that"/"he" resolve to what was just said.
+        deadline:          time.monotonic() bound for the KG walk (partial result past it).
         depth:             BFS depth for multi_seed_activation.
         top_k_convergence: Max convergence nodes to surface.
         importance_threshold:      Min importance for convergence nodes to include.
@@ -253,6 +261,7 @@ def run_context_activation(
             seed_node_ids=seed_ids,
             depth=depth,
             top_k_convergence=top_k_convergence,
+            deadline=deadline,
         )
     finally:
         session.close()
@@ -272,6 +281,7 @@ def run_context_activation(
         user_message=user_message,
         seeds=seeds,
         primary_user=primary_user,
+        recent_chat_context=recent_chat_context,
     )
 
     elapsed = time.perf_counter() - t0

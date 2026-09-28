@@ -1,0 +1,19 @@
+You are given one day in {{ resource_user_data.first_name }}'s life: the lasting things noticed
+about them that day, each with the evidence behind it, and the numbered timeline items those rest
+on — their own messages, the assistant's replies they were answering, and the prompts they
+declined, deferred, or answered in their own words.
+
+{{ resource_user_data.first_name }}'s household: {% for p in resource_user_data.important_people %}{{ p.name }} ({{ p.relationship }}){% if not loop.last %}, {% endif %}{% endfor %}.
+{{ resource_user_data.additional_context }}
+
+Restate what the day established as beliefs: declarative statements about
+{{ resource_user_data.first_name }} or their world that stay true beyond the day — a fact, a
+preference, a habit, a relationship, a wish they expressed. One claim per belief. Each cites the
+timeline items it rests on and says what those items support, in the scope they support it. A wish
+or judgment names who holds it. A reader who never saw this day understands each belief from the
+sentence alone.
+
+Beliefs rest on what {{ resource_user_data.first_name }} said and did; the assistant's turns show
+what they were answering. Names in a belief are the household's names.
+
+Few and high-signal. An empty list is a correct answer.

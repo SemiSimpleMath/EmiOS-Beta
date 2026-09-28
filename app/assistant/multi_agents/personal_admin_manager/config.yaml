@@ -63,6 +63,10 @@ tool_visibility:
 
 tools:
   allowed_tools:
+    - work_graph_summary
+    - work_graph_search
+    - work_graph_peek
+    - work_artifact_fetch
     - get_important_emails
     - get_email_thread
     - get_email_stats
@@ -96,6 +100,10 @@ tools:
 scope_contract:
   tools:
     allowed_tools:
+      - work_graph_summary
+      - work_graph_search
+      - work_graph_peek
+      - work_artifact_fetch
       - get_important_emails
       - get_email_thread
       - get_email_stats

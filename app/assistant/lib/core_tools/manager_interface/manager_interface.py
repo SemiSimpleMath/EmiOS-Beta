@@ -144,9 +144,11 @@ class ManagerInterface:
         from work_objects.runtime import active_attribution_node
         parent_id = active_attribution_node(ctx.store, ctx.work_id, ctx.node_id)
         child_id = new_id("node")
+        from app.assistant.dayflow_orchestrator.work_context import render_view
+        delegated_content = render_view("delegated_task", task=task_text, information=information)
         ctx.store.apply("add_node", {
             "work_id": ctx.work_id, "id": child_id, "type": "subtask", "parent_id": parent_id,
-            "title": task_text[:80], "content": task_text, "owner_agent": self.manager_name,
+            "title": task_text, "content": delegated_content, "owner_agent": self.manager_name,
             "satisfied_when_kind": "tool_success",
         }, actor=ctx.actor)
         # The child is handed over through the SAME entry the dispatch uses — the manager's job is

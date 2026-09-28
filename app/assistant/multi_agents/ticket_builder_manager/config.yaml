@@ -62,6 +62,10 @@ tool_visibility:
 #   never re-doing the work inside the delivery step.
 tools:
   allowed_tools:
+    - work_graph_summary
+    - work_graph_search
+    - work_graph_peek
+    - work_artifact_fetch
     - read_work_object
     - search_work_objects
     - pod_fetch
@@ -70,6 +74,10 @@ tools:
 scope_contract:
   tools:
     allowed_tools:
+      - work_graph_summary
+      - work_graph_search
+      - work_graph_peek
+      - work_artifact_fetch
       - read_work_object
       - search_work_objects
       - pod_fetch

@@ -58,12 +58,20 @@ tool_visibility:
 # - ask_user: cron runs overnight; blocking on a user prompt would hang.
 tools:
   allowed_tools:
+    - work_graph_summary
+    - work_graph_search
+    - work_graph_peek
+    - work_artifact_fetch
     - kg_query
   except_tools: []
 
 scope_contract:
   tools:
     allowed_tools:
+      - work_graph_summary
+      - work_graph_search
+      - work_graph_peek
+      - work_artifact_fetch
       - kg_query
     blocked_tools:
       - install_tool

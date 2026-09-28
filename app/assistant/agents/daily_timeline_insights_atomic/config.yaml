@@ -1,0 +1,22 @@
+# PROTOTYPE of the atomic daily-insights writer (step 1 of
+# docs/design/belief_intake_redesign_2026-09-26.md). Same job as daily_timeline_insights, but each
+# insight is one claim and cites the numbered timeline items it rests on; code restores them.
+# Not wired into the daily_insights pipeline — exercised by
+# app/assistant/tests/agent_tests/daily_timeline_insights_atomic/run_atomic_insights.py.
+name: daily_timeline_insights_atomic
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.6-luna"
+  model_tier: "smart"
+
+allowed_tools: []
+except_tools: []
+
+user_context_items:
+  - date
+  - timeline_items
+  - memory_available_tags
+
+system_context_items:
+  - resource_user_data

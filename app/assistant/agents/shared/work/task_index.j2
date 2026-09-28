@@ -1,0 +1,4 @@
+## WORK GRAPH — main tasks, not additional assignments
+{% for task in tasks %}- {{ task.id }} | [{{ task.status }}] {{ task.title }}
+{% else %}(no main tasks)
+{% endfor %}

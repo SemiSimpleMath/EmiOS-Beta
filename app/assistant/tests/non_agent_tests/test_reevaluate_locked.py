@@ -51,7 +51,7 @@ def test_upsert_rejects_unconfigured_domain(routed_db):
     from belief_engine.store.belief_store import BeliefStore, BeliefUpsertRequest
 
     store = BeliefStore()
-    with pytest.raises(ValueError, match="unknown belief domain"):
+    with pytest.raises(ValueError, match="Unknown belief domain"):
         store.upsert_belief(BeliefUpsertRequest(
             domain="other", belief_key="other.orphan",
             statement="An orphan nothing would ever maintain.",

@@ -1,0 +1,16 @@
+# Reads how ONE work object ended and decides what that means for the standing beliefs that
+# caused it to exist. Invoked deterministically by belief_engine/work_feedback.py when the work
+# store commits a belief-linked terminal transition — never on a schedule, never inline.
+#
+# It DECIDES only. The control code applies the decision through BeliefStore (owner-locked
+# beliefs are honoured there, not here) and attaches the work outcome as evidence either way.
+name: belief_engine::work_outcome
+class_name: Agent
+llm_params:
+  llm_provider: openai
+  engine: gpt-5.6-luna
+  model_tier: strong
+allowed_tools: []
+except_tools: []
+user_context_items: [beliefs, work_outcome]
+system_context_items: []

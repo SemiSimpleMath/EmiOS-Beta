@@ -606,6 +606,38 @@ class ContextInjector:
                     context[key] = ""
                 continue
 
+            if key == "relevant_beliefs":
+                # The few beliefs about the owner that bear on this turn, from the new intake's
+                # store (its first reader). Beliefs describe the owner, so they are injected only
+                # in the owner's own room; other rooms have other participants. Recall is
+                # memoized per inbound message: prompt assembly can render more than once a
+                # turn, and each surfacing is logged exactly once.
+                room_id = str(agent.blackboard.get_state_value("room_id", "") or "").strip()
+                query = str(context.get("incoming_message") or "").strip()
+                if room_id != "master_room" or not query:
+                    context[key] = ""
+                    continue
+                anchor = str(agent.blackboard.get_state_value("inbound_message_id", "") or "").strip() or None
+                memo = agent.blackboard.get_state_value("_relevant_beliefs")
+                if anchor and isinstance(memo, dict) and memo.get("anchor") == anchor:
+                    context[key] = str(memo.get("text") or "")
+                    continue
+                try:
+                    from belief_engine.intake import recall as belief_recall
+                    people = (self.resolve_resource(agent, "resource_user_data") or {}).get("important_people") or []
+                    names = [str(p.get("name") or "") for p in people if isinstance(p, dict)
+                             and p.get("name") and p["name"].lower() in query.lower()]
+                    items = belief_recall.recall(query, names=names, k=10)
+                    text = belief_recall.format_for_prompt(items)
+                    belief_recall.log_surfaced(items, room_id=room_id, message_id=anchor, query=query)
+                    agent.blackboard.update_state_value("_relevant_beliefs", {"anchor": anchor, "text": text})
+                    context[key] = text
+                except Exception as e:
+                    logger.error("[%s] relevant_beliefs recall failed: %s", agent.name, e)
+                    logger.debug("[%s] relevant_beliefs exception details", agent.name, exc_info=True)
+                    context[key] = ""
+                continue
+
             if key == "location_summary":
                 try:
                     loc_resource = self.resolve_resource(agent, "resource_current_location")

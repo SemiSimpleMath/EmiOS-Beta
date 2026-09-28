@@ -185,6 +185,8 @@ class WorkFinalizerNode(ControlNode):
         if dayflow_delivery and updated.status in {"done", "abandoned"}:
             from app.assistant.subconscious.concern_feedback import propagate_work_outcome
             propagate_work_outcome(store, updated.id, updated.status)
+            from belief_engine.work_feedback import propagate_work_outcome_to_beliefs
+            propagate_work_outcome_to_beliefs(store, updated.id, updated.status)
         fin = updated.nodes[node.id].payload["finalizer"]
         return [{"work_id": wo.id, "node_id": node.id, "verdict": fin["verdict"], "next_step": fin["next_step"]}]
 

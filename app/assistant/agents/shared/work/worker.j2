@@ -6,7 +6,7 @@ task: {{ view.task.directive }}
 success when: {{ view.task.success_kind }}
 parent goal: {{ view.work.objective }}
 {% if view.work.success_criteria %}goal success criteria: {{ view.work.success_criteria }}{% endif %}
-## YOUR INTERNAL CHECKLIST — provenance, not orchestrator tasks
+## YOUR INTERNAL CHECKLIST â€” provenance, not orchestrator tasks
 Echo [id:...] to update an item, omit the id to add one. Mark done only after a result is recorded.
 {% for item in view.checklist %}- [id:{{ item.id }}] [{{ item.status }}] {{ item.title }}
 {% else %}(no checklist recorded)
@@ -15,13 +15,13 @@ Echo [id:...] to update an item, omit the id to add one. Mark done only after a 
 ## RELEVANT INFO
 {% for fact in view.facts %}- {{ fact.content }}{% if fact.pod_ref %} | {{ fact.pod_ref }}{% endif %}
 {% endfor %}
-## DEPENDENCIES — reuse recorded outputs; check their status before assuming completion
-{% for dependency in view.dependencies %}
-- {{ dependency.task.id }} [{{ dependency.task.status }}] {{ dependency.task.title }}
-  TASK DIRECTIVE: {{ dependency.task.directive }}
-{% if not dependency.records %}  (no recorded result)
+{% set tasks = view.work.tasks %}{% include 'shared/work/task_index.j2' %}
+{% include 'shared/work/read_contract.j2' %}
+
+{% if view.owning_task %}
+## OWNING MAIN TASK — context for your delegated work
+id: {{ view.owning_task.task.id }} | status: {{ view.owning_task.task.status }}
+title: {{ view.owning_task.task.title }}
+task: {{ view.owning_task.task.directive }}
+{% set records = view.owning_task.records %}{% include 'shared/work/provenance.j2' %}
 {% endif %}
-{% set records = dependency.records %}{% include 'shared/work/provenance.j2' %}
-{% endfor %}
-## MAIN TASKS — context, not additional assignments to you
-{% set work = view.work %}{% include 'shared/work/portfolio.j2' %}

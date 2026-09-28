@@ -6,5 +6,5 @@ llm_params:
   model_tier: strong
 allowed_tools: []
 except_tools: []
-user_context_items: [beliefs, fragments]
+user_context_items: [beliefs, fragments, page_retry]
 system_context_items: []

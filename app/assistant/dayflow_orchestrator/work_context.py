@@ -75,7 +75,34 @@ def work_data(wo, now=None):
 def worker_data(wo, node_id):
     node = wo.nodes[node_id]
     records = wo.provenance_for(node_id)
-    return {"work": work_data(wo), "task": task_data(wo, node),
+    owner = node
+    seen = set()
+    while not wo.is_work_unit(owner) and owner.parent_id in wo.nodes and owner.id not in seen:
+        seen.add(owner.id)
+        owner = wo.nodes[owner.parent_id]
+    owning_task = None
+    if owner.id != node.id and wo.is_work_unit(owner):
+        owning_task = {"task": task_data(wo, owner),
+                       "records": [record_data(n) for n in wo.provenance_for(owner.id)]}
+    work = work_data(wo)
+    # A worker and its delegated helpers are already executing this main-task
+    # epoch. Their own live receipts are not competing dispatches. Preserve
+    # older epochs, other tasks, cancellation and uncertain external outcomes.
+    epoch = int(owner.payload.get("dispatch_epoch") or 0)
+    execution = work["execution"] or {}
+    def own_current(row):
+        return row.get("node_id") == owner.id and int(row.get("epoch") or 0) == epoch
+    cancelled = any(own_current(row) and row.get("revoked")
+                    for row in execution.get("attempts", []))
+    work["execution"] = {
+        **execution,
+        "attempts": [row for row in execution.get("attempts", [])
+                     if not (own_current(row) and not row.get("revoked")
+                             and row.get("state") in {"reserved", "running"})],
+        "calls": [row for row in execution.get("calls", [])
+                  if not (own_current(row) and not cancelled and row.get("state") == "in_flight")],
+    }
+    return {"owning_task": owning_task, "work": work, "task": task_data(wo, node),
             "records": [record_data(n) for n in records],
             "checklist": [record_data(n) for n in records if n.parent_id == node_id and n.type == "subtask"],
             "facts": [record_data(wo.nodes[e.src]) for e in wo.edges

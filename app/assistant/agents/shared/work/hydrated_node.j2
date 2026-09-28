@@ -1,0 +1,10 @@
+## NODE {{ node.id }} | [{{ node.status }}] {{ node.title }}
+{{ node.content }}
+{% if node.payload.finalizer is defined %}Recorded finalizer judgment: {{ node.payload.finalizer | tojson }}{% endif %}
+{% if node.pod_ref %}Pod reference: {{ node.pod_ref }}{% endif %}
+## ARTIFACT INDEX — titles and references only
+{% for artifact in node.artifacts %}- {{ artifact.id }} | {{ artifact.type }} | [{{ artifact.status }}] {{ artifact.title }}{% if artifact.pod_ref %} | {{ artifact.pod_ref }}{% endif %}
+{% else %}(no owned artifacts recorded)
+{% endfor %}
+Use work_artifact_fetch with the selected artifact ID to read the complete output.
+Historical status describes the attempt, not whether its draft or research is reusable.

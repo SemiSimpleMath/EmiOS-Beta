@@ -70,6 +70,10 @@ tool_visibility:
 # it" rather than tool exclusion.
 tools:
   allowed_tools:
+    - work_graph_summary
+    - work_graph_search
+    - work_graph_peek
+    - work_artifact_fetch
     - kg_query
     - kg_close_state
     - kg_create_state_node
@@ -92,6 +96,10 @@ tools:
 scope_contract:
   tools:
     allowed_tools:
+      - work_graph_summary
+      - work_graph_search
+      - work_graph_peek
+      - work_artifact_fetch
       - kg_query
       - kg_close_state
       - kg_create_state_node

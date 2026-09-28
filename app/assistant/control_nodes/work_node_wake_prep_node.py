@@ -72,6 +72,8 @@ class WorkNodeWakePrepNode(ControlNode):
         self.blackboard.update_state_value("node_status_legend", STATUS_LEGEND)
         self.blackboard.update_state_value("recent_dayflow_chat_history", chat_history)
         self.blackboard.update_state_value("recent_responded_tickets", responded)
+        from app.assistant.dayflow_orchestrator.communication_context import scheduled_reminder_history
+        self.blackboard.update_state_value("scheduled_reminder_history", scheduled_reminder_history(now_utc))
         for key, value in build_dayflow_blackboard_extras().items():
             self.blackboard.update_state_value(key, value)
 

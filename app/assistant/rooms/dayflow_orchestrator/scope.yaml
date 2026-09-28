@@ -46,6 +46,10 @@ tools:
     # self-minted scope). Same rationale as emi_team_manager's rule.
     emi_team_manager:
       allow:
+        - work_graph_summary
+        - work_graph_search
+        - work_graph_peek
+        - work_artifact_fetch
         - personal_admin_manager
         - devices_manager
         - web_manager
@@ -64,8 +68,12 @@ tools:
         - read_skill
     work_emi_team_manager:
       allow:
+        - work_graph_summary
+        - work_graph_search
+        - work_graph_peek
+        - work_artifact_fetch
         - work_web_manager
-        - personal_admin_manager
+        - work_personal_admin_manager
         - devices_manager
         - playwright_manager
         - bash_manager

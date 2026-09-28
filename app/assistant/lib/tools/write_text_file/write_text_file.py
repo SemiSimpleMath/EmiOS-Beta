@@ -46,7 +46,13 @@ class WriteTextFileTool(BaseTool):
             file_path = f"outputs/{ts}_output.md"
             logger.info("write_text_file: no file_path provided, defaulting to %s", file_path)
         if not isinstance(content, str):
-            return ToolResult(result_type="error", content="Missing required argument: content")
+            # Say which of the two it is. Reporting a wrong-typed `content` as "missing" sent
+            # the 2026-09-13 morning_briefing diagnosis in the wrong direction for months: the
+            # argument was present, it was a dict.
+            return ToolResult(
+                result_type="error",
+                content=("Missing required argument: content" if content is None else
+                         f"Argument 'content' must be text, got {type(content).__name__}"))
 
         resolved = _resolve_path(file_path.strip())
         if resolved is None:

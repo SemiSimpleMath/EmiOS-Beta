@@ -120,6 +120,7 @@ def _situational_context(bb) -> str:
     """Prepare the tick's situational data for the architect's Jinja context block."""
     responses = bb.get_state_value("recent_responded_tickets", {}) or {}
     return render_view("situation",
+        scheduled_reminder_history=bb.get_state_value("scheduled_reminder_history"),
         responses=[{"category": category, "ticket": ticket}
                    for category in ("accepted", "acknowledged", "declined", "snoozed")
                    for ticket in (responses.get(category) or [])],

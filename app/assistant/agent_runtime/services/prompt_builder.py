@@ -147,6 +147,12 @@ class PromptBuilder:
         system_prompt = self.get_system_prompt(agent, message, entity_injection_keys)
         user_prompt = self.get_user_prompt(agent, message, entity_injection_keys)
         user_prompt = self._append_runtime_injections(agent, user_prompt)
+        from work_objects.runtime import peek_work_context
+        ctx = peek_work_context()
+        if ctx is not None and agent.config.get("allowed_tools") and "work_projection" not in agent.config.get("user_context_items", []):
+            from app.assistant.control_nodes.workobject_render_node import render_work_projection
+            user_prompt += "\n" + render_work_projection(ctx.store.load(ctx.work_id), ctx.node_id)
+
 
         if not system_prompt:
             logger.error("[%s] Error forming the system prompt.", agent.name)

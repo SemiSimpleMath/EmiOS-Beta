@@ -266,9 +266,10 @@ from work_objects.execution_store import ExecutionStoreMixin, SCHEMA as EXECUTIO
 
 
 from work_objects.concern_outbox import ConcernOutboxMixin, SCHEMA as CONCERN_FEEDBACK_SCHEMA
+from work_objects.belief_outbox import BeliefOutboxMixin, SCHEMA as BELIEF_FEEDBACK_SCHEMA
 
 
-class WorkStore(ConcernOutboxMixin, ExecutionStoreMixin):
+class WorkStore(ConcernOutboxMixin, BeliefOutboxMixin, ExecutionStoreMixin):
     def __init__(self, path: str = "work_objects/work.db", busy_timeout_ms: int = 10_000):
         self.path = path
         # Single-writer model: one connection shared across threads, with ALL access
@@ -282,7 +283,8 @@ class WorkStore(ConcernOutboxMixin, ExecutionStoreMixin):
         # On a shared DB (dayflow's store lives in emi.db) a write must wait for
         # the main application writer instead of failing "database is locked".
         self._conn.execute(f"PRAGMA busy_timeout={int(busy_timeout_ms)}")
-        self._conn.executescript(SCHEMA_SQL + EXECUTION_SCHEMA + CONCERN_FEEDBACK_SCHEMA)
+        self._conn.executescript(SCHEMA_SQL + EXECUTION_SCHEMA + CONCERN_FEEDBACK_SCHEMA
+                                 + BELIEF_FEEDBACK_SCHEMA)
 
     def close(self) -> None:
         self._conn.close()
@@ -473,6 +475,7 @@ class WorkStore(ConcernOutboxMixin, ExecutionStoreMixin):
             )
             self._persist(wo, now)
             self._queue_concern_feedback(wo, previous_status, now)
+            self._queue_belief_feedback(wo, previous_status, now)
         if execution_revoked:
             from app.assistant.manager_runtime.execution import REGISTRY
             with REGISTRY.lock:

@@ -3,3 +3,12 @@
 
 ## Source fragments
 {{ fragments | tojson }}
+
+{% if page_retry %}
+## Correct the previous incomplete review
+The previous response did not cover this page. Read the same complete fragments again and
+return one finding for every id in required_fragment_ids, copying each id exactly as given.
+Keep the findings you already reached; add the ones that are missing. Do not drop a fragment
+to avoid the error, and do not return an id that is not on this page.
+{{ page_retry | tojson }}
+{% endif %}

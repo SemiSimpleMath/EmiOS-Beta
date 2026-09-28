@@ -1,0 +1,18 @@
+{
+  "id": "belief_intake",
+  "enabled": true,
+  "name": "Belief intake (shadow mode)",
+  "aliases": [
+    "belief intake",
+    "new belief intake"
+  ],
+  "runner": "pipeline",
+  "spec": {
+    "pipeline_id": "belief_intake"
+  },
+  "run_policy": {
+    "type": "daily",
+    "time_local": "01:00"
+  },
+  "notes": "SHADOW MODE (2026-09-27): the new belief intake — daily insights + timeline -> belief_extractor -> belief_dedup -> belief_revise -> contradiction fan-out — writes only the belief_intake_* tables in emi.db. Nothing the assistant reads is touched; the old belief_engine routine keeps running at 00:30. Runs after daily_insights (00:05) and processes yesterday plus any unfinished earlier day. Compare belief_intake_beliefs against user_beliefs before any cutover."
+}

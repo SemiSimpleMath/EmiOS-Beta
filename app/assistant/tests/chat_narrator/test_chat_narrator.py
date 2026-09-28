@@ -312,3 +312,13 @@ class TestDisplayNameLookup:
 
     def test_empty_manager_returns_empty(self, narrator):
         assert narrator._display_name_for("") == ""
+
+
+def test_work_start_notice_identifies_complete_task(narrator):
+    title = 'Set cooling to 75°F while leaving cooling enabled'
+    narrator._on_invocation_started(Message(sender='manager_invoker', data={
+        'manager_name': 'emi_team_manager', 'task_title': title,
+        'work_id': 'work_test', 'node_id': 'cooling',
+        'reply_to': {'type': 'socketio', 'room_id': 'master_room'},
+    }))
+    assert narrator._publishes[0][1] == 'Starting: ' + title

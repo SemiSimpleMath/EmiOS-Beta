@@ -45,6 +45,12 @@ logger = get_logger(__name__)
 _running_locks: dict[str, threading.Lock] = {}
 _running_locks_guard = threading.Lock()
 
+# Wall-time budget for one run (owner's rule, 2026-09-27: "5 min max"). The KG walk stops at
+# the deadline and returns what it has; a run that is over budget after activation writes its
+# brief and stops — no reasoning stage on a stale brief. While a run holds the per-owner lock
+# every later message's trigger is dropped, so a runaway run also blinds the engine.
+WALL_BUDGET_S = 300.0
+
 
 def _get_owner_lock(owner_id: str) -> threading.Lock:
     with _running_locks_guard:
@@ -90,6 +96,7 @@ def run_context_activation_pipeline(
     from app.assistant.context_engine.context_memo import distil_memo, write_memo_to_blackboard
 
     t_total = time.perf_counter()
+    deadline = time.monotonic() + WALL_BUDGET_S
 
     # ── Stage 1: chat_scan ────────────────────────────────────────────────────
     if not skip_scan:
@@ -120,6 +127,8 @@ def run_context_activation_pipeline(
         user_message=user_message,
         primary_user=primary_user,
         owner_id=owner_id,
+        recent_chat_context=recent_chat_context,
+        deadline=deadline,
     )
     logger.debug(
         "pipeline: context_activation done in %.1fs",
@@ -131,12 +140,21 @@ def run_context_activation_pipeline(
         owner_id=owner_id,
         user_message=user_message,
         seeds=seeds,
+        recent_chat_context=recent_chat_context,
         kg_briefing=activation.kg_briefing,
         situation_brief=activation.situation_brief,
         activation_elapsed_seconds=activation.elapsed_seconds,
     )
     save_brief(brief)
     logger.debug("pipeline: brief saved brief_id=%s", brief.brief_id)
+
+    if time.monotonic() > deadline:
+        logger.error(
+            "pipeline: wall budget of %.0fs exhausted during activation (%.1fs) brief_id=%s — "
+            "brief saved, reasoning and memo skipped",
+            WALL_BUDGET_S, activation.elapsed_seconds, brief.brief_id,
+        )
+        return brief
 
     # ── Stage 4: reasoning_agent ──────────────────────────────────────────────
     logger.debug("pipeline: reasoning_agent starting brief_id=%s", brief.brief_id)

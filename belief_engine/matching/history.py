@@ -20,6 +20,9 @@ CREATE TABLE IF NOT EXISTS belief_match_merges (
  index_synced INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS belief_observation_equivalence (
  evidence_id TEXT PRIMARY KEY, representative_id TEXT NOT NULL, pair_key TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS belief_update_failures (
+ belief_key TEXT PRIMARY KEY, consecutive_runs INTEGER NOT NULL,
+ first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, last_error TEXT);
 '''
 
 
