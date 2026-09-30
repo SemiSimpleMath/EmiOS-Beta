@@ -7,6 +7,11 @@ approval or success without sufficient evidence in the source content and record
 {% if not sources %}(no attributed external source recorded)
 {% endif %}
 
-{% include 'shared/work/response_meaning.j2' %}
+{% set work_concerns = view.work.concerns | default([]) %}{% if work_concerns %}## THE CONCERN THIS WORK SERVES
+Everything known about it, kept by the brain. Read it before acting: it says what was already done,
+what the owner said, and what else depends on it.
+{% with concerns = work_concerns %}{% include 'shared/work/concern_brief.j2' %}{% endwith %}
+
+{% endif %}{% include 'shared/work/response_meaning.j2' %}
 
 {% with work = view.work %}{% include 'shared/work/execution_state.j2' %}{% endwith %}

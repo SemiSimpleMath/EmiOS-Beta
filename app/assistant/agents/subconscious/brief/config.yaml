@@ -1,0 +1,26 @@
+name: subconscious::brief
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.6-luna"
+  model_tier: "smart"
+
+# Writes the brief for one concern: what it is, why it matters, what is known (with sources), what
+# was tried, what the owner said, what depends on it, open questions, a recommendation. Rewritten
+# whenever the concern's record changes. Context is fully pre-injected by
+# subconscious/concern_brief.py; code checks every cited source was shown.
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+accept_auto_skills: false
+
+user_context_items:
+  - agent_input
+
+required_context_items:
+  - agent_input
+
+system_context_items:
+  - resource_assistant_data
+  - resource_user_data

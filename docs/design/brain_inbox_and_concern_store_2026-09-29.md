@@ -154,6 +154,63 @@ morning for the 2 October calendar entry; the school library-fine email became a
 library-fine concern, with the pay-or-return details. Each without a gate route: the brain found the
 concern from the list of open concerns.
 
+## Step 4: association (2026-09-30)
+
+`app/assistant/subconscious/work_links.py`; the brain step adds, per matter:
+
+- Linked work, exact, by code: work whose `constraints.concern_refs` cites one of the matter's
+  concerns (full id or the 8-character short form), and work whose `constraints.source_intake`
+  came from an email in one of the matter's Gmail threads (account + thread_id).
+- Similar past work, by meaning: `brain_work_index` (emi.db) holds one MiniLM vector per work object
+  (title + objective), refreshed for new or changed objects only (first build: 1,513 objects in 44 s).
+  Top 5 at cosine >= 0.36, best over every event text and concern title, linked work excluded.
+  Calibration on the live store: true matches 0.74-0.84 (flea medication, OpenAI charges),
+  0.53-0.58 (library fine), 0.38 ("haven't booked my physical" -> the active notify-to-schedule
+  work); best unrelated 0.33-0.35; unrelated chat 0.22.
+- Past work is shown as title, status, dates, why it ended, and each task's finalizer outcome
+  (shared/work/finalizer_summary.j2, what the steward reads).
+- Already in motion: every active work object, every scheduled reminder that can still fire
+  (time_events), and the calendar for the next 30 days (read once per run, with calendar:<id>
+  anchors). The prompt asks the brain to name, in its note, every item that depends on a fact
+  that changed.
+
+Live dry run (nothing applied): the 2026-09-28 flea message, now read with the calendar and active
+work, became a note naming the 2 October calendar entry and the active 2 October dose work as
+needing review because the dose was given four days earlier, instead of resolving the concern.
+The library-fine email linked exactly to the work created from it (same Gmail thread) and found the
+related "resolve the fine" work by similarity (0.63).
+
+Not yet: KG-entity candidates (entity detection misses places; see the bug list), and search over
+outbound messages that arranged something with someone. Linking what dayflow creates for a concern
+at creation is step 6.
+
+## Step 5: the concern brief (2026-09-30)
+
+`app/assistant/subconscious/concern_brief.py`, agent `subconscious::brief`, run by the brain_gate
+routine after the brain step. For every open concern whose record changed since its brief was written
+(fingerprint `basis` over the record, the brief excluded), the writer reads the concern's full record
+(evidence as text, journal, work outcomes), its linked and similar past work, and what is in motion
+(active work, live reminders, 30 days of calendar), and writes: what, why it matters, known facts each
+with a source, what was tried, the owner's wishes, what depends on it, open questions, a
+recommendation. Every source must be a ref it was shown, or `journal` / `notes`; one correction round.
+Stored on the concern as `brief` {…, basis, written_at} by `persist.set_concern_brief`, which refuses a
+brief written from an older record. A failure is stored as `brief_error` with its basis and not retried
+until the record changes.
+
+Dayflow reads it: `work_context.work_data` carries `concerns` (the briefs of the concerns a work object
+cites, `briefs_for_refs`), rendered by shared/work/concern_brief.j2 in the architect's portfolio and in
+the worker and finalizer task context. A ref that resolves to no concern is logged and shown as
+unresolved, not raised, because it renders on every pass. The planner (strategic_planner_wo) still
+reads concerns from the daily-context snapshot; it gets briefs with the handoff (step 6).
+
+Shared templates for both brain agents: agents/shared/brain/concern.j2, past_work.j2 (now with the
+work id, so briefs can cite it), work_and_motion.j2.
+
+Live dry run (not stored): the flea concern's brief named the 2 October calendar entry and the active
+work as depending on it, and put what is unknown (medication on hand, dose given) in open questions;
+the library-fine brief sourced every fact to the school's email and found in past work that two
+earlier attempts to get the owner's choice expired unanswered.
+
 ## Requirement for the brain build: association finds dependents (owner, 2026-09-30)
 
 Finding what an event relates to is the most important part of the brain step. A change is rarely

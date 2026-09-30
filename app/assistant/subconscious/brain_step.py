@@ -16,7 +16,11 @@ For each matter `subconscious::brain` gets:
 - the chat summaries (chat_cluster pods) of those rooms from the 48 hours before the first event,
   and any since, so an event is read with the earlier conversations about it, not just this one;
 - the full record of every concern the events bear on, evidence shown as its text, not its id;
-- the other open concerns, briefly.
+- the other open concerns, briefly;
+- past work (subconscious/work_links.py): work linked exactly (it cites one of the matter's
+  concerns, or came from an email in one of its Gmail threads) and similar past work by meaning;
+- what is already in motion: active work, live scheduled reminders, and the calendar for the next
+  CALENDAR_DAYS, so the brain can name everything that depends on a fact that changed.
 
 It answers with notes and resolutions on concerns, new concerns (with done-when, and the owner's
 words verbatim when the owner asked for it), and a decision on every event. Code validates the
@@ -38,6 +42,7 @@ logger = get_logger(__name__)
 
 _AGENT = "subconscious::brain"
 ROOM_HISTORY = timedelta(hours=48)
+CALENDAR_DAYS = 30
 
 SCHEMA = """CREATE TABLE IF NOT EXISTS brain_matters (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -152,6 +157,14 @@ def _room_history(room_id: str, before: datetime) -> List[Dict[str, Any]]:
              "title": p.one_liner, "body": p.body or "", "pod_id": p.pod_id} for p in pods]
 
 
+def _calendar(now_utc: datetime) -> str:
+    """The calendar from now through CALENDAR_DAYS, each event line with its calendar:<id> anchor."""
+    from app.assistant.subconscious.context_builder import _fetch_calendar_text
+    from app.assistant.utils.time_utils import utc_to_local
+    start = utc_to_local(now_utc.isoformat())
+    return _fetch_calendar_text(start, start + timedelta(days=CALENDAR_DAYS), label=f"next {CALENDAR_DAYS} days")
+
+
 def _concern_view(label: str, c: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "label": label, "title": c.get("title"), "status": c["_status"], "subject": c.get("subject") or "household",
@@ -169,9 +182,11 @@ def _concern_view(label: str, c: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def build_payload(events: List[Dict[str, Any]], register: Dict[str, Any],
-                  now_utc: Optional[datetime] = None) -> Tuple[Dict[str, Any], Dict[str, Dict], Dict[str, str]]:
-    """The brain's input for one matter. Returns (payload, event by label, concern_id by label)."""
-    from app.assistant.subconscious import conversations
+                  now_utc: Optional[datetime] = None,
+                  calendar: Optional[str] = None) -> Tuple[Dict[str, Any], Dict[str, Dict], Dict[str, str]]:
+    """The brain's input for one matter. Returns (payload, event by label, concern_id by label).
+    `calendar` is the run's calendar text, read once per run; omitted, it is read here."""
+    from app.assistant.subconscious import conversations, work_links
     from app.assistant.utils.time_utils import utc_to_local
     now = now_utc or datetime.now(timezone.utc)
     open_concerns = [{**c, "_status": b} for b in ("active", "addressing") for c in register.get(b) or []]
@@ -184,6 +199,14 @@ def build_payload(events: List[Dict[str, Any]], register: Dict[str, Any],
     marked = [{**e, "mark": f"E{i}", "note": _gate_note(e, titles)} for i, e in enumerate(events, 1)]
     first = min(_utc(e["occurred_at"]) for e in events)
     rooms = list(dict.fromkeys(e["room_id"] for e in events if e["source"] == "chat"))
+    threads = []
+    for e in events:
+        if e["source"] == "email":
+            record = conversations._load_email(e["source_ref"])
+            threads.append({"account_id": record.get("account_id"), "thread_id": record.get("thread_id")})
+    linked = work_links.linked_work(named, threads)
+    similar = work_links.similar_work([e["text"] for e in events] + [by_id[cid].get("title") for cid in named],
+                                      exclude=[w["work_id"] for w in linked])
     payload = {
         "now": utc_to_local(now.isoformat()).strftime("%a %Y-%m-%d %H:%M"),
         "events": conversations.render(conversations.build(marked, now_utc=now)),
@@ -192,6 +215,11 @@ def build_payload(events: List[Dict[str, Any]], register: Dict[str, Any],
         "other_concerns": [{"label": f"C{i}", "title": c.get("title"), "status": c["_status"],
                             "subject": c.get("subject") or "household", "done_when": c.get("done_when")}
                            for i, c in enumerate(ordered, 1) if i > len(named)],
+        "linked_work": linked,
+        "similar_work": similar,
+        "active_work": work_links.active_work(),
+        "reminders": work_links.live_reminders(now),
+        "calendar": calendar if calendar is not None else _calendar(now),
     }
     return payload, {e["mark"]: e for e in marked}, labels
 
@@ -279,14 +307,14 @@ def _evidence(e: Dict[str, Any]) -> Dict[str, Any]:
 # ── one matter ──────────────────────────────────────────────────────────────
 
 def process_matter(events: List[Dict[str, Any]], *, call: Optional[Callable[[Dict[str, Any]], Any]] = None,
-                   judge=None, register_connect=None) -> Dict[str, Any]:
+                   judge=None, register_connect=None, calendar: Optional[str] = None) -> Dict[str, Any]:
     """Decide and apply one matter. Returns {decisions, admitted, concern_ids}; raises when the
     brain's answer is still invalid after one correction or applying it fails."""
     from app.assistant.subconscious import concern_door, persist
     from app.assistant.subconscious.concern_store import load_register
     now = datetime.now(timezone.utc)
     register = load_register(connect=register_connect)
-    payload, by_label, labels = build_payload(events, register, now)
+    payload, by_label, labels = build_payload(events, register, now, calendar)
     call = call or _agent_call
     data = call(payload)
     problems = _problems(data, by_label, list(labels))
@@ -347,9 +375,11 @@ def run_brain_step(*, connect=None, register_connect=None, call=None, judge=None
         return {"matters": 0, "applied": 0, "failed": 0}
     applied = failed = 0
     matters = group_matters(events)
+    calendar = _calendar(datetime.now(timezone.utc))
     for matter in matters:
         try:
-            result = process_matter(matter, call=call, judge=judge, register_connect=register_connect)
+            result = process_matter(matter, call=call, judge=judge, register_connect=register_connect,
+                                    calendar=calendar)
         except Exception as exc:
             logger.error("[brain] matter of %d event(s) failed; its events stay in the inbox, not retried: %s",
                          len(matter), exc, exc_info=True)

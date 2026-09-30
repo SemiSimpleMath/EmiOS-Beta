@@ -37,6 +37,12 @@ def fakes(monkeypatch):
          "pod_id": "datapod:chat_cluster:x"}])
     monkeypatch.setattr(brain_step, "_message_text", lambda mid: f"(message {mid})")
     monkeypatch.setattr(brain_step, "_pod_text", lambda pid: f"(pod {pid})")
+    monkeypatch.setattr(brain_step, "_calendar", lambda now: "- [calendar:bake] Bake sale @ Fri 08:00")
+    from app.assistant.subconscious import work_links
+    monkeypatch.setattr(work_links, "linked_work", lambda concern_ids, threads: [])
+    monkeypatch.setattr(work_links, "similar_work", lambda texts, exclude=(): [])
+    monkeypatch.setattr(work_links, "active_work", lambda: [])
+    monkeypatch.setattr(work_links, "live_reminders", lambda now=None: [])
 
 
 @pytest.fixture
@@ -190,11 +196,24 @@ def test_the_brain_prompt_renders_every_section():
                                                              "_status": "active"})],
                "other_concerns": [{"label": "C2", "title": "Car service", "status": "active", "subject": "owner",
                                    "done_when": None}],
+               "linked_work": [{"work_id": "w1", "title": "Bake cookies for the sale", "status": "done",
+                                "objective": "Bake cookies for the sale", "created": "Mon", "updated": "Tue",
+                                "ended_because": "", "link": "cites a concern of this matter", "score": None,
+                                "outcomes": [{"verdict": "achieved", "outcome": "Two dozen baked."}]}],
+               "similar_work": [],
+               "active_work": [{"work_id": "w2", "title": "Remind about the sale", "objective": "", "created": "Mon"}],
+               "reminders": [{"title": "Bake cookies", "kind": "one time", "repeats": "", "start": "Thu 18:00", "end": ""}],
+               "calendar": "- [calendar:bake] Bake sale @ Fri 08:00",
                "correction": None}
     user = work_context._ENV.get_template("subconscious/brain/prompts/user.j2").render(agent_input=payload)
     assert "## Earlier in master_room" in user and "Talked about the dose." in user
     assert "### [C1] Flea medication due (active)" in user and 'the owner asked for this: "track it"' in user
     assert "- [C2] Car service (active; about owner; done when: (not stated))" in user
+    assert "### Bake cookies for the sale [w1; done; started Mon, last changed Tue; cites a concern of this matter]" in user
+    assert "OUTCOME: Two dozen baked." in user and "(none close enough)" in user
+    assert "- Remind about the sale [w2] (started Mon)" in user and "- Bake cookies (one time; at Thu 18:00)" in user
+    assert "- [calendar:bake] Bake sale @ Fri 08:00" in user
     system = work_context._ENV.get_template("subconscious/brain/prompts/system.j2").render(
         resource_assistant_data={"name": "the assistant"}, resource_user_data={"first_name": "Sam"})
     assert "closes only when its done-when is met or Sam says" in system
+    assert "name in your note every item that depends on the old fact" in system

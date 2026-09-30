@@ -1,0 +1,12 @@
+Now: {{ agent_input.now }}
+
+## The concern
+
+{% set c = agent_input.concern %}{% include 'shared/brain/concern.j2' %}
+{% include 'shared/brain/work_and_motion.j2' %}
+{% if agent_input.correction %}
+## Correct your previous answer
+
+It did not satisfy the contract: {{ agent_input.correction }}
+{% endif %}
+Write the brief for this concern.

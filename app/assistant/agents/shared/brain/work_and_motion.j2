@@ -1,0 +1,32 @@
+{#- Past work and what is already in motion. Expects `agent_input` with linked_work, similar_work,
+    active_work, reminders, calendar. -#}
+## Past work linked to this matter
+
+{% for w in agent_input.linked_work -%}
+{% include 'shared/brain/past_work.j2' %}
+{% else -%}
+(none: no work cites these concerns or came from these email threads)
+{% endfor %}
+## Similar past work (found by meaning; judge whether it is the same matter)
+
+{% for w in agent_input.similar_work -%}
+{% include 'shared/brain/past_work.j2' %}
+{% else -%}
+(none close enough)
+{% endfor %}
+## Already in motion
+
+Active work:
+{% for w in agent_input.active_work -%}
+- {{ w.title }} [{{ w.work_id }}] (started {{ w.created }}){% if w.objective and w.objective != w.title %}: {{ w.objective }}{% endif %}
+{% else -%}
+(none)
+{% endfor %}
+Scheduled reminders:
+{% for r in agent_input.reminders -%}
+- {{ r.title }} ({{ r.kind }}{% if r.repeats %}, {{ r.repeats }}{% endif %}; {% if r.kind == "one time" %}at{% else %}from{% endif %} {{ r.start }}{% if r.end %} until {{ r.end }}{% endif %})
+{% else -%}
+(none)
+{% endfor %}
+Calendar:
+{{ agent_input.calendar }}

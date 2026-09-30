@@ -243,6 +243,30 @@ def apply_brain_matter(updates: List[Dict[str, Any]], plan: List[Dict[str, Any]]
     return admitted
 
 
+def set_concern_brief(concern_id: str, written_from: str, *, brief: Optional[Dict[str, Any]] = None,
+                      error: Optional[str] = None, connect=None) -> bool:
+    """Store a concern's brief (or the error that stopped it) against the record it was written from.
+    Returns False, writing nothing, when the record changed meanwhile: the next run writes it again."""
+    from app.assistant.subconscious import concern_brief
+    with _REGISTER_LOCK:
+        register = _load_register(connect)
+        for bucket in ("active", "addressing", "resolved", "dormant"):
+            for concern in register.get(bucket) or []:
+                if concern.get("concern_id") != concern_id:
+                    continue
+                if concern_brief.basis(concern, bucket) != written_from:
+                    return False
+                now_iso = datetime.now(timezone.utc).isoformat()
+                if error is None:
+                    concern["brief"] = {**brief, "basis": written_from, "written_at": now_iso}
+                    concern.pop("brief_error", None)
+                else:
+                    concern["brief_error"] = {"basis": written_from, "error": error, "at": now_iso}
+                _save_register(connect, register)
+                return True
+    raise KeyError(f"concern {concern_id} is not in the register")
+
+
 def _apply_noticer_output_locked(
     output: Dict[str, Any],
     plan: List[Dict[str, Any]],

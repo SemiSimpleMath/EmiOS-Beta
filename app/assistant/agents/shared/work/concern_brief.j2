@@ -1,0 +1,20 @@
+{#- The concerns a work object serves, with their briefs. Expects `concerns` (work_context.concern_context). -#}
+{% for c in concerns %}
+{% if c.get('unresolved') %}- concern {{ c.ref }}: not found ({{ c.unresolved }})
+{% else %}- concern {{ c.concern_id[:8] }}: {{ c.title }} [{{ c.status }}]
+  done when: {{ c.done_when or "(not stated)" }}
+{% if c.owner_words %}  the owner asked for this: "{{ c.owner_words }}"
+{% endif %}{% if c.brief %}{% if not c.brief_current %}  (this brief predates the latest change to the concern; a newer one is being written)
+{% endif %}  what: {{ c.brief.what }}
+  why it matters: {{ c.brief.why_it_matters }}
+  known:
+{% for f in c.brief.known %}    - {{ f.fact }} ({{ f.source }})
+{% endfor %}  tried: {{ c.brief.tried }}
+  the owner's wishes: {{ c.brief.owner_wishes }}
+{% if c.brief.depends_on_it %}  depends on it:
+{% for d in c.brief.depends_on_it %}    - {{ d }}
+{% endfor %}{% endif %}{% if c.brief.open_questions %}  open questions:
+{% for q in c.brief.open_questions %}    - {{ q }}
+{% endfor %}{% endif %}  recommendation: {{ c.brief.recommendation }}
+{% else %}  (no brief written yet)
+{% endif %}{% endif %}{% endfor %}

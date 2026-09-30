@@ -10,6 +10,9 @@ Historical failure totals do not request another user decision. Follow current f
 {% include 'shared/work/execution_state.j2' %}
 SOURCE CONTEXT
 {% with sources = work.sources | default([]), compact_sources = true %}{% include 'shared/work/source_context.j2' %}{% endwith %}
+{% if work.concerns | default([]) %}CONCERN THIS WORK SERVES (the brain's brief)
+{% with concerns = work.concerns %}{% include 'shared/work/concern_brief.j2' %}{% endwith %}
+{% endif %}
 TASKS (main assignments only)
 {% for task in work.tasks %}
 - [{{ task.status }}] {{ task.id }} | {{ task.title }}

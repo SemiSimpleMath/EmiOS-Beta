@@ -52,6 +52,15 @@ def task_data(wo, node, now=None):
                               "satisfied": nid in wo.nodes and wo.is_satisfied(wo.nodes[nid])}
                              for nid in wo.deps_of(node.id)]}
 
+def concern_context(wo):
+    """The concerns this work object serves, each with its brief (subconscious/concern_brief.py)."""
+    refs = wo.constraints.get("concern_refs") or []
+    if not refs:
+        return []
+    from app.assistant.subconscious.concern_brief import briefs_for_refs
+    return briefs_for_refs(refs)
+
+
 def work_data(wo, now=None):
     now = now or utcnow()
     goal = wo.nodes.get(wo.goal_node_id)
@@ -68,6 +77,7 @@ def work_data(wo, now=None):
             "unrun": sum(n.status in {"proposed", "actionable", "waiting", "dispatched"} for n in tasks),
             "repeated_contacts": [{"channel": c, "target": t, "count": count} for (c, t), count in contacts.items() if count >= 3],
             "sources": source_context(wo),
+            "concerns": concern_context(wo),
             "execution": wo._execution,
             "actions": [{"when": local_stamp(a.ts), "channel": a.channel, "target": a.target,
                          "summary": a.summary, "outcome": a.outcome} for a in wo.actions]}

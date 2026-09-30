@@ -1,0 +1,16 @@
+{#- One concern's full record, as the brain and the brief writer read it. Expects `c` (brain_step._concern_view). -#}
+### [{{ c.label }}] {{ c.title }} ({{ c.status }})
+- about: {{ c.subject }}; kind: {{ c.kind }}; severity: {{ c.severity }}; horizon: {{ c.horizon }}
+{% if c.owner_words %}- the owner asked for this: "{{ c.owner_words }}"
+{% endif -%}
+- done when: {{ c.done_when or "(not stated)" }}
+- first observed: {{ c.first_observed }}
+- notes: {{ c.notes }}
+{% for e in c.evidence -%}
+- evidence ({{ e.kind }} {{ e.ref }}){% if e.snippet %}: {{ e.snippet }}{% endif %}
+{% endfor -%}
+{% for w in c.work_outcomes -%}
+- work {{ w.work_id }}: {{ w.outcome }} ({{ w.recorded_at }}){% if w.user_response %}; the owner's response: {{ w.user_response }}{% endif %}
+{% endfor -%}
+{% if c.journal %}- journal:{{ c.journal }}
+{% endif %}

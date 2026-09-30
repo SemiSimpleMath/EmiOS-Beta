@@ -1,0 +1,8 @@
+{#- One past work object (work_links.work_view). Expects `w`. -#}
+### {{ w.title }} [{{ w.work_id }}; {{ w.status }}; started {{ w.created }}, last changed {{ w.updated }}; {{ w.link }}{% if w.score is not none %} {{ w.score }}{% endif %}]
+{% if w.objective and w.objective != w.title %}- objective: {{ w.objective }}
+{% endif -%}
+{% if w.ended_because %}- ended because: {{ w.ended_because }}
+{% endif -%}
+{% for finalizer in w.outcomes %}- task outcome: {% include 'shared/work/finalizer_summary.j2' %}
+{%- endfor %}
