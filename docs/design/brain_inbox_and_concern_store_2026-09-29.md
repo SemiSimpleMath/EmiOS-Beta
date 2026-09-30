@@ -282,6 +282,37 @@ snapshot, and work was linked to a concern only if the steward cited `concern:<i
   triaged intake is doorbell/bedroom camera pods.
 - The steward's intake is now the brain's concern handoffs plus allowlisted pods.
 
+## Seeing it work: the /brain page (2026-09-30)
+
+`subconscious/brain_trace.py` records every model call of the brain's agents (gate, brain, concern
+door, brief writer, noticer) and of the steward, at `LLMClient.call_structured_output`: the system
+and user prompts exactly as sent, the structured result or the error, engine and duration, and the
+tags of the block the call ran in (`trace(stage=…, event_ids=…, concern_id=…)`, set by the gate,
+the brain step, the brief writer and the noticer run). Table `brain_calls`; a failed write is logged
+and never fails the call. /brain gains three views over it: What the brain did (per matter: events,
+calls, decisions), Concerns (brief, readiness, brief calls, handoffs with the steward's answer and
+the steward call found by the item id in its prompt, linked work, journal), and Calls (all, by
+agent). Handoff items are found by the concern id in their record (`concern_handoff._existing_items`),
+which also finds the first two, named `concern:…` before the rename.
+
+## Reading a ticket: /read/<ticket_id> (2026-09-30)
+
+Owner: a long notification or question shows only its first lines in the popup, with a link to a page
+where it reads in normal type with everything it rides on. The popup keeps the answer buttons; the
+page only reads. `proactive_popup.messageOrLead`: a message over 400 characters shows its first two
+lines (cut at a word near 240 characters) and "Read the whole ticket"; tool approvals are unchanged.
+
+`ticket_manager/reading.py` assembles the page by code from existing links, no model call: the work
+node in `trigger_context.work_node` (goal, the steward's reason, done-when, the step's directive,
+source intake), or the noticer question in `trigger_context.question_id`; the concerns either
+reaches (brief, done-when, the owner's words, earlier outcomes); the sources the work, the brief and
+the concern evidence cite, as text (an email with the rest of its Gmail thread, a chat message, a
+pod); knowledge-graph entities named (`kg_links`); other work on the same concerns (`work_links`).
+Route `app/routes/ticket_reading.py` (local only), page `read_ticket.html/.css/.js`.
+
+Gap: tickets from the generic `ask_user` tool carry only the room id, not the work node of the
+worker that asked, so their page shows the message and entities but no work or concern.
+
 ## Requirement for the brain build: association finds dependents (owner, 2026-09-30)
 
 Finding what an event relates to is the most important part of the brain step. A change is rarely

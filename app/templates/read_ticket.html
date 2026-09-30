@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ticket</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/emi_tokens.css') }}?v={{ static_v }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/read_ticket.css') }}?v={{ static_v }}">
+  <script>window.SCRIPT_NAME = {{ request.script_root | tojson }}; window.TICKET_ID = {{ ticket_id | tojson }};</script>
+</head>
+<body>
+  <main class="rt-page">
+    <div id="rt-status" class="rt-muted">loading…</div>
+    <article id="rt-article" class="hidden"></article>
+  </main>
+  <script src="{{ url_for('static', filename='js/read_ticket.js') }}?v={{ static_v }}"></script>
+</body>
+</html>

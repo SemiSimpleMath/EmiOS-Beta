@@ -345,7 +345,7 @@ class ProactiveSuggestionPopup {
                     <button class="proactive-item-close" data-idx="${idx}" title="Close without action">&times;</button>
                     <div class="proactive-item-content">
                         <div class="proactive-item-title">${this.escapeHtml(s.title || 'Suggestion')}</div>
-                        <div class="proactive-item-message">${isToolApproval ? this.formatApprovalMessage(s.message || '') : this.linkifyEscaped(this.escapeHtml(s.message || ''))}</div>
+                        <div class="proactive-item-message">${isToolApproval ? this.formatApprovalMessage(s.message || '') : this.messageOrLead(s)}</div>
                         <div class="proactive-item-meta">${isToolApproval ? '🔐 Tool Approval' : (s.suggestion_type || '')}</div>
                     </div>
                     <div class="proactive-item-actions">
@@ -666,6 +666,17 @@ class ProactiveSuggestionPopup {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    // A long message shows its first lines and links to its reading page (/read/<ticket_id>), which
+    // has the whole text and everything the ticket rides on. The answer buttons stay here.
+    messageOrLead(s) {
+        const text = String(s.message || '');
+        if (text.length <= 400 || !s.ticket_id) return this.linkifyEscaped(this.escapeHtml(text));
+        let lead = text.split(/\n+/).filter(l => l.trim()).slice(0, 2).join('\n');
+        if (lead.length > 240) lead = lead.slice(0, lead.lastIndexOf(' ', 240) > 120 ? lead.lastIndexOf(' ', 240) : 240);
+        const href = (window.SCRIPT_NAME || '') + '/read/' + encodeURIComponent(s.ticket_id);
+        return `${this.linkifyEscaped(this.escapeHtml(lead))}… <a href="${href}" target="_blank" rel="noopener" class="proactive-item-link proactive-read-more">Read the whole ticket</a>`;
     }
 
     linkifyEscaped(escaped) {

@@ -1,0 +1,32 @@
+/* The reading page of a ticket (/read/<ticket_id>): one column, reading-size type, the shared colour tokens. */
+*{box-sizing:border-box}
+body{margin:0;background:var(--background-color);color:var(--text-color);
+  font-family:var(--font-family),system-ui,-apple-system,Segoe UI,sans-serif}
+.hidden{display:none}
+.rt-page{max-width:760px;margin:0 auto;padding-inline:20px;padding-block:36px 72px}
+.rt-muted{color:var(--text-muted);font-size:14px}
+
+.rt-kicker{color:var(--text-muted);font-size:13px;letter-spacing:.3px}
+.rt-title{font-size:28px;line-height:1.25;margin:6px 0 18px;color:var(--text-color);text-wrap:balance}
+.rt-message{font-size:18px;line-height:1.65;white-space:pre-wrap;word-break:break-word}
+.rt-answer{margin-top:16px;padding:12px 16px;border-left:3px solid var(--accent-color);
+  background:var(--widget-background);font-size:15px;line-height:1.55}
+.rt-note{margin-top:16px;font-size:14px;color:var(--text-muted)}
+
+.rt-section{margin-top:38px}
+.rt-section > h2{font-size:13px;text-transform:uppercase;letter-spacing:.8px;color:var(--heading-color);
+  margin:0 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border-color)}
+.rt-section p,.rt-section li,.rt-section dd{font-size:16px;line-height:1.6}
+.rt-block{background:var(--widget-background);border:1px solid var(--border-color);border-radius:10px;
+  padding:14px 16px;margin-bottom:12px}
+.rt-block h3{margin:0 0 8px;font-size:17px;line-height:1.35}
+.rt-meta{font-size:13px;color:var(--text-muted);margin-bottom:8px}
+.rt-body{white-space:pre-wrap;word-break:break-word;font-size:15.5px;line-height:1.6}
+.rt-kv{display:grid;grid-template-columns:minmax(120px,180px) 1fr;gap:6px 16px;margin:0}
+.rt-kv dt{color:var(--text-muted);font-size:14px;padding-top:2px}
+.rt-kv dd{margin:0;white-space:pre-wrap;word-break:break-word}
+.rt-list{margin:0;padding-left:20px}
+.rt-block details{margin-top:10px}
+.rt-block summary{cursor:pointer;color:var(--accent-color);font-size:14px}
+.rt-thread{margin-top:10px;padding-left:12px;border-left:2px solid var(--border-color)}
+@media (max-width:600px){.rt-kv{grid-template-columns:1fr}.rt-title{font-size:23px}.rt-message{font-size:17px}}
