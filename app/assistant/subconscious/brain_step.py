@@ -382,9 +382,11 @@ def run_brain_step(*, connect=None, register_connect=None, call=None, judge=None
     matters = group_matters(events)
     calendar = _calendar(datetime.now(timezone.utc))
     for matter in matters:
+        from app.assistant.subconscious.brain_trace import trace
         try:
-            result = process_matter(matter, call=call, judge=judge, register_connect=register_connect,
-                                    calendar=calendar)
+            with trace(stage="brain", event_ids=[e["id"] for e in matter]):
+                result = process_matter(matter, call=call, judge=judge, register_connect=register_connect,
+                                        calendar=calendar)
         except Exception as exc:
             logger.error("[brain] matter of %d event(s) failed; its events stay in the inbox, not retried: %s",
                          len(matter), exc, exc_info=True)

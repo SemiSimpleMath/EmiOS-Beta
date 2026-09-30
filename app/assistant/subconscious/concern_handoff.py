@@ -44,14 +44,18 @@ def item_id(concern_id: str, brief_basis: str) -> str:
 
 
 def _existing_items(concern_id: str) -> List[Dict[str, Any]]:
-    """Every handoff item ever written for this concern, as dayflow item metadata."""
+    """Every handoff item ever written for this concern, as dayflow item metadata. Found by the
+    concern id in the item's own record, so the first two handoffs, named `concern:…` before the
+    rename, are found too (an item id is an identity field and is not rewritten)."""
     import json
     from app.models.db_manager import get_db_manager
     from app.assistant.dayflow_orchestrator.dayflow_item_writer import DAYFLOW_ITEM_SOURCE, DAYFLOW_ROOM_ID
     with get_db_manager().read_session() as session:
         raw = session.connection().connection.driver_connection
-        rows = raw.execute("SELECT metadata_json FROM unified_log_2026 WHERE source=? AND room_id=? AND id LIKE ?",
-                           (DAYFLOW_ITEM_SOURCE, DAYFLOW_ROOM_ID, f"concern_handoff:{concern_id}:%")).fetchall()
+        rows = raw.execute("SELECT metadata_json FROM unified_log_2026 WHERE source=? AND room_id=? "
+                           "AND json_extract(metadata_json, '$.source_type') = ? "
+                           "AND json_extract(metadata_json, '$.concern_id') = ?",
+                           (DAYFLOW_ITEM_SOURCE, DAYFLOW_ROOM_ID, SOURCE_TYPE, concern_id)).fetchall()
     return [json.loads(r[0]) if isinstance(r[0], str) else r[0] for r in rows]
 
 

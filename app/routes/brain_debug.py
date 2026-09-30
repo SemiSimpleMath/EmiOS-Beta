@@ -1,15 +1,19 @@
-"""Owner-only /brain test page: everything the brain receives, and the prompts its agents see.
+"""Owner-only /brain page: what the brain received, what each of its agents was sent and answered,
+and what it decided.
 
-Three views, all read-only:
-- inbox    brain_events: every event, its gate route, the concerns it touched, the gate's
-           reasoning and the noticer's decision.
-- noticer  every context input the noticer gets this moment (the same build_noticer_context a
-           run uses, with the unconsumed reports), each with its size, and the system + user
-           prompts the noticer agent would be sent, rendered by the agent itself.
+What actually happened (recorded by subconscious/brain_trace.py at the one call path every agent
+takes, so the prompts shown are the ones sent):
+- matters   each matter the brain step handled: its events, every recorded call made for them
+            (gate pages, the brain, the concern door) and the decisions applied.
+- concerns  each open concern: brief and readiness, the brief writer's calls, every handoff to
+            dayflow with the steward's answer and the steward call that gave it, the work serving it.
+- calls     every recorded call of the brain's agents, filterable by agent; open one for its system
+            prompt, user prompt and result.
+
+What would be sent now (rendered by the agent's own input step and prompt builder; no model call):
+- inbox    brain_events: every event, its gate route, the concerns it touched, the brain's decision.
+- noticer  every context input the noticer gets this moment, and its rendered prompts.
 - gate     the gate agent's rendered prompts for the latest events against the open concerns.
-
-Rendering goes through the agent's own input step and prompt builder (what a real run does), so
-the page shows exactly what the model gets. No model is called and nothing is written.
 """
 from __future__ import annotations
 
@@ -132,3 +136,77 @@ def brain_gate_api():
     prompts = _render_prompts("subconscious::gate", payload, "subconscious::gate")
     return jsonify({"events_source": source, "event_count": len(events),
                     "concern_count": len(payload["open_concerns"]), **prompts})
+
+
+# ── what actually happened: recorded calls, matters, concerns (subconscious/brain_trace.py) ─────
+
+@brain_debug_bp.route("/api/brain/calls")
+def brain_calls_api():
+    """Recorded model calls of the brain's agents, newest first (prompt sizes only)."""
+    from app.assistant.subconscious import brain_trace
+    agent = (request.args.get("agent") or "").strip() or None
+    limit = min(int(request.args.get("limit") or 200), 2000)
+    return jsonify({"calls": brain_trace.list_calls(agent=agent, limit=limit),
+                    "agents": sorted(brain_trace.TRACED_AGENTS)})
+
+
+@brain_debug_bp.route("/api/brain/calls/<call_id>")
+def brain_call_api(call_id: str):
+    """One recorded call in full: the system and user prompts as sent, and the result or error."""
+    from app.assistant.subconscious import brain_trace
+    return jsonify(brain_trace.get_call(call_id))
+
+
+@brain_debug_bp.route("/api/brain/matters")
+def brain_matters_api():
+    """What the brain did, one matter at a time, newest first: the events it read, every recorded
+    call made for them (gate, brain, concern door), and the decisions applied."""
+    import json
+    from app.assistant.subconscious import brain_inbox, brain_step, brain_trace
+    limit = min(int(request.args.get("limit") or 50), 500)
+    brain_step.ensure_schema()
+    with brain_inbox._connect(False) as c:
+        matters = [dict(r) for r in c.execute("SELECT * FROM brain_matters ORDER BY id DESC LIMIT ?", (limit,))]
+        out = []
+        for m in matters:
+            ids = json.loads(m["event_ids"])
+            marks = ",".join("?" * len(ids))
+            events = [dict(r) for r in c.execute(
+                f"SELECT id, source, source_ref, occurred_at, room_id, speaker, text, gate_status, route, "
+                f"concern_ids, gate_reasoning FROM brain_events WHERE id IN ({marks}) ORDER BY occurred_at", ids)]
+            out.append({**m, "event_ids": ids, "concern_ids": json.loads(m["concern_ids"]),
+                        "decisions": json.loads(m["decisions"]) if m["decisions"] else None,
+                        "admitted": json.loads(m["admitted"]) if m["admitted"] else None,
+                        "events": events, "calls": brain_trace.calls_for_events(ids)})
+    return jsonify({"matters": out})
+
+
+@brain_debug_bp.route("/api/brain/concerns")
+def brain_concerns_api():
+    """Every open concern with what the brain knows and decided: its brief and readiness, its journal,
+    the brief writer's calls, each handoff to dayflow with the steward's answer and the steward call
+    that gave it, and the work that serves it."""
+    import json
+    from app.assistant.subconscious import brain_trace, work_links
+    from app.assistant.subconscious.concern_brief import basis
+    from app.assistant.subconscious.concern_handoff import _existing_items
+    from app.assistant.subconscious.concern_store import load_register
+    register = load_register()
+    rows = work_links._rows()
+    out = []
+    for bucket in ("active", "addressing"):
+        for c in register.get(bucket) or []:
+            cid = c["concern_id"]
+            handoffs = [{**i, "steward_calls": brain_trace.steward_calls_mentioning(i["item_id"])}
+                        for i in sorted(_existing_items(cid), key=lambda i: i.get("created_at") or "")]
+            out.append({
+                "concern_id": cid, "status": bucket, "title": c.get("title"), "subject": c.get("subject"),
+                "origin": c.get("origin"), "done_when": c.get("done_when"), "owner_request": c.get("owner_request"),
+                "notes": c.get("notes"), "journal": c.get("reinforcement_notes") or "",
+                "brief": c.get("brief"), "brief_current": (c.get("brief") or {}).get("basis") == basis(c, bucket),
+                "brief_error": c.get("brief_error"), "brief_calls": brain_trace.calls_for_concern(cid),
+                "handoffs": handoffs,
+                "work": [{"work_id": r["id"], "status": r["status"], "title": r["title"]} for r in rows
+                         if work_links._cites(r["constraints"].get("concern_refs") or [], cid)],
+            })
+    return jsonify({"concerns": out})

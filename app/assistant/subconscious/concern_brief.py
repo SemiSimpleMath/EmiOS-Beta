@@ -196,8 +196,10 @@ def run_briefs(*, call=None, register_connect=None, calendar: Optional[str] = No
     written = failed = 0
     for bucket, concern in todo:
         written_from = basis(concern, bucket)
+        from app.assistant.subconscious.brain_trace import trace
         try:
-            brief = write_brief(concern, bucket, calendar=calendar, call=call)
+            with trace(stage="brief", concern_id=concern["concern_id"]):
+                brief = write_brief(concern, bucket, calendar=calendar, call=call)
         except Exception as exc:
             logger.error("[brief] could not write the brief for %s; not retried until it changes: %s",
                          concern["concern_id"], exc, exc_info=True)

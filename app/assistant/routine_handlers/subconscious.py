@@ -109,14 +109,16 @@ def noticer_run(
         logger.info("[noticer_run] another noticer tick is in flight — skipping this one")
         return {"status": "skipped_concurrent_run"}
     try:
+        from app.assistant.subconscious.brain_trace import trace
         context = build_noticer_context(trigger_mode="daily")
-        output = _run_subconscious_agent(
-            handler_label="noticer_run",
-            agent_name="subconscious::noticer",
-            context=context,
-            scope_id="subconscious::noticer",
-            actor_id="routine::noticer_run",
-        )
+        with trace(stage="noticer"):
+            output = _run_subconscious_agent(
+                handler_label="noticer_run",
+                agent_name="subconscious::noticer",
+                context=context,
+                scope_id="subconscious::noticer",
+                actor_id="routine::noticer_run",
+            )
         summary = apply_noticer_output(output) or {}
         logger.info(
             "[noticer_run] new=%d reinforced=%d resolved=%d escalated=%d beliefs=%d questions=%d",

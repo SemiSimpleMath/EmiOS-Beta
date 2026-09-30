@@ -40,3 +40,24 @@ body{margin:0;background:var(--bg);color:var(--ink);
   word-break:break-word;font:12.5px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;
   max-height:70vh;overflow:auto}
 .br-h{font-size:13px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px;margin:12px 0 2px}
+
+/* ── Matters, concerns and recorded calls ───────────────────────────────── */
+.br-card{background:var(--panel);border:1px solid var(--line);border-radius:12px}
+.br-card > summary{cursor:pointer;padding:11px 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.br-card > summary .br-title{font-weight:600}
+.br-card-body{border-top:1px solid var(--line);padding:10px 14px 14px;display:flex;flex-direction:column;gap:8px}
+.br-badge.act_now{color:var(--warn);border-color:#5a4a2a}
+.br-badge.hold{color:var(--acc);border-color:#2a3f5a}
+.br-badge.no_action,.br-badge.applied{color:var(--ok);border-color:#2a5a34}
+.br-badge.agent{color:var(--acc);border-color:#2a3f5a}
+.br-kv{display:grid;grid-template-columns:minmax(110px,170px) 1fr;gap:3px 12px;font-size:13px}
+.br-kv dt{color:var(--mut)}
+.br-kv dd{margin:0;white-space:pre-wrap;word-break:break-word}
+.br-call{background:var(--panel2);border:1px solid var(--line);border-radius:10px}
+.br-call > summary{cursor:pointer;padding:7px 11px;display:flex;gap:9px;align-items:center;flex-wrap:wrap;font-size:12.5px}
+.br-call .br-call-body{padding:6px 10px 10px;display:flex;flex-direction:column;gap:6px}
+.br-err{color:var(--bad)}
+.br-note{font-size:12.5px;color:var(--mut)}
+.br-decision{border-left:3px solid var(--line);padding:3px 10px;font-size:13px}
+.br-decision b{color:var(--ink)}
+@media (max-width:640px){.br-kv{grid-template-columns:1fr}}

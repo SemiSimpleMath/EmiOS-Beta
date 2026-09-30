@@ -3,23 +3,53 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Brain — inputs and prompts</title>
+  <title>Brain</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/brain.css') }}">
   <script>window.SCRIPT_NAME = {{ request.script_root | tojson }};</script>
 </head>
 <body>
   <header class="br-header">
     <h1>Brain</h1>
-    <div class="br-sub">everything the brain receives, and the exact prompts its agents are sent &middot; read-only, no model is called</div>
+    <div class="br-sub">what the brain received, what each of its agents was sent and answered, and what it decided &middot; read-only</div>
   </header>
 
   <nav class="br-tabs">
-    <button class="br-tab is-active" data-tab="inbox">Inbox</button>
+    <button class="br-tab is-active" data-tab="matters">What the brain did</button>
+    <button class="br-tab" data-tab="concerns">Concerns</button>
+    <button class="br-tab" data-tab="calls">Calls</button>
+    <button class="br-tab" data-tab="inbox">Inbox</button>
     <button class="br-tab" data-tab="noticer">Noticer inputs &amp; prompts</button>
     <button class="br-tab" data-tab="gate">Gate prompts</button>
   </nav>
 
-  <section id="br-inbox" class="br-panel">
+  <section id="br-matters" class="br-panel">
+    <div class="br-bar">
+      <button id="m-refresh">refresh</button>
+      <span id="m-status" class="br-sub">each matter: the events the brain read, every call made for them (gate, brain, concern door), and what it decided</span>
+    </div>
+    <div id="m-list" class="br-list"></div>
+  </section>
+
+  <section id="br-concerns" class="br-panel hidden">
+    <div class="br-bar">
+      <button id="c-refresh">refresh</button>
+      <span id="c-status" class="br-sub">each open concern: its brief and readiness, the brief writer's calls, handoffs to dayflow with the steward's answer, and the work that serves it</span>
+    </div>
+    <div id="c-list" class="br-list"></div>
+  </section>
+
+  <section id="br-calls" class="br-panel hidden">
+    <div class="br-bar">
+      <label class="br-sub">agent
+        <select id="k-agent"><option value="">all</option></select>
+      </label>
+      <button id="k-refresh">refresh</button>
+      <span id="k-status" class="br-sub">every recorded model call: open one for its system prompt, user prompt and result</span>
+    </div>
+    <div id="k-list" class="br-list"></div>
+  </section>
+
+  <section id="br-inbox" class="br-panel hidden">
     <div class="br-bar">
       <select id="i-route">
         <option value="">all events</option>

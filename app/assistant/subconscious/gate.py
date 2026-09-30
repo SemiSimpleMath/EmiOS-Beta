@@ -121,8 +121,10 @@ def run_gate(*, ingest: bool = True, call: Optional[Callable[[Dict[str, Any]], A
 
     routed = passed = failed = 0
     for page in pages(events, max_chars=_PAGE_CHARS):
+        from app.assistant.subconscious.brain_trace import trace
         try:
-            decisions = route_page(page, concerns, call)
+            with trace(stage="gate", event_ids=[e["id"] for e in page]):
+                decisions = route_page(page, concerns, call)
         except Exception as exc:
             logger.error("[gate] %d event(s) could not be routed; the brain reads them unrouted: %s",
                          len(page), exc, exc_info=True)

@@ -378,6 +378,10 @@ class LLMClient:
                 agent_name=agent.name,
                 caller_scope_id=_scope_id,
             )
+            # The brain's agents: the exact prompts and result, for the /brain page.
+            from datetime import datetime, timezone
+            from app.assistant.subconscious.brain_trace import record_call
+            _started = datetime.now(timezone.utc)
             try:
                 from app.services.llm_resilience import retry_transient
 
@@ -396,8 +400,12 @@ class LLMClient:
                     messages=messages,
                     engine=engine,
                 )
+            except Exception as exc:
+                record_call(agent_name=agent.name, messages=messages, engine=engine, started=_started, error=exc)
+                raise
             finally:
                 set_current_call_context(**_prev_ctx)
+            record_call(agent_name=agent.name, messages=messages, engine=engine, started=_started, result=response)
             return response
         except Exception as e:
             logger.error("[%s] LLM call failed: %s", agent.name, e)
