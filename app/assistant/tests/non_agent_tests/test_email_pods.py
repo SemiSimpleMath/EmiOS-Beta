@@ -3,7 +3,8 @@
 Pins: the pod id is the one every existing email pod already has; a parsed email becomes one pod
 holding the full body and every header and parser field; storing it twice changes nothing; readers
 select by when the email ARRIVED, so a pod minted late is not a recent email; the ingest source
-forwards only freshly fetched email to the signal router, in the envelope shape it always read.
+forwards only freshly fetched email to the signal router, in the envelope shape it always read;
+encoded subjects and sender names (RFC 2047) are read decoded.
 Fake pod store; invented data only.
 """
 from __future__ import annotations
@@ -105,3 +106,19 @@ def test_the_ingest_source_forwards_only_freshly_fetched_email(monkeypatch):
     assert env.data["subject"] == "Field trip form" and env.data["body"].startswith("Please sign")
     assert env.data["sender_email"] == "office@school.example"
     assert source.pull() == [], "the cursor advanced"
+
+
+_ENCODED = ("From: =?UTF-8?B?VGhlIFNjaG9vbCBPZmZpY2U=?= <office@school.example>\r\n"
+            "Subject: =?utf-8?B?RmllbGQgdHJpcCBmb3JtIOKAlCBkdWUg?=\r\n\t=?utf-8?B?RnJpZGF5?=\r\n"
+            "Date: Mon, 29 Sep 2026 10:00:00 +0000\r\n\r\nbody")
+
+
+def test_encoded_subject_and_sender_are_read_decoded():
+    from email import message_from_string
+    from app.assistant.lib.core_tools.email_tool.utils.email_processor import EmailProcessor
+    meta = EmailProcessor.extract_metadata(message_from_string(_ENCODED))
+    assert meta["subject"] == "Field trip form — due Friday"
+    assert meta["sender"] == "The School Office" and meta["email_address"] == "office@school.example"
+    plain = EmailProcessor.extract_metadata(message_from_string('From: "Doe, J" <j@x.example>\r\n\r\nb'))
+    assert plain["sender"] == "Doe, J" and plain["subject"] == "[No Subject]"
+

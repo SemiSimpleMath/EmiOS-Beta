@@ -1,5 +1,6 @@
 # app/assistant/lib/core_tools/email_tool/utils/email_processor.py
 from app.assistant.utils.logging_config import get_logger
+from email import policy
 from email.message import EmailMessage
 from bs4 import BeautifulSoup
 from email.utils import parseaddr
@@ -8,14 +9,23 @@ logger = get_logger(__name__)
 
 class EmailProcessor:
     @staticmethod
+    def decode_header_value(name: str, raw: str) -> str:
+        """A raw header value as readable text: folding removed and RFC 2047 encoded words
+        (=?utf-8?B?...?=) decoded, by the stdlib's RFC 5322 header parser. Messages are parsed with
+        the compat32 policy, whose get() returns headers still encoded."""
+        return str(policy.default.header_fetch_parse(name, raw))
+
+    @staticmethod
     def extract_metadata(email_message):
         """
-        Extracts sender, subject, and date metadata.
-        (This is YOUR original, correct function)
+        Extracts sender, subject, and date metadata, with the sender name and subject decoded.
         """
         from_raw = email_message.get("From")
         display_name, email_address = parseaddr(from_raw)
-        subject = email_message.get("Subject", "[No Subject]")
+        if display_name:
+            display_name = EmailProcessor.decode_header_value("Subject", display_name)
+        subject_raw = email_message.get("Subject")
+        subject = EmailProcessor.decode_header_value("Subject", subject_raw) if subject_raw is not None else "[No Subject]"
         date_received = email_message.get("Date", "[No Date]")
 
         return {
