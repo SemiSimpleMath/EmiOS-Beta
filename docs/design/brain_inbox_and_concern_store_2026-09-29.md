@@ -19,8 +19,11 @@ Step 1: information arrives.
 
 - **Brain inbox** (`app/assistant/subconscious/brain_inbox.py`, table `brain_events` in emi.db).
   Each source writes one row per thing that happened, keyed by the source's own id (`message:<id>`)
-  so it lands once. Chat is the first source: every user message in every room, verbatim, any
-  length, with the assistant turn it replies to. Only `role='user'` rows enter, so the brain's own
+  so it lands once. Chat: every user message in every room, verbatim, any length. Email (added the
+  same day, step 1 of the brain build): every email the fetch keeps (email_parser importance >= 5),
+  read from its pod as it is created — sender line, subject and full body, ref = the pod id,
+  dated by its Date header (`ingest_email`, cursor = previous ingest time; pods minted by the
+  one-time repository move are excluded). Only `role='user'` rows enter chat intake, so the brain's own
   output (digest, questions, replies) cannot come back as events.
 - **Gate** (`app/assistant/subconscious/gate.py`, agent `subconscious::gate`). Routes each pending
   event against the open concerns: `concern` (naming every concern it bears on), `new_matter`, or
@@ -29,8 +32,22 @@ Step 1: information arrives.
   `failed`, and the noticer still reads those events. Anything passed on triggers a noticer tick
   (cooldown-guarded, shared with answer capture). Routine `brain_gate`, every 5 minutes; free when
   nothing new arrived.
+- **Events are read inside their conversations** (`app/assistant/subconscious/conversations.py`,
+  macro `agents/shared/macros/conversations.j2`; added the same day). Gate and noticer see events
+  grouped by room, under the room's ROOM.md `description:` (who talks there, what it is), each inside
+  its whole conversation: the room's user and assistant turns, split at 30 minutes of silence, walked
+  back and forward to the conversation's ends, nothing cut. Local times, a date header per day.
+  Events carry the reader's mark (gate `E1`…, noticer `[message:<id>]` plus where the gate routed
+  it); other turns are context. This replaced the per-event `replying_to` (the latest assistant line
+  in the room, of any age), which made every Slack message for three days "reply" to one old line.
+  The `replying_to` column is no longer written; it stays in the schema.
+  Email is read the same way: grouped by inbox under the account's `description` in
+  configs/oauth_accounts.json (one factual line: whose inbox, what arrives there; required, raises
+  when missing — `oauth_registry.get_description`), each email inside its Gmail thread (every stored
+  email of the thread, in time order). The gate routes newsletters and promotions `none` unless
+  their content bears on a concern.
 - **Noticer reads reports.** New context item `brain_reports`: every unconsumed routed event,
-  verbatim, grouped under the concern it bears on, then new matters, then unrouted events. Prompt
+  verbatim, inside its conversation, with its route (concerns it bears on, new matter, unrouted). Prompt
   section A1a: a user's own words about a concern outrank calendar entries and earlier notes.
 - **Every report gets a decision.** AgentForm `report_decisions`: `used` / `tracked_as_new` /
   `not_worth_tracking` with a reason, stored on the event (`noticer_decision`, `noticer_reason`).

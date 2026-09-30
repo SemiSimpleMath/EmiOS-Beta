@@ -1,0 +1,18 @@
+{#- Brain events inside their conversations and email threads (built by app/assistant/subconscious/conversations.py).
+    A labelled line is an event the reader answers by its [mark]; unlabelled lines are context. -#}
+{% macro conversations(rooms) -%}
+{% for room in rooms -%}
+### {{ room.heading }}
+{{ room.description }}
+{% for conv in room.conversations %}
+{{ conv.label }}:
+{% for t in conv.turns -%}
+{% if t.day %}  {{ t.day }}
+{% endif -%}
+{{ "    " }}{{ t.time }} {% if t.mark %}[{{ t.mark }}] {% endif %}{{ t.speaker }}: {{ t.text }}
+{% if t.note %}{{ "      " }}({{ t.note }})
+{% endif -%}
+{% endfor -%}
+{% endfor %}
+{% endfor -%}
+{%- endmacro %}

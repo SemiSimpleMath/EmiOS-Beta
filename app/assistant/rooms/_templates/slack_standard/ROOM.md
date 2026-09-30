@@ -1,4 +1,5 @@
 ---
+description: "A Slack channel where {{PRIMARY_USER_NAME}} and {{DISPLAY_NAME}}, a friend of {{PRIMARY_USER_NAME}}'s, message each other, with the assistant present."
 policy:
   policy_id: room_policy::{{ROOM_ID}}::v1
   surface: slack

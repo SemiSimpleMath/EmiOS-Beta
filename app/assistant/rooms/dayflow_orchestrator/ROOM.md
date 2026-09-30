@@ -1,4 +1,5 @@
 ---
+description: "The assistant's autonomous work room (Dayflow). User messages here are requests other parts of the assistant handed to the workflow on the owner's behalf, often from the owner's chat; the owner does not type here."
 policy:
   policy_id: room_policy::dayflow_orchestrator::v1
   manager_name: dayflow_orchestrator_manager

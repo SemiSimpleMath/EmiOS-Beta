@@ -141,6 +141,70 @@ def recent_emails(*, received_since: datetime, min_importance: int = MIN_IMPORTA
     return out
 
 
+
+
+def email_sender_line(record: Dict[str, Any]) -> str:
+    """"Name <address>" as the email's sender, for readers."""
+    sender = str(record.get("sender_display") or record.get("sender") or "").strip()
+    address = str(record.get("sender_email") or record.get("email_address") or "").strip()
+    if sender and address and sender.lower() != address.lower():
+        return f"{sender} <{address}>"
+    return sender or address
+
+
+def email_text(record: Dict[str, Any]) -> str:
+    """The email as readers see it: subject line, blank line, the full body."""
+    return f"Subject: {str(record.get('subject') or '').strip()}\n\n{str(record.get(_BODY_KEY) or '').strip()}"
+
+
+def email_time(record: Dict[str, Any]) -> str:
+    """When the email was received (ISO, UTC): its Date header, else the time its pod recorded
+    for the arrival, else when the pod was created. An email with no Date header has only these."""
+    value = record.get("received_at_utc") or record.get("occurred_at_utc") or record.get("created_at")
+    if not value:
+        raise ValueError(f"email {record.get('pod_id')} has no time")
+    return str(value)
+
+def emails_created_since(since_utc: datetime, *, store=None) -> List[Dict[str, Any]]:
+    """Email records whose pods were created after `since_utc`, oldest first, each with the pod's
+    `created_at`. Pods minted by the one-time repository move are old mail, not arrivals: excluded."""
+    from app.assistant.pod_store.pod_store import PodStore
+    store = store or PodStore()
+    since = since_utc if since_utc.tzinfo else since_utc.replace(tzinfo=timezone.utc)
+    out = []
+    for pod in store.query(kind="email", since_utc=since, limit=None):
+        if pod.created_by == MIGRATION_CREATOR:
+            continue
+        created = pod.created_at if pod.created_at.tzinfo else pod.created_at.replace(tzinfo=timezone.utc)
+        if created <= since:
+            continue
+        out.append({**email_record(pod), "created_at": created.isoformat()})
+    out.sort(key=lambda r: r["created_at"])
+    return out
+
+
+def email_by_pod_id(pod_id: str, *, store=None) -> Dict[str, Any]:
+    """One email record by pod id. Raises when the pod is gone or is not an email."""
+    from app.assistant.pod_store.pod_store import PodStore
+    pod = (store or PodStore()).get(pod_id)
+    if pod is None or pod.kind != "email":
+        raise KeyError(f"no email pod {pod_id}")
+    return email_record(pod)
+
+
+def thread_emails(account_id: str, thread_id: str) -> List[Dict[str, Any]]:
+    """Every stored email in one Gmail thread of one account, as records (unordered)."""
+    from app.assistant.pod_store.pod_store import PodStore
+    from app.models.db_manager import get_db_manager
+    with get_db_manager().read_session() as session:
+        raw = session.connection().connection.driver_connection
+        pod_ids = [r[0] for r in raw.execute(
+            "SELECT pod_id FROM pod_store WHERE kind='email' "
+            "AND json_extract(metadata_json, '$.thread_id') = ? "
+            "AND json_extract(metadata_json, '$.account_id') = ?", (thread_id, account_id)).fetchall()]
+    store = PodStore()
+    return [email_record(store.get(pid)) for pid in pod_ids]
+
 # ── one-time move from the event repository (app startup) ────────────────────
 
 def migrate_repository_emails() -> Dict[str, int]:

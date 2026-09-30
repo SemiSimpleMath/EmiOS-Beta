@@ -1,4 +1,5 @@
 ---
+description: "A task-definition room in the assistant's app: the owner defines task specs with the assistant."
 policy:
   policy_id: room_policy::task_create::v1
   manager_name: task_spec_manager

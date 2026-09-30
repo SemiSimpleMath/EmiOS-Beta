@@ -1,4 +1,5 @@
 ---
+description: "A Telegram chat between the assistant and {{DISPLAY_NAME}}."
 policy:
   policy_id: room_policy::{{ROOM_ID}}::v1
   surface: telegram

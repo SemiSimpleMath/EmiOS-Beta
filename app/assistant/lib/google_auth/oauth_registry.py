@@ -134,6 +134,15 @@ def get_display_name(account_id: str) -> str:
     return str(account.get("display_name") or account_id).strip()
 
 
+def get_description(account_id: str) -> str:
+    """The account's `description`: one factual line saying whose account it is and what arrives
+    there, for readers of its mail (the brain). Raises when absent."""
+    description = str(get_account(account_id).get("description") or "").strip()
+    if not description:
+        raise ValueError(f"Account '{account_id}' has no 'description' in oauth_accounts.json.")
+    return description
+
+
 def list_accounts() -> Dict[str, Dict[str, Any]]:
     """Return all configured accounts as {account_id: config}."""
     config = _load_config()

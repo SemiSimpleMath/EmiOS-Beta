@@ -1,4 +1,5 @@
 ---
+description: "The owner's main chat with the assistant, in the assistant's own app. User messages here are the owner's."
 policy:
   policy_id: room_policy::master_room::v1
   chat_compaction:

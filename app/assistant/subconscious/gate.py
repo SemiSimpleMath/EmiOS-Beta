@@ -7,7 +7,8 @@ round; an answer still invalid after it marks the page `failed`, which the notic
 (a routing failure must not drop an event).
 
 Labels are request-local (E1… for events, C1… for concerns) and mapped back by code, so the model
-never copies a concern_id or a message id.
+never copies a concern_id or a message id. Events are shown inside their conversations, grouped by
+room under the room's description (subconscious/conversations.py); unlabelled turns are context.
 
 When anything is passed on (concern or new_matter), a noticer tick is triggered — cooldown-guarded,
 shared with answer capture — so a report reaches the brain within minutes, not at tomorrow's 04:00.
@@ -27,13 +28,6 @@ _PAGE_CHARS = 24000   # events per call are bounded by size, never cut
 def open_concerns(register: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Active + addressing concerns, each tagged with its bucket."""
     return [{**c, "_bucket": b} for b in ("active", "addressing") for c in register.get(b) or []]
-
-
-def _event_view(label: str, e: Dict[str, Any]) -> Dict[str, Any]:
-    from app.assistant.utils.time_utils import utc_to_local
-    return {"label": label, "time": utc_to_local(e["occurred_at"]).strftime("%a %Y-%m-%d %H:%M"),
-            "room": e.get("room_id") or "?", "speaker": e.get("speaker") or "user",
-            "text": e["text"], "replying_to": e.get("replying_to")}
 
 
 def _problems(data: Any, event_labels: List[str], concern_labels: List[str]) -> List[str]:
@@ -64,12 +58,14 @@ def _problems(data: Any, event_labels: List[str], concern_labels: List[str]) -> 
 
 
 def build_payload(events: List[Dict[str, Any]], concerns: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """The gate agent's input for one page: labelled open concerns and labelled events."""
+    """The gate agent's input for one page: labelled open concerns, and the events labelled inside
+    their conversations."""
+    from app.assistant.subconscious import conversations
     return {
         "open_concerns": [{"label": f"C{i}", "title": c.get("title"), "subject": c.get("subject") or "household",
                            "status": c["_bucket"], "notes": c.get("notes") or ""}
                           for i, c in enumerate(concerns, 1)],
-        "events": [_event_view(f"E{i}", e) for i, e in enumerate(events, 1)],
+        "conversations": conversations.build([{**e, "mark": f"E{i}"} for i, e in enumerate(events, 1)]),
     }
 
 
@@ -108,13 +104,13 @@ def _agent_call(payload: Dict[str, Any]) -> Any:
 def run_gate(*, ingest: bool = True, call: Optional[Callable[[Dict[str, Any]], Any]] = None,
              register: Optional[Dict[str, Any]] = None, trigger: Optional[Callable[[str], Any]] = None,
              connect=None) -> Dict[str, Any]:
-    """Ingest new chat, route every pending event, trigger the noticer if anything was passed on.
+    """Ingest new chat and email, route every pending event, trigger the noticer if anything was passed on.
     Free when nothing is pending (no model call). The keyword arguments are test seams."""
     from app.assistant.subconscious import brain_inbox as inbox
     from belief_engine.matching.context import pages
 
     kw = {"connect": connect} if connect else {}
-    ingested = inbox.ingest_chat(**kw) if ingest else 0
+    ingested = (inbox.ingest_chat(**kw) + inbox.ingest_email(**kw)) if ingest else 0
     events = inbox.pending(**kw)
     if not events:
         return {"ingested": ingested, "routed": 0, "passed_on": 0, "failed": 0}

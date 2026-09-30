@@ -116,6 +116,11 @@ it is. Other sections are optional.
 - Missing or malformed `ROOM.md` raises loudly.
 - Missing `# Identity` content raises loudly.
 - Unknown FRONTMATTER keys are ignored, not errors.
+- `description:` (top-level frontmatter string) is one factual line for readers OUTSIDE the room:
+  what the room is and whose messages arrive there (e.g. "Telegram chat between the assistant and
+  <name>; the owner is not in this chat"). The brain's readers show it above the room's
+  conversations; `load_room_description` raises when it is missing, so every room that receives
+  user messages must have one. The Slack/Telegram templates fill it from their tokens.
 - Unknown BODY sections are **not** ignored: an unrecognized H1 is folded
   into the most recently recognized section, so prose under a
   `# Working notes` heading placed after `# Identity` is appended to

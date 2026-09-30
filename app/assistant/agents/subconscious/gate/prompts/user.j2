@@ -1,3 +1,4 @@
+{%- from "shared/macros/conversations.j2" import conversations -%}
 ## Open concerns
 
 {% for c in agent_input.open_concerns -%}
@@ -7,18 +8,13 @@
 (no open concerns)
 {% endfor %}
 
-## Events, oldest first
+## Events, inside their conversations
 
-{% for e in agent_input.events -%}
-- [{{ e.label }}] {{ e.time }} in {{ e.room }}, {{ e.speaker }}: {{ e.text }}
-{%- if e.replying_to %}
-  (replying to the assistant: {{ e.replying_to }})
-{%- endif %}
-{% endfor %}
+{{ conversations(agent_input.conversations) }}
 {% if agent_input.correction %}
 ## Correct your previous answer
 
 It did not satisfy the routing contract: {{ agent_input.correction }}
 Answer every event exactly once, using only the labels above.
 {% endif %}
-Route every event.
+Route every labelled event.

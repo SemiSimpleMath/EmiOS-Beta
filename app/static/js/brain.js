@@ -35,11 +35,10 @@ async function loadInbox() {
     const head = el("div", "br-ev-head");
     const kind = e.gate_status === "routed" ? e.route : e.gate_status;
     head.appendChild(el("span", "br-badge " + kind, kind));
-    head.appendChild(el("span", null, `${e.occurred_at} · ${e.room_id || "?"} · ${e.speaker || "user"} · ${e.source_ref}`));
+    head.appendChild(el("span", null, `${e.occurred_at} · ${e.room_id || e.source} · ${e.speaker || "user"} · ${e.source_ref}`));
     if (e.consumed_at) head.appendChild(el("span", "br-badge", "read by noticer"));
     box.appendChild(head);
     box.appendChild(el("div", "br-ev-text", e.text));
-    if (e.replying_to) box.appendChild(el("div", "br-ev-reply", "replying to the assistant: " + e.replying_to));
     const meta = el("div", "br-ev-meta");
     const line = (label, value) => {
       if (!value) return;

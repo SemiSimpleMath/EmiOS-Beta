@@ -30,7 +30,6 @@ body{margin:0;background:var(--bg);color:var(--ink);
 .br-badge.none{color:var(--mut)}
 .br-badge.failed,.br-badge.pending{color:var(--bad);border-color:#5a2a2a}
 .br-ev-text{white-space:pre-wrap;word-break:break-word}
-.br-ev-reply{color:var(--mut);font-size:12px;margin-top:4px;white-space:pre-wrap}
 .br-ev-meta{font-size:12px;color:var(--mut);margin-top:6px}
 .br-ev-meta b{color:var(--ink);font-weight:600}
 

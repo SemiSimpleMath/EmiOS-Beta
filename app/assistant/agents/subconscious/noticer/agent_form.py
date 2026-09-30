@@ -179,7 +179,7 @@ class ReportDecision(BaseModel):
     something mattered or did not. A report left without a decision is shown again next tick.
     """
     model_config = ConfigDict(extra="forbid")
-    ref: str = Field(description="The report's [ref] exactly as shown, e.g. message:1234.")
+    ref: str = Field(description="The report's [ref] exactly as shown, e.g. message:1234 or datapod:email:abc123.")
     decision: Literal["used", "tracked_as_new", "not_worth_tracking"] = Field(
         description="used: it changed or confirmed a concern this tick. tracked_as_new: you raised a new "
                     "concern for it. not_worth_tracking: it needs nothing from the household's concerns.")

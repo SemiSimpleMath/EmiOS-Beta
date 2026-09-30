@@ -1,4 +1,5 @@
 ---
+description: "A synthetic Slack channel used by the room test harness; not a real conversation."
 policy:
   policy_id: room_policy::slack/__test__::v1
   surface: slack

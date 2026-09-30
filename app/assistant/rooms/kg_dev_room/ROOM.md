@@ -1,4 +1,5 @@
 ---
+description: "A developer console in the assistant's app: the owner asks diagnostic questions about the assistant's knowledge graph."
 policy:
   policy_id: room_policy::kg_dev_room::v1
   chat_compaction:

@@ -1,4 +1,5 @@
 ---
+description: "A document-editing room in the assistant's app: the owner writes and revises documents with the assistant."
 policy:
   policy_id: room_policy::doc_editor::v1
   manager_name: doc_editor_manager

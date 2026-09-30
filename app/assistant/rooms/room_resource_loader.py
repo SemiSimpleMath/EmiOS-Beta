@@ -120,6 +120,17 @@ def load_room_access(room_id: str) -> Dict[str, Any]:
     return access
 
 
+def load_room_description(room_id: str) -> str:
+    """The room's `description:` from ROOM.md frontmatter: a factual line saying what the room is
+    and who talks in it, for readers outside the room (the brain). Raises when absent."""
+    base_dir = resolve_room_config_dir(room_id)
+    fm = _read_frontmatter(base_dir / _ROOM_FILE_NAME)
+    description = str(fm.get("description") or "").strip()
+    if not description:
+        raise ValueError(f"Room '{room_id}' ROOM.md has no 'description' in frontmatter.")
+    return description
+
+
 def load_room_context_for_manager(room_id: str) -> Dict[str, Any]:
     """Load room config + prose for an agent's prompt context.
 

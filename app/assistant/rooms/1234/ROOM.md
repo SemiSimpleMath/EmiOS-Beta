@@ -1,4 +1,5 @@
 ---
+description: "A test room for room-manager integration checks; not a real conversation."
 policy:
   policy_id: room_policy::1234::default
   surface: sms
