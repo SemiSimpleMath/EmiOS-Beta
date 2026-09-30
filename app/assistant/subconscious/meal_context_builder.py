@@ -28,7 +28,7 @@ from app.assistant.subconscious.context_builder import (
     _NO_DATA_FMT,
 )
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_repo_root, get_resources_dir
+from app.assistant.utils.path_utils import get_repo_root
 from app.assistant.utils.time_utils import get_local_time
 
 logger = get_logger(__name__)
@@ -533,14 +533,8 @@ def _build_food_calendar(*, now_local: datetime) -> str:
 def _build_addressable_concerns() -> str:
     """Read concerns_register, filter to concerns where addressable_by
     includes meal_proposer."""
-    path = get_resources_dir() / "subconscious" / "resource_concerns_register.json"
-    if not path.is_file():
-        return "(no concerns_register yet)"
-    try:
-        register = json.loads(path.read_text(encoding="utf-8"))
-    except Exception as e:
-        logger.warning("[meal_context] concerns_register parse failed: %s", e)
-        return "(error reading concerns_register)"
+    from app.assistant.subconscious.concern_store import load_register
+    register = load_register()
 
     matched: List[Dict[str, Any]] = []
     for bucket in ("active", "addressing"):

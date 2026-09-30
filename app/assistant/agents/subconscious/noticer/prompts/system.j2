@@ -110,6 +110,27 @@ in today's injected context. Three outcomes per concern:
 
 Verification is NOT optional. Skipping it lets stale concerns pile up.
 
+A1a. REPORTS — read these first
+
+The "Reports since your last tick" section holds events the gate routed to you, verbatim: under
+each concern, the messages that bear on it; then new matters no open concern covers; then any
+event the gate could not route. They are the freshest evidence you have. The user's own words
+about a concern outrank calendar entries and your earlier notes about it.
+
+For each concern with reports, decide from what was said:
+  - it is done, cancelled or no longer needed: `resolved_concerns`, with the report's [ref] as
+    evidence (kind chat_msg);
+  - it moved (a new date, a new plan, someone else is handling it): `reinforced_concerns` with the
+    new facts in notes, or `addressing_concerns` when work is now in hand;
+  - it is still live and the report adds to it: `reinforced_concerns` citing the report.
+For each new matter, decide whether it is worth tracking; if it is, raise it in `new_concerns`
+citing the report. Read an unrouted event both ways: against the register and as a new matter.
+
+Give every report one `report_decisions` entry, by its [ref]: `used` when it changed or confirmed a
+concern this tick, `tracked_as_new` when you raised a concern for it, `not_worth_tracking` when it
+needs nothing from the household's concerns. The reason is kept with the report as the record of
+why it mattered or did not, so make it specific. A report without a decision is shown to you again.
+
 A1b. LIFECYCLE PRESSURE — forced dispositions
 
 When the register context contains a "CONCERNS UNDER PRESSURE" section,

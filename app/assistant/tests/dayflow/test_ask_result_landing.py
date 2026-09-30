@@ -14,6 +14,8 @@ Now the ask is an ordinary dispatch: the gate claims the node, the session calls
 """
 from __future__ import annotations
 
+from app.assistant.tests.concern_store_helpers import ScratchRegister
+
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -225,13 +227,13 @@ class TestWaitingIsNotFrozen:
 class TestDeclineReachesTheConcern:
 
     def _register(self, tmp_path, concern_id):
-        path = tmp_path / "resource_concerns_register.json"
-        path.write_text(json.dumps({
+        path = ScratchRegister(tmp_path)
+        path.write({
             "schema_version": 1,
             "active": [{"concern_id": concern_id, "title": "Picture Day needs preparation",
                         "reinforcement_count": 5}],
             "addressing": [], "resolved": [], "dormant": [],
-        }), encoding="utf-8")
+        })
         return path
 
     def test_declined_work_parks_its_concern_dormant(self, monkeypatch, tmp_path):
@@ -245,8 +247,9 @@ class TestDeclineReachesTheConcern:
 
         concern_id = "3a9f2c71-6b84-4d15-ae32-91f0c7b5e628"
         register_path = self._register(tmp_path, concern_id)
-        monkeypatch.setattr(persist, "get_repo_root", lambda: tmp_path)
-        monkeypatch.setattr(persist, "_REGISTER_REL", register_path.name)
+        # propagate_work_outcome takes no store; route persist's register I/O to the scratch store.
+        monkeypatch.setattr(persist, "_load_register", lambda connect=None: register_path.read())
+        monkeypatch.setattr(persist, "_save_register", lambda connect, reg: register_path.write(reg))
         monkeypatch.setattr(answer_capture, "trigger_noticer", lambda reason=None: None)
 
         store = _store()
@@ -264,7 +267,7 @@ class TestDeclineReachesTheConcern:
                                         "reason": "steward: objective dropped"}, actor="steward")
         concern_feedback.propagate_work_outcome(store, wid, "abandoned")
 
-        register = json.loads(register_path.read_text(encoding="utf-8"))
+        register = register_path.read()
         assert register["active"] == []
         assert [c["concern_id"] for c in register["dormant"]] == [concern_id]
         parked = register["dormant"][0]

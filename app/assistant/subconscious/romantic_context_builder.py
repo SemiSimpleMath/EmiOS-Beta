@@ -162,14 +162,8 @@ def _build_wellness_calendar(*, now_local: datetime) -> str:
 
 def _build_addressable_concerns() -> str:
     """concerns_register filtered to those routed to romantic_proposer."""
-    path = get_resources_dir() / "subconscious" / "resource_concerns_register.json"
-    if not path.is_file():
-        return "(no concerns_register yet)"
-    try:
-        register = json.loads(path.read_text(encoding="utf-8"))
-    except Exception as e:
-        logger.warning("[romantic_context] concerns_register parse failed: %s", e)
-        return "(error reading concerns_register)"
+    from app.assistant.subconscious.concern_store import load_register
+    register = load_register()
 
     matched: List[dict] = []
     for bucket in ("active", "addressing"):

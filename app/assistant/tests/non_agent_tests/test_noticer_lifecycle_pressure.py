@@ -8,6 +8,8 @@ lifecycle instead of letting them grow forever.
 """
 from __future__ import annotations
 
+from app.assistant.tests.concern_store_helpers import ScratchRegister
+
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -47,21 +49,21 @@ def _register(tmp_path, *, active=(), addressing=()):
         "resolved": [],
         "dormant": [],
     }
-    path = tmp_path / "register.json"
-    path.write_text(json.dumps(register), encoding="utf-8")
+    path = ScratchRegister(tmp_path)
+    path.write(register)
     return path
 
 
 def _apply(tmp_path, register_path, output):
     return apply_noticer_output(
         output,
-        register_path=register_path,
+        connect=register_path.connect,
         tick_log_path=tmp_path / "ticks.jsonl",
     )
 
 
 def _load(register_path):
-    return json.loads(register_path.read_text(encoding="utf-8"))
+    return register_path.read()
 
 
 def _reinforce(cid, n=1):

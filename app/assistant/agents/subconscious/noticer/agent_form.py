@@ -172,6 +172,20 @@ class QuestionOutcome(BaseModel):
     )
 
 
+class ReportDecision(BaseModel):
+    """What the noticer did with one report from the "Reports since your last tick" section.
+
+    Required for every report listed. The reason is kept on the report, so it is the record of why
+    something mattered or did not. A report left without a decision is shown again next tick.
+    """
+    model_config = ConfigDict(extra="forbid")
+    ref: str = Field(description="The report's [ref] exactly as shown, e.g. message:1234.")
+    decision: Literal["used", "tracked_as_new", "not_worth_tracking"] = Field(
+        description="used: it changed or confirmed a concern this tick. tracked_as_new: you raised a new "
+                    "concern for it. not_worth_tracking: it needs nothing from the household's concerns.")
+    reason: str = Field(max_length=300, description="Why it matters, or why it does not.")
+
+
 class PendingQuestion(BaseModel):
     model_config = ConfigDict(extra="forbid")
     question_id: str = Field(description="UUID for tracking.")
@@ -215,6 +229,13 @@ class AgentForm(BaseModel):
         description=(
             "REQUIRED for every item in the context's 'Question mailbox' section. "
             "Empty when the mailbox is empty."
+        ),
+    )
+    report_decisions: List[ReportDecision] = Field(
+        default_factory=list,
+        description=(
+            "REQUIRED for every report in the context's 'Reports since your last tick' section. "
+            "Empty when there are none."
         ),
     )
     summary: str = Field(

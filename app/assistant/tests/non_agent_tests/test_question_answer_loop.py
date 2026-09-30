@@ -6,7 +6,6 @@ Now: pending → asked → answered (captured by per-turn check / sweeper)
 """
 from __future__ import annotations
 
-import json
 import os
 
 os.environ.setdefault("USE_TEST_DB", "true")
@@ -122,8 +121,8 @@ def test_noticer_question_outcomes_close_rows(tmp_path):
     mark_answered(q1, answer_text="yes")
     mark_asked(q2)
 
-    register_path = tmp_path / "register.json"
-    register_path.write_text(json.dumps({"active": [], "addressing": [], "resolved": [], "dormant": []}))
+    from app.assistant.tests.concern_store_helpers import ScratchRegister
+    store = ScratchRegister(tmp_path)
     summary = apply_noticer_output(
         {
             "question_outcomes": [
@@ -131,7 +130,7 @@ def test_noticer_question_outcomes_close_rows(tmp_path):
                 {"question_id": q2, "outcome": "expired_default_applied", "notes": "default applied"},
             ]
         },
-        register_path=register_path,
+        connect=store.connect,
         tick_log_path=tmp_path / "ticks.jsonl",
     )
     assert summary["question_outcomes_count"] == 2
@@ -147,10 +146,9 @@ def test_enqueue_derives_ticket_mode_for_high_stakes(tmp_path):
         "horizon": "this_week",
         "domain_tags": ["home"],
     }
-    register_path = tmp_path / "register.json"
-    register_path.write_text(json.dumps(
-        {"active": [concern], "addressing": [], "resolved": [], "dormant": []}
-    ))
+    from app.assistant.tests.concern_store_helpers import ScratchRegister
+    store = ScratchRegister(tmp_path).write(
+        {"active": [concern], "addressing": [], "resolved": [], "dormant": []})
     apply_noticer_output(
         {
             "pending_questions": [
@@ -163,7 +161,7 @@ def test_enqueue_derives_ticket_mode_for_high_stakes(tmp_path):
                 },
             ]
         },
-        register_path=register_path,
+        connect=store.connect,
         tick_log_path=tmp_path / "ticks.jsonl",
     )
     session = get_session()
@@ -265,18 +263,16 @@ def test_annotate_concern_answer_journals_register(tmp_path, monkeypatch):
         "active": [{"concern_id": "c1", "title": "T", "reinforcement_notes": ""}],
         "addressing": [], "resolved": [], "dormant": [],
     }
-    path = tmp_path / "resources" / "subconscious" / "resource_concerns_register.json"
-    path.parent.mkdir(parents=True)
-    path.write_text(json.dumps(register))
-    # The register write lives in persist now (one lock, one atomic writer);
-    # patch its module-level get_repo_root binding.
-    monkeypatch.setattr(
-        "app.assistant.subconscious.persist.get_repo_root", lambda: tmp_path,
-    )
+    from app.assistant.subconscious import persist
+    from app.assistant.tests.concern_store_helpers import ScratchRegister
+    store = ScratchRegister(tmp_path).write(register)
+    # answer_capture takes no store; route persist's register I/O to the scratch store.
+    monkeypatch.setattr(persist, "_load_register", lambda connect=None: store.read())
+    monkeypatch.setattr(persist, "_save_register", lambda connect, reg: store.write(reg))
     ok = answer_capture.annotate_concern_answer(
         "c1", question_text="When was it?", answer_text="In April",
     )
     assert ok
-    saved = json.loads(path.read_text())
+    saved = store.read()
     assert "USER ANSWERED" in saved["active"][0]["reinforcement_notes"]
     assert "In April" in saved["active"][0]["reinforcement_notes"]

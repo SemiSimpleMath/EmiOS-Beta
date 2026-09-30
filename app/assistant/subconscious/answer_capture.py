@@ -89,7 +89,7 @@ def _candidate_messages(*, room_id: str, since_utc: datetime) -> List[Dict[str, 
 def _concern_title(concern_id: Optional[str]) -> str:
     if not concern_id:
         return ""
-    from app.assistant.subconscious.digest_runner import load_register
+    from app.assistant.subconscious.concern_store import load_register
 
     register = load_register()
     for bucket in ("active", "addressing", "resolved", "dormant"):

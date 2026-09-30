@@ -170,6 +170,11 @@ def initialize_services(app):
     ServiceLocator.register('db_manager', get_db_manager())
     logger.info("✅ DB manager registered (single-writer coordinator)")
 
+    # One-time move of the subconscious concerns register from its JSON file into the concerns
+    # table (2026-09-29). A no-op once the file has been imported.
+    from app.assistant.subconscious.concern_store import import_legacy_file_if_pending
+    import_legacy_file_if_pending()
+
     # Register user settings manager
     from app.assistant.user_settings_manager.user_settings import UserSettingsManager
     user_settings = UserSettingsManager()

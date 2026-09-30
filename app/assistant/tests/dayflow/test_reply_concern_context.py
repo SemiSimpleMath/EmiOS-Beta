@@ -48,12 +48,12 @@ def test_ticket_to_graph_to_concern_preserves_text_and_choice(graph,tmp_path,mon
     path=_register(tmp_path)
     from app.assistant.subconscious import persist, answer_capture
     real=persist.apply_work_outcome
-    monkeypatch.setattr(persist,'apply_work_outcome',lambda *a,**kw:real(*a,**kw,register_path=path))
+    monkeypatch.setattr(persist,'apply_work_outcome',lambda *a,**kw:real(*a,**kw,connect=path.connect))
     trigger=Mock()
     monkeypatch.setattr(answer_capture,'trigger_noticer',trigger)
     store.apply('set_work_status', {'work_id':wid,'status':outcome,'reason':'User discussion settled'})
     propagate_work_outcome(store,wid,outcome)
-    reg=json.loads(path.read_text())
+    reg=path.read()
     concern=next(c for bucket in ('active','addressing','dormant','resolved') for c in reg[bucket])
     assert 'Already handled. Stop asking.' in concern['reinforcement_notes']
     assert 'Arrange service' in concern['reinforcement_notes']
@@ -101,8 +101,8 @@ def test_ambiguous_or_qualified_response_does_not_silence_concern(tmp_path,meani
     response={'user_text':text or 'OK','response_details':{'meaning':meaning,'typed_text':text,
         'label':'OK','scope':'Current question'}}
     assert apply_work_outcome(_CID,work_id='work',outcome='abandoned',
-        user_response=response,register_path=path)=='journaled'
-    reg=json.loads(path.read_text())
+        user_response=response,connect=path.connect)=='journaled'
+    reg=path.read()
     assert len(reg['active'])==1 and reg['dormant']==[]
     assert meaning in reg['active'][0]['reinforcement_notes']
 
@@ -110,8 +110,8 @@ def test_ambiguous_or_qualified_response_does_not_silence_concern(tmp_path,meani
 def test_historical_words_are_preserved_without_inventing_decline(tmp_path):
     path=_register(tmp_path)
     assert apply_work_outcome(_CID,work_id='work',outcome='abandoned',
-        user_words='OK',register_path=path)=='journaled'
-    assert 'OK' in json.loads(path.read_text())['active'][0]['reinforcement_notes']
+        user_words='OK',connect=path.connect)=='journaled'
+    assert 'OK' in path.read()['active'][0]['reinforcement_notes']
 
 
 def test_response_history_survives_round_trip(graph):

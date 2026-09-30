@@ -28,12 +28,9 @@ Output shape:
 """
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any, Dict, List
 
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_resources_dir
 from app.assistant.utils.time_utils import utc_to_local
 
 logger = get_logger(__name__)
@@ -73,21 +70,9 @@ _ACTIVE_REGISTER_KEY = "active"
 _NOTES_MAX_CHARS = 200
 
 
-def _concerns_register_path() -> Path:
-    return get_resources_dir() / "subconscious" / "resource_concerns_register.json"
-
-
 def _load_concerns_register() -> Dict[str, Any]:
-    p = _concerns_register_path()
-    if not p.exists():
-        return {}
-    try:
-        with p.open(encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except Exception as e:
-        logger.warning("[subconscious_projection] concerns_register read failed: %s", e)
-        return {}
+    from app.assistant.subconscious.concern_store import load_register
+    return load_register()
 
 
 def _project_concern(concern: Dict[str, Any]) -> Dict[str, Any]:

@@ -13,7 +13,7 @@ from app.assistant.tests.dayflow.test_concern_propagation import _register, _CID
 def setup(tmp_path, monkeypatch):
     path = _register(tmp_path)
     real = persist.apply_work_outcome
-    monkeypatch.setattr(persist, 'apply_work_outcome', lambda *a, **kw: real(*a, **kw, register_path=path))
+    monkeypatch.setattr(persist, 'apply_work_outcome', lambda *a, **kw: real(*a, **kw, connect=path.connect))
     trigger = Mock()
     monkeypatch.setattr(answer_capture, 'trigger_noticer', trigger)
     store = WorkStore(str(tmp_path/'work.db'))
@@ -49,8 +49,8 @@ def test_automatic_rollup_queues_then_delivers_visible_history(setup):
     trigger.assert_not_called()  # Generic store has no application side effects.
     assert concern_feedback.recover_pending_concern_feedback(store)==1
     assert store.pending_concern_feedback()==[]
-    concern=json.loads(path.read_text())['addressing'][0]
-    assert json.loads(path.read_text())['resolved']==[]
+    concern=path.read()['addressing'][0]
+    assert path.read()['resolved']==[]
     for view in (context_builder._render_concern_summary(concern,status='addressing'),
                  context_builder._render_closed_concern(concern,status='dormant',why='user ownership')):
         assert 'I have arranged it. Stop asking.' in view
@@ -66,13 +66,13 @@ def test_failure_survives_reopen_and_retries_without_repeating_register_write(se
     ack=store.acknowledge_concern_feedback
     monkeypatch.setattr(store,'acknowledge_concern_feedback',Mock(side_effect=OSError('crash before ack')))
     assert concern_feedback.recover_pending_concern_feedback(store)==0
-    first=path.read_text()
+    first=path.read()
     # New connection proves recovery uses persistent state, not a Python callback.
     reopened=WorkStore(store.path)
     try:
         assert concern_feedback.recover_pending_concern_feedback(reopened)==1
         assert reopened.pending_concern_feedback()==[]
-        assert path.read_text()==first
+        assert path.read()==first
     finally:
         reopened.close()
 
@@ -93,9 +93,9 @@ def test_unresolved_ref_retains_receipt_and_resolved_ref_is_idempotent(setup):
     store,path,trigger=setup
     wid=graph(store,[_CID,'concern:missingref']); finish(store,wid)
     assert concern_feedback.recover_pending_concern_feedback(store)==0
-    first=path.read_text()
+    first=path.read()
     assert concern_feedback.recover_pending_concern_feedback(store)==0
-    assert path.read_text()==first
+    assert path.read()==first
     assert len(store.pending_concern_feedback())==1
 
 
@@ -123,7 +123,7 @@ def test_finalizer_delivers_after_commit(setup,monkeypatch):
         {'verdict':'achieved','outcome':'User arranged it.'})
     assert store.load(wid).status=='done'
     assert store.pending_concern_feedback()==[]
-    assert json.loads(path.read_text())['addressing']
+    assert path.read()['addressing']
     trigger.assert_called_once()
 
 
@@ -131,7 +131,7 @@ def test_handling_history_survives_journal_trimming(setup):
     store,path,trigger=setup
     wid=graph(store); finish(store,wid)
     concern_feedback.recover_pending_concern_feedback(store)
-    c=json.loads(path.read_text())['addressing'][0]
+    c=path.read()['addressing'][0]
     c['reinforcement_notes']+='\n'+'\n'.join(f'observation {i}' for i in range(30))
     persist._trim_journal(c)
     assert 'I have arranged it.' not in c['reinforcement_notes']
@@ -148,16 +148,16 @@ def test_review_date_resets_age_pressure_without_faking_resolution():
 
 def test_keep_tracking_persists_review_without_recontact_or_resolution(tmp_path):
     path=_register(tmp_path)
-    reg=json.loads(path.read_text())
+    reg=path.read()
     c=reg['active'].pop()
     since=(datetime.now(timezone.utc)-timedelta(days=10)).isoformat()
     c['addressing_since_utc']=since
     reg['addressing'].append(c)
-    path.write_text(json.dumps(reg))
+    path.write(reg)
     persist.apply_noticer_output({'concern_dispositions':[{'concern_id':_CID,
         'action':'keep_active','reason':'User owns the plan; no new evidence.'}]},
-        register_path=path,tick_log_path=tmp_path/'ticks.jsonl')
-    reg=json.loads(path.read_text())
+        connect=path.connect,tick_log_path=tmp_path/'ticks.jsonl')
+    reg=path.read()
     assert reg['addressing'][0]['addressing_since_utc']==since
     assert persist.compute_pressure(reg)['addressing_stale']==[]
     assert reg['active']==reg['resolved']==[]

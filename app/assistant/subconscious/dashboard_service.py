@@ -15,7 +15,6 @@ from app.assistant.utils.path_utils import get_repo_root
 
 logger = get_logger(__name__)
 
-_REGISTER_REL = "resources/subconscious/resource_concerns_register.json"
 _TICK_LOG_REL = "resources/subconscious/resource_subconscious_tick_log.jsonl"
 _DIGEST_DIR_REL = "app/subconscious_digests"
 
@@ -54,13 +53,12 @@ def _slim_concern(c: Dict[str, Any]) -> Dict[str, Any]:
 
 def load_mind_overview() -> Dict[str, Any]:
     """Everything the dashboard's mind sections need, in one dict."""
-    register_path = get_repo_root() / _REGISTER_REL
+    from app.assistant.subconscious.concern_store import load_register
     register: Dict[str, Any] = {}
-    if register_path.is_file():
-        try:
-            register = json.loads(register_path.read_text(encoding="utf-8"))
-        except Exception as e:
-            logger.error("[dashboard] failed reading concerns register: %s", e)
+    try:
+        register = load_register()
+    except Exception as e:
+        logger.error("[dashboard] failed reading concerns register: %s", e)
 
     buckets: Dict[str, List[Dict[str, Any]]] = {}
     for bucket in ("active", "addressing"):

@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import app.assistant.tests.test_setup  # noqa: F401
+from app.assistant.tests.concern_store_helpers import ScratchRegister
 
 from app.assistant.subconscious.concern_feedback import propagate_work_outcome
 from app.assistant.subconscious.persist import apply_work_outcome
@@ -23,8 +24,8 @@ _CID = "a2a8a4b0-2d34-4c94-9d2e-f5e6f9c6e5d7"
 
 
 def _register(tmp_path) -> Path:
-    path = tmp_path / "register.json"
-    path.write_text(json.dumps({
+    path = ScratchRegister(tmp_path)
+    path.write({
         "schema_version": 1,
         "last_updated_utc": None,
         "last_noticer_tick_utc": None,
@@ -37,7 +38,7 @@ def _register(tmp_path) -> Path:
             "last_disposition_at_count": 18,
         }],
         "addressing": [], "resolved": [], "dormant": [],
-    }), encoding="utf-8")
+    })
     return path
 
 
@@ -50,9 +51,9 @@ class TestApplyWorkOutcome:
             user_response={"user_text": "No thanks", "response_details": {
                 "meaning": "decline", "label": "No thanks", "typed_text": "",
                 "scope": "Arrange AC service"}},
-            register_path=path)
+            connect=path.connect)
         assert result == "user_declined"
-        reg = json.loads(path.read_text(encoding="utf-8"))
+        reg = path.read()
         assert reg["active"] == []
         concern = reg["dormant"][0]
         assert "No thanks" in concern["reinforcement_notes"]
@@ -62,9 +63,9 @@ class TestApplyWorkOutcome:
     def test_done_moves_to_addressing(self, tmp_path):
         path = _register(tmp_path)
         result = apply_work_outcome(_CID, work_id="work_x", outcome="done",
-                                    register_path=path)
+                                    connect=path.connect)
         assert result == "addressing"
-        reg = json.loads(path.read_text(encoding="utf-8"))
+        reg = path.read()
         assert reg["active"] == []
         concern = reg["addressing"][0]
         assert "ADDRESSED by work_x" in concern["reinforcement_notes"]
@@ -73,16 +74,16 @@ class TestApplyWorkOutcome:
     def test_system_abandon_without_words_only_journals(self, tmp_path):
         path = _register(tmp_path)
         result = apply_work_outcome(_CID, work_id="work_x", outcome="abandoned",
-                                    register_path=path)
+                                    connect=path.connect)
         assert result == "journaled"
-        reg = json.loads(path.read_text(encoding="utf-8"))
+        reg = path.read()
         assert len(reg["active"]) == 1      # a system drop must not silence a real concern
 
     def test_unknown_ref_is_unresolved(self, tmp_path):
         path = _register(tmp_path)
         assert apply_work_outcome("concern:ffffffff", work_id="work_x",
-                                  outcome="done", register_path=path) == "unresolved"
-        reg = json.loads(path.read_text(encoding="utf-8"))
+                                  outcome="done", connect=path.connect) == "unresolved"
+        reg = path.read()
         assert len(reg["active"]) == 1      # untouched
 
 

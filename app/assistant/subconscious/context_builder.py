@@ -32,11 +32,14 @@ def build_noticer_context(
     *,
     trigger_mode: str = "daily",
     household_members: Optional[List[str]] = None,
+    reports: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, str]:
     """Assemble the full context dict for one noticer tick.
 
     Returns a dict keyed by the user_context_items names in the noticer's
     config.yaml. Each value is a string ready to interpolate into user.j2.
+    `reports` are the brain-inbox events this tick reads (the caller marks exactly these consumed
+    after the tick is applied); omitted, the unconsumed ones are read.
     """
     now_local = get_local_time()
     now_utc = datetime.now(timezone.utc)
@@ -60,6 +63,7 @@ def build_noticer_context(
         "family_roster": _build_family_roster(household_members),
         "kg_household_digests": _build_kg_household_digests(household_members),
         "ambient_state_digest": _build_ambient_state_digest(household_members),
+        "brain_reports": _build_brain_reports(reports),
         "concerns_register_active": _build_concerns_register_active(),
         "concerns_recently_closed": _build_concerns_recently_closed(),
         "question_mailbox": _build_question_mailbox(),
@@ -549,16 +553,23 @@ def _build_ambient_state_digest(members: List[str]) -> str:
     return _NO_DATA_FMT.format(kind="ambient state")
 
 
+def _build_brain_reports(reports: Optional[List[Dict[str, Any]]]) -> str:
+    """The brain inbox's routed events, grouped under the concern each bears on."""
+    from app.assistant.subconscious import brain_inbox
+    from app.assistant.subconscious.concern_store import load_register
+    if reports is None:
+        reports = brain_inbox.unconsumed_reports()
+    register = load_register()
+    concerns = {c.get("concern_id"): {**c, "_bucket": bucket}
+                for bucket in ("active", "addressing", "resolved", "dormant")
+                for c in register.get(bucket) or []}
+    return brain_inbox.render_reports(reports, concerns)
+
+
 def _build_concerns_register_active() -> str:
-    """Read the concerns_register JSON and render active + addressing concerns."""
-    path = get_resources_dir() / "subconscious" / "resource_concerns_register.json"
-    if not path.is_file():
-        return _NO_DATA_FMT.format(kind="concerns register")
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception as e:
-        logger.warning("[noticer.context] concerns_register parse failed: %s", e)
-        return _NO_DATA_FMT.format(kind="concerns register")
+    """Render the active + addressing concerns from the concerns table."""
+    from app.assistant.subconscious.concern_store import load_register
+    data = load_register()
 
     active = data.get("active") or []
     addressing = data.get("addressing") or []
@@ -616,17 +627,11 @@ def _build_concerns_recently_closed(register: Optional[Dict[str, Any]] = None) -
     a pattern is real but no longer worth tick-by-tick attention, and that stays
     true however long ago it was taken.
 
-    `register` is injected by tests; production reads the resource file.
+    `register` is injected by tests; production reads the concerns table.
     """
     if register is None:
-        path = get_resources_dir() / "subconscious" / "resource_concerns_register.json"
-        if not path.is_file():
-            return _NO_DATA_FMT.format(kind="concerns register")
-        try:
-            register = json.loads(path.read_text(encoding="utf-8"))
-        except Exception as e:
-            logger.warning("[noticer.context] concerns_register parse failed: %s", e)
-            return _NO_DATA_FMT.format(kind="concerns register")
+        from app.assistant.subconscious.concern_store import load_register
+        register = load_register()
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=_CLOSED_CONCERN_WINDOW_DAYS)
     recent_resolved: List[tuple] = []

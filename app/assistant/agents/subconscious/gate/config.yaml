@@ -1,0 +1,24 @@
+name: subconscious::gate
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.6-luna"
+  model_tier: "fast"
+
+# Routes each event in the brain inbox (subconscious/brain_inbox.py) against the open concerns:
+# bears on named concerns / new matter / nothing. A router, not the judge — the noticer reads what
+# is passed on and decides. Context is fully pre-injected by subconscious/gate.py.
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+accept_auto_skills: false
+
+user_context_items:
+  - agent_input
+
+required_context_items:
+  - agent_input
+
+system_context_items:
+  - resource_assistant_data

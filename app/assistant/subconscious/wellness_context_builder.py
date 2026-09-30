@@ -173,14 +173,8 @@ def _build_addressable_concerns() -> str:
     import json
     from app.assistant.utils.path_utils import get_resources_dir
 
-    path = get_resources_dir() / "subconscious" / "resource_concerns_register.json"
-    if not path.is_file():
-        return "(no concerns_register yet)"
-    try:
-        register = json.loads(path.read_text(encoding="utf-8"))
-    except Exception as e:
-        logger.warning("[wellness_context] concerns_register parse failed: %s", e)
-        return "(error reading concerns_register)"
+    from app.assistant.subconscious.concern_store import load_register
+    register = load_register()
 
     matched: List[dict] = []
     for bucket in ("active", "addressing"):

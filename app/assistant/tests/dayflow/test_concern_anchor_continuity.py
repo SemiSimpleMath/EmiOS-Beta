@@ -28,10 +28,10 @@ Run:
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import app.assistant.tests.test_setup  # noqa: F401
+from app.assistant.tests.concern_store_helpers import ScratchRegister
 
 from app.assistant.subconscious.context_builder import (
     _anchor_for_calendar_event,
@@ -145,9 +145,8 @@ def test_concerns_without_an_anchor_never_settle_anything():
 # The re-mint itself
 # --------------------------------------------------------------------------- #
 
-def _register_with_declined_picture_day(tmp_path: Path) -> Path:
-    path = tmp_path / "register.json"
-    path.write_text(json.dumps({
+def _register_with_declined_picture_day(tmp_path: Path) -> ScratchRegister:
+    return ScratchRegister(tmp_path).write({
         "schema_version": 1,
         "active": [], "addressing": [], "resolved": [],
         "dormant": [{
@@ -157,8 +156,7 @@ def _register_with_declined_picture_day(tmp_path: Path) -> Path:
             "user_declined_at_utc": "2026-09-17T21:31:20+00:00",
             "reinforcement_notes": '\n[2026-09-17T21:31:20+00:00] USER DECLINED via work_x: "already done"',
         }],
-    }), encoding="utf-8")
-    return path
+    })
 
 
 def _new_concern(anchor, *, cid="new-1", title="Picture Day is today and prep needs confirming"):
@@ -173,12 +171,8 @@ def _new_concern(anchor, *, cid="new-1", title="Picture Day is today and prep ne
     return concern
 
 
-def _apply(path, concerns):
-    return apply_noticer_output(
-        {"new_concerns": concerns},
-        register_path=path,
-        tick_log_path=path.parent / "tick.jsonl",
-    )
+def _apply(reg, concerns):
+    return apply_noticer_output({"new_concerns": concerns}, connect=reg.connect, tick_log_path=reg.tick_log)
 
 
 def test_the_real_case_a_declined_event_is_not_re_minted(tmp_path):
@@ -186,7 +180,7 @@ def test_the_real_case_a_declined_event_is_not_re_minted(tmp_path):
     path = _register_with_declined_picture_day(tmp_path)
     _apply(path, [_new_concern(_PICTURE_DAY)])
 
-    reg = json.loads(path.read_text(encoding="utf-8"))
+    reg = path.read()
     assert reg["active"] == [], "a settled anchor must not reappear as a live concern"
 
     prior = reg["dormant"][0]
@@ -204,7 +198,7 @@ def test_repeated_attempts_are_counted_not_lost(tmp_path):
     path = _register_with_declined_picture_day(tmp_path)
     _apply(path, [_new_concern(_PICTURE_DAY, cid="n1")])
     _apply(path, [_new_concern(_PICTURE_DAY, cid="n2")])
-    reg = json.loads(path.read_text(encoding="utf-8"))
+    reg = path.read()
     assert reg["active"] == []
     assert reg["dormant"][0]["suppressed_remint_count"] == 2
 
@@ -213,7 +207,7 @@ def test_a_different_event_is_unaffected(tmp_path):
     """The guard is per-thing. Declining one event must not mute the household."""
     path = _register_with_declined_picture_day(tmp_path)
     _apply(path, [_new_concern("calendar:evt_dentist", cid="n2", title="Dentist needs confirming")])
-    reg = json.loads(path.read_text(encoding="utf-8"))
+    reg = path.read()
     assert [c["concern_id"] for c in reg["active"]] == ["n2"]
 
 
@@ -221,47 +215,44 @@ def test_an_unanchored_concern_is_still_admitted(tmp_path):
     """Patterns anchor to nothing ("sleep has been poor") and must keep flowing."""
     path = _register_with_declined_picture_day(tmp_path)
     _apply(path, [_new_concern(None, cid="n3", title="Sleep has been poor again")])
-    reg = json.loads(path.read_text(encoding="utf-8"))
+    reg = path.read()
     assert [c["concern_id"] for c in reg["active"]] == ["n3"]
 
 
 def test_a_resolved_anchor_may_be_re_minted(tmp_path):
     """Recurring obligations depend on this. Resolved is not a refusal."""
-    path = tmp_path / "register.json"
-    path.write_text(json.dumps({
+    path = ScratchRegister(tmp_path).write({
         "schema_version": 1, "active": [], "addressing": [], "dormant": [],
         "resolved": [{"concern_id": "old", "anchor": "calendar:timesheets",
                       "resolved_at_utc": "2026-08-31T00:00:00+00:00"}],
-    }), encoding="utf-8")
+    })
     _apply(path, [_new_concern("calendar:timesheets", cid="n4", title="Timesheets due again")])
-    reg = json.loads(path.read_text(encoding="utf-8"))
+    reg = path.read()
     assert [c["concern_id"] for c in reg["active"]] == ["n4"]
 
 
 def test_a_chronic_acceptance_also_holds(tmp_path):
     """The docstring's sleep concern: re-minted twice past an accept_chronic."""
-    path = tmp_path / "register.json"
-    path.write_text(json.dumps({
+    path = ScratchRegister(tmp_path).write({
         "schema_version": 1, "active": [], "addressing": [], "resolved": [],
         "dormant": [{"concern_id": "old", "anchor": "calendar:club_drive", "chronic": True,
                      "dormant_reason": "standing pattern, not worth ticking"}],
-    }), encoding="utf-8")
+    })
     _apply(path, [_new_concern("calendar:club_drive", cid="n5")])
-    reg = json.loads(path.read_text(encoding="utf-8"))
+    reg = path.read()
     assert reg["active"] == []
     assert "accepted as chronic" in reg["dormant"][0]["reinforcement_notes"]
 
 
 def test_existing_unanchored_history_is_unaffected(tmp_path):
     """Every concern already in the register predates anchors. Nothing may break on them."""
-    path = tmp_path / "register.json"
-    path.write_text(json.dumps({
+    path = ScratchRegister(tmp_path).write({
         "schema_version": 1, "active": [], "addressing": [], "resolved": [],
         "dormant": [{"concern_id": "legacy", "title": "no anchor field at all",
                      "user_declined_at_utc": "2026-09-01T00:00:00+00:00"}],
-    }), encoding="utf-8")
+    })
     _apply(path, [_new_concern(_PICTURE_DAY, cid="n6")])
-    reg = json.loads(path.read_text(encoding="utf-8"))
+    reg = path.read()
     assert [c["concern_id"] for c in reg["active"]] == ["n6"], (
         "an unanchored legacy decline cannot suppress anything, and must not crash"
     )

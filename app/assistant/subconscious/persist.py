@@ -1,7 +1,9 @@
-"""Persist a noticer tick's output to disk.
+"""Persist a noticer tick's output.
 
-v0 storage:
-- resource_concerns_register.json — updated in place (active/addressing/resolved/dormant)
+Storage:
+- the concerns table in emi.db (subconscious/concern_store.py) — the register
+  (active/addressing/resolved/dormant), read and written whole under one lock;
+  replaced resource_concerns_register.json on 2026-09-29
 - resource_subconscious_tick_log.jsonl — one line per tick: full AgentForm dump
   for audit + later replay
 
@@ -19,14 +21,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from app.assistant.utils.atomic_write import write_json_atomic
+from app.assistant.subconscious import concern_store
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_repo_root
 
 logger = get_logger(__name__)
 
 
-_REGISTER_REL = "resources/subconscious/resource_concerns_register.json"
 _TICK_LOG_REL = "resources/subconscious/resource_subconscious_tick_log.jsonl"
 
 # The register is the subconscious's spine and has TWO writers (the noticer
@@ -129,22 +130,20 @@ def compute_pressure(register: Dict[str, Any], *, now_utc: Optional[datetime] = 
 def apply_noticer_output(
     output: Dict[str, Any],
     *,
-    register_path: Optional[Path] = None,
+    connect=None,
     tick_log_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
-    """Apply one noticer tick to the concerns_register on disk.
+    """Apply one noticer tick to the concerns register.
 
     Accepts the raw dict shape (what JSON-roundtrip of AgentForm produces).
-    Returns a small summary dict for the runner to print. `register_path`/`tick_log_path`
-    default to the real resource files; tests pass temp paths to avoid touching them.
+    Returns a small summary dict for the runner to print. `connect`/`tick_log_path`
+    default to emi.db and the real tick log; tests pass a scratch store and path.
 
     Holds the register lock for the whole read-modify-write so a concurrent
     answer-capture journal write can't be lost.
     """
     with _REGISTER_LOCK:
-        return _apply_noticer_output_locked(
-            output, register_path=register_path, tick_log_path=tick_log_path,
-        )
+        return _apply_noticer_output_locked(output, connect=connect, tick_log_path=tick_log_path)
 
 
 def _journal_on(concern: Dict[str, Any], now_iso: str, line: str) -> None:
@@ -189,13 +188,12 @@ def _settled_anchors(register: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
 def _apply_noticer_output_locked(
     output: Dict[str, Any],
     *,
-    register_path: Optional[Path] = None,
+    connect=None,
     tick_log_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
-    register_path = register_path or (get_repo_root() / _REGISTER_REL)
     tick_log_path = tick_log_path or (get_repo_root() / _TICK_LOG_REL)
 
-    register = _load_register(register_path)
+    register = _load_register(connect)
     now_utc_iso = datetime.now(timezone.utc).isoformat()
 
     new_concerns = output.get("new_concerns") or []
@@ -405,7 +403,7 @@ def _apply_noticer_output_locked(
 
     register["last_updated_utc"] = now_utc_iso
     register["last_noticer_tick_utc"] = now_utc_iso
-    _save_register(register_path, register)
+    _save_register(connect, register)
 
     # 5. Tick log — append the full output for audit
     tick_log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -440,7 +438,6 @@ def _apply_noticer_output_locked(
         "pending_questions_count": len(pending_questions),
         "questions_enqueued_count": questions_enqueued,
         "active_total_after": len(register.get("active", [])),
-        "register_path": str(register_path),
         "tick_log_path": str(tick_log_path),
     }
 
@@ -551,39 +548,24 @@ def _enqueue_pending_questions(
     return enqueued
 
 
-def _load_register(path: Path) -> Dict[str, Any]:
-    """Load the register; a MISSING file bootstraps empty, a CORRUPT file
-    raises. The old behavior (parse failure → fresh register) meant the next
-    save silently destroyed every concern — the spine deserves fail-loud, and
-    the atomic save below makes corruption a should-never state."""
-    if path.is_file():
-        return json.loads(path.read_text(encoding="utf-8"))
-    return {
-        "schema_version": 1,
-        "last_updated_utc": None,
-        "last_noticer_tick_utc": None,
-        "active": [],
-        "addressing": [],
-        "resolved": [],
-        "dormant": [],
-    }
+def _load_register(connect=None) -> Dict[str, Any]:
+    """The whole register from the concerns table. An unreadable row raises: the spine
+    deserves fail-loud, never a fresh register the next save would write over every concern."""
+    return concern_store.load_register(connect=connect)
 
 
-def _save_register(path: Path, register: Dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    write_json_atomic(path, register)
+def _save_register(connect, register: Dict[str, Any]) -> None:
+    """The whole register back, in one transaction."""
+    concern_store.save_register(register, connect=connect)
 
 
-def annotate_concern_answer(concern_id: str, *, question_text: str, answer_text: str) -> bool:
+def annotate_concern_answer(concern_id: str, *, question_text: str, answer_text: str, connect=None) -> bool:
     """Journal a captured answer onto its concern immediately — the noticer
     formally processes it on its (triggered) next tick. Lives here with the
-    other register writers: one lock, one atomic save. Returns False when the
-    register or the concern doesn't exist; raises on a corrupt register."""
-    path = get_repo_root() / _REGISTER_REL
+    other register writers: one lock, one transaction. Returns False when the
+    concern isn't active or addressing; raises on an unreadable register."""
     with _REGISTER_LOCK:
-        if not path.is_file():
-            return False
-        register = _load_register(path)
+        register = _load_register(connect)
         now_iso = datetime.now(timezone.utc).isoformat()
         for bucket in ("active", "addressing"):
             for c in register.get(bucket) or []:
@@ -592,7 +574,7 @@ def annotate_concern_answer(concern_id: str, *, question_text: str, answer_text:
                         (c.get("reinforcement_notes") or "")
                         + f"\n[{now_iso}] USER ANSWERED ({question_text[:80]}): {answer_text[:200]}"
                     )
-                    _save_register(path, register)
+                    _save_register(connect, register)
                     return True
     return False
 
@@ -604,7 +586,7 @@ def apply_work_outcome(
     outcome: str,
     user_words: str = "",
     user_response: Optional[dict] = None,
-    register_path: Optional[Path] = None,
+    connect=None,
     receipt_id: str = "",
     work_context: Optional[dict] = None,
 ) -> str:
@@ -623,7 +605,6 @@ def apply_work_outcome(
     Returns what happened: 'addressing' | 'user_declined' | 'journaled' |
     'unresolved'. Lives with the other register writers: one lock, one atomic save.
     """
-    path = register_path or (get_repo_root() / _REGISTER_REL)
     ref = str(concern_ref or "").strip()
     if ref.startswith("concern:"):
         ref = ref[len("concern:"):].strip()
@@ -631,10 +612,7 @@ def apply_work_outcome(
         return "unresolved"
 
     with _REGISTER_LOCK:
-        if not path.is_file():
-            logger.warning("[persist.work_outcome] no register at %s — %s unresolved", path, concern_ref)
-            return "unresolved"
-        register = _load_register(path)
+        register = _load_register(connect)
         now_iso = datetime.now(timezone.utc).isoformat()
 
         matches = []  # (bucket, index, concern)
@@ -701,7 +679,7 @@ def apply_work_outcome(
             result = "journaled"
 
         register["last_updated_utc"] = now_iso
-        _save_register(path, register)
+        _save_register(connect, register)
         logger.info("[persist.work_outcome] %s -> %s (%s, outcome=%s)",
                     work_id, concern.get("concern_id"), result, outcome)
         return result

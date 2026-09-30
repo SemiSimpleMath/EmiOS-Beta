@@ -23,21 +23,14 @@ from app.assistant.subconscious.digest_builder import (
     render_digest,
     save_digest_state,
 )
+from app.assistant.subconscious.concern_store import load_register
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_repo_root
 from app.assistant.utils.time_utils import get_local_time
 
 logger = get_logger(__name__)
 
-_REGISTER_REL = "resources/subconscious/resource_concerns_register.json"
 _DIGEST_DIR_REL = "app/subconscious_digests"
-
-
-def load_register() -> Dict[str, Any]:
-    path = get_repo_root() / _REGISTER_REL
-    if not path.is_file():
-        return {"active": [], "addressing": [], "resolved": [], "dormant": []}
-    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def load_latest_pending_questions() -> List[Dict[str, Any]]:

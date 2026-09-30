@@ -59,7 +59,9 @@ def main():
 
     # 1. Build context
     print("\n[1/4] Building context...")
-    context = build_noticer_context(trigger_mode=args.trigger_mode)
+    from app.assistant.subconscious import brain_inbox
+    reports = brain_inbox.unconsumed_reports()
+    context = build_noticer_context(trigger_mode=args.trigger_mode, reports=reports)
 
     print(f"      Assembled {len(context)} context keys.")
     for k, v in context.items():
@@ -149,6 +151,9 @@ def main():
     else:
         print("\n[4/4] Persisting to concerns_register...")
         summary = apply_noticer_output(output)
+        undecided = brain_inbox.mark_consumed(reports, output.get("report_decisions") or [])
+        summary["reports_read"] = len(reports)
+        summary["reports_undecided"] = len(undecided)
         for k, v in summary.items():
             print(f"      {k}: {v}")
 

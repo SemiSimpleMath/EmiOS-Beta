@@ -1,11 +1,11 @@
 """Register durability + run serialization (2026-07-07 subconscious audit).
 
 The concerns register is the subconscious's spine. Pinned here:
-- a CORRUPT register raises instead of silently starting fresh (the old
+- an UNREADABLE concern row raises instead of silently starting fresh (the old
   behavior meant the next save destroyed every concern);
-- a MISSING register still bootstraps empty (first run);
-- answer capture's concern journaling lives in persist (one lock, one atomic
-  writer) and journals onto the right concern;
+- an EMPTY concerns table still bootstraps (first run);
+- answer capture's concern journaling lives in persist (one lock, one
+  transaction) and journals onto the right concern;
 - a second noticer tick started while one is in flight SKIPS instead of
   running concurrently against the same register;
 - the arbiter's single product (plan.weekly_schedule) fails LOUD on a mint
@@ -17,8 +17,6 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
-from pathlib import Path
 
 os.environ.setdefault("USE_TEST_DB", "true")
 os.environ.setdefault("TEST_DB_NAME", "test_subconscious_register_durability")
@@ -33,8 +31,9 @@ from app.models.base import Base, get_session
 from app.assistant.database.pending_question import PendingQuestion
 from app.assistant.pending_questions import enqueue_question, mark_answered, mark_asked
 from app.assistant.pending_questions.store import count_asked_in_window
-from app.assistant.subconscious import persist
+from app.assistant.subconscious import concern_store
 from app.assistant.subconscious.persist import annotate_concern_answer, apply_noticer_output
+from app.assistant.tests.concern_store_helpers import ScratchRegister
 
 
 @pytest.fixture(autouse=True)
@@ -49,75 +48,68 @@ def _clean_table():
     yield
 
 
-def _tick() -> Path:
-    fd, p = tempfile.mkstemp(suffix=".jsonl"); os.close(fd)
-    return Path(p)
+def _store(tmp_path, register=None) -> ScratchRegister:
+    store = ScratchRegister(tmp_path)
+    return store.write(register) if register is not None else store
 
 
-def _register_file(content: str) -> Path:
-    fd, p = tempfile.mkstemp(suffix=".json"); os.close(fd)
-    Path(p).write_text(content, encoding="utf-8")
-    return Path(p)
+def _corrupt_row(store: ScratchRegister) -> None:
+    """A concern row whose record is not JSON — the table's version of a corrupt file."""
+    concern_store.ensure_schema(store.connect)
+    with store.connect(True) as c:
+        c.execute("INSERT INTO concerns (concern_id, status, position, title, updated_at, data) "
+                  "VALUES ('c-bad', 'active', 0, 't', 'now', '{ this is not json !!')")
 
 
 # ---------------------------------------------------------------------------
-# corrupt / missing register
+# unreadable / empty register
 # ---------------------------------------------------------------------------
 
-def test_corrupt_register_raises_and_is_not_overwritten():
-    reg_path = _register_file("{ this is not json !!")
-    tick = _tick()
+def test_corrupt_register_raises_and_is_not_overwritten(tmp_path):
+    store = _store(tmp_path)
+    _corrupt_row(store)
     with pytest.raises(json.JSONDecodeError):
         apply_noticer_output(
             {"new_concerns": [{"concern_id": "c-1", "title": "t"}]},
-            register_path=reg_path, tick_log_path=tick,
+            connect=store.connect, tick_log_path=store.tick_log,
         )
-    # The corrupt bytes are still there for a human to recover — nothing wiped.
-    assert reg_path.read_text(encoding="utf-8").startswith("{ this is not json")
-    os.remove(reg_path); os.remove(tick)
+    # The unreadable record is still there for a human to recover — nothing wiped.
+    with store.connect(False) as c:
+        assert c.execute("SELECT data FROM concerns WHERE concern_id='c-bad'").fetchone()[0].startswith("{ this is not")
+        assert c.execute("SELECT COUNT(*) FROM concerns").fetchone()[0] == 1
 
 
-def test_missing_register_bootstraps_empty():
-    fd, p = tempfile.mkstemp(suffix=".json"); os.close(fd); os.remove(p)
-    reg_path, tick = Path(p), _tick()
+def test_missing_register_bootstraps_empty(tmp_path):
+    store = _store(tmp_path)
     summary = apply_noticer_output(
         {"new_concerns": [{"concern_id": "c-1", "title": "fresh start"}]},
-        register_path=reg_path, tick_log_path=tick,
+        connect=store.connect, tick_log_path=store.tick_log,
     )
     assert summary["new_concerns_count"] == 1
-    reg = json.loads(reg_path.read_text(encoding="utf-8"))
-    assert [c["concern_id"] for c in reg["active"]] == ["c-1"]
-    os.remove(reg_path); os.remove(tick)
+    assert [c["concern_id"] for c in store.read()["active"]] == ["c-1"]
 
 
 # ---------------------------------------------------------------------------
-# answer journaling lives in persist (one lock, one atomic writer)
+# answer journaling lives in persist (one lock, one transaction)
 # ---------------------------------------------------------------------------
 
-def test_annotate_concern_answer_journals(monkeypatch, tmp_path):
-    reg = {"schema_version": 1, "active": [
+def test_annotate_concern_answer_journals(tmp_path):
+    store = _store(tmp_path, {"schema_version": 1, "active": [
         {"concern_id": "c-a", "title": "t", "reinforcement_notes": ""},
-    ], "addressing": [], "resolved": [], "dormant": []}
-    reg_path = tmp_path / "resources" / "subconscious" / "resource_concerns_register.json"
-    reg_path.parent.mkdir(parents=True)
-    reg_path.write_text(json.dumps(reg), encoding="utf-8")
-    monkeypatch.setattr(persist, "get_repo_root", lambda: tmp_path)
+    ], "addressing": [], "resolved": [], "dormant": []})
 
-    assert annotate_concern_answer("c-a", question_text="Q?", answer_text="A!") is True
-    saved = json.loads(reg_path.read_text(encoding="utf-8"))
-    assert "USER ANSWERED (Q?): A!" in saved["active"][0]["reinforcement_notes"]
+    assert annotate_concern_answer("c-a", question_text="Q?", answer_text="A!", connect=store.connect) is True
+    assert "USER ANSWERED (Q?): A!" in store.read()["active"][0]["reinforcement_notes"]
 
     # Unknown concern → False, register untouched.
-    assert annotate_concern_answer("nope", question_text="Q?", answer_text="A!") is False
+    assert annotate_concern_answer("nope", question_text="Q?", answer_text="A!", connect=store.connect) is False
 
 
-def test_annotate_on_corrupt_register_raises(monkeypatch, tmp_path):
-    reg_path = tmp_path / "resources" / "subconscious" / "resource_concerns_register.json"
-    reg_path.parent.mkdir(parents=True)
-    reg_path.write_text("not json", encoding="utf-8")
-    monkeypatch.setattr(persist, "get_repo_root", lambda: tmp_path)
+def test_annotate_on_corrupt_register_raises(tmp_path):
+    store = _store(tmp_path)
+    _corrupt_row(store)
     with pytest.raises(json.JSONDecodeError):
-        annotate_concern_answer("c-a", question_text="Q?", answer_text="A!")
+        annotate_concern_answer("c-a", question_text="Q?", answer_text="A!", connect=store.connect)
 
 
 # ---------------------------------------------------------------------------
