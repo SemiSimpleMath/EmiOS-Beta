@@ -53,7 +53,7 @@ def test_a_concern_ready_to_act_on_becomes_one_inbox_item(tmp_path):
     out, written, pokes = _run(reg)
     assert out == {"handed_over": 1, "handoff_skipped": 0} and pokes == [1]
     [item] = written
-    assert item["item_id"].startswith("concern:c-bake:") and item["source_type"] == "concern"
+    assert item["item_id"].startswith("concern_handoff:c-bake:") and item["source_type"] == "concern"
     assert (item["state"], item["evaluator_pending"]) == ("artifact", True), "past triage, into the inbox"
     assert item["summary"] == "Move the bake-sale plans to Monday" and item["why_now"] == "The sale moved."
     assert "PTSA bake sale" in item["brief_text"] and "Thu reminder" in item["brief_text"]
@@ -106,3 +106,8 @@ def test_the_planners_answer_is_journalled_on_the_concern(tmp_path):
     [c] = reg.read()["active"]
     assert "HANDOFF concern:c-bake:abc: the planner reviewed it as no_action: already handled by the school" in (
         c["reinforcement_notes"])
+
+
+def test_citing_a_handoff_item_does_not_look_like_a_concern_ref():
+    """The steward cites the item id in based_on, where `concern:` prefixes a concern reference."""
+    assert not concern_handoff.item_id("c-bake", "abcdef123456789").startswith("concern:")

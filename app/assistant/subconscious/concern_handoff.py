@@ -21,7 +21,9 @@ on is handed over as a dayflow intake item, by code:
   the concern and its agents read the brief.
 - The steward's answer is journalled on the concern (`record_intake_outcome`).
 
-One handoff per version of the brief: the item id is `concern:<concern id>:<brief basis>`. A
+One handoff per version of the brief: the item id is `concern_handoff:<concern id>:<brief basis>`.
+Not `concern:…`: the steward cites the item id in `based_on`, where `concern:` means a concern
+reference, and the first handoffs (2026-09-30) put the item id into `concern_refs` that way. A
 concern is not handed over while an earlier handoff item is still in the inbox, or while work
 citing it is active.
 """
@@ -38,7 +40,7 @@ SOURCE_TYPE = "concern"
 
 
 def item_id(concern_id: str, brief_basis: str) -> str:
-    return f"concern:{concern_id}:{brief_basis[:12]}"
+    return f"concern_handoff:{concern_id}:{brief_basis[:12]}"
 
 
 def _existing_items(concern_id: str) -> List[Dict[str, Any]]:
@@ -49,7 +51,7 @@ def _existing_items(concern_id: str) -> List[Dict[str, Any]]:
     with get_db_manager().read_session() as session:
         raw = session.connection().connection.driver_connection
         rows = raw.execute("SELECT metadata_json FROM unified_log_2026 WHERE source=? AND room_id=? AND id LIKE ?",
-                           (DAYFLOW_ITEM_SOURCE, DAYFLOW_ROOM_ID, f"concern:{concern_id}:%")).fetchall()
+                           (DAYFLOW_ITEM_SOURCE, DAYFLOW_ROOM_ID, f"concern_handoff:{concern_id}:%")).fetchall()
     return [json.loads(r[0]) if isinstance(r[0], str) else r[0] for r in rows]
 
 
