@@ -310,8 +310,9 @@ the concern evidence cite, as text (an email with the rest of its Gmail thread, 
 pod); knowledge-graph entities named (`kg_links`); other work on the same concerns (`work_links`).
 Route `app/routes/ticket_reading.py` (local only), page `read_ticket.html/.css/.js`.
 
-Gap: tickets from the generic `ask_user` tool carry only the room id, not the work node of the
-worker that asked, so their page shows the message and entities but no work or concern.
+A question a dayflow worker asks through the generic `ask_user` tool carries the same `work_node`
+and `dispatch_epoch`, taken from the execution owner of the attempt it runs in, so its page shows the
+work too. A question asked from chat has no work and shows the message and entities.
 
 ## Requirement for the brain build: association finds dependents (owner, 2026-09-30)
 

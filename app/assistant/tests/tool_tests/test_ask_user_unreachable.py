@@ -26,8 +26,10 @@ class _StubTicketManager:
         self._states = list(states)
         self.expired = []
         self.user_text = None
+        self.created = []
 
     def create_ticket(self, **kwargs):
+        self.created.append(kwargs)
         return SimpleNamespace(ticket_id="tk_test")
 
     def mark_proposed(self, ticket_id):
@@ -104,3 +106,26 @@ def test_infrastructure_failure_still_aborts_the_task(monkeypatch):
     result = tool.execute(msg)
     assert result.result_type == "error"
     assert result.data["abort_policy"] == "abort_task"
+
+
+class _Store:
+    """An owner's store; nothing is revoked."""
+
+    def execution_revoked(self, owner):
+        return False
+
+
+def test_ask_inside_a_work_attempt_names_the_work(monkeypatch):
+    from app.assistant.manager_runtime.execution import REGISTRY, Owner
+    owner = Owner(_Store(), "work_abc", "ask_node", 3)
+    with REGISTRY.span("tool", "ask_user", owner=owner):
+        _, stub = _run(monkeypatch, states=["accepted"], timeout_seconds=300, user_text="yes")
+    ctx = stub.created[0]["trigger_context"]
+    assert ctx["work_node"] == "work_abc::ask_node"
+    assert ctx["dispatch_epoch"] == 3
+
+
+def test_ask_off_a_work_attempt_names_no_work(monkeypatch):
+    _, stub = _run(monkeypatch, states=["accepted"], timeout_seconds=300, user_text="yes")
+    ctx = stub.created[0]["trigger_context"]
+    assert "work_node" not in ctx and "dispatch_epoch" not in ctx

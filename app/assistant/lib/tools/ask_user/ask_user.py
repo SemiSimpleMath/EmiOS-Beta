@@ -3,6 +3,7 @@ from app.assistant.lib.core_tools.tool_error_protocol import make_tool_error
 from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.logging_config import get_logger
+from app.assistant.manager_runtime.execution import current_owner
 from datetime import datetime, timezone
 import time
 
@@ -138,6 +139,20 @@ class AskUserTool(BaseTool):
 
         now = datetime.now(timezone.utc)
         title = question if len(question) <= 80 else question[:77].rstrip() + "..."
+        trigger_context = {
+            "source": f"ask_user:{calling_agent}",
+            "calling_agent": calling_agent,
+            "request_id": request_id,
+            "room_id": calling_room_id,
+            "time": now.isoformat(),
+        }
+        # A question asked inside a dayflow work attempt names that work, the same
+        # `<work id>::<main node id>` ref dayflow's own tickets carry, so the reply and the
+        # reading page (/read/<ticket_id>) join to it by id. Off a work attempt (chat) there is none.
+        owner = current_owner()
+        if owner is not None:
+            trigger_context["work_node"] = f"{owner.work_id}::{owner.main_node_id}"
+            trigger_context["dispatch_epoch"] = owner.dispatch_epoch
         ticket = ticket_manager.create_ticket(
             ticket_type="ask_user",
             suggestion_type="ask_user",
@@ -150,13 +165,7 @@ class AskUserTool(BaseTool):
                 "request_id": request_id,
                 "requested_at": now.isoformat(),
             },
-            trigger_context={
-                "source": f"ask_user:{calling_agent}",
-                "calling_agent": calling_agent,
-                "request_id": request_id,
-                "room_id": calling_room_id,
-                "time": now.isoformat(),
-            },
+            trigger_context=trigger_context,
             valid_hours=_TICKET_VALID_HOURS,
         )
         if not ticket:
