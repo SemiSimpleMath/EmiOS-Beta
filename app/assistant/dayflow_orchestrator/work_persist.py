@@ -10,7 +10,8 @@ there is no advance directive any more, and dispatch runs every ready node.)
 
 `based_on` entries prefixed `concern:` are lifted into `constraints.concern_refs` at creation so a
 terminal outcome can be back-propagated to the subconscious register; complete/abandon call
-`propagate_work_outcome` here, directly.
+`propagate_work_outcome` here, directly. Work made from an intake item the brain handed over carries
+that item's concern whatever the steward cites (work_intake.concern_refs_of).
 """
 from __future__ import annotations
 
@@ -24,7 +25,7 @@ logger = get_logger(__name__)
 def persist_steward_output(store, output: Dict[str, Any], *, admitted_artifacts=()) -> Dict[str, Any]:
     """Mint new work objects from `new_or_changed`, update changed objectives, and close
     complete/abandon ids. Returns a summary {created, changed, completed, abandoned}."""
-    from app.assistant.dayflow_orchestrator.work_intake import source_records, goal_update
+    from app.assistant.dayflow_orchestrator.work_intake import concern_refs_of, source_records, goal_update
     from app.assistant.dayflow_orchestrator.work_context import render_view
     # Closure intent must survive a failed graph write or a lost tick blackboard.
     requests = []
@@ -68,8 +69,9 @@ def persist_steward_output(store, output: Dict[str, Any], *, admitted_artifacts=
             # CREATE just the goal; the architect decomposes it in the planning pipeline.
             # Concern provenance rides constraints so closure can back-propagate the
             # outcome to the register (concern_feedback.propagate_work_outcome).
-            concern_refs = [str(b).strip() for b in (spec.get("based_on") or [])
-                            if str(b).strip().startswith("concern:")]
+            concern_refs = list(dict.fromkeys(
+                [str(b).strip() for b in (spec.get("based_on") or []) if str(b).strip().startswith("concern:")]
+                + concern_refs_of(sources)))
             # Belief provenance rides constraints for the same reason: a belief that caused
             # this work wants the outcome back. Stored as the belief_key, not the row id —
             # a merge deprecates the losing id but the surviving key still resolves.

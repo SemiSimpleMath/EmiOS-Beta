@@ -18,7 +18,9 @@ from app.assistant.tests.concern_store_helpers import ScratchRegister
 BRIEF = {"what": "The dogs' monthly flea dose.", "why_it_matters": "Fleas if missed.",
          "known": [{"fact": "Given on Sep 28.", "source": "message:m1"}], "tried": "Nothing yet.",
          "owner_wishes": "Nothing said.", "depends_on_it": ["Calendar: Oct 2 dose"], "open_questions": [],
-         "recommendation": "No action until the next dose."}
+         "recommendation": "No action until the next dose.",
+         "readiness": {"decision": "no_action", "task": "", "why": "Nothing to do until the next dose.",
+                       "hold_until": None}}
 
 
 @pytest.fixture(autouse=True)

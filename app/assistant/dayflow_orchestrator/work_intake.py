@@ -15,7 +15,15 @@ def intake_source(item):
             "subject": str(meta.get("email_subject") or ""),
             "created_at": str(meta.get("created_at") or item.get("timestamp") or ""),
             "message_id": str(meta.get("linked_email_unified_id") or ""),
-            "thread_id": str(meta.get("email_thread_id") or "")}
+            "thread_id": str(meta.get("email_thread_id") or ""),
+            # A concern handed over by the brain (subconscious/concern_handoff.py): work made from
+            # this item serves that concern, whatever the steward cites.
+            "concern_id": str(meta.get("concern_id") or "")}
+
+
+def concern_refs_of(sources):
+    """The concern refs work made from these intake sources must carry."""
+    return [f"concern:{s['concern_id']}" for s in sources if s.get("concern_id")]
 
 
 def source_records(items, references):
@@ -40,6 +48,8 @@ def goal_update(wo, *, objective=None, sources=(), success_criteria=None):
         prior.append({"item_id": "", "summary": goal.content, "pod_id": ""})
     merged = {s.get("item_id") or s["summary"]: s for s in [*prior, *sources]}
     constraints["source_intake"] = list(merged.values())
+    constraints["concern_refs"] = list(dict.fromkeys([*(constraints.get("concern_refs") or []),
+                                                      *concern_refs_of(sources)]))
     constraints["objective"] = original if objective is None else objective
     if success_criteria is not None:
         constraints["success_criteria"] = success_criteria

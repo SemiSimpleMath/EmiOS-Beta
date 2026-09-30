@@ -146,15 +146,18 @@ def brain_gate_run(
 ) -> Dict[str, Any]:
     """Ingest new chat and email into the brain inbox, route each event against the open concerns
     (subconscious/gate.py), let the brain decide every matter the gate passed on
-    (subconscious/brain_step.py), then rewrite the brief of every open concern whose record changed
-    (subconscious/concern_brief.py). Free when nothing new arrived and nothing changed."""
+    (subconscious/brain_step.py), rewrite the brief of every open concern whose record changed
+    (subconscious/concern_brief.py), then hand every concern ready to act on to dayflow
+    (subconscious/concern_handoff.py). Free when nothing new arrived and nothing changed."""
     from app.assistant.subconscious.brain_step import run_brain_step
     from app.assistant.subconscious.concern_brief import run_briefs
+    from app.assistant.subconscious.concern_handoff import run_handoffs
     from app.assistant.subconscious.gate import run_gate
     gate = run_gate()
     brain = run_brain_step()
     briefs = run_briefs()
-    return {"status": "ok", **gate, **{f"brain_{k}": v for k, v in brain.items()}, **briefs}
+    handoffs = run_handoffs()
+    return {"status": "ok", **gate, **{f"brain_{k}": v for k, v in brain.items()}, **briefs, **handoffs}
 
 
 # ---------------------------------------------------------------------------

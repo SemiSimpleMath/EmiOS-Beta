@@ -238,6 +238,33 @@ named sources. Scheduled reminders carry `reminder:<id>`: the writer had invente
 "calendar:<a friend>'s birthday" for one. Live re-run of the three: all valid; the friend's-birthday brief cited the
 reminder by its ref.
 
+## Step 6: readiness and the handoff to dayflow (2026-09-30)
+
+Before: concerns reached the steward (strategic_planner_wo) as prompt lines from the daily-context
+snapshot, and work was linked to a concern only if the steward cited `concern:<id>` in `based_on`
+(101 of 1,494 work objects did; the 2026-09-20 flea work did not).
+
+- Readiness: the brief (writer v3) ends in `readiness`: act_now (a broad task stating the outcome,
+  and why now), hold (a future local time, stored as `hold_until_utc`; when it passes the concern is
+  briefed again and the decision remade), or no_action (handled, work in progress, the owner has it,
+  or only to know). Validated by code; one correction.
+- Handoff (`subconscious/concern_handoff.py`, brain_gate routine after the briefs): each open concern
+  whose current brief says act_now becomes one dayflow intake item, `concern:<id>:<brief basis>`,
+  written straight into the steward's inbox (state `artifact`, `evaluator_pending`, past triage),
+  carrying the concern id, the task, why now and the brief rendered by shared/work/concern_brief.j2.
+  Once per brief version; not while an earlier handoff item waits in the inbox or work citing the
+  concern is active. A `concern_handoff` event pokes the dayflow scheduler.
+- The steward must answer every inbox item (intake_review): cite it in `based_on` to make work, or
+  review it no_action / defer with a reason. Work made from the item gets the concern in
+  `constraints.concern_refs` from the item's record (`work_intake.concern_refs_of`, at creation and
+  when attached to existing work), not from the steward's citation.
+- The steward's answer is journalled on the concern (`HANDOFF <item>: the planner turned it into work
+  / reviewed it as no_action / defer until …: reason`), post-commit; a failed journal write is
+  logged. The brief writer is told: after a deferral or no action, act_now again only on something
+  new.
+- The steward's prompt no longer lists concerns from the daily snapshot (the side door): concerns
+  reach dayflow only through handoff items. The snapshot still feeds chat_gate.
+
 ## Requirement for the brain build: association finds dependents (owner, 2026-09-30)
 
 Finding what an event relates to is the most important part of the brain step. A change is rarely

@@ -17,6 +17,11 @@ journal or notes, or the knowledge graph; one correction.
 Dayflow reads it through `briefs_for_refs`: every agent working on a work object that cites a
 concern (architect, worker, finalizer) gets that concern's brief whole (dayflow_orchestrator/
 work_context.work_data).
+
+The brief ends in a readiness decision: act_now (with a broad task; subconscious/concern_handoff.py
+hands it to the planner), hold (with a local date and time, stored as `hold_until_utc`; when it
+passes the concern is briefed again, so the decision is remade on what is known then), or
+no_action.
 """
 from __future__ import annotations
 
@@ -33,7 +38,7 @@ logger = get_logger(__name__)
 _AGENT = "subconscious::brief"
 # Part of every brief's basis: raising it rewrites every brief, and retries every brief the older
 # writer failed on. 2: sources are checked against the refs shown, reminders carry refs, KG entities.
-WRITER_VERSION = 2
+WRITER_VERSION = 3   # 3: readiness (act_now / hold / no_action)
 _OWN_KEYS = ("brief", "brief_error")
 _FIELDS = ("what", "why_it_matters", "tried", "owner_wishes", "recommendation")
 # A fact from the concern's own journal or notes, or from a knowledge-graph description, has no ref.
@@ -47,14 +52,24 @@ def basis(concern: Dict[str, Any], bucket: str) -> str:
                                      default=str).encode("utf-8")).hexdigest()
 
 
-def stale(register: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
-    """Open concerns whose brief is missing or was written from an older record, minus those whose
-    brief already failed on the current record. (bucket, concern) pairs."""
+def _held_until_passed(brief: Dict[str, Any], now: datetime) -> bool:
+    readiness = brief.get("readiness") or {}
+    when = readiness.get("hold_until_utc")
+    return readiness.get("decision") == "hold" and bool(when) and datetime.fromisoformat(when) <= now
+
+
+def stale(register: Dict[str, Any], now_utc: Optional[datetime] = None) -> List[Tuple[str, Dict[str, Any]]]:
+    """Open concerns whose brief is missing, was written from an older record, or holds until a time
+    that has passed; minus those whose brief already failed on the current record. (bucket, concern)."""
+    now = now_utc or datetime.now(timezone.utc)
     out = []
     for bucket in ("active", "addressing"):
         for c in register.get(bucket) or []:
             b = basis(c, bucket)
-            if (c.get("brief") or {}).get("basis") == b or (c.get("brief_error") or {}).get("basis") == b:
+            brief = c.get("brief") or {}
+            if (c.get("brief_error") or {}).get("basis") == b:
+                continue
+            if brief.get("basis") == b and not _held_until_passed(brief, now):
                 continue
             out.append((bucket, c))
     return out
@@ -97,10 +112,38 @@ def _cites_shown(part: str, refs: List[str]) -> bool:
     return False
 
 
-def _problems(data: Any, refs: List[str]) -> List[str]:
+def hold_until_utc(value: str, now_utc: datetime) -> datetime:
+    """A local 'YYYY-MM-DD HH:MM' as UTC; raises when unreadable or not in the future."""
+    from app.assistant.utils.time_utils import get_local_timezone
+    local = datetime.strptime(str(value or "").strip(), "%Y-%m-%d %H:%M").replace(tzinfo=get_local_timezone())
+    when = local.astimezone(timezone.utc)
+    if when <= now_utc:
+        raise ValueError(f"hold_until {value!r} is not in the future")
+    return when
+
+
+def _readiness_problems(readiness: Any, now_utc: datetime) -> List[str]:
+    if not isinstance(readiness, dict):
+        return ["readiness is missing"]
+    decision = readiness.get("decision")
+    if decision not in ("act_now", "hold", "no_action"):
+        return [f"readiness decision {decision!r} is not act_now, hold or no_action"]
+    out = [] if str(readiness.get("why") or "").strip() else ["readiness why is empty"]
+    if decision == "act_now" and not str(readiness.get("task") or "").strip():
+        out.append("act_now needs a task for the planner")
+    if decision == "hold":
+        try:
+            hold_until_utc(readiness.get("hold_until"), now_utc)
+        except ValueError as exc:
+            out.append(f"hold needs hold_until as a future local YYYY-MM-DD HH:MM: {exc}")
+    return out
+
+
+def _problems(data: Any, refs: List[str], now_utc: Optional[datetime] = None) -> List[str]:
     if not isinstance(data, dict):
         return ["no brief"]
     out = [f"{f} is empty" for f in _FIELDS if not str(data.get(f) or "").strip()]
+    out += _readiness_problems(data.get("readiness"), now_utc or datetime.now(timezone.utc))
     for fact in data.get("known") or []:
         source = str(fact.get("source") or "").strip()
         parts = [p.strip() for p in re.split(r";", source) if p.strip()]
@@ -125,15 +168,19 @@ def write_brief(concern: Dict[str, Any], bucket: str, *, calendar: str,
     refs = allowed_refs(payload)
     call = call or _agent_call
     data = call(payload)
-    problems = _problems(data, refs)
+    problems = _problems(data, refs, now)
     if problems:
         logger.warning("[brief] invalid brief for %s, one correction: %s", concern["concern_id"], problems)
         data = call({**payload, "correction": "; ".join(problems)})
-        problems = _problems(data, refs)
+        problems = _problems(data, refs, now)
         if problems:
             raise ValueError(f"brief still invalid after one correction: {problems}")
-    return {k: data.get(k) for k in ("what", "why_it_matters", "known", "tried", "owner_wishes",
-                                     "depends_on_it", "open_questions", "recommendation")}
+    readiness = {k: data["readiness"].get(k) for k in ("decision", "hold_until", "task", "why")}
+    if readiness["decision"] == "hold":
+        readiness["hold_until_utc"] = hold_until_utc(readiness["hold_until"], now).isoformat()
+    return {**{k: data.get(k) for k in ("what", "why_it_matters", "known", "tried", "owner_wishes",
+                                        "depends_on_it", "open_questions", "recommendation")},
+            "readiness": readiness}
 
 
 def run_briefs(*, call=None, register_connect=None, calendar: Optional[str] = None) -> Dict[str, Any]:

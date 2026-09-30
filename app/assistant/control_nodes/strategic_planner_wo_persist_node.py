@@ -54,6 +54,7 @@ class StrategicPlannerWoPersistNode(ControlNode):
 
         write_intake_reviews(reviews,
             self.blackboard.get_state_value("intake_review_snapshots", {}) or {}, caller=self.name)
+        self._tell_concerns_reviews(reviews)
 
         # replan_work_ids flows on to the architect (re-plan an existing work object's graph).
         # (advance is gone — work_execution runs every ready node; it never gated on it.)
@@ -92,3 +93,26 @@ class StrategicPlannerWoPersistNode(ControlNode):
                 write_dayflow_item(source["item_id"], state="closed",
                                    reason=f"converted_to_work_object:{wid}", caller=self.name,
                                    updates={"evaluator_pending": False, "evaluator_review": {"outcome": "transferred", "work_id": wid}})
+                if source.get("concern_id"):
+                    self._tell_concern(source, "turned it into work", f"{wid}: {wo.title}")
+
+    def _tell_concerns_reviews(self, reviews):
+        """The steward's no-action or deferral of a handed-over concern, journalled on the concern."""
+        admitted = {str((item.get("metadata") or {}).get("item_id") or item.get("id") or ""): item.get("metadata") or {}
+                    for item in self.blackboard.get_state_value("admitted_artifacts", []) or []}
+        for review in reviews:
+            meta = admitted.get(review["item_id"]) or {}
+            if meta.get("concern_id"):
+                when = f" until {review['reconsider_at']}" if review.get("reconsider_at") else ""
+                self._tell_concern({"concern_id": meta["concern_id"], "item_id": review["item_id"]},
+                                   f"reviewed it as {review['outcome']}{when}", review["reason"])
+
+    def _tell_concern(self, source, outcome, detail):
+        """Post-commit, like concern outcome delivery: the dayflow writes stand; a failed journal
+        write is logged and the concern learns of the work through its linked work instead."""
+        from app.assistant.subconscious.concern_handoff import record_intake_outcome
+        try:
+            record_intake_outcome({"concern_id": source["concern_id"], "item_id": source["item_id"]}, outcome, detail)
+        except Exception:
+            logger.error("[%s] could not journal the planner's answer on concern %s (item %s)", self.name,
+                         source["concern_id"], source["item_id"], exc_info=True)

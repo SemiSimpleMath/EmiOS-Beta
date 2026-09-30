@@ -62,7 +62,7 @@ def test_scheduler_event_subscription_is_idempotent(monkeypatch):
     scheduler = DayflowScheduler(timing_engine=SimpleNamespace(scheduler=Mock()), app=None)
     scheduler._subscribe_events()
     scheduler._subscribe_events()
-    assert len(registered) == 4
+    assert len(registered) == 5   # repo_update, afk, ticket replies, work progress, concern handoffs
 
 
 def test_partial_subscription_failure_can_be_retried(monkeypatch):
@@ -83,4 +83,4 @@ def test_partial_subscription_failure_can_be_retried(monkeypatch):
     assert not registered
     fail[0] = False
     scheduler._subscribe_events()
-    assert len(registered) == 4
+    assert len(registered) == 5   # repo_update, afk, ticket replies, work progress, concern handoffs
