@@ -1,6 +1,6 @@
 {
   "id": "belief_engine",
-  "enabled": true,
+  "enabled": false,
   "name": "Belief engine — all enabled domains",
   "aliases": [
     "belief engine",
@@ -15,5 +15,5 @@
     "type": "daily",
     "time_local": "00:30"
   },
-  "notes": "Loops over every domain marked enabled in configs/belief_domains.yaml and updates that domain's beliefs from the last 14 days of daily insights + ticket signals. Adding / disabling a domain is a YAML edit, not a code change. Domain failures are logged but don't abort the rest. After all domains succeed, the adapter exports active beliefs to resource_user_beliefs.json inline — atomic with the run, no fixed-time race against a slow upstream."
+  "notes": "RETIRED 2026-09-29 (belief cutover): the live belief catalog is the belief intake's store (belief_intake_*); this legacy pipeline wrote user_beliefs, which nothing reads for context any more. Its tables are kept. Was: nightly global pass over configs/belief_domains.yaml domains with an inline export."
 }

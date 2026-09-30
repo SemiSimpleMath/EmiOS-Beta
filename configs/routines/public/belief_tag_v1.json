@@ -20,5 +20,5 @@
     "then": "disable_with_ticket",
     "auto_retry_after_seconds": 3600
   },
-  "notes": "Daily at 05:35 local — after the v1 belief_engine rebuild (00:30). Tags active user_beliefs that are untagged OR stale (statement changed since last tagged -> re-tag on evolve/merge), from the standardized vocab (configs/belief_tags.yaml). 'needs' selector + max_per_run cap + max_run_seconds watchdog; on_error self-heals transient failures. The sole tagging routine (the v2-store belief_tag_new was retired 2026-07-07)."
+  "notes": "Daily at 05:35 local, after the feedback_extractor drain (04:00-05:00). Tags active intake beliefs (belief_intake_beliefs) that are untagged OR revised since tagged, from the standardized vocab (configs/belief_tags.yaml), then rewrites the belief export so the extractor's and the day's work-outcome changes reach its readers. The intake (01:00) does the same after its own run; this pass covers writes after it. 'needs' selector + max_per_run cap + max_run_seconds watchdog."
 }

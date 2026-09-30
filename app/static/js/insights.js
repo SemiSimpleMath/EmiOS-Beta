@@ -269,6 +269,7 @@ function loadBeliefs() {
                 return;
             }
             allBeliefs = data.beliefs || [];
+            fillTagFilter();
             renderBeliefs();
         })
         .catch(function(e) {
@@ -276,13 +277,25 @@ function loadBeliefs() {
         });
 }
 
+// The filter offers the tags the catalog actually carries (belief_tags vocabulary).
+function fillTagFilter() {
+    var select = document.getElementById('beliefs-domain-filter');
+    var seen = {};
+    allBeliefs.forEach(function(b) { (b.tags || []).forEach(function(t) { seen[t] = true; }); });
+    var parts = ['<option value="all">All tags</option>'];
+    Object.keys(seen).sort().forEach(function(t) {
+        parts.push('<option value="' + escHtml(t) + '">' + escHtml(t) + '</option>');
+    });
+    select.innerHTML = parts.join('');
+}
+
 function renderBeliefs() {
     var el = document.getElementById('beliefs-content');
-    var domain = document.getElementById('beliefs-domain-filter').value;
+    var tag = document.getElementById('beliefs-domain-filter').value;
     var search = document.getElementById('beliefs-search').value.toLowerCase().trim();
 
     var filtered = allBeliefs.filter(function(b) {
-        if (domain !== 'all' && b.domain !== domain) return false;
+        if (tag !== 'all' && (b.tags || []).indexOf(tag) === -1) return false;
         if (search && (b.statement || '').toLowerCase().indexOf(search) === -1
             && (b.belief_key || '').toLowerCase().indexOf(search) === -1) return false;
         return true;
@@ -293,9 +306,10 @@ function renderBeliefs() {
 
     filtered.forEach(function(b) {
         parts.push('<div class="belief-card">');
-        parts.push('<span class="belief-domain">' + escHtml(b.domain || 'general') + '</span>');
-        parts.push('<span class="belief-confidence ' + escHtml(b.confidence || '') + '">' + escHtml(b.confidence || '?') + '</span>');
-        parts.push('<span style="font-size:0.7rem;color:#8899aa;">' + escHtml(b.scope || '') + '</span>');
+        (b.tags || []).forEach(function(t) {
+            parts.push('<span class="belief-domain">' + escHtml(t) + '</span> ');
+        });
+        parts.push('<span class="belief-kind">' + escHtml(b.belief_key || '') + ' &middot; ' + escHtml(b.kind || '') + '</span>');
         parts.push('<div class="belief-statement">' + escHtml(b.statement || '') + '</div>');
         parts.push('<div class="belief-meta">');
         if (b.first_observed) parts.push('First seen: ' + escHtml(b.first_observed.substring(0, 10)) + ' &middot; ');

@@ -29,35 +29,43 @@ APP_TABLE_PREFIX = "belief_intake_"
 def judge_day(day: str, atoms: list[dict], store: IntakeStore, scope_ctx, embed_texts, log=print) -> dict:
     """Dedup, apply, revise and fan out one day's atoms against the store. Returns verdict counts."""
     counts: dict[str, int] = {}
+    vectors = embed_texts([a["statement"] for a in atoms]) if atoms else []
+    for atom, vec in zip(atoms, vectors):
+        judge_atom(day, atom, vec, store, scope_ctx, embed_texts, log, counts)
+    return counts
+
+
+def judge_atom(day: str, atom: dict, vec: list, store: IntakeStore, scope_ctx, embed_texts, log=print,
+               counts: dict | None = None) -> str:
+    """Dedup, apply, revise and fan out one atom. Returns the id of the belief it landed on."""
+    counts = {} if counts is None else counts
 
     def tick(key):
         counts[key] = counts.get(key, 0) + 1
 
-    vectors = embed_texts([a["statement"] for a in atoms]) if atoms else []
-    for atom, vec in zip(atoms, vectors):
-        verdict = agents.dedup(atom, day, ordered(store.beliefs(), vec), scope_ctx)
-        bid = store.apply(day, atom, vec, verdict)
-        tick(verdict["verdict"])
-        tgt = f" -> {verdict['target']}" if verdict.get("target") else ""
-        log(f"  {day} [{verdict['verdict']:11}] {bid}{tgt}: {atom['statement'][:110]}")
-        if verdict["verdict"] != "contradicts":
-            continue
-        # Beliefs evolve: restate the held belief from its whole evidence, new item included.
-        held = next(b for b in store.beliefs() if b["id"] == bid)
-        revision = agents.revise(held, atom, day, scope_ctx)
+    verdict = agents.dedup(atom, day, ordered(store.beliefs(), vec), scope_ctx)
+    bid = store.apply(day, atom, vec, verdict)
+    tick(verdict["verdict"])
+    tgt = f" -> {verdict['target']}" if verdict.get("target") else ""
+    log(f"  {day} [{verdict['verdict']:11}] {bid}{tgt}: {atom['statement'][:110]}")
+    if verdict["verdict"] != "contradicts":
+        return bid
+    # Beliefs evolve: restate the held belief from its whole evidence, new item included.
+    held = next(b for b in store.beliefs() if b["id"] == bid)
+    revision = agents.revise(held, atom, day, scope_ctx)
+    if revision["outcome"] == "revised":
+        store.revise(bid, day, revision, embed_texts([revision["statement"]])[0])
+    tick(revision["outcome"])
+    log(f"  {day} [{revision['outcome']:11}] {bid}: {revision['statement'][:110]}")
+    # ...and the same new belief may bear on other held beliefs than the one named.
+    others = [b for b in store.beliefs() if b["id"] != bid]
+    for other, revision, hit in contradiction_fanout(atom, day, others, vec, [bid], scope_ctx):
+        store.apply(day, atom, vec, hit)
         if revision["outcome"] == "revised":
-            store.revise(bid, day, revision, embed_texts([revision["statement"]])[0])
+            store.revise(other, day, revision, embed_texts([revision["statement"]])[0])
         tick(revision["outcome"])
-        log(f"  {day} [{revision['outcome']:11}] {bid}: {revision['statement'][:110]}")
-        # ...and the same new belief may bear on other held beliefs than the one named.
-        others = [b for b in store.beliefs() if b["id"] != bid]
-        for other, revision, hit in contradiction_fanout(atom, day, others, vec, [bid], scope_ctx):
-            store.apply(day, atom, vec, hit)
-            if revision["outcome"] == "revised":
-                store.revise(other, day, revision, embed_texts([revision["statement"]])[0])
-            tick(revision["outcome"])
-            log(f"  {day} [also {revision['outcome']:6}] {other}: {revision['statement'][:110]}")
-    return counts
+        log(f"  {day} [also {revision['outcome']:6}] {other}: {revision['statement'][:110]}")
+    return bid
 
 
 def run_day(day: str, store: IntakeStore, scope_ctx, embed_texts, log=print) -> dict:

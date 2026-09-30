@@ -3,7 +3,7 @@
 Reads the queue of unprocessed feedback.comment pods (via
 feedback_service), looks up each comment's target pod for summary
 context, and surfaces a sample of recent beliefs filtered to the
-subconscious domains for key-reuse hints.
+subconscious areas (tag pull set) for key-reuse hints.
 """
 from __future__ import annotations
 
@@ -19,12 +19,6 @@ from app.assistant.utils.path_utils import get_resources_dir
 from app.assistant.utils.time_utils import get_local_time
 
 logger = get_logger(__name__)
-
-
-# Domains the subconscious cares about — used to filter the
-# recent_existing_beliefs sample so the prompt doesn't drown in
-# unrelated communication / kg beliefs.
-_RELEVANT_DOMAINS = {"meal", "wellness", "romantic", "scheduling", "household_routine"}
 
 
 def build_feedback_extractor_context(*, max_comments: int = 30) -> Dict[str, str]:
@@ -83,7 +77,7 @@ def _build_unprocessed_comments_block(limit: int) -> str:
 
 def _build_recent_existing_beliefs() -> str:
     """Sample of beliefs from the exported beliefs file, filtered to
-    subconscious-relevant domains. The exporter writes
+    subconscious-relevant tags. The exporter writes
     resources/kg_derived/resource_user_beliefs.json after every belief
     pipeline run; we read from there as a snapshot. v0 reads UP TO ~30
     relevant beliefs so the extractor has key-reuse signal without
@@ -101,9 +95,13 @@ def _build_recent_existing_beliefs() -> str:
     if not isinstance(beliefs, list) or not beliefs:
         return "(beliefs file present but empty)"
 
-    relevant = [b for b in beliefs if isinstance(b, dict) and (b.get("domain") or "") in _RELEVANT_DOMAINS]
+    # The areas the subconscious proposes in (meals, wellness, family time, scheduling, the
+    # household routine) — the `feedback_extractor` pull set in configs/belief_tags.yaml.
+    from belief_engine.tagging import pull_set
+    wanted = set(pull_set("feedback_extractor"))
+    relevant = [b for b in beliefs if isinstance(b, dict) and wanted & set(b.get("tags") or [])]
     if not relevant:
-        return "(no beliefs in subconscious-relevant domains yet — invent keys freely, follow the schema)"
+        return "(no beliefs in subconscious-relevant areas yet — invent keys freely, follow the schema)"
 
     # Sort by status=active first, then by observation_count desc
     relevant.sort(
@@ -114,14 +112,12 @@ def _build_recent_existing_beliefs() -> str:
     )
     relevant = relevant[:30]
 
-    lines: List[str] = [f"# {len(relevant)} existing belief(s) in subconscious domains:", ""]
+    lines: List[str] = [f"# {len(relevant)} existing belief(s) in subconscious areas:", ""]
     for b in relevant:
         key = b.get("belief_key", "?")
-        domain = b.get("domain", "?")
-        conf = b.get("confidence", "?")
-        scope = b.get("scope", "?")
+        tags = ", ".join(b.get("tags") or [])
         obs = b.get("observation_count", 0)
         statement = (b.get("statement") or "").replace("\n", " ").strip()
-        lines.append(f"- `{key}` [{domain}/{conf}/{scope}, obs={obs}]")
+        lines.append(f"- `{key}` [{tags}; obs={obs}]")
         lines.append(f"  {statement[:240]}")
     return "\n".join(lines)

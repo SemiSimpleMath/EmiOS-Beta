@@ -70,3 +70,22 @@ def store_path(store):
     # The sqlite_file provider keeps its connection in the closure; read its file path back.
     with store._connect(False) as c:
         return c.execute("PRAGMA database_list").fetchone()[2]
+
+
+def test_ids_never_reuse_a_removed_number(store):
+    store.apply("2026-01-01", atom("A likes tea", "t"), [1.0, 0.0], {"verdict": "new"})
+    store.apply("2026-01-01", atom("A likes coffee", "c"), [0.0, 1.0], {"verdict": "new"})
+    with store._connect(True) as c:
+        c.execute(f"DELETE FROM {store.p}beliefs WHERE id='B1'")
+    assert store.apply("2026-01-02", atom("A likes cocoa", "k"), [0.5, 0.5], {"verdict": "new"}) == "B3"
+
+
+def test_retired_belief_leaves_the_active_set_but_keeps_history(store):
+    store.apply("2026-01-01", atom("A wants a physical scheduled", "remind me"), [1.0, 0.0], {"verdict": "new"})
+    store.add_evidence("B1", "2026-02-01", kind="did", relation="support", text="booked",
+                       source_ref="work:w1", via="work_outcome")
+    assert store.has_evidence("B1", "work:w1") and not store.has_evidence("B1", "work:w2")
+    store.retire("B1", "2026-02-01", "the physical was booked")
+    assert store.beliefs() == []
+    kept = store.beliefs(include_retired=True)[0]
+    assert kept["status"] == "retired" and len(kept["sources"]) == 2

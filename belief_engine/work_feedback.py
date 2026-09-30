@@ -2,9 +2,11 @@
 
 The mirror of `subconscious/concern_feedback.py`. WorkStore commits a pending receipt with each
 belief-linked terminal transition; this module delivers it after commit. `belief_engine::work_outcome`
-DECIDES what the outcome means, this code APPLIES it through BeliefStore, and the work outcome is
-attached as evidence either way — which is also the reverse link, since the evidence row carries
-the work_id in `source_ref`.
+DECIDES what the outcome means, this code APPLIES it to the belief catalog (the intake store,
+belief_intake_*, since the 2026-09-29 cutover), and the work outcome is attached as evidence either
+way — which is also the reverse link, since the evidence row carries `work:<work_id>` in
+`source_ref`. A belief_ref that is not a catalog id (a pre-cutover dotted key) resolves to nothing
+and is logged, like any vanished belief.
 
 Why it exists: on 2026-09-25 a belief said "do not treat the request as completed until he
 confirms it is scheduled" while the work object it spawned closed itself on a single delivery.
@@ -17,10 +19,6 @@ work_outcome evidence row is detected before the model is consulted.
 """
 from __future__ import annotations
 
-import json
-import sqlite3
-from datetime import datetime, timezone
-
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -28,25 +26,6 @@ logger = get_logger(__name__)
 _AGENT_NAME = "belief_engine::work_outcome"
 _ACTIONS = ("no_change", "resolve", "revise")
 _VALENCES = ("support", "contradict", "qualify")
-# EvidenceInput.signal_type vocabulary, keyed by the valence the model reports.
-_SIGNAL = {"support": "confirms", "contradict": "contradicts", "qualify": "qualifies"}
-
-
-def _already_recorded(belief_id: str, work_id: str) -> bool:
-    """Has this work outcome already been attached to this belief?
-
-    The idempotency fence: a redelivered receipt must not append a second evidence row or
-    re-deprecate. Cheaper and safer than asking the model again.
-    """
-    from belief_engine.db.paths import belief_db_path
-    conn = sqlite3.connect(str(belief_db_path()))
-    try:
-        row = conn.execute(
-            "SELECT 1 FROM belief_evidence WHERE belief_id=? AND source_type='work_outcome' "
-            "AND source_ref=? LIMIT 1", (belief_id, work_id)).fetchone()
-        return row is not None
-    finally:
-        conn.close()
 
 
 def _scope():
@@ -70,8 +49,7 @@ def _decide(beliefs, context, user_reply):
     if agent is None:
         raise RuntimeError(f"Agent {_AGENT_NAME!r} not found")
     supplied = [{"belief_key": b.belief_key, "statement": b.statement, "status": b.status,
-                 "confidence": b.confidence, "scope": b.scope, "kind": b.kind,
-                 "conditions": b.conditions, "last_confirmed": b.last_confirmed}
+                 "scope": b.scope, "kind": b.kind, "last_confirmed": b.last_confirmed}
                 for b in beliefs]
     response = agent.action_handler(Message(
         agent_input={"beliefs": supplied,
@@ -103,81 +81,79 @@ def _decide(beliefs, context, user_reply):
     return seen
 
 
-def _apply(store_b, belief, outcome, *, work_id, context):
+def _outcome_day(context) -> str:
+    """The local day the work ended — evidence days are local, completed_at is UTC."""
+    from app.assistant.utils.time_utils import get_local_time, utc_to_local
+    completed = context.get("completed_at")
+    return (utc_to_local(completed) if completed else get_local_time()).date().isoformat()
+
+
+def _apply(intake, belief, outcome, *, work_id, context, embed_texts):
     """Write the decision. The model never touches the store; this does."""
-    from belief_engine.store.belief_store import BeliefUpsertRequest, EvidenceInput
     action = outcome["action"]
-    valence = outcome["valence"]
     reasoning = str(outcome.get("reasoning") or "").strip()
+    day = _outcome_day(context)
 
-    # Honour an owner lock exactly as update_beliefs does: evidence still attaches so the
-    # history is complete, but a belief the owner corrected is never re-worded or retired.
-    if action in ("resolve", "revise") and getattr(belief, "locked", 0):
-        logger.info("[belief_work_feedback] %s is LOCKED — recording evidence only (was %s)",
-                    belief.belief_key, action)
-        action = "no_change"
-
-    evidence = EvidenceInput(
-        source_type="work_outcome",
-        source_date=(str(context.get("completed_at") or "")[:10] or None),
-        signal_type=_SIGNAL[valence],
-        summary=reasoning or f"Work object {work_id} ended {context.get('terminal', {}).get('status', '')}.",
-        source_ref=work_id,
-        raw_text=json.dumps(context, default=str)[:4000],
-        weight=1.0,
-        valence=valence,
-        extracted_by=_AGENT_NAME,
-    )
-    # Attach BEFORE any deprecation: add_evidence_to_existing refuses a deprecated belief, and
-    # the evidence row is the reverse link we most want to survive.
-    store_b.add_evidence_to_existing(belief.belief_key, [evidence])
+    # Attach BEFORE retiring: the evidence row is the reverse link we most want to survive, and
+    # it is the idempotency fence for a redelivered receipt.
+    intake.add_evidence(
+        belief.belief_key, day, kind="did", relation=outcome["valence"], via="work_outcome",
+        text=reasoning or f"Work object {work_id} ended {context.get('terminal', {}).get('status', '')}.",
+        source_ref=f"work:{work_id}")
 
     if action == "resolve":
-        store_b.deprecate(belief.belief_key,
-                          reason=f"work {work_id} satisfied this belief's condition: {reasoning}"[:500])
+        intake.retire(belief.belief_key, day, f"work {work_id} satisfied this belief's condition: {reasoning}")
         return "resolved"
     if action == "revise":
-        store_b.upsert_belief(BeliefUpsertRequest(
-            domain=belief.domain, belief_key=belief.belief_key,
-            statement=str(outcome["statement"]).strip(),
-            confidence=str(outcome.get("confidence") or "").strip() or belief.confidence,
-            scope=belief.scope, status=belief.status, conditions=belief.conditions,
-            kind=belief.kind,
-            last_confirmed=datetime.now(timezone.utc).date().isoformat()))
+        statement = str(outcome["statement"]).strip()
+        intake.revise(belief.belief_key, day, {"statement": statement, "kind": belief.kind,
+                                               "reasoning": f"work {work_id}: {reasoning}"},
+                      embed_texts([statement])[0])
         return "revised"
     return "unchanged"
 
 
+def _intake():
+    from belief_engine.intake.run import app_store
+    return app_store()
+
+
+def _embedder():
+    from app.assistant.embeddings.embedder import embed_texts
+    return embed_texts
+
+
 def _deliver_receipt(store, receipt) -> bool:
     from app.assistant.subconscious.concern_feedback import _last_user_reply
-    from belief_engine.store.belief_store import BeliefStore
     from types import SimpleNamespace
 
     payload = receipt["payload"]
     work_id, context = receipt["work_id"], payload["context"]
-    store_b = BeliefStore()
+    intake = _intake()
 
     pending, applied = [], []
     for key in payload["belief_refs"]:
-        belief = store_b.get_by_key(key)
-        if belief is None:
-            # A key can vanish when a merge retires it. The survivor holds the lineage, but this
-            # lane does not follow merges yet, so say so loudly rather than wedge the outbox.
-            logger.error("[belief_work_feedback] belief %r from work %s no longer resolves — "
+        row = intake.get(key)
+        if row is None:
+            # A pre-cutover dotted key, or an id that never existed. Say so loudly rather than
+            # wedge the outbox.
+            logger.error("[belief_work_feedback] belief %r from work %s is not in the catalog — "
                          "outcome not recorded for it", key, work_id)
             continue
-        if _already_recorded(belief.id, work_id):
+        if intake.has_evidence(key, f"work:{work_id}"):
             applied.append((key, "already_applied"))
             continue
-        pending.append(belief)
+        pending.append(SimpleNamespace(belief_key=row["id"], statement=row["statement"], status=row["status"],
+                                       scope=row["scope"], kind=row["kind"], last_confirmed=row["last_confirmed"]))
 
     if pending:
         snapshot = SimpleNamespace(nodes={n["id"]: SimpleNamespace(**n) for n in payload["reply_nodes"]})
         decisions = _decide(pending, context, _last_user_reply(snapshot))
+        embed_texts = _embedder()
         for belief in pending:
             applied.append((belief.belief_key,
-                            _apply(store_b, belief, decisions[belief.belief_key],
-                                   work_id=work_id, context=context)))
+                            _apply(intake, belief, decisions[belief.belief_key],
+                                   work_id=work_id, context=context, embed_texts=embed_texts)))
 
     store.acknowledge_belief_feedback(receipt["id"])
     changed = [f"{k}:{r}" for k, r in applied if r not in ("already_applied", "unchanged")]

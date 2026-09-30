@@ -547,10 +547,79 @@ one of `important_people` present in the message). Weights had to change from re
 three days ago) outrank the AC-service belief for an AC-service message. Relevance floor 0.30 on
 cosine (measured: the beliefs a message is about sit at 0.37–0.86; 0.24–0.30 is topic-adjacent
 noise), so k is a ceiling. Harness `agent_tests/belief_recall/run_recall.py "<message>"` (read-only).
-Unit tests `non_agent_tests/test_belief_intake_recall.py`. Needs an the assistant restart to load (the YAML
+Unit tests `non_agent_tests/test_belief_intake_recall.py`. Needs an assistant restart to load (the YAML
 change alone resolves to empty on the old code, harmlessly). The loop closes through the intake:
 chat is its main source, so a reply that contradicts a surfaced belief is the next night's
 contradict evidence.
+
+**First real turn, 2026-09-28, and the entity-expansion change.** "When do I usually take the
+dogs out?" surfaced five beliefs, two about the trash bins ("take the bins out"), and missed the
+evening-walk belief entirely (cosine 0.09, rank 150): the message says "the dogs", the beliefs say
+"Bonnie and Clyde". Fix (`recall.expand_query`): the KG entity detector the gate already uses
+finds the entities the message names; their one-line card summaries join the query and their
+names join the lift lane; the ceiling drops from 10 to 6 because the expanded query raises every
+cosine and a ceiling of 10 then fills with the entity's tail (the spouse's wedding for a message about
+the spouse walking the dogs). Owner's rule for every recall change: better, or shorter for the same
+quality. Measured with `agent_tests/belief_recall/eval_recall.py` (7 fixed messages, must-have and
+must-not patterns): live before (plain, k=10) 6/7 pass, 6,605 chars; after (expanded, k=6) 7/7
+pass, 5,701 chars. `agent_tests/belief_recall/report_surfaced.py` reports the same numbers over
+real turns from the surfacing log. Hot path is Python: needs an assistant restart.
+
+## 10e. Cutover — the intake store is the live catalog (2026-09-29)
+
+Owner: "lets make the beliefs live … so fix all this". Done in one change; every reader and
+writer below now uses the intake store (`belief_intake_*`). Nothing in the DB was dropped.
+
+Store: `belief_intake_beliefs.status` (active | retired; added in place, every existing belief
+active), `IntakeStore.get / add_evidence / has_evidence / retire`, ids from the highest number
+(never the row count — B-ids are cross-system keys). `belief_engine/intake/catalog.py`
+`active_entries()` is the one reader: the legacy export's entry shape with belief_key = short_id
+= B-id, tags from `belief_tags`, domain = first tag, confidence null, observation_count and
+first/last dates from support evidence, `refines` = parent id.
+
+| Consumer | Now reads / writes |
+|---|---|
+| Export `resource_user_beliefs.json` | `catalog.active_entries()`; written by the intake routine after each night and by belief_tag_v1 at 05:35 |
+| Routine writer | the export; `beliefs.j2` shows kind, tags, observation count (no confidence/domain) |
+| Health stage | tags ∩ `health_status` pull set; most-evidenced first |
+| Entertainment stage | unchanged code (tags ∩ `entertainment`) |
+| Feedback-extractor context | tags ∩ new `feedback_extractor` pull set (was legacy domain names) |
+| Insights page | tag filter built from the tags present; kind + id badge |
+| Meal lane (`beliefs_for_context`) | catalog + stored statement embeddings (query embedded only) |
+| Chat gate | `recall.py` (unchanged; active only) |
+| Tagging | `tag_beliefs(source="intake")`: untagged, or revised on/after the tag day; backfill tagged 537/537 |
+| Feedback extractor persist | each extraction is an atom sourced to the comment pod (`said`, `pod:<id>`) judged by `run.judge_atom` (dedup → apply → revise → fan-out); pushback attaches as contradict only on dedup `same`, else skipped (phantom guard); a failed extraction leaves its comment queued |
+| Work feedback | refs resolve in the intake store; evidence `work:<id>` (the idempotency fence); resolve → retire, revise → revision with embedding. A pre-cutover dotted key resolves to nothing and is logged (no legacy path). The work_outcome form lost `confidence`. |
+| Routines | `belief_engine`, `belief_archive` disabled (tables kept); `belief_intake` renamed live |
+
+Found on the way: the routine belief selector's request-local ids were `B0…Bn` — the same
+spelling as live belief ids, so an echoed belief id (or a `refines` value) would validate as a
+selection of a different record. Selection ids are now `S0…Sn` (`matching/selection.py`, both
+selector prompts, three tests).
+
+Verified on live data (`scratch/verify_belief_cutover.py`): export 537 entries, keys unique, none
+untagged; health 87 lines; entertainment 39; feedback context 30; routine block renders
+`[belief:B1]` with kind/tags; meal lane 40 ranked beliefs. Tests: store 14, feedback persist 4,
+outbox 17, meal lane 3, selection 22.
+
+**/beliefs admin page moved the same day** (owner: "ok fix the UI to use new beliefs"). Routes in
+`app/routes/beliefs.py` read `belief_intake_*`: list (status active | retired | all, tag, kind,
+text; support/against counts, last seen, refinement parent), item (evidence with kind, relation,
+source and the prompt it answered; revision history; parent and children), trends (support vs
+contradiction in the window; recent revisions). Corrections follow §7 (corrections stay on the
+evidence path): a new statement = a revision + an evidence row with the owner's words (`said`,
+`source_ref = owner`, `via = owner_correction`), so later revisions weigh it as the newest thing
+the owner said; retire / restore (`IntakeStore.restore`) are recorded in the revision history;
+tags written there are `method = manual` and the nightly tagger's stale rule skips them. Domain,
+lock, confidence and the archive view are gone (the store has none of them). The export is
+rewritten after every correction. Tests: `non_agent_tests/test_beliefs_admin_routes.py` (5);
+read endpoints and page render checked on the live catalog. Still on `user_beliefs`: the meal
+lane's flag-off fallback, and `personalize.py`'s belief trend/evidence endpoints, which no page
+loads (`/personalize/beliefs` redirects to `/beliefs`) — pre-existing dead code, left in place.
+
+Restart: the running process has the pre-cutover insert (eight values) and the new column is in
+the table, so its 01:00 intake would fail to insert a new belief; restart before 01:00. The
+routine JSON changes apply on reload; after the restart the export is already current.
 
 ## 11. Open decisions for the owner
 

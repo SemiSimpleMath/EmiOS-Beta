@@ -6,7 +6,6 @@ the other. These tests pin the link in both directions — provenance in, outcom
 rule that a delivery is not a resolution.
 """
 import json
-import sqlite3
 from types import SimpleNamespace
 
 import pytest
@@ -16,34 +15,11 @@ from work_objects.store import WorkStore
 _KEY = 'routine.reminders.annual_physical.weekly_prompt'
 
 
-class _FakeChroma:
-    def upsert(self, **kw): pass
-    def delete(self, belief_id): pass
-    def count(self): return 0
-    def search(self, query, *, k=5, domain=None): return []
-
-
 @pytest.fixture
 def store(tmp_path):
     s = WorkStore(str(tmp_path / 'work.db'))
     yield s
     s.close()
-
-
-@pytest.fixture()
-def beliefs(monkeypatch, tmp_path):
-    """A tmp-routed belief DB, same shape the reevaluator tests use."""
-    db = tmp_path / 'beliefs.db'
-    monkeypatch.setenv('USE_TEST_DB', 'true')
-    monkeypatch.setenv('TEST_DATABASE_URI_EMI', f'sqlite:///{db.as_posix()}')
-    import belief_engine.store.belief_store as bs
-    monkeypatch.setattr(bs, 'get_belief_chroma', lambda: _FakeChroma())
-    from app.models.base import Base, get_current_engine
-    import belief_engine.db.models  # noqa: F401
-    Base.metadata.create_all(get_current_engine())
-    from belief_engine.db.ensure_schema import ensure_schema
-    ensure_schema()
-    return db
 
 
 def graph(store, refs=None):
@@ -172,72 +148,72 @@ def test_decide_refuses_malformed_decisions(payload, message, monkeypatch):
 
 # --- applying the decision ---------------------------------------------------
 
-def _make_belief(locked=0):
-    from belief_engine.store.belief_store import BeliefStore, BeliefUpsertRequest
-    s = BeliefStore()
-    s.upsert_belief(BeliefUpsertRequest(
-        domain='routine', belief_key=_KEY,
-        statement='the owner wants weekly prompting until he schedules his annual physical; do not '
-                  'treat it as complete until he confirms it is scheduled.',
-        confidence='high', scope='temporary'))
-    if locked:
-        from app.models.base import get_current_engine
-        from sqlalchemy import text
-        with get_current_engine().begin() as conn:
-            conn.execute(text('UPDATE user_beliefs SET locked=1 WHERE belief_key=:k'), {'k': _KEY})
+_BID = 'B1'
+
+
+@pytest.fixture()
+def catalog(monkeypatch, tmp_path):
+    """A scratch intake store holding the one belief that caused the work."""
+    from belief_engine import work_feedback as W
+    from belief_engine.intake.store import IntakeStore, sqlite_file
+    s = IntakeStore(sqlite_file(tmp_path / 'catalog.db'))
+    s.apply('2026-09-20', {
+        'statement': 'The owner wants weekly prompting until he schedules his annual physical; the '
+                     'request is complete only when he confirms it is scheduled.',
+        'kind': 'episodic_context', 'scope': 'temporary',
+        'sources': [{'time': '2026-09-20 09:00', 'kind': 'said', 'relation': 'support',
+                     'text': 'keep reminding me until I book it', 'source_ref': 'message:1'}]},
+        [1.0, 0.0], {'verdict': 'new'})
+    monkeypatch.setattr(W, '_intake', lambda: s)
+    monkeypatch.setattr(W, '_embedder', lambda: (lambda texts: [[0.5, 0.5] for _ in texts]))
     return s
 
 
-def _deliver(store, wid, monkeypatch, action='resolve', statement=''):
+def _deliver(store, wid, monkeypatch, action='resolve', statement='', key=_BID):
     from belief_engine import work_feedback as W
-    _agent_returning({'outcomes': [{'belief_key': _KEY, 'action': action, 'valence': 'support',
+    _agent_returning({'outcomes': [{'belief_key': key, 'action': action, 'valence': 'support',
                                     'reasoning': 'He replied that he booked it for the 14th.',
                                     'statement': statement}]}, monkeypatch)
     monkeypatch.setattr(W, '_scope', lambda: None)
     return W.recover_pending_belief_feedback(store, work_id=wid)
 
 
-def test_resolve_records_the_work_then_retires_the_belief(store, beliefs, monkeypatch):
-    s = _make_belief()
-    wid = graph(store, [_KEY])
+def _work_rows(catalog, wid):
+    return [s for b in catalog.beliefs(include_retired=True) for s in b['sources'] if s['kind'] == 'did']
+
+
+def test_resolve_records_the_work_then_retires_the_belief(store, catalog, monkeypatch):
+    wid = graph(store, [_BID])
     finish(store, wid)
     assert _deliver(store, wid, monkeypatch, 'resolve') == 1
 
     assert store.pending_belief_feedback() == []
-    assert s.get_by_key(_KEY).status == 'deprecated'
+    assert catalog.get(_BID)['status'] == 'retired' and catalog.beliefs() == []
     # The reverse link: the belief carries the work id that closed it.
-    rows = sqlite3.connect(str(beliefs)).execute(
-        "SELECT source_ref, valence FROM belief_evidence WHERE source_type='work_outcome'").fetchall()
-    assert [r[0] for r in rows] == [wid]
-    assert rows[0][1] == 'support'
+    assert catalog.has_evidence(_BID, f'work:{wid}')
+    assert [r['relation'] for r in _work_rows(catalog, wid)] == ['support']
 
 
-def test_no_change_keeps_the_belief_driving_work(store, beliefs, monkeypatch):
-    s = _make_belief()
-    wid = graph(store, [_KEY])
+def test_revise_restates_the_belief_and_keeps_the_old_wording(store, catalog, monkeypatch):
+    wid = graph(store, [_BID])
+    finish(store, wid)
+    _deliver(store, wid, monkeypatch, 'revise', statement='The annual physical is booked for the 14th.')
+    held = catalog.get(_BID)
+    assert held['status'] == 'active' and held['statement'] == 'The annual physical is booked for the 14th.'
+
+
+def test_no_change_keeps_the_belief_driving_work(store, catalog, monkeypatch):
+    wid = graph(store, [_BID])
     finish(store, wid)
     assert _deliver(store, wid, monkeypatch, 'no_change') == 1
 
     # A delivered reminder must not retire a belief whose condition is the user's confirmation.
-    assert s.get_by_key(_KEY).status == 'active'
-    assert sqlite3.connect(str(beliefs)).execute(
-        "SELECT COUNT(*) FROM belief_evidence WHERE source_type='work_outcome'").fetchone()[0] == 1
+    assert catalog.get(_BID)['status'] == 'active'
+    assert len(_work_rows(catalog, wid)) == 1
 
 
-def test_owner_locked_belief_is_never_retired_but_still_gets_the_evidence(store, beliefs, monkeypatch):
-    s = _make_belief(locked=1)
-    wid = graph(store, [_KEY])
-    finish(store, wid)
-    _deliver(store, wid, monkeypatch, 'resolve')
-
-    assert s.get_by_key(_KEY).status == 'active'
-    assert sqlite3.connect(str(beliefs)).execute(
-        "SELECT COUNT(*) FROM belief_evidence WHERE source_type='work_outcome'").fetchone()[0] == 1
-
-
-def test_redelivery_does_not_write_twice(store, beliefs, monkeypatch):
-    _make_belief()
-    wid = graph(store, [_KEY])
+def test_redelivery_does_not_write_twice(store, catalog, monkeypatch):
+    wid = graph(store, [_BID])
     finish(store, wid)
     _deliver(store, wid, monkeypatch, 'no_change')
 
@@ -245,15 +221,15 @@ def test_redelivery_does_not_write_twice(store, beliefs, monkeypatch):
     store.apply('set_work_status', {'work_id': wid, 'status': 'abandoned',
                                     'reason': 'test re-close'}, actor='steward')
     _deliver(store, wid, monkeypatch, 'no_change')
-    assert sqlite3.connect(str(beliefs)).execute(
-        "SELECT COUNT(*) FROM belief_evidence WHERE source_type='work_outcome'").fetchone()[0] == 1
+    assert len(_work_rows(catalog, wid)) == 1
 
 
-def test_a_vanished_belief_does_not_wedge_the_outbox(store, beliefs, monkeypatch):
+def test_a_pre_cutover_key_does_not_wedge_the_outbox(store, catalog, monkeypatch):
     wid = graph(store, ['routine.nothing.here'])
     finish(store, wid)
-    assert _deliver(store, wid, monkeypatch, 'no_change') == 1
+    assert _deliver(store, wid, monkeypatch, 'no_change', key='routine.nothing.here') == 1
     assert store.pending_belief_feedback() == []
+    assert _work_rows(catalog, wid) == []
 
 
 def test_agent_prompts_render_and_carry_the_doctrine():

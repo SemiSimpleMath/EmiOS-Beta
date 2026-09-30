@@ -14,11 +14,9 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
-from app.assistant.utils.path_utils import get_repo_root, get_resources_dir
+from app.assistant.utils.path_utils import get_resources_dir
 from app.assistant.kg_core.user_identity import get_primary_user_name
-from belief_engine.store.belief_store import BeliefStore
 
 logger = get_logger(__name__)
 
@@ -36,74 +34,27 @@ _OUTPUT_DIR = get_resources_dir() / "kg_derived"
 _OUTPUT_FILE = "resource_user_beliefs.json"
 
 
-def export_beliefs(*, domain: Optional[str] = None) -> Path:
+def export_beliefs() -> Path:
     """
-    Export active beliefs to JSON.
-    If domain is given, export only that domain.
-    Returns the path written. Skips write if content is unchanged.
+    Export the active belief catalog to JSON.
+
+    Since the 2026-09-29 cutover the catalog is the intake store (belief_intake_beliefs, ids B<n>),
+    read through belief_engine.intake.catalog, which gives each entry the shape consumers already
+    read. Returns the path written. Skips write if content is unchanged.
     """
+    from belief_engine.intake.catalog import active_entries
+
     _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    store = BeliefStore()
-
-    beliefs = store.list_by_domain(domain) if domain else store.list_all()
-
-    # Tags + stable short id from the additive side tables, so this export matches the shape
-    # consumers read (the same shape as the v2 export). Guarded: an older store without these
-    # tables simply emits empty tags / null short_id.
-    import sqlite3 as _sqlite
-    from belief_engine.db.paths import belief_db_path
-    _tags_by_id: dict = {}
-    _sid_by_id: dict = {}
-    try:
-        _conn = _sqlite.connect(f"file:{belief_db_path()}?mode=ro", uri=True)
-        _ids = [b.id for b in beliefs]
-        for _i in range(0, len(_ids), 400):
-            _chunk = _ids[_i:_i + 400]
-            _ph = ",".join("?" for _ in _chunk)
-            for _r in _conn.execute(f"SELECT belief_id, tag FROM belief_tags WHERE belief_id IN ({_ph})", _chunk):
-                _tags_by_id.setdefault(_r[0], []).append(_r[1])
-            for _r in _conn.execute(f"SELECT belief_id, short_id FROM belief_short_id WHERE belief_id IN ({_ph})", _chunk):
-                _sid_by_id[_r[0]] = _r[1]
-        _conn.close()
-    except Exception:
-        logger.warning("[export_beliefs] tags/short_id fetch failed; exporting without them", exc_info=True)
-
-    entries = []
-    for b in beliefs:
-        # Decay v2: prefer the evidence-weighted snapshot band (computed nightly
-        # by RecomputeBeliefSnapshotStep). Stored b.confidence is the LLM's
-        # extraction-time read; the snapshot is what stays current as evidence
-        # accumulates and ages. Fall back to b.confidence if no snapshot yet
-        # (fresh belief between Update and Recompute).
-        effective_confidence = b.current_confidence_band or b.confidence
-        entry: dict = {
-            "belief_key": b.belief_key,
-            "short_id": f"b{_sid_by_id[b.id]}" if b.id in _sid_by_id else None,
-            "domain": b.domain,
-            "tags": sorted(_tags_by_id.get(b.id, [])),
-            "statement": b.statement,
-            "confidence": effective_confidence,
-            "scope": b.scope,
-            "status": b.status,
-            "observation_count": b.observation_count,
-            "first_observed": b.first_observed,
-            "last_confirmed": b.last_confirmed,
-        }
-        if b.kind:
-            entry["kind"] = b.kind
-        if b.conditions:
-            entry["conditions"] = b.conditions
-        entries.append(entry)
+    entries = active_entries()
 
     resource = {
         "_metadata": {
             "resource_id": "resource_user_beliefs",
             "schema_version": "1.0",
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "domain_filter": domain or "all",
             "entry_count": len(entries),
             "description": (
-                f"Living belief set about {get_primary_user_name()} derived by the belief inference engine. "
+                f"Living belief set about {get_primary_user_name()} from the belief intake. "
                 "Regenerated after each pipeline run. Do not edit manually."
             ),
         },

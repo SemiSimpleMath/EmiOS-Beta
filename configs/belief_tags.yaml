@@ -61,3 +61,4 @@ pull_sets:
   health_status: [health, sleep, dietary, mental_health, exercise]
   entertainment: [food, dining_out]
   routine_stage:  [routine, home_automation]
+  feedback_extractor: [meal, food, dining_out, dietary, health, exercise, sleep, mental_health, family, social, schedule, routine, home]

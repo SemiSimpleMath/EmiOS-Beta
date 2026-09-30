@@ -105,14 +105,15 @@ class StepContext:
 
 
 def format_belief_line(e: dict) -> str:
-    """One belief as ``[domain/confidence] statement [conditions]`` — the
-    shared rendering used by the health-status and dayflow-routine stages."""
-    stmt = e.get("statement", "")
-    domain = e.get("domain", "")
-    confidence = e.get("confidence", "")
-    conditions = e.get("conditions", "")
-    cond_suffix = f" [{conditions}]" if conditions else ""
-    return f"[{domain}/{confidence}] {stmt}{cond_suffix}"
+    """One catalog belief as ``[tags] statement (observed Nx, last YYYY-MM-DD)`` — the
+    health-status stage's rendering."""
+    seen = []
+    if e.get("observation_count"):
+        seen.append(f"observed {e['observation_count']}x")
+    if e.get("last_confirmed"):
+        seen.append(f"last {e['last_confirmed']}")
+    tail = f" ({', '.join(seen)})" if seen else ""
+    return f"[{', '.join(e.get('tags') or [])}] {e.get('statement', '')}{tail}"
 
 
 class BaseStep:

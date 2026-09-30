@@ -10,12 +10,12 @@ def test_repairs_complete_selection_preserving_all_context():
     calls=[]
     def invoke(rows,retry):
         calls.append((rows,retry))
-        return {'belief_ids':['morning.only'] if retry is None else ['B1','B0','B1'], 'reasoning':'both'}
+        return {'belief_ids':['morning.only'] if retry is None else ['S1','S0','S1'], 'reasoning':'both'}
     selected,_=select_records(records,invoke,AgentForm)
     assert selected == [records[1],records[0]]
     assert selected[1] is records[0]
     assert calls[0][0][0]['statement']==records[0]['statement']
-    assert calls[1][1]['allowed_ids']==['B0','B1']
+    assert calls[1][1]['allowed_ids']==['S0','S1']
     assert calls[1][1]['previous_response']['belief_ids']==['morning.only']
 
 
@@ -23,7 +23,7 @@ def test_invalid_selection_never_partially_accepted():
     calls=[]
     def invoke(rows,retry):
         calls.append(retry)
-        return {'belief_ids':['B0','B999'],'reasoning':'bad'}
+        return {'belief_ids':['S0','S999'],'reasoning':'bad'}
     with pytest.raises(ValueError,match='after correction'):
         select_records([{'belief_key':'a'}],invoke,AgentForm)
     assert len(calls)==2
@@ -47,12 +47,12 @@ def test_dayflow_retry_receives_weekly_context(monkeypatch):
     calls=[]
     def run(msg):
         calls.append(msg.agent_input)
-        return SimpleNamespace(data={'belief_ids':['wrong'] if len(calls)==1 else ['B0'], 'reasoning':'relevant'})
+        return SimpleNamespace(data={'belief_ids':['wrong'] if len(calls)==1 else ['S0'], 'reasoning':'relevant'})
     monkeypatch.setattr(DI,'agent_factory',SimpleNamespace(create_agent=lambda _:SimpleNamespace(action_handler=run)))
     records=[{'belief_key':'actual','statement':'morning only','conditions':{'when':'morning'}}]
     assert _select_beliefs(records,'day context',None,weekly_insights='whole weekly context')[0]==records
     assert calls[1]['weekly_insights']=='whole weekly context'
-    assert calls[1]['selection_retry']['allowed_ids']==['B0']
+    assert calls[1]['selection_retry']['allowed_ids']==['S0']
 
 
 def test_evidence_path_repairs_and_caches_only_valid_keys(tmp_path, monkeypatch):
@@ -75,7 +75,7 @@ def test_evidence_path_repairs_and_caches_only_valid_keys(tmp_path, monkeypatch)
     calls=[]
     def run(msg):
         calls.append(msg.agent_input)
-        return SimpleNamespace(data={'belief_ids':['invented'] if len(calls)==1 else ['B0'],'reasoning':'relevant'})
+        return SimpleNamespace(data={'belief_ids':['invented'] if len(calls)==1 else ['S0'],'reasoning':'relevant'})
     factory=SimpleNamespace(create_agent=lambda _:SimpleNamespace(action_handler=run))
     evidence=[{'source_ref':'source1','raw_text':'complete original evidence'}]
     assert S.select_for_evidence(store,factory,None,evidence)==[{'id':'id1','belief_key':'actual.key','statement':'morning only'}]

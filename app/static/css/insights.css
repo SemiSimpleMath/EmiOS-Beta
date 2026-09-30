@@ -134,16 +134,7 @@
     border-radius: 4px;
     margin-right: 0.5rem;
 }
-.belief-card .belief-confidence {
-    display: inline-block;
-    font-size: 0.7rem;
-    padding: 0.15em 0.5em;
-    border-radius: 4px;
-    margin-right: 0.5rem;
-}
-.belief-confidence.high { color: #4caf50; background: rgba(76,175,80,0.1); }
-.belief-confidence.medium { color: #ff9800; background: rgba(255,152,0,0.1); }
-.belief-confidence.low { color: #f44336; background: rgba(244,67,54,0.1); }
+.belief-card .belief-kind { font-size: 0.7rem; color: #8899aa; }
 .belief-card .belief-statement { margin-top: 0.3em; font-size: 0.88rem; }
 .belief-card .belief-meta { font-size: 0.75rem; color: #8899aa; margin-top: 0.3em; }
 .belief-count { color: #8899aa; font-size: 0.85rem; margin-bottom: 0.8rem; }

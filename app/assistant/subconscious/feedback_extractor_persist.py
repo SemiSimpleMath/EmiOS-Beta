@@ -1,159 +1,125 @@
-"""Persist feedback_extractor output to the belief store + mark comments processed.
+"""Persist feedback_extractor output into the belief catalog + mark comments processed.
 
-For each BeliefExtraction in the agent's output:
-1. Build a BeliefUpsertRequest + an EvidenceInput pointing at the
-   source comment pod
-2. Call BeliefStore.upsert_belief(req, [evidence])
-3. Track the belief_id for the comment's processed-marker
+Since the 2026-09-29 cutover the catalog is the belief intake's store (belief_intake_*). Each
+extraction becomes one intake atom whose source is the user's own comment (kind "said",
+source_ref "pod:<comment id>"), and is judged by the same steps the nightly intake uses — the
+store's dedup decides which held belief it is, never the extractor's belief_key:
 
-Then per source-comment pod:
-4. Read the pod, set metadata.processed_at_utc + metadata.extracted_belief_ids
-5. Write the pod back so the next extractor run skips it
+- confirms / qualifies: dedup → apply → (on contradicts) revise → contradiction fan-out, exactly
+  as a day's atom. A new claim becomes a new belief.
+- contradicts / rejects: the extractor states the belief the user pushed back on. It attaches as
+  contradicting evidence only when dedup finds that belief held ("same"). Any other verdict is
+  skipped, never minted: contradicting a belief nobody holds would create an affirmative belief
+  carrying only negative evidence (the 2026-06 zucchini phantoms). The paired confirms extraction
+  carries the user's actual claim through the revise path.
 
-This is the final piece that closes the feedback loop: comment →
-extractor → belief → (next-day proposer reads belief snapshot → behavior shifts).
+Then per source-comment pod: set metadata.processed_at_utc + metadata.extracted_belief_ids and
+flip the 'unprocessed' tag, so the next run skips it. A comment whose extraction failed is left
+unprocessed (ERROR logged) so the next run retries it.
 """
 from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from app.assistant.pod_store.pod_store import PodStore
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+# The extractor's scope → the intake's kind. Its statements are household preferences
+# ("what the household prefers/wants"); `temporary` is its "this week, this trip".
+_KIND_FOR_SCOPE = {"chronic": "stable_preference", "temporary": "episodic_context"}
+_CONTRA = {"contradicts", "rejects"}
 
-def apply_feedback_extractor_output(output: Dict[str, Any]) -> Dict[str, Any]:
-    """Persist the extractor's belief updates + mark source comments processed.
 
-    Returns a summary with counts and per-extraction belief_ids for
-    smoke-test visibility."""
+def _comment_source(pod, relation: str) -> tuple[str, dict]:
+    """(evidence day, source) for a comment pod: the user's words, dated when they were written."""
+    from app.assistant.utils.time_utils import get_local_time, utc_to_local
+    from belief_engine.intake.redact import redact
+    meta = pod.metadata or {}
+    submitted = meta.get("submitted_at_utc")
+    local = utc_to_local(submitted) if submitted else get_local_time()
+    return local.date().isoformat(), {
+        "time": local.strftime("%Y-%m-%d %H:%M"), "kind": "said", "relation": relation,
+        "text": redact(str(meta.get("text") or "")), "source_ref": f"pod:{pod.pod_id}",
+    }
+
+
+def apply_feedback_extractor_output(output: Dict[str, Any], *, intake_store=None, pod_store=None,
+                                    embed_texts=None, scope_ctx=None) -> Dict[str, Any]:
+    """Judge the extractor's belief updates into the catalog + mark source comments processed.
+
+    Returns a summary with counts and per-extraction belief ids. The keyword arguments are
+    injectable for tests; production resolves the app store, pod store, embedder and scope."""
+    from belief_engine.intake import agents
+    from belief_engine.intake.rank import ordered
+    from belief_engine.intake.run import app_store, judge_atom
+
     extractions = output.get("extractions") or []
     skipped = output.get("skipped") or []
     now_utc_iso = datetime.now(timezone.utc).isoformat()
-
-    # Group extractions by source comment so we can mark each comment
-    # processed with all the belief_ids it contributed to.
-    by_comment: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-    for ext in extractions:
-        cid = (ext or {}).get("source_comment_pod_id") or ""
-        if cid:
-            by_comment[cid].append(ext)
+    store = PodStore() if pod_store is None else pod_store
+    intake = app_store() if intake_store is None else intake_store
+    if embed_texts is None:
+        from app.assistant.embeddings.embedder import embed_texts
+    scope_ctx = agents.scope() if scope_ctx is None else scope_ctx
 
     upserted: List[Dict[str, Any]] = []
     failed: List[Dict[str, Any]] = []
     phantom_skipped: List[Dict[str, Any]] = []
-
-    # 1. Upsert beliefs into the belief store
-    store_unavailable = False
-    BeliefStore = None
-    BeliefUpsertRequest = None
-    EvidenceInput = None
-    try:
-        from belief_engine.store.belief_store import (
-            BeliefStore as _BeliefStore,
-            BeliefUpsertRequest as _BeliefUpsertRequest,
-            EvidenceInput as _EvidenceInput,
-        )
-        BeliefStore = _BeliefStore
-        BeliefUpsertRequest = _BeliefUpsertRequest
-        EvidenceInput = _EvidenceInput
-    except Exception as e:
-        logger.error("[feedback_persist] belief_engine.store.belief_store import failed: %s", e)
-        store_unavailable = True
-
-    belief_store = None
-    if not store_unavailable:
-        try:
-            belief_store = BeliefStore()
-        except Exception as e:
-            logger.error("[feedback_persist] BeliefStore() init failed: %s", e)
-            store_unavailable = True
+    ids_by_comment: Dict[str, List[str]] = defaultdict(list)
+    failed_comments: set = set()
 
     for ext in extractions:
+        cid = str((ext or {}).get("source_comment_pod_id") or "")
+        signal = str(ext.get("signal_type") or "confirms")
         try:
-            if store_unavailable or belief_store is None:
-                failed.append({"extraction": ext, "error": "belief_store_unavailable"})
-                continue
-            belief_key = str(ext.get("belief_key") or "").strip()
-            signal_type = str(ext.get("signal_type") or "confirms")
-            evidence = EvidenceInput(
-                source_type="user_comment",
-                source_date=ext.get("source_comment_submitted_at"),  # may be None — see below
-                source_ref=str(ext.get("source_comment_pod_id") or ""),
-                signal_type=signal_type,
-                summary=str(ext.get("reasoning") or "")[:500],
-                raw_text=None,
-                weight=_weight_for_confidence(str(ext.get("confidence") or "medium")),
-                valence=None,  # derive from signal_type
-                extracted_by="feedback_extractor",
-            )
-            if signal_type == "contradicts":
-                # A contradiction must only WEAKEN a belief that already exists — never
-                # mint a new affirmative one. Otherwise "kids don't like zucchini"
-                # fabricates a phantom "kids will eat zucchini" carrying only negative
-                # evidence (the paired 'confirms' extraction already records the real
-                # signal). See scratch/MEAL-PLANNING-AUDIT.md.
-                record = belief_store.add_evidence_to_existing(belief_key, [evidence])
-                if record is None:
-                    phantom_skipped.append({
-                        "belief_key": belief_key,
-                        "source_comment_pod_id": ext.get("source_comment_pod_id"),
-                        "reason": "contradicts with no existing active belief — not minting a phantom",
-                    })
+            pod = store.get(cid) if cid else None
+            if pod is None:
+                raise ValueError(f"source comment pod {cid!r} not found")
+            relation = "contradict" if signal in _CONTRA else "support"
+            day, source = _comment_source(pod, relation)
+            atom = {"statement": str(ext.get("statement") or "").strip(),
+                    "kind": _KIND_FOR_SCOPE[str(ext.get("scope") or "chronic")],
+                    "scope": str(ext.get("scope") or "chronic"), "sources": [source]}
+            if not atom["statement"]:
+                raise ValueError("extraction has no statement")
+            vec = embed_texts([atom["statement"]])[0]
+            if signal in _CONTRA:
+                verdict = agents.dedup({**atom, "sources": [{**source, "relation": "support"}]}, day,
+                                       ordered(intake.beliefs(), vec), scope_ctx)
+                if verdict["verdict"] != "same":
+                    phantom_skipped.append({"statement": atom["statement"], "source_comment_pod_id": cid,
+                                            "verdict": verdict["verdict"],
+                                            "reason": "pushback on a belief not held — not minting a phantom"})
                     continue
+                bid = intake.apply(day, atom, vec, verdict)
             else:
-                # This is the MEAL feedback lane — an extraction without a domain belongs to
-                # 'meal' (a configured domain; 'other' was an orphan no pipeline maintains).
-                req = BeliefUpsertRequest(
-                    domain=str(ext.get("domain") or "meal"),
-                    belief_key=belief_key,
-                    statement=str(ext.get("statement") or "").strip(),
-                    confidence=str(ext.get("confidence") or "medium"),
-                    scope=str(ext.get("scope") or "chronic"),
-                    status="active",
-                    conditions=None,
-                    first_observed=None,  # store fills in if new
-                    last_confirmed=now_utc_iso,
-                    kind=None,  # let heuristic classifier decide
-                )
-                record = belief_store.upsert_belief(req, evidence=[evidence])
-            upserted.append({
-                "belief_id": record.id,
-                "belief_key": record.belief_key,
-                "signal_type": signal_type,
-                "comment_pod_id": belief_key,  # for logging (re-use key)
-            })
+                bid = judge_atom(day, atom, vec, intake, scope_ctx, embed_texts,
+                                 log=lambda line: logger.info("[feedback_persist]%s", line))
+            ids_by_comment[cid].append(bid)
+            upserted.append({"belief_id": bid, "signal_type": signal, "comment_pod_id": cid})
         except Exception as e:
-            logger.warning("[feedback_persist] belief upsert failed: %s — extraction: %r", e, ext)
-            failed.append({"extraction": ext, "error": str(e)[:240]})
+            logger.error("[feedback_persist] extraction failed; comment %s stays unprocessed and is "
+                         "retried next run: %s — extraction: %r", cid, e, ext, exc_info=True)
+            failed.append({"extraction": ext, "error": str(e)})
+            failed_comments.add(cid)
 
-    # 2. Mark each processed comment pod's metadata. A failed mark is COUNTED
-    # and logged at ERROR: the comment stays tagged 'unprocessed', so the next
-    # run re-drains it and its evidence double-counts — that must be visible,
-    # not a debug-level shrug.
-    store = PodStore()
+    # Mark each processed comment pod. A failed mark is COUNTED and logged at ERROR: the comment
+    # stays tagged 'unprocessed', so the next run re-drains it and its evidence double-counts.
     comment_pods_marked: List[str] = []
     mark_failed = 0
-    for comment_pod_id, exts in by_comment.items():
+    done = {c for c in {str(e.get("source_comment_pod_id") or "") for e in extractions} if c} - failed_comments
+    for comment_pod_id in sorted(done):
         try:
             pod = store.get(comment_pod_id)
-            if pod is None:
-                logger.warning("[feedback_persist] comment pod %s not found — skip mark", comment_pod_id)
-                continue
             meta = dict(pod.metadata or {})
             meta["processed_at_utc"] = now_utc_iso
-            existing_ids = list(meta.get("extracted_belief_ids") or [])
-            # Append all belief_ids that came from upserts referencing this comment
-            new_ids = [
-                u["belief_id"] for u in upserted
-                if any(ext.get("source_comment_pod_id") == comment_pod_id for ext in exts)
-            ]
-            meta["extracted_belief_ids"] = list({*existing_ids, *new_ids})
+            meta["extracted_belief_ids"] = list({*(meta.get("extracted_belief_ids") or []),
+                                                 *ids_by_comment.get(comment_pod_id, [])})
             pod.metadata = meta
-            # Drop the "unprocessed" tag since this comment is no longer queued
             tags = [t for t in (pod.tags or []) if t != "unprocessed"]
             if "processed" not in tags:
                 tags.append("processed")
@@ -167,7 +133,7 @@ def apply_feedback_extractor_output(output: Dict[str, Any]) -> Dict[str, Any]:
                 "be RE-DRAINED next run and its evidence double-counted", comment_pod_id,
             )
 
-    # 3. Also mark skipped comments processed (with 0 extracted_belief_ids)
+    # Also mark skipped comments processed (with 0 extracted_belief_ids)
     for s in skipped:
         cid = s.get("comment_pod_id") if isinstance(s, dict) else None
         if not cid:
@@ -205,21 +171,5 @@ def apply_feedback_extractor_output(output: Dict[str, Any]) -> Dict[str, Any]:
         "comments_mark_failed": mark_failed,
         "upserted": upserted,
         "phantom_skipped": phantom_skipped,
-        "failed": failed[:10],  # cap for readability
+        "failed": failed,
     }
-
-
-def _weight_for_confidence(confidence: str) -> float:
-    """Map qualitative confidence to a numeric evidence weight.
-
-    The belief store's decay v2 reweights by evidence; this gives the
-    extractor a way to register "this comment is strong signal" vs
-    "this is light signal" without inventing a separate field."""
-    c = (confidence or "").lower()
-    if c == "high":
-        return 1.0
-    if c == "medium":
-        return 0.6
-    if c == "low":
-        return 0.3
-    return 0.5

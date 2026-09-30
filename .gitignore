@@ -259,6 +259,7 @@ resources/env_registry_user.json
 
 # Subconscious — noticer's living state + per-tick audit log + digest output. Personal.
 resources/subconscious/resource_concerns_register.json
+resources/subconscious/resource_concerns_register.imported-*.json
 resources/subconscious/resource_subconscious_watchlist.md
 resources/subconscious/resource_recurring_obligations.md
 resources/subconscious/resource_learned_skills_proposed.md
@@ -506,3 +507,6 @@ kg_embedding_sync_status.json
 
 # Private contributor-review log (owner's study notes on external PRs; never published)
 /contrib_log/
+
+# Belief recall eval cases name real people from the owner catalog
+app/assistant/tests/agent_tests/belief_recall/cases.private.json

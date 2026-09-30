@@ -10,7 +10,10 @@ def select_records(records, invoke, form):
     """
     if not records:
         return [], "Empty catalog"
-    labeled = [{**record, 'selection_id': f'B{i}'} for i, record in enumerate(records)]
+    # 'S', not 'B': live belief ids are B<n> (the intake catalog, 2026-09-29), and a request-local
+    # B12 would be indistinguishable from belief B12 — an echoed belief id would validate as a
+    # selection of a different record.
+    labeled = [{**record, 'selection_id': f'S{i}'} for i, record in enumerate(records)]
     by_id = {record['selection_id']: original for record, original in zip(labeled, records)}
     retry = None
     for attempt in range(2):

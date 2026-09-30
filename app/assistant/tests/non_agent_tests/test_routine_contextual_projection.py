@@ -24,7 +24,7 @@ def test_llm_selects_cross_domain_belief_without_python_matching(monkeypatch):
     seen=[]
     def call(msg):
         seen.append(msg.agent_input)
-        return SimpleNamespace(data={'belief_ids':['B0'],'reasoning':'Preparation before lesson'})
+        return SimpleNamespace(data={'belief_ids':['S0'],'reasoning':'Preparation before lesson'})
     monkeypatch.setattr(DI,'agent_factory',SimpleNamespace(create_agent=lambda _:SimpleNamespace(action_handler=call)))
     selected,reason=drs._select_beliefs(entries(),'17:00 instrument lesson',None)
     assert len(seen[0]['belief_catalog'])==2

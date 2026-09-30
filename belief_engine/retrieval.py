@@ -1,18 +1,20 @@
 """v1 contextual retrieval — a ranked, tag-scoped candidate set of ACTIVE beliefs.
 
-`beliefs_for_context(query=, tags=, k=)` returns active user_beliefs ranked by
+`beliefs_for_context(query=, tags=, k=)` returns active beliefs ranked by
     w_v·relevance (embedding cosine to the query) + w_r·recency + w_f·frequency,
 optionally scoped to a tag SET (a consumer's `pull_set` — a belief surfaces if it carries ANY of
 the tags). High-recall by design: `status` is the only HARD filter; the tag scope is applied only
 when the store is actually tagged (else return all, never nothing). Each returned item carries its
-short_id + tags so consumers can cite/route. Reads the v1 store (emi.db: user_beliefs +
-belief_tags + belief_short_id).
+short_id + tags so consumers can cite/route. Reads the live catalog (belief_engine.intake.catalog:
+belief_intake_* + belief_tags in emi.db) since the 2026-09-29 cutover; relevance uses the statement
+embeddings the intake stored.
 
 There is no structured `applies_when` or `surfacing_log` yet, so temporal and usage ranking terms
 are omitted (add them if those land on the store).
 """
 from __future__ import annotations
 
+import json
 import math
 import sqlite3
 from datetime import datetime, timezone
@@ -64,6 +66,8 @@ def beliefs_for_context(
     include_scores: bool = False,
 ) -> List[Dict[str, Any]]:
     """Ranked, optionally tag-scoped candidate set of ACTIVE beliefs (see module docstring)."""
+    from belief_engine.intake.catalog import active_entries
+
     own = conn is None
     if own:
         conn = sqlite3.connect(_db_path())
@@ -71,54 +75,45 @@ def beliefs_for_context(
     now = now or datetime.now(timezone.utc)
     w = {**_DEFAULT_WEIGHTS, **(weights or {})}
     try:
-        where, params = "b.status='active'", []
-        clean = _sanitize(tags) if tags else []
-        # Scope to the tagged slice ONLY when the store is actually tagged; on an untagged store
-        # stay high-recall (return all) instead of returning nothing.
-        if clean and conn.execute("SELECT 1 FROM belief_tags LIMIT 1").fetchone():
-            ph = ",".join("?" for _ in clean)
-            where += f" AND b.id IN (SELECT belief_id FROM belief_tags WHERE tag IN ({ph}))"
-            params = clean
-        rows = conn.execute(
-            "SELECT b.id, b.belief_key, b.statement, b.domain, b.confidence, b.kind, "
-            "b.observation_count, b.last_confirmed, s.short_id "
-            "FROM user_beliefs b LEFT JOIN belief_short_id s ON s.belief_id=b.id "
-            f"WHERE {where}", params).fetchall()
-        if not rows:
+        entries = active_entries(conn=conn)
+        clean = set(_sanitize(tags)) if tags else set()
+        # Scope to the tagged slice ONLY when the catalog is actually tagged; on an untagged
+        # catalog stay high-recall (return all) instead of returning nothing.
+        if clean and any(e["tags"] for e in entries):
+            entries = [e for e in entries if clean & set(e["tags"])]
+        if not entries:
             return []
 
-        ids = [r["id"] for r in rows]
-        tags_by_id: Dict[str, List[str]] = {i: [] for i in ids}
-        for i in range(0, len(ids), 400):
-            chunk = ids[i:i + 400]
-            ph = ",".join("?" for _ in chunk)
-            for tr in conn.execute(f"SELECT belief_id, tag FROM belief_tags WHERE belief_id IN ({ph})", chunk):
-                tags_by_id.setdefault(tr[0], []).append(tr[1])
-
-        rel = {i: 0.0 for i in ids}
+        rel = {e["belief_key"]: 0.0 for e in entries}
         if query:
-            emb = embedder or _default_embedder()
-            vecs = emb([query] + [r["statement"] or "" for r in rows])
-            if np is not None and vecs:
-                M = np.asarray(vecs, dtype=float)
-                norms = np.linalg.norm(M, axis=1, keepdims=True)
-                M = M / np.where(norms > 0, norms, 1.0)
-                q = M[0]
-                for idx, r in enumerate(rows):
-                    rel[r["id"]] = max(0.0, float(q @ M[idx + 1]))
+            # The intake stores each statement's embedding when it writes or revises the belief;
+            # only the query is embedded here.
+            ids = list(rel)
+            stored = {}
+            for i in range(0, len(ids), 400):
+                chunk = ids[i:i + 400]
+                ph = ",".join("?" for _ in chunk)
+                for r in conn.execute(f"SELECT id, embedding FROM belief_intake_beliefs WHERE id IN ({ph})", chunk):
+                    stored[r[0]] = json.loads(r[1])
+            q = (embedder or _default_embedder())([query])[0]
+            if np is None:
+                raise RuntimeError("numpy is required for belief relevance ranking")
+            qv = np.asarray(q, dtype=float)
+            qv = qv / (np.linalg.norm(qv) or 1.0)
+            for bid, vec in stored.items():
+                v = np.asarray(vec, dtype=float)
+                rel[bid] = max(0.0, float(qv @ (v / (np.linalg.norm(v) or 1.0))))
 
         scored: List[Dict[str, Any]] = []
-        for r in rows:
-            rec = _recency(r["last_confirmed"], now)
-            freq = _frequency(r["observation_count"])
-            rl = rel[r["id"]]
+        for e in entries:
+            rec = _recency(e["last_confirmed"], now)
+            freq = _frequency(e["observation_count"])
+            rl = rel[e["belief_key"]]
             item = {
-                "id": r["id"], "belief_key": r["belief_key"],
-                "short_id": f"b{r['short_id']}" if r["short_id"] is not None else None,
-                "statement": r["statement"], "domain": r["domain"], "confidence": r["confidence"],
-                "kind": r["kind"], "observation_count": r["observation_count"],
-                "last_confirmed": r["last_confirmed"],
-                "tags": sorted(tags_by_id.get(r["id"], [])),
+                "id": e["belief_key"], "belief_key": e["belief_key"], "short_id": e["short_id"],
+                "statement": e["statement"], "domain": e["domain"], "confidence": e["confidence"],
+                "kind": e["kind"], "observation_count": e["observation_count"],
+                "last_confirmed": e["last_confirmed"], "tags": sorted(e["tags"]),
                 "score": w["relevance"] * rl + w["recency"] * rec + w["frequency"] * freq,
             }
             if include_scores:

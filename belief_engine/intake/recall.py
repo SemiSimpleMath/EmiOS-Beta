@@ -49,7 +49,7 @@ def _load_beliefs() -> list[dict]:
     from belief_engine.intake.store import app_db
     with app_db()(False) as c:
         rows = [dict(r) for r in c.execute(
-            "SELECT id, statement, kind, created_day, embedding FROM belief_intake_beliefs ORDER BY rowid")]
+            "SELECT id, statement, kind, created_day, embedding FROM belief_intake_beliefs WHERE status='active' ORDER BY rowid")]
         support = {r["belief_id"]: (r["first"], r["last"], r["n"]) for r in c.execute(
             "SELECT belief_id, MIN(day) first, MAX(day) last, COUNT(*) n FROM belief_intake_evidence "
             "WHERE relation='support' GROUP BY belief_id")}
@@ -103,8 +103,27 @@ def rank(candidates: list[dict], query_vector: list[float], names: list[str], k:
     return scored[:k]
 
 
+def expand_query(message: str) -> tuple[str, list[str]]:
+    """(query text, entity names) for a chat message.
+
+    A message and the beliefs about the same thing often name it differently — "the dogs" in chat,
+    "Bonnie and Clyde" in the beliefs — and the embedding cannot bridge that: for "When do I usually
+    take the dogs out?" the evening-walk belief scored 0.09 and two trash beliefs ("take the bins
+    out") got in instead (2026-09-28). The KG entity detector the chat gate already uses finds the
+    entities the message names; their one-line card summaries join the query so it speaks the
+    beliefs' vocabulary, and the names join the lift lane.
+    """
+    from app.assistant.entity_management.entity_card_injector import EntityCardInjector
+    from app.assistant.agent_runtime.services.entity_injector import EntityInjector
+    found = [e for e in (EntityCardInjector().detect_entities_in_text(message) or []) if isinstance(e, str) and e.strip()]
+    if not found:
+        return message, []
+    summaries = EntityInjector().format_entity_cards_leveled(found, level=0)
+    return (f"{message}\n{summaries}" if summaries else message), found
+
+
 def recall(query: str, *, names: list[str], k: int, today: date | None = None) -> list[dict]:
-    """Ranked beliefs for the message; each has id, statement, kind, first_day, last_day, score."""
+    """Ranked beliefs for the query; each has id, statement, kind, first_day, last_day, score."""
     if not query.strip():
         return []
     from app.assistant.embeddings.embedder import embed_texts

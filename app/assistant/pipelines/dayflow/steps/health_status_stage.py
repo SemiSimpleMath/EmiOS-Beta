@@ -31,12 +31,6 @@ _WEEKLY_INSIGHTS_PATH = (
     _get_resources_dir() / "weekly_insights_pipeline_outputs" / "resource_weekly_insights_latest.json"
 )
 
-# Belief domains to include in the health status document
-_HEALTH_DOMAINS = {"health", "sleep"}
-
-_CONFIDENCE_RANK = {"high": 0, "medium": 1, "low": 2}
-
-
 def _format_health_beliefs() -> str:
     if not _BELIEFS_PATH.exists():
         logger.error(
@@ -53,18 +47,17 @@ def _format_health_beliefs() -> str:
 
     from belief_engine import tagging as _belief_tags
     health_tags = set(_belief_tags.pull_set("health_status"))
-    # Health-relevant = a curated health/sleep DOMAIN, OR a health-bridging TAG (dietary,
-    # mental_health, exercise) — the tag side catches beliefs filed under another domain
-    # (e.g. a reflux trigger tagged food+dietary). Domain stays the floor so this still
-    # works on an export that predates tags.
+    # Health-relevant = carries a tag in the health_status pull set: health and sleep plus the
+    # bridging tags (dietary, mental_health, exercise) that catch e.g. a reflux trigger.
     active = [
         e for e in entries
         if e.get("statement")
         and e.get("status", "active") == "active"
-        and (e.get("domain", "") in _HEALTH_DOMAINS or (set(e.get("tags") or []) & health_tags))
+        and (set(e.get("tags") or []) & health_tags)
     ]
 
-    active.sort(key=lambda e: _CONFIDENCE_RANK.get(e.get("confidence", "low"), 2))
+    # Most-evidenced first; the catalog has no confidence band, its evidence count is the weight.
+    active.sort(key=lambda e: -(e.get("observation_count") or 0))
 
     return "\n".join(format_belief_line(e) for e in active) if active else "(no active health beliefs)"
 

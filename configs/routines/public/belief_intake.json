@@ -1,7 +1,7 @@
 {
   "id": "belief_intake",
   "enabled": true,
-  "name": "Belief intake (shadow mode)",
+  "name": "Belief intake (live belief catalog)",
   "aliases": [
     "belief intake",
     "new belief intake"
@@ -14,5 +14,5 @@
     "type": "daily",
     "time_local": "01:00"
   },
-  "notes": "SHADOW MODE (2026-09-27): the new belief intake — daily insights + timeline -> belief_extractor -> belief_dedup -> belief_revise -> contradiction fan-out — writes only the belief_intake_* tables in emi.db. Nothing the assistant reads is touched; the old belief_engine routine keeps running at 00:30. Runs after daily_insights (00:05) and processes yesterday plus any unfinished earlier day. Compare belief_intake_beliefs against user_beliefs before any cutover."
+  "notes": "LIVE since 2026-09-29 (cutover from the legacy belief_engine). Daily insights + timeline -> belief_extractor -> belief_dedup -> belief_revise -> contradiction fan-out, into the belief_intake_* tables in emi.db. Runs after daily_insights (00:05) and processes yesterday plus any unfinished earlier day. After the days it tags new and revised beliefs (belief_tags) and rewrites resources/kg_derived/resource_user_beliefs.json, which the routine writer, health and entertainment stages, feedback-extractor context and insights page read; the chat gate and meal lane read the tables directly."
 }

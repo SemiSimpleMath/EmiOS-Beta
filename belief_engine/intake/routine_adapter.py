@@ -1,9 +1,10 @@
-"""Shadow mode: the new belief intake runs nightly beside the old belief engine.
+"""The nightly belief intake — the writer of the live belief catalog since the 2026-09-29 cutover.
 
 It reads the day's insights and timeline (written by the daily_insights pipeline at 00:05) and
-the assistant's turns, and writes only its own `belief_intake_*` tables. Nothing the assistant reads —
-user_beliefs, the export, the daily compile — is touched. The owner compares the two stores;
-cutover is a separate, later change.
+the assistant's turns, and writes its own `belief_intake_*` tables. After the days are processed
+it tags the new and revised beliefs (belief_tags, the shared retrieval vocabulary) and rewrites
+the export (resource_user_beliefs.json) that the routine writer, the health and entertainment
+stages, the feedback-extractor context and the insights page read.
 
 Runs every stored day up to yesterday (local calendar date) that the store has not finished. A day
 is taken only once its calendar date has passed: the routine manager runs a missed daily slot at
@@ -43,5 +44,10 @@ class BeliefIntakeAdapter:
         if day not in day_items.available_days():
             raise RuntimeError(f"belief_intake: no insights/timeline stored for {day} — did daily_insights run?")
         results = run_pending(app_store(), day, log=lambda line: logger.info("[belief_intake:%s] %s", run_id, line))
+        from belief_engine.export.export_beliefs import export_beliefs
+        from belief_engine.tagging import tag_beliefs
+        tags = tag_beliefs(mode="needs", source="intake")
+        out_path = export_beliefs()
+        logger.info("[belief_intake:%s] tagged %s; exported -> %s", run_id, tags, out_path)
         return {"pipeline_id": self.pipeline_id, "run_id": run_id, "status": "success",
-                "date": day, "days": results}
+                "date": day, "days": results, "tags": tags, "export_path": str(out_path)}

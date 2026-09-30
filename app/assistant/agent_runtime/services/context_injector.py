@@ -627,9 +627,10 @@ class ContextInjector:
                     people = (self.resolve_resource(agent, "resource_user_data") or {}).get("important_people") or []
                     names = [str(p.get("name") or "") for p in people if isinstance(p, dict)
                              and p.get("name") and p["name"].lower() in query.lower()]
-                    items = belief_recall.recall(query, names=names, k=10)
+                    expanded, entities = belief_recall.expand_query(query)
+                    items = belief_recall.recall(expanded, names=names + [e for e in entities if e not in names], k=6)
                     text = belief_recall.format_for_prompt(items)
-                    belief_recall.log_surfaced(items, room_id=room_id, message_id=anchor, query=query)
+                    belief_recall.log_surfaced(items, room_id=room_id, message_id=anchor, query=expanded)
                     agent.blackboard.update_state_value("_relevant_beliefs", {"anchor": anchor, "text": text})
                     context[key] = text
                 except Exception as e:

@@ -84,7 +84,9 @@ def set_tags(conn, belief_id: str, tags, *, method: str = "categorizer") -> List
     return clean
 
 
-def _select(conn, mode: str):
+def _select(conn, mode: str, source: str = "legacy"):
+    if source == "intake":
+        return _select_intake(conn, mode)
     base = ("SELECT b.id AS id, b.belief_key AS key, b.statement AS stmt, "
             "COALESCE(b.domain,'') AS domain FROM user_beliefs b WHERE b.status='active'")
     if mode == "needs":
@@ -96,14 +98,34 @@ def _select(conn, mode: str):
     return conn.execute(base).fetchall()
 
 
-def tag_beliefs(*, mode: str = "all", limit: Optional[int] = None, batch_size: int = _BATCH) -> dict:
+def _select_intake(conn, mode: str):
+    """Active intake beliefs (ids 'B<n>'). They carry no domain, so tags come from the statement
+    alone. Stale = revised on or after the day its tags were assigned (revision days are content
+    days, so the >= retags exactly once after a revision) — unless the owner set the tags by hand
+    in /beliefs (method 'manual'), which the tagger never overwrites."""
+    base = ("SELECT b.id AS id, b.id AS key, b.statement AS stmt, '' AS domain "
+            "FROM belief_intake_beliefs b WHERE b.status='active'")
+    if mode == "needs":
+        base += (
+            " AND (NOT EXISTS (SELECT 1 FROM belief_tags t WHERE t.belief_id=b.id)"
+            " OR (EXISTS (SELECT 1 FROM belief_intake_revisions r WHERE r.belief_id=b.id AND r.day >="
+            " (SELECT SUBSTR(MIN(t.assigned_at), 1, 10) FROM belief_tags t WHERE t.belief_id=b.id))"
+            " AND NOT EXISTS (SELECT 1 FROM belief_tags t WHERE t.belief_id=b.id AND t.method='manual')))"
+        )
+    base += " ORDER BY CAST(SUBSTR(b.id, 2) AS INTEGER)"
+    return conn.execute(base).fetchall()
+
+
+def tag_beliefs(*, mode: str = "all", limit: Optional[int] = None, batch_size: int = _BATCH,
+                source: str = "legacy") -> dict:
     """Tag active beliefs (domain baseline UNION LLM enrichment). mode='all' (backfill) or
-    mode='needs' (untagged + stale, for the nightly pass). Returns a summary dict."""
+    mode='needs' (untagged + stale, for the nightly pass). source='intake' tags the intake store's
+    beliefs (the live catalog since the 2026-09-29 cutover). Returns a summary dict."""
     conn = sqlite3.connect(_db_path())
     conn.row_factory = sqlite3.Row
     try:
         _ensure_table(conn)
-        rows = _select(conn, mode)
+        rows = _select(conn, mode, source)
         if limit:
             rows = rows[:limit]
         if not rows:

@@ -1,15 +1,15 @@
 """Meal planner ↔ belief-engine retrieval lane (first beliefs_for_context consumer).
 
 Covers:
-- the lane renders context-ranked beliefs from the v1 store, marking
+- the lane renders context-ranked beliefs from the catalog, marking
   recently-confirmed items as current intent and stale ones as not
 - the dispatcher honors subsystem flag meal_beliefs_v2 (off → legacy v1
   prefix-match lane)
 - a lane failure with the flag ON is loud (explicit marker, no silent swap)
 
-The lane reads the v1 store (emi.db: user_beliefs + belief_tags + belief_short_id)
-via belief_engine.retrieval.beliefs_for_context — belief-engine v2 was retired as
-the primary producer (2026-06-16). The `_v2` names persist for flag continuity.
+The lane reads the live belief catalog (the intake store, belief_intake_* + belief_tags,
+since the 2026-09-29 cutover) via belief_engine.retrieval.beliefs_for_context. The `_v2`
+names persist for flag continuity.
 """
 from __future__ import annotations
 
@@ -32,35 +32,23 @@ NOW = datetime(2026, 6, 10, 9, 0, 0)
 
 @pytest.fixture()
 def v1_store_path(tmp_path):
-    db = str(tmp_path / "belief_v1_test.db")
-    con = sqlite3.connect(db)
-    con.executescript(
-        """
-        CREATE TABLE user_beliefs (
-            id TEXT PRIMARY KEY, belief_key TEXT, statement TEXT, domain TEXT,
-            confidence TEXT, kind TEXT, observation_count INTEGER,
-            last_confirmed TEXT, status TEXT
-        );
-        CREATE TABLE belief_short_id (belief_id TEXT PRIMARY KEY, short_id INTEGER);
-        CREATE TABLE belief_tags (belief_id TEXT, tag TEXT);
-        """
-    )
-    fresh = (NOW - timedelta(days=2)).isoformat()
-    stale = (NOW - timedelta(days=120)).isoformat()
-    con.executemany(
-        "INSERT INTO user_beliefs VALUES (?,?,?,?,?,?,?,?,?)",
-        [
-            ("b-kids-bananas", "food.kids.bananas", "The kids strongly dislike bananas.",
-             "food", "high", "preference", 4, fresh, "active"),
-            ("b-user-salmon", "food.user.salmon", "The user prefers simple oven-baked salmon.",
-             "food", "high", "preference", 2, stale, "active"),
-        ],
-    )
-    con.executemany("INSERT INTO belief_short_id VALUES (?,?)",
-                    [("b-kids-bananas", 11), ("b-user-salmon", 12)])
+    """The live catalog's tables (belief_intake_* + belief_tags) in a scratch file."""
+    from belief_engine.intake.store import IntakeStore, sqlite_file
+    db = tmp_path / "catalog_test.db"
+    s = IntakeStore(sqlite_file(db), "belief_intake_")
+    fresh = (NOW - timedelta(days=2)).date().isoformat()
+    stale = (NOW - timedelta(days=120)).date().isoformat()
+    for day, statement in ((fresh, "The kids strongly dislike bananas."),
+                           (stale, "The user prefers simple oven-baked salmon.")):
+        s.apply(day, {"statement": statement, "kind": "stable_preference", "scope": "chronic",
+                      "sources": [{"time": f"{day} 12:00", "kind": "said", "relation": "support",
+                                   "text": statement, "source_ref": "message:1"}]},
+                _fake_embedder([statement])[0], {"verdict": "new"})
+    con = sqlite3.connect(str(db))
+    con.execute("CREATE TABLE belief_tags (belief_id TEXT, tag TEXT)")
     con.commit()
     con.close()
-    return db
+    return str(db)
 
 
 def test_lane_renders_recent_and_stale(v1_store_path):
@@ -83,7 +71,7 @@ def test_lane_renders_recent_and_stale(v1_store_path):
     salmon_line = next(l for l in block.splitlines() if "salmon" in l)
     assert "recent" in banana_line
     assert "recent" not in salmon_line
-    assert "preference" in banana_line          # kind is visible to the planner
+    assert "stable_preference" in banana_line   # kind is visible to the planner
     # Observed DATE is visible — this is what lets the planner LLM time-scope
     # transient facts ("sick Monday" governs Tue, not Thu).
     assert "observed 2026-06-08" in banana_line

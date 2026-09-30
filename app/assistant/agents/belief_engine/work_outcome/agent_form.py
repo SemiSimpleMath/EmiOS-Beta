@@ -25,10 +25,6 @@ class BeliefOutcome(BaseModel):
         default="",
         description="Required for 'revise': the complete replacement statement, self-contained and "
                     "preserving every condition that still applies. Leave empty otherwise.")
-    confidence: str = Field(
-        default="",
-        description="Optional for 'revise': high, medium or low. Leave empty to keep the current "
-                    "confidence.")
 
 
 class AgentForm(BaseModel):
