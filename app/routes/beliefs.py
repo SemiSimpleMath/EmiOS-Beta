@@ -1,26 +1,22 @@
-"""Owner-only /beliefs management page + API — browse and correct the v1 belief set.
+"""Owner-only /beliefs management page + API — browse and correct the live belief catalog.
 
-Local-only surface (``reject_if_not_local``) over the v1 belief engine (emi.db:
-user_beliefs + belief_evidence + belief_tags + belief_short_id). Lists every live belief
-with domain / kind / status / strength + tags and lets the owner CORRECT it: edit the
-statement, reclassify domain, retag, suppress (deprecate), or LOCK it against the nightly
-auto-revision.
+Local-only surface (``reject_if_not_local``) over the belief intake's store (emi.db:
+belief_intake_beliefs / _evidence / _revisions + belief_tags), the live catalog since the
+2026-09-29 cutover. Lists every belief with its kind, tags, evidence counts and refinement
+parent, shows its evidence and revision history, and lets the owner correct it.
 
-v1 rows are MUTABLE (not a rebuilt projection), so edits are DIRECT row updates — no override
-side tables. The lock is the durability mechanism: a locked belief is skipped by the updater,
-decay, and canonicalize (see belief_engine: update_beliefs / decay.recompute / canonicalize),
-so a correction here sticks.
-
-Deprecated beliefs are evicted nightly to user_beliefs_archive / belief_evidence_archive
-(belief_archive routine); `include_archived` also reads those for browsing/provenance, but
-edits apply only to live beliefs.
+Corrections follow the intake's own rules — a belief is a view of its evidence:
+- a new statement is a REVISION (old wording kept in the history) plus an evidence row carrying
+  the owner's words (kind "said", source_ref "owner"), so later revisions weigh the correction
+  as the newest thing the owner said;
+- retire / restore flips status and records it in the revision history (nothing is deleted);
+- tags written here are method 'manual', which the nightly tagger never overwrites.
+After a write the export (resource_user_beliefs.json) is rewritten so its readers see it.
 """
 from __future__ import annotations
 
-import sqlite3
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from typing import List
+from datetime import timedelta
+from typing import Any, Dict, List
 
 import yaml
 from flask import Blueprint, jsonify, render_template, request
@@ -28,7 +24,6 @@ from flask import Blueprint, jsonify, render_template, request
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_configs_dir
 from app.routes._security import reject_if_not_local
-from belief_engine.db.paths import belief_db_path
 
 logger = get_logger(__name__)
 
@@ -36,53 +31,35 @@ beliefs_admin_bp = Blueprint("beliefs_admin", __name__)
 # Owner-only: full belief set with evidence + edit controls; never a proxied request.
 beliefs_admin_bp.before_request(reject_if_not_local)
 
-# Trends read the evidence log directly. Only real user-driven signal counts toward movement —
-# the engine's own bookkeeping (canonicalization, deprecation, seed replay) is excluded so the
-# numbers reflect what the user actually did.
-_REAL_SOURCES = ("daily_insights", "ticket_acceptance", "ticket_rejection", "user_comment")
-_POS = ("confirms",)
-_NEG = ("contradicts", "rejects")
+_P = "belief_intake_"
 _TREND_WINDOW_DAYS = 21
 _TREND_MIN_NET = 2
 _TREND_LIMIT = 15
 
 
-def _db_path() -> Path:
-    return Path(belief_db_path())
+def _read():
+    from belief_engine.intake.store import app_db
+    return app_db()(False)
 
 
-def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(_db_path()), timeout=10.0)
-    conn.row_factory = sqlite3.Row
-    # The archive tables are created by the belief_archive routine on its first run; ensure them
-    # (empty) so queries that read them work before that sweep has ever run. No-op once they exist.
-    conn.execute("CREATE TABLE IF NOT EXISTS user_beliefs_archive AS SELECT * FROM user_beliefs WHERE 0")
-    conn.execute("CREATE TABLE IF NOT EXISTS belief_evidence_archive AS SELECT * FROM belief_evidence WHERE 0")
-    return conn
+def _write():
+    from belief_engine.intake.store import app_db
+    return app_db()(True)
 
 
-def _domains(conn: sqlite3.Connection) -> List[str]:
-    """Domain vocabulary for the filters + the reclassify dropdown — the union of the
-    configured domains (belief_engine.config, the single parser of belief_domains.yaml)
-    and any actually present, so nothing is unreachable."""
-    present = {r[0] for r in conn.execute("SELECT DISTINCT domain FROM user_beliefs WHERE domain IS NOT NULL")}
-    try:
-        from belief_engine.config import list_all_domain_ids
-        configured = set(list_all_domain_ids())
-    except Exception:
-        logger.warning("[beliefs] could not load configured belief domains", exc_info=True)
-        configured = set()
-    return sorted(present | configured)
+def _store():
+    from belief_engine.intake.run import app_store
+    return app_store()
+
+
+def _today() -> str:
+    from app.assistant.utils.time_utils import get_local_time
+    return get_local_time().date().isoformat()
 
 
 def _tags_vocab() -> List[str]:
-    try:
-        cfg = yaml.safe_load((get_configs_dir() / "belief_tags.yaml").read_text(encoding="utf-8")) or {}
-        tags = cfg.get("tags", cfg)
-        return sorted(tags.keys()) if isinstance(tags, dict) else sorted(tags)
-    except Exception:
-        logger.warning("[beliefs] could not load belief_tags.yaml vocab", exc_info=True)
-        return []
+    cfg = yaml.safe_load((get_configs_dir() / "belief_tags.yaml").read_text(encoding="utf-8")) or {}
+    return sorted((cfg.get("tags") or {}).keys())
 
 
 def _int_arg(name: str, default: int) -> int:
@@ -92,254 +69,161 @@ def _int_arg(name: str, default: int) -> int:
     return int(raw.strip())
 
 
-# Column projection shared by list + item, aliased to the field names the page reads.
+# Every belief with its tags and evidence counts, aliased to the field names the page reads.
 _SELECT = (
-    "SELECT b.id AS belief_id, b.statement, b.domain, b.kind, b.status, b.confidence, b.locked, "
-    " b.observation_count AS obs_count, b.last_confirmed AS last_observed, b.first_observed, "
-    " ROUND(COALESCE(b.current_net_weight, 0), 1) AS net, b.current_confidence_band AS band, "
-    " ('b' || s.short_id) AS short_id, "
-    " (SELECT GROUP_CONCAT(tag) FROM belief_tags WHERE belief_id = b.id) AS tags "
+    f"SELECT b.id AS belief_id, b.statement, b.kind, b.scope, b.status, b.parent_id, b.created_day, "
+    f" (SELECT GROUP_CONCAT(tag) FROM belief_tags t WHERE t.belief_id = b.id) AS tags, "
+    f" (SELECT COUNT(*) FROM {_P}evidence e WHERE e.belief_id = b.id AND e.relation='support') AS support, "
+    f" (SELECT COUNT(*) FROM {_P}evidence e WHERE e.belief_id = b.id AND e.relation='contradict') AS contradict, "
+    f" (SELECT MAX(day) FROM {_P}evidence e WHERE e.belief_id = b.id AND e.relation='support') AS last_observed "
+    f"FROM {_P}beliefs b"
 )
+
+
+def _row(c, belief_id: str) -> Dict[str, Any] | None:
+    r = c.execute(_SELECT + " WHERE b.id = ?", (belief_id,)).fetchone()
+    return dict(r) if r else None
 
 
 @beliefs_admin_bp.route("/beliefs")
 def beliefs_page():
-    conn = _connect()
-    try:
-        return render_template("beliefs.html", domains=_domains(conn), tags_vocab=_tags_vocab())
-    finally:
-        conn.close()
+    return render_template("beliefs.html", tags_vocab=_tags_vocab())
 
 
 @beliefs_admin_bp.route("/api/beliefs/list")
 def beliefs_list():
-    """Live beliefs (filterable). `include_archived=1` also reads the archive tables (read-only,
-    for provenance browsing). Filtering is server-side so big result sets stay light."""
-    domain = (request.args.get("domain") or "").strip()
+    """Beliefs filtered by status (active | retired | all), tag, kind and statement text."""
+    tag = (request.args.get("tag") or "").strip()
     kind = (request.args.get("kind") or "").strip()
     status = (request.args.get("status") or "active").strip()
     q = (request.args.get("q") or "").strip().lower()
-    include_archived = request.args.get("include_archived") == "1"
 
     where, params = [], []
-    if status == "active":
-        where.append("b.status = 'active'")
-    elif status == "contested":
-        where.append("b.status = 'contested'")
-    # status == "all": no status filter (live = active + contested).
-    if domain:
-        where.append("b.domain = ?"); params.append(domain)
+    if status in ("active", "retired"):
+        where.append("b.status = ?"); params.append(status)
+    if tag:
+        where.append("b.id IN (SELECT belief_id FROM belief_tags WHERE tag = ?)"); params.append(tag)
     if kind:
         where.append("b.kind = ?"); params.append(kind)
     if q:
         where.append("lower(b.statement) LIKE ?"); params.append(f"%{q}%")
     clause = (" WHERE " + " AND ".join(where)) if where else ""
-    order = " ORDER BY b.observation_count DESC, b.id"
 
-    conn = _connect()
-    try:
-        rows = [dict(r) for r in conn.execute(
-            _SELECT + " FROM user_beliefs b LEFT JOIN belief_short_id s ON s.belief_id = b.id"
-            + clause + order, params)]
-        for r in rows:
-            r["archived"] = 0
-        if include_archived:
-            arch_where = [w for w in where if not w.startswith("b.status")]  # archive is all-deprecated
-            arch_clause = (" WHERE " + " AND ".join(arch_where)) if arch_where else ""
-            arch_params = [p for w, p in zip(where, params) if not w.startswith("b.status")] if where else []
-            arch = [dict(r) for r in conn.execute(
-                _SELECT + " FROM user_beliefs_archive b LEFT JOIN belief_short_id s ON s.belief_id = b.id"
-                + arch_clause + order, arch_params)]
-            for r in arch:
-                r["archived"] = 1
-            rows += arch
-        kinds = [r[0] for r in conn.execute(
-            "SELECT DISTINCT kind FROM user_beliefs WHERE kind IS NOT NULL ORDER BY 1")]
-        dcounts = {r[0]: r[1] for r in conn.execute(
-            "SELECT domain, COUNT(*) FROM user_beliefs WHERE status='active' GROUP BY domain")}
-        domains = _domains(conn)
-    finally:
-        conn.close()
-    return jsonify({"beliefs": rows, "count": len(rows), "domains": domains,
-                    "kinds": kinds, "domain_counts": dcounts})
+    with _read() as c:
+        rows = [dict(r) for r in c.execute(
+            _SELECT + clause + " ORDER BY support DESC, CAST(SUBSTR(b.id, 2) AS INTEGER)", params)]
+        kinds = [r[0] for r in c.execute(f"SELECT DISTINCT kind FROM {_P}beliefs ORDER BY 1")]
+        tag_counts = {r[0]: r[1] for r in c.execute(
+            f"SELECT t.tag, COUNT(*) FROM belief_tags t JOIN {_P}beliefs b ON b.id = t.belief_id "
+            "WHERE b.status = 'active' GROUP BY t.tag")}
+    return jsonify({"beliefs": rows, "count": len(rows), "kinds": kinds, "tag_counts": tag_counts})
 
 
 @beliefs_admin_bp.route("/api/beliefs/item")
 def beliefs_item():
-    """One belief's full state + its evidence trail (the 'why')."""
+    """One belief's full state + its evidence trail (the 'why') + its revision history."""
     bid = (request.args.get("belief_id") or "").strip()
     if not bid:
         return jsonify({"error": "belief_id required"}), 400
-    conn = _connect()
-    try:
-        b = conn.execute("SELECT * FROM user_beliefs WHERE id=?", (bid,)).fetchone()
-        ev_table, archived = "belief_evidence", 0
-        if b is None:
-            b = conn.execute("SELECT * FROM user_beliefs_archive WHERE id=?", (bid,)).fetchone()
-            ev_table, archived = "belief_evidence_archive", 1
+    with _read() as c:
+        b = _row(c, bid)
         if b is None:
             return jsonify({"error": "not found"}), 404
-        evidence = [dict(e) for e in conn.execute(
-            f"SELECT source_type, source_date, signal_type, summary, raw_text, weight "
-            f"FROM {ev_table} WHERE belief_id=? ORDER BY source_date DESC, created_at DESC LIMIT 80", (bid,))]
-        sid = conn.execute("SELECT short_id FROM belief_short_id WHERE belief_id=?", (bid,)).fetchone()
-        tags = [r[0] for r in conn.execute(
-            "SELECT tag FROM belief_tags WHERE belief_id=? ORDER BY tag", (bid,))]
-    finally:
-        conn.close()
-    return jsonify({
-        "belief": dict(b),
-        "short_id": f"b{sid['short_id']}" if sid else None,
-        "domain": b["domain"],
-        "tags": tags,
-        "archived": archived,
-        "evidence": evidence,
-    })
+        evidence = [dict(e) for e in c.execute(
+            f"SELECT day, time, kind, relation, text, in_reply_to, source_ref, via FROM {_P}evidence "
+            "WHERE belief_id = ? ORDER BY day DESC, time DESC, id DESC", (bid,))]
+        revisions = [dict(r) for r in c.execute(
+            f"SELECT day, old_statement, new_statement, old_kind, new_kind, reasoning FROM {_P}revisions "
+            "WHERE belief_id = ? ORDER BY id DESC", (bid,))]
+        parent = _row(c, b["parent_id"]) if b["parent_id"] else None
+        children = [dict(r) for r in c.execute(
+            f"SELECT id AS belief_id, statement, status FROM {_P}beliefs WHERE parent_id = ? ORDER BY rowid", (bid,))]
+        tags = [r[0] for r in c.execute("SELECT tag FROM belief_tags WHERE belief_id = ? ORDER BY tag", (bid,))]
+    return jsonify({"belief": b, "tags": tags, "evidence": evidence, "revisions": revisions,
+                    "parent": parent, "children": children})
 
 
 @beliefs_admin_bp.route("/api/beliefs/update", methods=["POST"])
 def beliefs_update():
-    """Apply owner corrections directly to the live belief row. JSON body:
-    ``{belief_id, statement?, domain?, suppressed?, locked?, tags?}`` — omitted keys unchanged.
-    suppress -> status='deprecated' (evicted to the archive on the next sweep); lock -> locked=1
-    so the engine can't re-evolve/deprecate it. Edits apply to LIVE beliefs only."""
+    """Owner corrections. JSON body ``{belief_id, statement?, retired?, tags?}`` — omitted keys
+    unchanged. See the module docstring for what each correction writes."""
+    from belief_engine.export.export_beliefs import export_beliefs
+    from belief_engine.tagging import sanitize
+
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         data = {}
     bid = (data.get("belief_id") or "").strip()
     if not bid:
         return jsonify({"error": "belief_id required"}), 400
+    store = _store()
+    current = store.get(bid)
+    if current is None:
+        return jsonify({"error": "not found"}), 404
+    day = _today()
 
-    sets, params = [], []
     if "statement" in data:
-        s = (data.get("statement") or "").strip()
-        if not s:
+        statement = (data.get("statement") or "").strip()
+        if not statement:
             return jsonify({"error": "statement cannot be empty"}), 400
-        sets.append("statement = ?"); params.append(s)
-    if "domain" in data:
-        d = (data.get("domain") or "").strip()
-        from belief_engine.config import list_all_domain_ids
-        if not d or d not in list_all_domain_ids():
-            return jsonify({"error": f"unknown domain {d!r} — add it to belief_domains.yaml first "
-                                     f"(unconfigured domains get no nightly maintenance)"}), 400
-        sets.append("domain = ?"); params.append(d)
-    if "locked" in data:
-        sets.append("locked = ?"); params.append(1 if data.get("locked") else 0)
-    if "suppressed" in data:
-        # Suppress = deprecate; un-suppress = reactivate. The nightly archive sweep evicts
-        # deprecated rows, so suppression removes the belief from the live set.
-        sets.append("status = ?"); params.append("deprecated" if data.get("suppressed") else "active")
-
-    conn = _connect()
-    try:
-        current = conn.execute("SELECT status FROM user_beliefs WHERE id=?", (bid,)).fetchone()
-        if not current:
-            return jsonify({"error": "not found (archived beliefs are read-only)"}), 404
-        # Locking is the owner endorsing the belief as true-as-written: a contested belief
-        # normalizes to active so it doesn't sit in the reevaluator's contested pool forever
-        # (the reevaluator skips locked beliefs). An explicit suppress in the same payload wins.
-        if data.get("locked") and "suppressed" not in data and current["status"] == "contested":
-            sets.append("status = ?"); params.append("active")
-        if sets:
-            sets.append("updated_at = ?"); params.append(datetime.now(timezone.utc).isoformat())
-            conn.execute(f"UPDATE user_beliefs SET {', '.join(sets)} WHERE id=?", (*params, bid))
-        if "tags" in data:
-            now_iso = datetime.now(timezone.utc).isoformat()
-            clean = sorted({str(t).strip().lower() for t in (data.get("tags") or []) if str(t).strip()})
-            conn.execute("DELETE FROM belief_tags WHERE belief_id=?", (bid,))
-            conn.executemany(
-                "INSERT OR IGNORE INTO belief_tags (belief_id, tag, assigned_at, method) VALUES (?,?,?,?)",
-                [(bid, t, now_iso, "manual") for t in clean])
-        conn.commit()
-        row = dict(conn.execute(
-            _SELECT + " FROM user_beliefs b LEFT JOIN belief_short_id s ON s.belief_id=b.id WHERE b.id=?",
-            (bid,)).fetchone())
-    finally:
-        conn.close()
-
-    # Keep the embedding in sync with the correction — canonicalize's NN recall and the
-    # updater's similar-belief surfacing read the vector store. A corrected statement or a
-    # reclassified domain re-upserts (domain rides the vector's metadata); a suppression
-    # removes the vector (the belief left the live set), and un-suppression re-adds it.
-    if any(k in data for k in ("statement", "domain", "suppressed")):
-        try:
-            from belief_engine.chroma.belief_chroma import get_belief_chroma
-            bc = get_belief_chroma()
-            if data.get("suppressed"):
-                bc.delete(bid)
+        if statement != current["statement"]:
+            from app.assistant.embeddings.embedder import embed_texts
+            store.revise(bid, day, {"statement": statement, "kind": current["kind"],
+                                    "reasoning": "owner correction in /beliefs"}, embed_texts([statement])[0])
+            store.add_evidence(bid, day, kind="said", relation="support", text=statement,
+                               source_ref="owner", via="owner_correction")
+    if "retired" in data:
+        want = "retired" if data.get("retired") else "active"
+        if want != current["status"]:
+            if want == "retired":
+                store.retire(bid, day, "owner retired it in /beliefs")
             else:
-                bc.upsert(belief_id=bid, statement=row["statement"], domain=row["domain"])
-        except Exception:
-            logger.warning("[beliefs] embedding sync failed for %s (the nightly archive "
-                           "reconcile is the backstop)", bid, exc_info=True)
+                store.restore(bid, day, "owner restored it in /beliefs")
+    if "tags" in data:
+        from datetime import datetime, timezone
+        clean = sanitize(data.get("tags") or [])
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with _write() as c:
+            c.execute("DELETE FROM belief_tags WHERE belief_id = ?", (bid,))
+            c.executemany("INSERT INTO belief_tags (belief_id, tag, assigned_at, method) VALUES (?,?,?,?)",
+                          [(bid, t, now_iso, "manual") for t in clean])
 
+    export_beliefs()
+    with _read() as c:
+        row = _row(c, bid)
     logger.info("[beliefs] corrected %s: %s", bid, sorted(k for k in data if k != "belief_id"))
     return jsonify({"success": True, "belief": row})
 
 
 @beliefs_admin_bp.route("/api/beliefs/trends")
 def beliefs_trends():
-    """Belief movement over a recent window, read from belief_evidence (richer than v2's
-    affirm/contradict log — confirms/qualifies/contradicts/rejects + weight):
-      - trending_up      : net-positive real-signal beliefs (gaining ground)
-      - challenged       : contested, or real-signal challenges >= confirms (losing ground)
-      - recently_changed : beliefs that faded (deprecated) in the window — organic fades only,
-                           merge-losers (belief_merges) excluded so it's not merge noise."""
+    """Belief movement over a recent window, from the evidence and revision history:
+      - trending_up      : active beliefs whose support outruns contradiction in the window
+      - challenged       : active beliefs contradicted at least as often as supported
+      - recently_changed : revisions in the window (restated, retired or restored)"""
+    from app.assistant.utils.time_utils import get_local_time
     days = _int_arg("days", _TREND_WINDOW_DAYS)
     min_net = _int_arg("min_net", _TREND_MIN_NET)
     limit = _int_arg("limit", _TREND_LIMIT)
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
-    src_ph = ",".join("?" for _ in _REAL_SOURCES)
-    pos_ph = ",".join("?" for _ in _POS)
-    neg_ph = ",".join("?" for _ in _NEG)
+    cutoff = (get_local_time().date() - timedelta(days=days)).isoformat()
 
-    # Per active belief, confirms vs challenges from REAL sources in the window.
     windowed = (
-        " SELECT b.id AS belief_id, b.statement, b.domain, b.kind, b.status,"
-        "        b.observation_count AS obs_count, b.last_confirmed AS last_observed,"
-        f"       SUM(CASE WHEN e.signal_type IN ({pos_ph}) THEN 1 ELSE 0 END) AS confirms,"
-        f"       SUM(CASE WHEN e.signal_type IN ({neg_ph}) THEN 1 ELSE 0 END) AS challenges"
-        "  FROM user_beliefs b JOIN belief_evidence e ON e.belief_id = b.id"
-        "  WHERE b.status IN ('active','contested')"
-        f"   AND e.source_date >= ? AND e.source_type IN ({src_ph})"
-        "  GROUP BY b.id"
+        f"SELECT b.id AS belief_id, b.statement, b.kind, "
+        f"  SUM(CASE WHEN e.relation='support' THEN 1 ELSE 0 END) AS confirms, "
+        f"  SUM(CASE WHEN e.relation='contradict' THEN 1 ELSE 0 END) AS challenges "
+        f"FROM {_P}beliefs b JOIN {_P}evidence e ON e.belief_id = b.id "
+        f"WHERE b.status = 'active' AND e.day >= ? GROUP BY b.id"
     )
-    win_params = [*_POS, *_NEG, cutoff, *_REAL_SOURCES]
-
-    conn = _connect()
-    try:
-        trending_up = [dict(r) for r in conn.execute(
-            windowed + " HAVING (confirms - challenges) >= ?"
-                       " ORDER BY (confirms - challenges) DESC, confirms DESC LIMIT ?",
-            [*win_params, min_net, limit])]
-        losing = [dict(r) for r in conn.execute(
-            windowed + " HAVING challenges > 0 AND challenges >= confirms"
-                       " ORDER BY (challenges - confirms) DESC, challenges DESC LIMIT ?",
-            [*win_params, limit])]
-        contested = [dict(r) for r in conn.execute(
-            _SELECT + " FROM user_beliefs b LEFT JOIN belief_short_id s ON s.belief_id=b.id"
-            " WHERE b.status='contested' ORDER BY b.observation_count DESC LIMIT ?", [limit])]
-        seen, challenged = set(), []
-        for r in [*contested, *losing]:
-            if r["belief_id"] in seen:
-                continue
-            seen.add(r["belief_id"])
-            challenged.append(r)
-        challenged = challenged[:limit]
-        # Recently faded: deprecated in the window, organic fades only (exclude merge-losers).
-        # Deprecated rows live briefly in user_beliefs (pre-sweep) then in the archive.
-        recently_changed = [dict(r) for r in conn.execute(
-            " SELECT belief_id, statement, domain, changed_on FROM ("
-            "   SELECT id AS belief_id, statement, domain, updated_at AS changed_on FROM user_beliefs WHERE status='deprecated'"
-            "   UNION ALL"
-            "   SELECT id AS belief_id, statement, domain, updated_at AS changed_on FROM user_beliefs_archive"
-            " ) WHERE changed_on >= ? AND belief_id NOT IN (SELECT loser_id FROM belief_merges)"
-            " ORDER BY changed_on DESC LIMIT ?", [cutoff, limit])]
-    finally:
-        conn.close()
-    return jsonify({
-        "window_days": days,
-        "trending_up": trending_up,
-        "challenged": challenged,
-        "recently_changed": recently_changed,
-    })
+    with _read() as c:
+        trending_up = [dict(r) for r in c.execute(
+            windowed + " HAVING (confirms - challenges) >= ? ORDER BY (confirms - challenges) DESC, confirms DESC LIMIT ?",
+            (cutoff, min_net, limit))]
+        challenged = [dict(r) for r in c.execute(
+            windowed + " HAVING challenges > 0 AND challenges >= confirms ORDER BY challenges DESC LIMIT ?",
+            (cutoff, limit))]
+        recently_changed = [dict(r) for r in c.execute(
+            f"SELECT r.belief_id, r.new_statement AS statement, r.old_statement, r.reasoning, r.day AS changed_on, "
+            f"b.status FROM {_P}revisions r JOIN {_P}beliefs b ON b.id = r.belief_id "
+            "WHERE r.day >= ? ORDER BY r.day DESC, r.id DESC LIMIT ?", (cutoff, limit))]
+    return jsonify({"window_days": days, "trending_up": trending_up, "challenged": challenged,
+                    "recently_changed": recently_changed})

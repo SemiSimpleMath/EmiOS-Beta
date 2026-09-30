@@ -10,8 +10,8 @@
   <header class="bx-header">
     <h1>Beliefs</h1>
     <div class="bx-sub">
-      belief&#8209;engine v1 &middot; <span id="bx-count">&hellip;</span> shown &middot;
-      edits write the belief directly &mdash; <b>lock</b> a correction so the nightly engine can&#8217;t re&#8209;evolve it
+      belief catalog &middot; <span id="bx-count">&hellip;</span> shown &middot;
+      a correction is a revision plus your words as evidence &mdash; the old wording stays in the history
     </div>
   </header>
 
@@ -23,14 +23,13 @@
   <section id="bx-browse" class="bx-panel">
     <div class="bx-filters">
       <input id="f-q" type="search" placeholder="search statements&hellip;">
-      <select id="f-domain"><option value="">all domains</option></select>
+      <select id="f-tag"><option value="">all tags</option></select>
       <select id="f-kind"><option value="">all kinds</option></select>
       <select id="f-status">
         <option value="active">active</option>
-        <option value="contested">contested</option>
-        <option value="all">all live</option>
+        <option value="retired">retired</option>
+        <option value="all">all</option>
       </select>
-      <label class="bx-chk"><input type="checkbox" id="f-archived"> include archived</label>
       <button id="f-refresh">refresh</button>
     </div>
     <div id="bx-list" class="bx-list"></div>
@@ -58,7 +57,7 @@
         <div id="t-challenged" class="bx-list"></div>
       </div>
       <div class="bx-trend-col">
-        <h3 class="bx-trend-h gone">&#8635; Recently faded <span class="bx-hint">left the active set</span></h3>
+        <h3 class="bx-trend-h gone">&#8635; Recently changed <span class="bx-hint">restated, retired or restored</span></h3>
         <div id="t-changed" class="bx-list"></div>
       </div>
     </div>
@@ -70,31 +69,31 @@
       <h2 id="d-title">Belief</h2>
       <div id="d-meta" class="bx-meta"></div>
 
-      <label class="bx-lbl">Statement <span class="bx-hint">(edits the belief directly)</span></label>
+      <label class="bx-lbl">Statement <span class="bx-hint">(saved as a revision; your words become evidence)</span></label>
       <textarea id="d-statement" rows="4"></textarea>
 
-      <label class="bx-lbl">Tags <span class="bx-hint">(how consumers pull this belief &mdash; click to toggle)</span></label>
+      <label class="bx-lbl">Tags <span class="bx-hint">(how consumers pull this belief &mdash; click to toggle; the nightly tagger keeps yours)</span></label>
       <div id="d-tags" class="bx-tagpick"></div>
 
       <div class="bx-row">
-        <label class="bx-lbl small">Domain
-          <select id="d-domain"></select>
-        </label>
-        <label class="bx-chk"><input type="checkbox" id="d-suppressed"> suppress &mdash; deprecate &amp; archive</label>
-        <label class="bx-chk"><input type="checkbox" id="d-locked"> lock &mdash; engine can&#8217;t revise/deprecate</label>
+        <label class="bx-chk"><input type="checkbox" id="d-retired"> retired &mdash; kept with its history, no longer used</label>
       </div>
+      <div id="d-family" class="bx-meta"></div>
 
       <div class="bx-actions">
         <button id="d-save" class="bx-primary">Save corrections</button>
         <span id="d-saved" class="bx-saved hidden">saved &check;</span>
       </div>
 
-      <h3>Evidence <span class="bx-hint">(observations behind this belief)</span></h3>
+      <h3>Evidence <span class="bx-hint">(what this belief rests on, newest first)</span></h3>
       <div id="d-evidence" class="bx-evidence"></div>
+
+      <h3>Revisions <span class="bx-hint">(how the statement changed)</span></h3>
+      <div id="d-revisions" class="bx-evidence"></div>
     </div>
   </div>
 
-  <script>window.BX_DOMAINS = {{ domains|tojson }}; window.BX_TAGS = {{ tags_vocab|tojson }};</script>
+  <script>window.BX_TAGS = {{ tags_vocab|tojson }};</script>
   <script src="/static/js/beliefs.js"></script>
 </body>
 </html>
