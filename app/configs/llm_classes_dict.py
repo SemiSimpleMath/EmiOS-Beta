@@ -1,5 +1,5 @@
 import os
-from app.services.llm_client import OpenAILLM, OpenCodeLLM, GeminiLLM, AnthropicLLM
+from app.services.llm_client import OpenAILLM, OpenCodeLLM, GeminiLLM, AnthropicLLM, LocalLLM
 
 from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
@@ -34,6 +34,15 @@ LLM_CLASSES = {
             "temperature": 0.1,
         }
     },
+    # A model on this machine (Ollama / llama.cpp / vLLM / LM Studio), schema enforced
+    # by the server. "Configured" = LOCAL_LLM_BASE_URL is set.
+    "local": {
+        "class": LocalLLM,
+        "params": {
+            "engine": os.getenv("LOCAL_LLM_MODEL", "gemma4:12b"),
+            "temperature": 0.1,
+        },
+    },
 }
 
 # Environment variable key names per provider (used for key-presence checks)
@@ -42,6 +51,7 @@ _PROVIDER_KEY_ENV = {
     "gemini": "GOOGLE_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
     "opencode": "OPENCODE_API_KEY",
+    "local": "LOCAL_LLM_BASE_URL",
 }
 
 # Default models per provider (used when remapping to default provider).
@@ -51,6 +61,7 @@ _PROVIDER_DEFAULT_MODEL = {
     "gemini": "gemini-3-flash-preview",
     "anthropic": "claude-3-5-haiku-20241022",
     "opencode": "kimi-k2.7-code",
+    "local": "gemma4:12b",
 }
 
 

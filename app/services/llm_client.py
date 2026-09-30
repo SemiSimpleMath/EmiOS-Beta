@@ -1104,6 +1104,146 @@ class OpenCodeLLM(BaseLLMProvider):
         return self.structured_output(messages, **send_params)
 
 
+class LocalLLM(BaseLLMProvider):
+    """A model served on this machine through an OpenAI-compatible endpoint
+    (Ollama, llama.cpp server, vLLM, LM Studio, SGLang).
+
+    The schema is ENFORCED, not requested: it goes to the server as a strict
+    `json_schema` response format, and the server constrains decoding to it, so
+    the reply is JSON of the form's shape by construction. The reply is then
+    parsed strictly (no tolerant scan — anything else is a server fault) and
+    validated with the Pydantic form, exactly as the hosted routes return it.
+
+    LOCAL_LLM_BASE_URL names the server (Ollama: http://127.0.0.1:11434/v1); it
+    doubles as this provider's "configured" key. LOCAL_LLM_CONTEXT_TOKENS states the
+    server's context size (Ollama: OLLAMA_CONTEXT_LENGTH); with it set, a prompt the
+    server would silently cut raises instead. Text-only: a multimodal message raises
+    rather than being silently flattened.
+    """
+    _log_tag = "LocalLLM"
+    _instance = None
+    _instance_lock = threading.Lock()
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = super(LocalLLM, cls).__new__(cls)
+                    cls._instance._init_once(*args, **kwargs)
+        else:
+            if not hasattr(cls._instance, "client"):
+                with cls._instance_lock:
+                    cls._instance._init_once(*args, **kwargs)
+        return cls._instance
+
+    def _init_once(self, engine="gemma4:12b", temperature=0.1, **kwargs):
+        if hasattr(self, "client"):
+            return
+        base_url = (os.environ.get("LOCAL_LLM_BASE_URL") or "").strip()
+        if not base_url:
+            raise ValueError("LOCAL_LLM_BASE_URL is not set (Ollama: http://127.0.0.1:11434/v1).")
+        self.base_url = base_url
+        self.engine = engine
+        self.temperature = temperature
+        self.last_usage = None
+        # Local servers ignore the key; the SDK requires a non-empty one.
+        self.client = OpenAI(api_key=os.environ.get("LOCAL_LLM_API_KEY") or "local", base_url=base_url)
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+    @staticmethod
+    def _schema_and_name(response_format):
+        from pydantic import BaseModel as _BaseModel
+        if isinstance(response_format, type) and issubclass(response_format, _BaseModel):
+            return response_format.model_json_schema(), response_format.__name__
+        if isinstance(response_format, dict):
+            return response_format, "EmiStructuredOutput"
+        raise ValueError(f"Invalid response format: {type(response_format)}")
+
+    def structured_output(self, messages, **send_params):
+        return self._structured_output_with_timeout_ladder(messages, **send_params)
+
+    def _structured_output_once(self, messages, **send_params):
+        import time as _time
+        import json as _json
+        from pydantic import BaseModel as _BaseModel
+
+        response_format = send_params.get('response_format')
+        model = send_params.get('engine') or self.engine
+        temperature = send_params.get('temperature', self.temperature)
+        timeout = send_params.get('timeout', 240)
+        max_tokens = send_params.get('max_tokens', 16384)
+        if response_format is None:
+            raise ValueError("Invalid response format: None")
+        for m in messages:
+            if not isinstance(m.get("content"), str):
+                raise ValueError("LocalLLM is text-only: a message with non-string content was passed")
+
+        schema, name = self._schema_and_name(response_format)
+        logger.info(f"[LocalLLM] model={model} schema={name} timeout={timeout}s base_url={self.base_url}")
+        self.last_usage = None
+        log_status = "error"
+        started = _time.monotonic()
+        # How long a thinking model reasons before the constrained answer (none | low | medium |
+        # high). Unset = the server's default. Reasoning counts against max_tokens: a long prompt
+        # can spend the whole budget thinking and return no answer at all.
+        effort = send_params.get("reasoning_effort") or os.environ.get("LOCAL_LLM_REASONING_EFFORT") or None
+        extra = {"reasoning_effort": effort} if effort else {}
+        try:
+            response = self.client.chat.completions.create(
+                model=model, messages=messages, temperature=temperature, max_tokens=max_tokens,
+                timeout=timeout,
+                response_format={"type": "json_schema",
+                                 "json_schema": {"name": name, "schema": schema, "strict": True}},
+                **extra,
+            )
+            self.last_usage = getattr(response, "usage", None)
+            # A local server cuts a prompt that does not fit (context - max_tokens) and answers the
+            # remainder without an error (Ollama, measured 2026-09-29: 16,386 of a 52k-token dedup
+            # prompt). An answer to a cut prompt is not an answer to the question.
+            context = int(os.environ.get("LOCAL_LLM_CONTEXT_TOKENS") or 0)
+            prompt_tokens = getattr(self.last_usage, "prompt_tokens", None) or 0
+            if context and prompt_tokens >= context - max_tokens:
+                raise ValueError(f"LocalLLM prompt truncated: {prompt_tokens} prompt tokens reached the budget of "
+                                 f"{context - max_tokens} (LOCAL_LLM_CONTEXT_TOKENS={context} - max_tokens={max_tokens})")
+            choice = response.choices[0]
+            raw = choice.message.content
+            if not isinstance(raw, str) or not raw.strip():
+                reasoning = getattr(choice.message, "reasoning", None) or ""
+                raise ValueError(f"LocalLLM returned an empty completion (finish_reason={choice.finish_reason!r}, "
+                                 f"max_tokens={max_tokens}, usage={self.last_usage}, "
+                                 f"reasoning_chars={len(reasoning)}, reasoning_effort={effort})")
+            try:
+                obj = _json.loads(raw)
+            except _json.JSONDecodeError as e:
+                raise ValueError(f"LocalLLM returned non-JSON under an enforced schema "
+                                 f"(finish_reason={choice.finish_reason!r}): {raw[:300]}") from e
+            if isinstance(response_format, type) and issubclass(response_format, _BaseModel):
+                obj = response_format.model_validate(obj).model_dump()
+            elif not isinstance(obj, dict):
+                raise ValueError("Structured output must be a JSON object")
+            log_status = "ok"
+            return obj
+        except Exception as e:
+            error_str = str(e).lower()
+            if "timeout" in error_str or "timed out" in error_str:
+                log_status = "timeout"
+                raise TimeoutError(f"LLM request timed out after {timeout} seconds") from e
+            if "validation error" in error_str or "non-json" in error_str or "empty completion" in error_str:
+                log_status = "parse_error"
+            raise RuntimeError(f"LLM structured_output failed: {e}") from e
+        finally:
+            try:
+                from app.services.llm_call_logger import record_llm_call
+                record_llm_call(engine=model, provider="local", usage=self.last_usage,
+                                duration_ms=int((_time.monotonic() - started) * 1000.0), status=log_status)
+            except Exception:
+                logger.debug("[LocalLLM] llm_call_log write skipped", exc_info=True)
+
+    def structured_output_json(self, messages, **send_params):
+        return self.structured_output(messages, **send_params)
+
+
 # ---------------------------------------------------------------------------
 # Gemini schema utilities — available for manually inlining $ref/$defs or
 # stripping unsupported keys.  GeminiLLM now uses response_json_schema
