@@ -105,7 +105,7 @@ class WebFillXY(BaseTool):
             _click_text, click_err, _ = format_mcp_tool_result_content(click_resp)
             if click_err:
                 return make_tool_error(
-                    error_code="mcp_call_failed",
+                    error_code="mcp_tool_error",
                     message=f"web_fill_xy error: mouse click at ({x},{y}) failed: {_click_text}",
                     abort_policy="abort_tool",
                     retryable=True,
@@ -175,7 +175,7 @@ class WebFillXY(BaseTool):
         text_out, is_error, _attachments = format_mcp_tool_result_content(call_resp)
         if is_error:
             return make_tool_error(
-                error_code="mcp_call_failed",
+                error_code="mcp_tool_error",
                 message=f"web_fill_xy error: MCP browser_evaluate returned isError: {text_out}",
                 abort_policy="abort_tool",
                 retryable=True,

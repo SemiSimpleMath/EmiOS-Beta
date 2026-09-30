@@ -47,8 +47,10 @@ def ingest() -> int:
         target = str(fm.get("status") or "").strip().lower()
         if target not in ("resolved", "dismissed") or cid not in live:
             continue
-        res_idx = text.find("## Resolution")
-        notes = text[res_idx:].strip() if res_idx >= 0 else ""
+        # The heading at the start of a line: the case's own instructions mention "`## Resolution`"
+        # in running text, and a plain find() recorded that instruction paragraph as the notes.
+        m = re.search(r"^## Resolution\b", text, re.MULTILINE)
+        notes = text[m.start():].strip() if m else ""
         commits = re.findall(r"\b[0-9a-f]{8,40}\b", notes)[:10]
         case_store.transition(cid, target, resolution={
             "disposition": target, "commits": commits,

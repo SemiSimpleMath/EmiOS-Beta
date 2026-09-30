@@ -345,7 +345,9 @@ def test_cancelled_queued_future_does_not_decrement_running_worker():
         first.result(timeout=5)
 
 
-@pytest.mark.parametrize('code,state',[('mcp_call_failed','unknown'),('invalid_arguments','settled')])
+# mcp_call_failed = no answer came back (transport); mcp_tool_error = the MCP server ANSWERED that the
+# action failed (e.g. a browser 'Ref not found'), a known outcome — 2026-09-29.
+@pytest.mark.parametrize('code,state',[('mcp_call_failed','unknown'),('mcp_tool_error','settled'),('invalid_arguments','settled')])
 def test_returned_transport_failure_keeps_uncertainty(task,code,state):
     from types import SimpleNamespace
     store,owner=task

@@ -111,7 +111,7 @@ class WebFillRef(BaseTool):
         click_text, click_error, _ = format_mcp_tool_result_content(click_resp)
         if click_error:
             return make_tool_error(
-                error_code="mcp_call_failed",
+                error_code="mcp_tool_error",
                 message=f"web_fill_ref error: browser_click(ref={ref}) failed: {click_text}",
                 abort_policy="abort_tool",
                 retryable=True,
@@ -141,7 +141,7 @@ class WebFillRef(BaseTool):
         code_text, code_error, _ = format_mcp_tool_result_content(type_resp)
         if code_error:
             return make_tool_error(
-                error_code="mcp_call_failed",
+                error_code="mcp_tool_error",
                 message=f"web_fill_ref error: browser_type failed: {code_text}",
                 abort_policy="abort_tool",
                 retryable=True,

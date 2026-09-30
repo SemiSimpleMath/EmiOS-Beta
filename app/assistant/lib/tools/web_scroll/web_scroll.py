@@ -102,7 +102,7 @@ class WebScroll(BaseTool):
             text_out, is_error, _attachments = format_mcp_tool_result_content(call_resp)
             if is_error:
                 return make_tool_error(
-                    error_code="mcp_call_failed",
+                    error_code="mcp_tool_error",
                     message=f"web_scroll error: browser_mouse_wheel failed on step {idx + 1}/{steps}: {text_out}",
                     abort_policy="abort_tool",
                     retryable=True,
@@ -126,7 +126,7 @@ class WebScroll(BaseTool):
                 wait_text, wait_error, _wait_attachments = format_mcp_tool_result_content(wait_resp)
                 if wait_error:
                     return make_tool_error(
-                        error_code="mcp_call_failed",
+                        error_code="mcp_tool_error",
                         message=f"web_scroll error: browser_wait_for failed after step {idx + 1}/{steps}: {wait_text}",
                         abort_policy="abort_tool",
                         retryable=True,

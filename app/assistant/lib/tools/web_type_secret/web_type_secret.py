@@ -233,7 +233,7 @@ class WebTypeSecret(BaseTool):
         text_out, is_error, _attachments = format_mcp_tool_result_content(type_resp)
         if is_error:
             return make_tool_error(
-                error_code="mcp_call_failed",
+                error_code="mcp_tool_error",
                 message=f"web_type_secret: MCP type call returned isError: {text_out}",
                 abort_policy="abort_tool", retryable=True,
                 details={"backend": "mcp", "pod_id": pod_id, "projection": projection},

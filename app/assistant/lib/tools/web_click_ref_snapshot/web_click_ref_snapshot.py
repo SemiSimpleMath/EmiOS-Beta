@@ -95,7 +95,7 @@ class WebClickRefSnapshot(BaseTool):
         click_text, click_error, _click_attachments = format_mcp_tool_result_content(click_resp)
         if click_error:
             return make_tool_error(
-                error_code="mcp_call_failed",
+                error_code="mcp_tool_error",
                 message=f"web_click_ref_snapshot error: browser_click failed: {click_text}",
                 abort_policy="abort_tool",
                 retryable=True,

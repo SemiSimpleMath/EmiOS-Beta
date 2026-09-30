@@ -62,7 +62,7 @@ class WebNavigateSnapshot(BaseTool):
         nav_text, nav_error, _nav_attachments = format_mcp_tool_result_content(nav_resp)
         if nav_error:
             return make_tool_error(
-                error_code="mcp_call_failed",
+                error_code="mcp_tool_error",
                 message=f"web_navigate_snapshot error: browser_navigate failed: {nav_text}",
                 abort_policy="abort_tool",
                 retryable=True,

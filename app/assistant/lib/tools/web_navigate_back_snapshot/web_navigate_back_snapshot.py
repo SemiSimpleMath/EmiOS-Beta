@@ -51,7 +51,7 @@ class WebNavigateBackSnapshot(BaseTool):
         back_text, back_error, _back_attachments = format_mcp_tool_result_content(back_resp)
         if back_error:
             return make_tool_error(
-                error_code="mcp_call_failed",
+                error_code="mcp_tool_error",
                 message=f"web_navigate_back_snapshot error: browser_navigate_back failed: {back_text}",
                 abort_policy="abort_tool",
                 retryable=True,

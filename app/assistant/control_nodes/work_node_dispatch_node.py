@@ -73,7 +73,11 @@ class WorkNodeDispatchNode(ControlNode):
             if isinstance(exc, ExecutionBlocked):
                 self.blackboard.update_state_value("work_node_ref", "")
                 self.blackboard.update_state_value("execution_blocked", str(exc))
-                return  # A hold, not a failed task and not an immediate retry.
+                # A hold, not a failed task and not an immediate retry: the pass ends here exactly
+                # as after a claim. Without last_agent the delegator routed the switchboard's output
+                # back into this node, which found the pick consumed and raised — every tick.
+                self.blackboard.update_state_value("last_agent", self.name)
+                return
             # A rejected claimant owns nothing. In particular it must not fail the winner.
             logger.error("[%s] claim failed for %s::%s", self.name, work_id, node_id, exc_info=True)
             self.blackboard.update_state_value("work_node_ref", "")

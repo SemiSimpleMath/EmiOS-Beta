@@ -102,7 +102,7 @@ class WebGetContent(BaseTool):
 
         if is_error:
             return make_tool_error(
-                error_code="mcp_call_failed",
+                error_code="mcp_tool_error",
                 message=f"web_get_content error: browser_evaluate failed: {text_out}",
                 abort_policy="abort_tool",
                 retryable=True,

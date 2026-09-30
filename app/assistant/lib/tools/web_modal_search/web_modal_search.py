@@ -279,7 +279,7 @@ class WebModalSearch(BaseTool):
         text, is_error, _ = format_mcp_tool_result_content(call_resp)
         if is_error:
             return make_tool_error(
-                error_code="mcp_call_failed",
+                error_code="mcp_tool_error",
                 message=f"web_modal_search error: browser_evaluate failed: {text}",
                 abort_policy="abort_tool",
                 retryable=True,
