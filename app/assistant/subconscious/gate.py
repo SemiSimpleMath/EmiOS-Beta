@@ -63,6 +63,16 @@ def _problems(data: Any, event_labels: List[str], concern_labels: List[str]) -> 
     return out
 
 
+def build_payload(events: List[Dict[str, Any]], concerns: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """The gate agent's input for one page: labelled open concerns and labelled events."""
+    return {
+        "open_concerns": [{"label": f"C{i}", "title": c.get("title"), "subject": c.get("subject") or "household",
+                           "status": c["_bucket"], "notes": c.get("notes") or ""}
+                          for i, c in enumerate(concerns, 1)],
+        "events": [_event_view(f"E{i}", e) for i, e in enumerate(events, 1)],
+    }
+
+
 def route_page(events: List[Dict[str, Any]], concerns: List[Dict[str, Any]],
                call: Callable[[Dict[str, Any]], Any]) -> Dict[int, Dict[str, Any]]:
     """Route one page. Returns event id -> {route, concern_ids, reasoning}; raises when the answer
@@ -70,12 +80,7 @@ def route_page(events: List[Dict[str, Any]], concerns: List[Dict[str, Any]],
     ev_labels = [f"E{i}" for i in range(1, len(events) + 1)]
     c_labels = [f"C{i}" for i in range(1, len(concerns) + 1)]
     c_by_label = dict(zip(c_labels, concerns))
-    payload = {
-        "open_concerns": [{"label": lab, "title": c.get("title"), "subject": c.get("subject") or "household",
-                           "status": c["_bucket"], "notes": c.get("notes") or ""}
-                          for lab, c in c_by_label.items()],
-        "events": [_event_view(lab, e) for lab, e in zip(ev_labels, events)],
-    }
+    payload = build_payload(events, concerns)
     data = call(payload)
     problems = _problems(data, ev_labels, c_labels)
     if problems:

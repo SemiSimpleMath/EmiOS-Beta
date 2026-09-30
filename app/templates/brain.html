@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Brain — inputs and prompts</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/brain.css') }}">
+  <script>window.SCRIPT_NAME = {{ request.script_root | tojson }};</script>
+</head>
+<body>
+  <header class="br-header">
+    <h1>Brain</h1>
+    <div class="br-sub">everything the brain receives, and the exact prompts its agents are sent &middot; read-only, no model is called</div>
+  </header>
+
+  <nav class="br-tabs">
+    <button class="br-tab is-active" data-tab="inbox">Inbox</button>
+    <button class="br-tab" data-tab="noticer">Noticer inputs &amp; prompts</button>
+    <button class="br-tab" data-tab="gate">Gate prompts</button>
+  </nav>
+
+  <section id="br-inbox" class="br-panel">
+    <div class="br-bar">
+      <select id="i-route">
+        <option value="">all events</option>
+        <option value="concern">routed to a concern</option>
+        <option value="new_matter">new matter</option>
+        <option value="none">none</option>
+        <option value="pending">pending (not routed yet)</option>
+        <option value="failed">failed to route</option>
+      </select>
+      <button id="i-refresh">refresh</button>
+      <span id="i-counts" class="br-sub"></span>
+    </div>
+    <div id="i-list" class="br-list"></div>
+  </section>
+
+  <section id="br-noticer" class="br-panel hidden">
+    <div class="br-bar">
+      <button id="n-load">build noticer context now</button>
+      <span id="n-status" class="br-sub">builds the live context (reads the calendar); takes a few seconds</span>
+    </div>
+    <div id="n-body" class="br-body"></div>
+  </section>
+
+  <section id="br-gate" class="br-panel hidden">
+    <div class="br-bar">
+      <label class="br-sub">latest events when none are pending
+        <select id="g-n"><option>5</option><option selected>10</option><option>25</option><option>50</option></select>
+      </label>
+      <button id="g-load">render gate prompts</button>
+      <span id="g-status" class="br-sub"></span>
+    </div>
+    <div id="g-body" class="br-body"></div>
+  </section>
+
+  <script src="{{ url_for('static', filename='js/brain.js') }}"></script>
+</body>
+</html>
