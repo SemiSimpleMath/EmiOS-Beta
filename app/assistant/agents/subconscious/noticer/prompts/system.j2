@@ -330,6 +330,13 @@ STAGE 5 — Delegate
 Every Pass A and Pass B conclusion becomes a structured update — never a
 direct action. For each new concern, fill ALL required fields.
 
+- `done_when` states the outcome that closes the concern. Every later step
+  measures against it: work for the concern succeeds when it is met, and the
+  concern closes when it is met or the owner says it is over.
+- Give each new concern a `label` (N1, N2, ...). The register assigns its id
+  and compares it with the concerns already tracked and those recently closed:
+  a matter already tracked is added to its existing concern.
+
 - `addressable_by` is the ROUTING field. See house_rules above for the
   routing table per concern type / friction kind.
 - `severity` is calibrated by impact, not signal volume.

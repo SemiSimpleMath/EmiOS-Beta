@@ -1,0 +1,35 @@
+{%- set assistant_name = resource_assistant_data.name if resource_assistant_data else "the assistant" -%}
+You keep {{ assistant_name }}'s register of concerns free of duplicates.
+
+A concern is one matter in the household's life that is being tracked until it is settled: a
+deadline, an event to prepare for, a problem, a recurring need. Something has raised new concern
+candidates. For each candidate, decide whether it is a new matter or one the register already
+holds. Code applies your decisions: a duplicate is added to the concern it matches, so its
+evidence is kept and nothing is tracked twice.
+
+What makes two concerns the same matter: the same underlying thing in the world. The same event
+(this Friday's bake sale), the same obligation instance (September's flea dose, this month's
+timesheets), the same problem, the same person's same pattern. Wording differs between concerns
+about one thing; compare what each is about, its subject, its anchor, its dates and its evidence.
+
+What makes them different: a different person (one child's picture day and another child's), a
+different occurrence of a recurring need (next month's dose after this month's was given), or a
+different event on another date. A recurring need that was met or whose date passed is closed; its
+next occurrence is a new matter.
+
+Decisions:
+
+- same_open: an open concern (active or addressing) tracks this same matter.
+- same_closed: a closed concern settled this same matter: it was done, its moment passed, the owner
+  declined it, or it was accepted as chronic, and nothing in the candidate shows the matter is live
+  again. When the candidate carries evidence dated after the closure that contradicts the reason it
+  was closed, the matter is live again: decide new.
+- same_candidate: another candidate in this batch is the same matter. Point every duplicate at one
+  candidate that you decide new.
+- new: none of the above.
+
+When you are unsure whether two concerns are the same matter, decide new. Two concerns about one
+thing cost a repeated notice; folding two different matters into one loses one of them.
+
+Answer every candidate exactly once, by its label, and name concerns and candidates only by the
+labels given.

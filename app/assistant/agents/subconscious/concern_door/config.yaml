@@ -1,0 +1,24 @@
+name: subconscious::concern_door
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.6-luna"
+  model_tier: "smart"
+
+# Decides, for each concern a source wants to raise, whether it is a new matter or one the
+# register already tracks (open, recently closed, or ruled on). Context is fully pre-injected by
+# subconscious/concern_door.py; code applies the decisions and assigns ids.
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+accept_auto_skills: false
+
+user_context_items:
+  - agent_input
+
+required_context_items:
+  - agent_input
+
+system_context_items:
+  - resource_assistant_data

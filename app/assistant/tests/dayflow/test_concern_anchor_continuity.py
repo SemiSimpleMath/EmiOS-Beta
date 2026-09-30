@@ -159,9 +159,9 @@ def _register_with_declined_picture_day(tmp_path: Path) -> ScratchRegister:
     })
 
 
-def _new_concern(anchor, *, cid="new-1", title="Picture Day is today and prep needs confirming"):
+def _new_concern(anchor, *, cid="N1", title="Picture Day is today and prep needs confirming"):
     concern = {
-        "concern_id": cid, "title": title, "kind": "anticipated_need",
+        "label": cid, "title": title, "done_when": "the owner has confirmed the prep", "kind": "anticipated_need",
         "severity": "medium", "horizon": "today", "domain_tags": ["family"],
         "addressable_by": ["dayflow_orchestrator"], "evidence": [],
         "notes": "n", "first_observed": "2026-09-18T14:13:00-07:00",
@@ -171,8 +171,20 @@ def _new_concern(anchor, *, cid="new-1", title="Picture Day is today and prep ne
     return concern
 
 
+def _all_new(payload):
+    """The concern_door judge, deciding every candidate a new matter: these tests pin the anchor
+    rule, which code applies before any judge is asked."""
+    return {"decisions": [{"candidate": c["label"], "decision": "new", "same_as": None, "reason": "r"}
+                          for c in payload["candidates"]]}
+
+
 def _apply(reg, concerns):
-    return apply_noticer_output({"new_concerns": concerns}, connect=reg.connect, tick_log_path=reg.tick_log)
+    return apply_noticer_output({"new_concerns": concerns}, connect=reg.connect, tick_log_path=reg.tick_log,
+                                judge=_all_new)
+
+
+def _active_titles(reg):
+    return [c["title"] for c in reg["active"]]
 
 
 def test_the_real_case_a_declined_event_is_not_re_minted(tmp_path):
@@ -208,7 +220,7 @@ def test_a_different_event_is_unaffected(tmp_path):
     path = _register_with_declined_picture_day(tmp_path)
     _apply(path, [_new_concern("calendar:evt_dentist", cid="n2", title="Dentist needs confirming")])
     reg = path.read()
-    assert [c["concern_id"] for c in reg["active"]] == ["n2"]
+    assert _active_titles(reg) == ["Dentist needs confirming"]
 
 
 def test_an_unanchored_concern_is_still_admitted(tmp_path):
@@ -216,7 +228,7 @@ def test_an_unanchored_concern_is_still_admitted(tmp_path):
     path = _register_with_declined_picture_day(tmp_path)
     _apply(path, [_new_concern(None, cid="n3", title="Sleep has been poor again")])
     reg = path.read()
-    assert [c["concern_id"] for c in reg["active"]] == ["n3"]
+    assert _active_titles(reg) == ["Sleep has been poor again"]
 
 
 def test_a_resolved_anchor_may_be_re_minted(tmp_path):
@@ -228,7 +240,7 @@ def test_a_resolved_anchor_may_be_re_minted(tmp_path):
     })
     _apply(path, [_new_concern("calendar:timesheets", cid="n4", title="Timesheets due again")])
     reg = path.read()
-    assert [c["concern_id"] for c in reg["active"]] == ["n4"]
+    assert _active_titles(reg) == ["Timesheets due again"]
 
 
 def test_a_chronic_acceptance_also_holds(tmp_path):
@@ -253,6 +265,6 @@ def test_existing_unanchored_history_is_unaffected(tmp_path):
     })
     _apply(path, [_new_concern(_PICTURE_DAY, cid="n6")])
     reg = path.read()
-    assert [c["concern_id"] for c in reg["active"]] == ["n6"], (
+    assert _active_titles(reg) == ["Picture Day is today and prep needs confirming"], (
         "an unanchored legacy decline cannot suppress anything, and must not crash"
     )

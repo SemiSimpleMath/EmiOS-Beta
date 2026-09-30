@@ -51,8 +51,16 @@ class Evidence(BaseModel):
 
 class Concern(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    concern_id: str = Field(description="UUID for this concern. The noticer generates it.")
+    label: str = Field(
+        description="A short label for this new concern within this output: N1, N2, ... The register "
+                    "assigns the concern's id. Refer to a concern you raise here by its label in "
+                    "pending_questions.related_concern_id and belief_updates.related_concern_id.")
     title: str = Field(max_length=120, description="One line, specific.")
+    done_when: str = Field(
+        description="The outcome that closes this concern, in one line, e.g. 'both dogs have had "
+                    "the September dose'. State the outcome itself: a reminder sent or a question "
+                    "asked is a delivery, not the outcome. When the owner stated the condition, "
+                    "use their words.")
     subject: Optional[str] = Field(default=None, description="Family member name or 'household'.")
     kind: ConcernKind
     domain_tags: List[str]
@@ -146,7 +154,8 @@ class BeliefUpdate(BaseModel):
     claim: str = Field(max_length=300, description="The proposition.")
     polarity: Polarity
     evidence: List[Evidence]
-    related_concern_id: Optional[str] = None
+    related_concern_id: Optional[str] = Field(
+        default=None, description="An existing concern's id, or the label of a concern raised in this output.")
     confidence: Confidence
     half_life_days: Optional[int] = Field(
         default=None,
@@ -190,7 +199,8 @@ class PendingQuestion(BaseModel):
     model_config = ConfigDict(extra="forbid")
     question_id: str = Field(description="UUID for tracking.")
     text: str = Field(max_length=400, description="The question to ask the user.")
-    related_concern_id: Optional[str] = None
+    related_concern_id: Optional[str] = Field(
+        default=None, description="An existing concern's id, or the label of a concern raised in this output.")
     why_asking: str = Field(max_length=300, description="What signal prompted this.")
     if_unanswered: str = Field(
         max_length=300,

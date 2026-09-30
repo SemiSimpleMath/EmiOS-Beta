@@ -90,6 +90,57 @@ data dir. A second slip: `ensure_schema(connect=_connect)` bound the default at 
 a monkeypatched connection did not reach it and an empty `concerns` table was created in emi.db
 from a test. All default connections now resolve at call time.
 
+## Step 2: the concern door (2026-09-30)
+
+`app/assistant/subconscious/concern_door.py` is the only way a concern enters the register; the
+noticer's `new_concerns` go through it, and the brain step, chat and dayflow will.
+
+- Plan, outside the register lock: a candidate whose anchor the owner settled (declined, or
+  accepted as chronic) is suppressed by code. The rest go to `subconscious::concern_door` beside
+  every open concern, every concern resolved in the last 14 days and every dormant one. For each
+  candidate: `new`, `same_open`, `same_closed` (settled, nothing since reopens it) or
+  `same_candidate` (another candidate in the batch). Unsure means new: a duplicate costs a repeated
+  notice, a false merge loses a matter. The next occurrence of a recurring need is new. Labels N#/C#
+  are request-local. One correction round; still invalid raises and nothing is written (the
+  noticer's reports stay unconsumed for its next tick).
+- Apply, under the lock: code assigns the id (uuid4) and records `origin` (the source) and
+  `created_at_utc`. A duplicate's evidence is appended to the concern it matches and the merge is
+  journalled there (`MERGED a re-raise from <source>`); a repeat of a closed matter is journalled on
+  it (`SUPPRESSED a re-mint`). The tick log records label -> concern_id.
+- Every candidate states `done_when`, the outcome that closes it; the door refuses one without.
+- The noticer's form: `concern_id` became `label` (N1…); questions and belief updates that refer to
+  a just-raised concern by label are mapped to its real id.
+
+Live check on the real register: a flea-medication candidate was judged the next monthly
+occurrence (new), and two library-fine candidates were merged into the fine concern the noticer had
+raised from the first email run.
+
+Not in step 2, deliberately: enforcement that an owner-created concern closes only when its
+`done_when` is met or the owner says so (owner-created concerns first exist with the brain step),
+and the record of what was created for a concern (its writers are the dayflow handoff).
+
+## Requirement for the brain build: association finds dependents (owner, 2026-09-30)
+
+Finding what an event relates to is the most important part of the brain step. A change is rarely
+local: "the bake sale moved to Monday" may require notifying the owner, moving reminders, changing
+calendar entries, and emailing the friend who was going to drive. Association is impact analysis:
+find the concern and every commitment built on the old fact — scheduler reminders, dayflow wakes and
+held concerns, calendar events, todos, and outbound messages or emails that arranged something with
+someone. The brain's handoff names each consequence; the architect plans the steps.
+
+Two mechanisms, in this order:
+
+1. Links set by code at creation. Anything dayflow creates for a concern (a reminder, a calendar
+   event, an outbound message, a ticket) is recorded against that concern when it is created, so a
+   later change follows the links.
+2. Search for what was made outside a concern (the owner's own calendar entry, an arrangement made
+   in chat): shared KG entities, dates, and similarity over sent messages, calendar and scheduler
+   items. Code proposes candidates; the model decides which are the same matter.
+
+First email run (2026-09-30, 44 emails over 72 hours): the gate routed 24 `new_matter`, 20 `none`,
+0 failed. Four OpenAI funding receipts and four AWS support-case emails each became a separate new
+matter. Grouping related events into one matter is part of the brain step's job.
+
 ## Not done yet
 
 - Other sources: email, calendar changes, ticket replies, dayflow outcomes, pods. Each needs an

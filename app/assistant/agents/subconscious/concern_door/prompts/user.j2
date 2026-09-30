@@ -1,0 +1,33 @@
+## Candidates
+
+{% for c in agent_input.candidates -%}
+### [{{ c.label }}] {{ c.title }}
+- about: {{ c.subject }}; kind: {{ c.kind }}; horizon: {{ c.horizon }}{% if c.anchor %}; anchor: {{ c.anchor }}{% endif %}
+- done when: {{ c.done_when }}
+- notes: {{ c.notes }}
+{% for e in c.evidence -%}
+- evidence ({{ e.kind }} {{ e.ref }}){% if e.snippet %}: {{ e.snippet }}{% endif %}
+{% endfor %}
+{% endfor %}
+## Concerns in the register
+
+{% for c in agent_input.existing -%}
+### [{{ c.label }}] {{ c.title }} ({{ c.status }}{% if c.closed_on %}, closed {{ c.closed_on }}{% endif %})
+- about: {{ c.subject }}; kind: {{ c.kind }}{% if c.anchor %}; anchor: {{ c.anchor }}{% endif %}; first observed: {{ c.first_observed }}
+{% if c.done_when %}- done when: {{ c.done_when }}
+{% endif -%}
+{% if c.closed_because %}- closed because: {{ c.closed_because }}
+{% endif -%}
+- notes: {{ c.notes }}
+{% if c.journal %}- journal:{{ c.journal }}
+{% endif %}
+{% else -%}
+(the register holds no open, recently closed or dormant concerns)
+{% endfor %}
+{% if agent_input.correction %}
+## Correct your previous answer
+
+It did not satisfy the contract: {{ agent_input.correction }}
+Answer every candidate exactly once, using only the labels above.
+{% endif %}
+Decide every candidate.

@@ -70,7 +70,7 @@ def test_corrupt_register_raises_and_is_not_overwritten(tmp_path):
     _corrupt_row(store)
     with pytest.raises(json.JSONDecodeError):
         apply_noticer_output(
-            {"new_concerns": [{"concern_id": "c-1", "title": "t"}]},
+            {"new_concerns": [{"label": "N1", "title": "t", "done_when": "d"}]},
             connect=store.connect, tick_log_path=store.tick_log,
         )
     # The unreadable record is still there for a human to recover — nothing wiped.
@@ -82,11 +82,11 @@ def test_corrupt_register_raises_and_is_not_overwritten(tmp_path):
 def test_missing_register_bootstraps_empty(tmp_path):
     store = _store(tmp_path)
     summary = apply_noticer_output(
-        {"new_concerns": [{"concern_id": "c-1", "title": "fresh start"}]},
+        {"new_concerns": [{"label": "N1", "title": "fresh start", "done_when": "d"}]},
         connect=store.connect, tick_log_path=store.tick_log,
     )
     assert summary["new_concerns_count"] == 1
-    assert [c["concern_id"] for c in store.read()["active"]] == ["c-1"]
+    assert [c["title"] for c in store.read()["active"]] == ["fresh start"]
 
 
 # ---------------------------------------------------------------------------

@@ -132,18 +132,24 @@ def apply_noticer_output(
     *,
     connect=None,
     tick_log_path: Optional[Path] = None,
+    judge=None,
 ) -> Dict[str, Any]:
     """Apply one noticer tick to the concerns register.
 
     Accepts the raw dict shape (what JSON-roundtrip of AgentForm produces).
     Returns a small summary dict for the runner to print. `connect`/`tick_log_path`
-    default to emi.db and the real tick log; tests pass a scratch store and path.
+    default to emi.db and the real tick log; tests pass a scratch store and path, and
+    `judge` in place of the concern_door agent.
 
-    Holds the register lock for the whole read-modify-write so a concurrent
-    answer-capture journal write can't be lost.
+    New concerns go through the concern door (subconscious/concern_door.py): planned first,
+    outside the lock (it may call a model), then applied with everything else under the
+    register lock for the whole read-modify-write, so a concurrent answer-capture journal
+    write can't be lost.
     """
+    from app.assistant.subconscious import concern_door
+    plan = concern_door.plan_admission(output.get("new_concerns") or [], _load_register(connect), judge=judge)
     with _REGISTER_LOCK:
-        return _apply_noticer_output_locked(output, connect=connect, tick_log_path=tick_log_path)
+        return _apply_noticer_output_locked(output, plan, connect=connect, tick_log_path=tick_log_path)
 
 
 def _journal_on(concern: Dict[str, Any], now_iso: str, line: str) -> None:
@@ -187,6 +193,7 @@ def _settled_anchors(register: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
 
 def _apply_noticer_output_locked(
     output: Dict[str, Any],
+    plan: List[Dict[str, Any]],
     *,
     connect=None,
     tick_log_path: Optional[Path] = None,
@@ -214,39 +221,15 @@ def _apply_noticer_output_locked(
             if cid:
                 by_id[cid] = c
 
-    # Anchors the owner has already ruled on, across EVERY bucket. A concern_id is the
-    # identity of the noticing; an anchor is the identity of the thing noticed. Deduping on
-    # the former alone is what let a declined concern come straight back under a fresh UUID:
-    # the evidence that produced it is still in context next tick, so the same worry is
-    # re-derived, and a new id never collides.
-    settled = _settled_anchors(register)
-
-    # 1. New concerns → active
-    for c in new_concerns:
-        # Best-effort: skip if same concern_id already exists (idempotent reruns)
-        cid = c.get("concern_id")
-        if cid and cid in by_id:
-            logger.info("[noticer.persist] new_concern %s already exists; skipping", cid)
-            continue
-        anchor = str(c.get("anchor") or "").strip()
-        prior = settled.get(anchor) if anchor else None
-        if prior is not None:
-            # The owner settled this exact thing. Record the attempt ON THE PRIOR concern so
-            # the suppression is auditable rather than silent, and so the next tick's
-            # recently-closed section shows that the worry came back.
-            ruling = ("declined" if prior.get("user_declined_at_utc")
-                      else "accepted as chronic")
-            _journal_on(prior, now_utc_iso,
-                        f"SUPPRESSED a re-mint of this ({ruling}): {str(c.get('title') or '')[:160]}")
-            prior["suppressed_remint_count"] = int(prior.get("suppressed_remint_count") or 0) + 1
-            prior["suppressed_remint_at_utc"] = now_utc_iso
-            logger.info(
-                "[noticer.persist] new_concern %s SUPPRESSED — anchor %s was already %s on "
-                "concern %s (%r)",
-                cid, anchor, ruling, prior.get("concern_id"), str(c.get("title") or "")[:80],
-            )
-            continue
-        register.setdefault("active", []).append(c)
+    # 1. New concerns, through the concern door: created with a code-assigned id, folded into
+    # the concern they duplicate, or journalled on the settled one they repeat.
+    from app.assistant.subconscious import concern_door
+    admitted = concern_door.apply_admission(plan, register, source="noticer", now_iso=now_utc_iso)
+    # References to a just-raised concern use its label; point them at where it landed.
+    for item in list(pending_questions) + list(belief_updates):
+        ref = item.get("related_concern_id")
+        if ref in admitted:
+            item["related_concern_id"] = admitted[ref]
 
     # 2. Reinforcements → update in-place (with growth caps: evidence and
     # the notes journal are bounded, and an explicit reinforcement_count
@@ -411,23 +394,24 @@ def _apply_noticer_output_locked(
         fh.write(json.dumps({
             "tick_utc": now_utc_iso,
             "output": output,
+            "admitted": admitted,
         }, ensure_ascii=False) + "\n")
 
     # 6. Pending questions → pending_question queue. Each becomes a row the
     # chat-reply injector (pending_questions/injector.py) consults at
     # prompt time. Topic tag, priority, and expiration are derived from the
     # related concern when one is named — otherwise reasonable defaults.
-    # Include new_concerns in the lookup so a question linked to a
-    # just-minted concern still inherits its tags + severity.
-    concern_lookup: Dict[str, Dict[str, Any]] = dict(by_id)
-    for c in new_concerns:
-        cid = c.get("concern_id")
-        if cid:
-            concern_lookup[cid] = c
+    # Every open concern, including those just admitted, so a question linked to a just-raised
+    # concern (its label already mapped to the real id) inherits its tags + severity.
+    concern_lookup: Dict[str, Dict[str, Any]] = {
+        c["concern_id"]: c for b in ("active", "addressing") for c in register.get(b) or []}
     questions_enqueued = _enqueue_pending_questions(pending_questions, concern_lookup)
 
     return {
         "new_concerns_count": len(new_concerns),
+        "concerns_created": sum(1 for st in plan if st["action"] == "create"),
+        "concerns_merged": sum(1 for st in plan if st["action"] in ("merge_open", "merge_candidate")),
+        "concerns_suppressed": sum(1 for st in plan if st["action"] == "suppress_closed"),
         "reinforced_count": len(reinforced_concerns),
         "addressing_count": len(addressing_concerns),
         "resolved_count": len(resolved_concerns),
