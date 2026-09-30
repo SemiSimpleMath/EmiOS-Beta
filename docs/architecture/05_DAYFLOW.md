@@ -1,7 +1,7 @@
 # Dayflow Orchestrator
 
 The Dayflow Orchestrator is the autonomous daily workflow engine — a background "day planner AI" that
-continuously turns intake (email, chat, calendar-driven routine, delegations) into executed work,
+continuously turns intake (the brain's concern handoffs, calendar-driven routine, pods) into executed work,
 reminders, and questions for the user.
 
 ## Core Philosophy
@@ -38,10 +38,10 @@ against the goal's `goal_unmet_attempts` (2026-09-17).
 ```
 DayflowScheduler (event-driven, debounced; precise per-node time wakes; work-progress follow-ups)
   -> dayflow_orchestrator_cadence_tick()
-    -> run_dayflow_ingestion()          (chat / email / delegation / pods -> items table)
+    -> run_dayflow_ingestion()          (chat / email as wake context; pods -> items table)
     -> four sweeps                      (legacy stale / orphaned / zombie items, then stuck work nodes)
     -> Invoke dayflow_orchestrator_manager (state_map order):
-         intake_triage -> triage_persist -> context_enricher
+         intake_triage -> triage_persist
            -> strategic_planner_wo (EVALUATOR) -> strategic_planner_wo_persist
            -> work_architect_node
            -> state_mover -> state_mover_persist (node promotion + event wakes)
@@ -261,7 +261,7 @@ derived rollup). `DAYFLOW_WORK_DB` overrides the path for tests.
 `metadata.item_id`; numeric `short_id` for prompts; `state_store.py` reads, `dayflow_item_writer.py`
 writes (`ALLOWED_TRANSITIONS` enforced). Freshness windows age untouched items out of the agents' view
 (active >24h, closed >2h). Ingestion sources: cross-room chat (context, `closed`), important email
-(`artifact`), master-room delegations (`user_request`), allowlisted pods. Calendar events are not
+(`artifact`, wake context only since 2026-09-30, never steward intake), allowlisted pods, and the brain's concern handoffs (`concern`, written straight to the inbox; master-room delegations were retired 2026-09-30). Calendar events are not
 ingested — the evaluator sees them via `resource_expected_calendar` and the routine overlay.
 
 **The item dispatch lane is gone (deleted 2026-09-16).** Items are intake and context only; the

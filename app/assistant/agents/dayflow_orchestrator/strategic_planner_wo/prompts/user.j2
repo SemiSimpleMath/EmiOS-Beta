@@ -81,9 +81,7 @@ Source dates below are the original dates, not the time this item entered this p
   body:
     {{ meta.get("email_body_excerpt") | replace("\n", "\n    ") }}
 {%- endif %}
-{%- if meta.get("enrichment") %}
-  context: {{ meta.get("enrichment") }}
-{%- endif %}
+
 {%- if meta.get("triage_uncovered") %}
   PARTLY COVERED ALREADY — act on the uncovered part only: {{ meta.get("triage_uncovered") }}
 {%- endif %}

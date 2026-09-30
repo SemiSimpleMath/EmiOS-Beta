@@ -69,7 +69,7 @@ orchestrator callers must also enforce `is_work_unit`.
 
 ## 0. What the dayflow_orchestrator is
 
-The autonomous daily-workflow engine. It ingests new signals (chat, email, delegations, pods),
+The autonomous daily-workflow engine. It ingests new signals (chat and email as wake context; pods; the brain's concern handoffs as intake),
 decides what (if anything) deserves action, and either does the work or surfaces a UI ticket to the
 user — all without a human in the loop. It is invoked as a **manager** (`dayflow_orchestrator_manager`,
 class `MultiAgentManager`, `max_cycles: 40`, `strict_routing: true`) whose `state_map` deterministically
@@ -122,7 +122,7 @@ receive carries no data.
 
 ### run_dayflow_ingestion — `dayflow_orchestrator/ingestion.py`
 Dedups against existing item IDs, then pulls new items from four sources — `_ingest_chat`,
-`_ingest_emails`, `_ingest_delegation_requests`, `_ingest_pods` — assigns `short_id`s, and persists
+`_ingest_emails`, `_ingest_pods` (delegations retired 2026-09-30) — assigns `short_id`s, and persists
 via `write_dayflow_items_batch`. Delegation requests are marked ingested only after that write.
 
 **Two of the four are gated by the room's `access` block, which lives in the frontmatter of
@@ -394,7 +394,7 @@ whether two phrasings are the same task.
 **plans (DAGs of task nodes) + standalone tasks** instead of work objects, with per-task
 wait/dependency/reactivate fields and plan-synopsis bookkeeping it managed itself. **Retired:** its driving
 control nodes (`StrategicPlannerPrepNode`, `PlannerPersistNode`) were deleted and it was removed from the
-manager's agents list + state_map; `context_enricher_persist_node` routes to the live `strategic_planner_wo`.
+manager's agents list + state_map; `triage_persist_node` routes to the live `strategic_planner_wo` (the context enricher between them was retired 2026-09-30).
 The agent dir is KEPT but unwired — the prompts are preserved as reference (see its `KEEP.md`).
 
 **relevance_cleaner** (`gpt-5-mini`) — the items-lane **janitor** that `close`s finished tasks (mark done,
@@ -844,7 +844,7 @@ tick proceeds to context-enrichment + the evaluator with no new admissions.
 
 **P3 — The planning tick (`dayflow_orchestrator_manager`, the whole of it).**
 `room::delegator → intake_triage_prep_node → intake_triage → triage_spawn_guard_node →
-triage_persist_node → context_enricher_prep_node → context_enricher_persist_node →
+triage_persist_node → (context enricher retired 2026-09-30) →
 strategic_planner_wo_prep_node → strategic_planner_wo → strategic_planner_wo_persist_node →
 work_architect_node → state_mover_prep_node → state_mover → state_mover_persist_node →
 work_node_materializer_node → action_selector → action_selector_router_node → switchboard →
@@ -934,7 +934,7 @@ items now age out via the freshness windows and the tick sweeps instead.
 
 **P13 — Legacy plan-task planner (RETIRED).** The old `strategic_planner_prep_node → strategic_planner →
 planner_persist_node` path is gone — the two control nodes were deleted and the agent unwired;
-`context_enricher_persist_node` routes to the work-object evaluator (`strategic_planner_wo`). The agent dir
+`triage_persist_node` routes to the work-object evaluator (`strategic_planner_wo`); the context enricher was retired 2026-09-30. The agent dir
 (prompts) is kept as reference.
 
 ---

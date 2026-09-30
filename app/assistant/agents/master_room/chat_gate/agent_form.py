@@ -20,15 +20,16 @@ class AgentForm(BaseModel):
     )
     switchboard_task: str = Field(default="", description="Task for switchboard when handoff_tf is True.")
     switchboard_information: str = Field(default="", description="Supporting information for switchboard when handoff_tf is True.")
-    dayflow_delegate_tf: bool = Field(
+    track_tf: bool = Field(
         default=False,
         description=(
             "Set true when the request involves waiting for future events, monitoring conditions over time, "
             "multi-step conditional logic, or anything that cannot complete in a single synchronous tool call. "
+            "The brain reads the user's message itself and tracks it; nothing is written here. "
             "Mutually exclusive with handoff_tf and no_op_tf."
         ),
     )
-    dayflow_task_description: str = Field(
+    track_description: str = Field(
         default="",
-        description="Concise description of what to monitor or execute. Required when dayflow_delegate_tf is True.",
+        description="One line naming what the user asked to have tracked, for the record. Required when track_tf is True.",
     )

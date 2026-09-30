@@ -69,10 +69,10 @@ def test_dict_agent_input_renders_via_agent_input_fields():
 
 def test_spread_keys_still_render_for_individually_declared_items():
     prompt = _invoke_capturing_prompt(
-        "context_enricher::planner",
+        "belief_engine::belief_tagger",
         {"task": "Source: pod\nSummary: sensor alert xyzzy",
          "information": "- [Entity] **Quux Plugh** (match=0.99)"},
-        {"enrichment": "test"},
+        {"assignments": []},
     )
     assert "sensor alert xyzzy" in prompt
     assert "Quux Plugh" in prompt

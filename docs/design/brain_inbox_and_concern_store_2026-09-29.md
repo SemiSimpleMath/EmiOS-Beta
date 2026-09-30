@@ -265,6 +265,23 @@ snapshot, and work was linked to a concern only if the steward cited `concern:<i
 - The steward's prompt no longer lists concerns from the daily snapshot (the side door): concerns
   reach dayflow only through handoff items. The snapshot still feeds chat_gate.
 
+## Step 7: dayflow's own intake lanes retired (2026-09-30)
+
+- Delegation: master_room's chat_gate decision `dayflow_delegate_tf` became `track_tf` /
+  `track_description`: the router acknowledges the user and writes nothing. The brain reads the
+  user's message itself (it is in the inbox verbatim) and keeps it as a concern with the owner's
+  words; the delegation request row, its ingestion lane (`_load_dayflow_requests`,
+  `_build_delegation_message`, `mark_dayflow_requests_ingested`) and `user_request` items are gone.
+- Email: still ingested as dayflow items, because the state_mover wakes work waiting on a reply
+  with new email and chat items (`work_wait_intake`). New email items are stored as wake context
+  (`artifact`, `email_wake_context`, not evaluator-pending) and triage skips them as it skips chat,
+  so dayflow never acts on an email directly; the brain does, through concern handoffs.
+- Chat: unchanged; chat items were already wake context, never triaged.
+- Context enricher: the two nodes, both agents and their tests are removed; triage_persist now
+  routes straight to the steward. Its job (KG context on intake) is the brief's, and the remaining
+  triaged intake is doorbell/bedroom camera pods.
+- The steward's intake is now the brain's concern handoffs plus allowlisted pods.
+
 ## Requirement for the brain build: association finds dependents (owner, 2026-09-30)
 
 Finding what an event relates to is the most important part of the brain step. A change is rarely

@@ -28,7 +28,6 @@ def sources(monkeypatch):
     monkeypatch.setattr(ingestion, "load_orchestrator_status", lambda: {})
     monkeypatch.setattr(ingestion, "ingest_cross_room_chat", lambda **kwargs: ([message], now))
     monkeypatch.setattr(ingestion, "_ingest_emails", lambda *args: [])
-    monkeypatch.setattr(ingestion, "_load_dayflow_requests", lambda **kwargs: [])
     monkeypatch.setattr(ingestion, "_load_dayflow_pod_kinds_filter", lambda: [])
     persisted = Mock()
     monkeypatch.setattr(ingestion, "persist_orchestrator_status", persisted)
@@ -54,19 +53,6 @@ def test_short_ids_do_not_wrap_onto_existing_ids(sources, monkeypatch):
     monkeypatch.setattr(dayflow_item_writer, "write_dayflow_items_batch", write)
     ingestion.run_dayflow_ingestion(now_utc=now)
     assert write.call_args.args[0][0]["short_id"] == "10001"
-
-
-def test_existing_destination_still_acknowledges_delegation(sources, monkeypatch):
-    now, _ = sources
-    request = {"id": "request"}
-    monkeypatch.setattr(ingestion, "ingest_cross_room_chat", lambda **kwargs: ([], None))
-    monkeypatch.setattr(ingestion, "load_ingestion_identity_index", lambda **kwargs: {"delegation": {"metadata": {"short_id": 1}}})
-    monkeypatch.setattr(ingestion, "_load_dayflow_requests", lambda **kwargs: [request])
-    monkeypatch.setattr(ingestion, "_build_delegation_message", lambda **kwargs: Message(id="delegation"))
-    acknowledge = Mock()
-    monkeypatch.setattr(ingestion, "mark_dayflow_requests_ingested", acknowledge)
-    ingestion.run_dayflow_ingestion(now_utc=now)
-    acknowledge.assert_called_once_with([request])
 
 
 def test_chat_scan_has_no_truncation_and_includes_cursor_boundary(monkeypatch):

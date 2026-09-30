@@ -172,17 +172,12 @@ class StrategicPlannerWoPrepNode(ControlNode):
         from app.assistant.dayflow_orchestrator.contracts import get_meta
         from copy import deepcopy
         # Stored eligibility is authoritative: stale tick memory cannot revive reviewed items.
-        enriched = {str(get_meta(item).get("item_id") or item.get("id") or ""): item
-                    for item in self.blackboard.get_state_value("admitted_artifacts", []) or []}
         snapshots = {}
         inbox = {}
         for item in load_admitted_intake():
             item_id = str(get_meta(item).get("item_id") or item.get("id") or "")
             if item_id:
                 snapshots[item_id] = deepcopy(get_meta(item))
-                enrichment = get_meta(enriched.get(item_id, {})).get("enrichment")
-                if enrichment:
-                    get_meta(item)["enrichment"] = enrichment
                 inbox[item_id] = item
         self.blackboard.update_state_value("intake_review_snapshots", snapshots)
         self.blackboard.update_state_value("intake_reviews", [])

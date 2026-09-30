@@ -123,14 +123,11 @@ def test_prep_does_not_resurrect_closed_or_deferred_tick_memory(monkeypatch):
     pending = seed(item_id="source:3", short_id=3)
     persist(board([closed, deferred], [review(), review("2", outcome="defer",
         reconsider_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat())]))
-    pending["metadata"]["enrichment"] = "Useful current-cycle detail"
     bb = board([closed, deferred, pending])
     monkeypatch.setattr(StrategicPlannerWoPrepNode, "_build_situational_context", lambda self: None)
     StrategicPlannerWoPrepNode(name="prep", blackboard=bb, agent_registry={}, tool_registry={}).action_handler(None)
     remaining = bb.get_state_value("admitted_artifacts")
     assert [i["metadata"]["item_id"] for i in remaining] == ["source:3"]
-    assert remaining[0]["metadata"]["enrichment"] == "Useful current-cycle detail"
-    assert "enrichment" not in bb.get_state_value("intake_review_snapshots")["source:3"]
 
 
 def test_malformed_deferral_stays_visible_and_old_unreviewed_is_not_dropped():

@@ -116,7 +116,6 @@ def _build_email_message(*, email_data: Dict[str, Any], now_utc: datetime) -> Me
     # First ~2000 chars of the email body — enough to capture the salutation
     # ("Dear Parent of <name>", account IDs, first paragraph of context) which
     # is what disambiguates the subject person for transactional/school emails.
-    # Used by context_enricher to attribute artifacts to the right person.
     body_full = str(email_data.get("body") or "").strip()
     body_excerpt = body_full[:2000]
 
@@ -169,8 +168,9 @@ def _build_email_message(*, email_data: Dict[str, Any], now_utc: datetime) -> Me
         "summary": f"{sender}: {subject}",
         "importance": inferred_importance,
         "actionability": "actionable" if action_items else "context_only",
-        "state": "new",
-        "state_reason": "email_ingested",
+        # Wake context only (state_mover), never steward intake: the brain reads every email.
+        "state": "artifact",
+        "state_reason": "email_wake_context",
         "last_reviewed_at": now_utc.isoformat(),
         "cooldown_until": None,
         "linked_item_ids": [],
@@ -449,133 +449,6 @@ def _resolve_expected_schedule() -> List[Dict[str, Any]]:
         raise ValueError("resource_expected_calendar.expected_schedule must not be empty.")
     return expected_schedule
 
-
-def _load_dayflow_requests(*, now_utc: datetime) -> List[Dict[str, Any]]:
-    """Load unprocessed user delegation requests from the unified log.
-
-    Only returns requests that haven't been picked up yet (no
-    ``ingested_at`` in metadata). After the item is built and passes
-    through triage, ``_mark_dayflow_request_ingested`` stamps the row
-    so it isn't re-loaded on the next tick.
-    """
-    import json
-    from sqlalchemy import select
-    from app.models.db_manager import get_db_manager
-    from app.assistant.database.db_handler import UnifiedLog2026
-
-    results: List[Dict[str, Any]] = []
-    with get_db_manager().read_session() as session:
-        rows = session.execute(
-            select(UnifiedLog2026)
-            .where(UnifiedLog2026.source == "dayflow_request")
-            .where(UnifiedLog2026.room_id == "dayflow_orchestrator")
-        ).scalars().all()
-
-        for row in rows:
-            meta = {}
-            if row.metadata_json:
-                try:
-                    meta = json.loads(row.metadata_json) if isinstance(row.metadata_json, str) else row.metadata_json
-                except (json.JSONDecodeError, TypeError):
-                    continue
-            if not isinstance(meta, dict):
-                continue
-            # Skip already-ingested requests.
-            if meta.get("ingested_at"):
-                continue
-            results.append({
-                "request_id": str(meta.get("request_id") or row.id or "").strip(),
-                "summary": str(meta.get("summary") or row.message or "").strip(),
-                "created_at": str(meta.get("created_at") or "").strip(),
-                "request_type": str(meta.get("request_type") or "user_delegation").strip(),
-                "_db_row_id": row.id,
-            })
-
-    logger.info("_load_dayflow_requests: found %d unprocessed request(s).", len(results))
-    return results
-
-
-def mark_dayflow_requests_ingested(requests: List[Dict[str, Any]]) -> None:
-    """Stamp ingested_at on processed dayflow requests so they aren't re-loaded."""
-    if not requests:
-        return
-    import json
-    from sqlalchemy import select, update
-    from app.models.db_manager import get_db_manager
-    from app.assistant.database.db_handler import UnifiedLog2026
-
-    now_iso = datetime.now(timezone.utc).isoformat()
-    with get_db_manager().transaction(op="dayflow.mark_requests_ingested") as session:
-        for req in requests:
-            row_id = req.get("_db_row_id")
-            if not row_id:
-                continue
-            row = session.execute(
-                select(UnifiedLog2026).where(UnifiedLog2026.id == row_id)
-            ).scalar_one_or_none()
-            if not row:
-                continue
-            meta = {}
-            if row.metadata_json:
-                try:
-                    meta = json.loads(row.metadata_json) if isinstance(row.metadata_json, str) else row.metadata_json
-                except (json.JSONDecodeError, TypeError):
-                    meta = {}
-            if not isinstance(meta, dict):
-                meta = {}
-            meta["ingested_at"] = now_iso
-            session.execute(
-                update(UnifiedLog2026)
-                .where(UnifiedLog2026.id == row_id)
-                .values(metadata_json=meta)
-            )
-    logger.info("mark_dayflow_requests_ingested: stamped %d request(s).", len(requests))
-
-
-def _build_delegation_message(*, request: Dict[str, Any], now_utc: datetime) -> Message:
-    """Convert a user delegation request into a dayflow intake Message."""
-    request_id = str(request.get("request_id") or "").strip()
-    if not request_id:
-        raise ValueError("Delegation request missing request_id.")
-    summary = str(request.get("summary") or "").strip()
-    if not summary:
-        raise ValueError(f"Delegation request {request_id} missing summary.")
-
-    created_at_raw = str(request.get("created_at") or "").strip()
-    if created_at_raw:
-        ts = parse_iso_utc_strict(created_at_raw, label="delegation.created_at")
-    else:
-        ts = now_utc
-
-    # Build as a dayflow input item — same shape as emails/tickets.
-    # Triage decides importance, state, actionability.
-    item_id = f"delegate:{request_id.split(':')[-1]}" if ":" in request_id else f"delegate:{request_id}"
-
-    metadata: Dict[str, Any] = {
-        "item_id": item_id,
-        "source_type": "user_request",
-        "event_type": "delegated_from_master_room",
-        "created_at": ts.isoformat(),
-        "summary": summary,
-        "importance": "high",
-        "actionability": "actionable",
-        "state": "new",
-        "state_reason": "delegated_from_master_room",
-        "last_reviewed_at": now_utc.isoformat(),
-        "cooldown_until": None,
-        "linked_item_ids": [],
-    }
-
-    return Message(
-        id=item_id,
-        data_type="dayflow_input_item",
-        sub_data_type=["dayflow_orchestrator", "input_layer", "new", "user_request"],
-        sender="master_room",
-        content=summary,
-        timestamp=ts,
-        room_id="dayflow_orchestrator",
-        metadata=metadata,
-    )
 
 
 def serialize_messages(messages: List[Message]) -> List[Dict[str, Any]]:

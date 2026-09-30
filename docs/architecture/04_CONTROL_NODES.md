@@ -14,7 +14,7 @@ Interface: `action_handler(message: Message)` — same as agents, so managers ro
 Route based on blackboard state:
 
 - **`chat_task_router_node.py`** — Routes chat responses: if `handoff_tf=true` -> switchboard, else -> final answer
-- **`master_room_chat_task_router_node.py`** — Master room variant: adds dayflow delegation path
+- **`master_room_chat_task_router_node.py`** — Master room variant: adds the "track this" acknowledgement (the brain keeps the request; no dayflow request is written since 2026-09-30)
 - **`action_selector_router_node.py`** — Dayflow: routes **everything** to the switchboard, one path for
   all dispatches. A `ChatTaskRouterNode` subclass whose only override is `_cfg()`, reading
   `flow_config.action_selector` instead of `flow_config.chat_gate`. (It branched on ticket vs handoff
@@ -98,7 +98,7 @@ claimed node on its own thread. Its control nodes:
   it serves the `node_input: render` handoff shape
 - **`state_mover_prep_node.py` / `_persist_node.py`** — is_ready promotion + HOLD
 - **`intake_triage_prep_node.py` / `triage_persist_node.py`**,
-  **`context_enricher_prep_node.py` / `_persist_node.py`** — intake triage and
+  **`context_enricher_prep_node.py` / `_persist_node.py`** (retired 2026-09-30) — intake triage and
   enrichment prep/persist pairs
 - **`post_room_finalize_node.py`** — the universal EXIT node: every dayflow path lands here,
   including the materializer's empty-list short-circuit and both wake-pass early exits. It closes
@@ -114,7 +114,7 @@ claimed node on its own thread. Its control nodes:
 
 Many nodes come in per-agent **prep/persist pairs**: a `*_prep_node.py` loads that
 agent's context off the items table before it runs, and a `*_persist_node.py` writes its
-output back. Examples: `context_enricher_prep_node` / `context_enricher_persist_node`,
+output back. Examples (the context enricher pair was retired 2026-09-30):
 `relevance_cleaner_prep/persist`, `state_mover_prep/persist`, `triage_persist_node`,
 `summary_pre/post_node`, `task_compile_metadata/post/final_output_node`. (`planner_persist_node` was
 listed here until 2026-09-18 — it was deleted with the legacy plan-task planner and no such file

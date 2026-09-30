@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-import hashlib
-from datetime import datetime, timezone
-
 from app.assistant.control_nodes.chat_task_router_node import ChatTaskRouterNode
-from app.assistant.message_manager.save_to_unified_db import save_to_unified_db
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -14,8 +10,12 @@ class MasterRoomChatTaskRouterNode(ChatTaskRouterNode):
     """
     Master-room specialized chat-task router.
 
-    Adds dayflow delegation and guard persistence on top of the base
-    chat/handoff pattern.
+    Adds the "track this" acknowledgement and guard persistence on top of the base chat/handoff
+    pattern. A request to track something (wait, monitor, do later) is acknowledged here and nothing
+    else: the brain reads the user's message itself and keeps it as a concern in the user's words
+    (subconscious/brain_step.py), then hands it to dayflow when it is time
+    (subconscious/concern_handoff.py). The dayflow delegation request this node used to write was
+    retired on 2026-09-30.
     """
 
     def action_handler(self, message):
@@ -36,26 +36,20 @@ class MasterRoomChatTaskRouterNode(ChatTaskRouterNode):
 
         no_op_tf = bool(self.blackboard.get_state_value(no_op_flag_key, False))
         should_handoff = bool(self.blackboard.get_state_value(handoff_flag_key, False))
-        dayflow_delegate = bool(self.blackboard.get_state_value("dayflow_delegate_tf", False))
+        track = bool(self.blackboard.get_state_value("track_tf", False))
 
-        true_count = sum([no_op_tf, should_handoff, dayflow_delegate])
+        true_count = sum([no_op_tf, should_handoff, track])
         if true_count > 1:
             raise ValueError(
                 f"[{self.name}] at most one of {no_op_flag_key}, {handoff_flag_key}, "
-                f"dayflow_delegate_tf may be true (got {true_count})."
+                f"track_tf may be true (got {true_count})."
             )
 
-        # ── Dayflow delegation (master_room only) ──────────────────
-        if dayflow_delegate:
-            task_desc = str(
-                self.blackboard.get_state_value("dayflow_task_description", "") or ""
-            ).strip()
+        # ── Track this (master_room only): acknowledge; the brain keeps it ──────
+        if track:
+            task_desc = str(self.blackboard.get_state_value("track_description", "") or "").strip()
             if not task_desc:
-                raise ValueError(
-                    f"[{self.name}] dayflow_task_description required when dayflow_delegate_tf=true."
-                )
-
-            self._persist_dayflow_delegation(task_desc)
+                raise ValueError(f"[{self.name}] track_description required when track_tf=true.")
 
             chat_response = str(
                 self.blackboard.get_state_value(chat_response_key, "") or ""
@@ -71,12 +65,12 @@ class MasterRoomChatTaskRouterNode(ChatTaskRouterNode):
                     "final_answer_task": str(self.blackboard.get_state_value("task", "") or ""),
                     "final_answer_answer": "",
                     "final_answer_no_op": True,
-                    "final_answer_what_was_done": f"Delegated to dayflow orchestrator: {task_desc}",
+                    "final_answer_what_was_done": f"Acknowledged for the brain to track: {task_desc}",
                     "final_answer_interesting_info": "",
                     "final_answer_sources": [],
                 },
             )
-            logger.info("[%s] dayflow delegation - task: %s", self.name, task_desc)
+            logger.info("[%s] track acknowledged - task: %s", self.name, task_desc)
             self.blackboard.update_state_value("next_agent", final_node)
             self.blackboard.update_state_value("last_agent", self.name)
             return
@@ -92,31 +86,3 @@ class MasterRoomChatTaskRouterNode(ChatTaskRouterNode):
             self._persist_guard(
                 guard_label=f"Task: {switchboard_task}\nArgs: {switchboard_information or '(none)'}",
             )
-
-    # ------------------------------------------------------------------
-    # Master-room specific helpers
-    # ------------------------------------------------------------------
-
-    def _persist_dayflow_delegation(self, task_description: str) -> None:
-        """Write a tagged request message for the dayflow intake pipeline."""
-        now_utc = datetime.now(timezone.utc)
-        date_seed = now_utc.strftime("%Y-%m-%d")
-        request_id = (
-            f"dayflow_request:{hashlib.sha256(f'{task_description}|{date_seed}'.encode()).hexdigest()[:16]}"
-        )
-
-        payload = {
-            "id": request_id,
-            "timestamp": now_utc,
-            "role": "user",
-            "message": task_description,
-            "room_id": "dayflow_orchestrator",
-            "metadata": {
-                "request_id": request_id,
-                "request_type": "user_delegation",
-                "summary": task_description,
-                "created_at": now_utc.isoformat(),
-            },
-        }
-
-        save_to_unified_db([payload], source="dayflow_request")

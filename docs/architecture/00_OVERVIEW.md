@@ -33,7 +33,7 @@ Orchestrators that run agent loops. `MultiAgentManager` is the one class (rooms 
 See: [02_MANAGERS.md](02_MANAGERS.md), [10_SERVICE_MANAGERS.md](10_SERVICE_MANAGERS.md)
 
 ### Rooms
-Scoped conversation channels. Each room is a single `ROOM.md` (frontmatter policy/permissions/access + body→blackboard mapping) plus a `scope.yaml`. `master_room` is the primary UI (authority 99, owner-only) with dayflow delegation; other surfaces have limited authority.
+Scoped conversation channels. Each room is a single `ROOM.md` (frontmatter policy/permissions/access + body→blackboard mapping) plus a `scope.yaml`. `master_room` is the primary UI (authority 99, owner-only); other surfaces have limited authority.
 
 See: [03_ROOMS.md](03_ROOMS.md)
 
@@ -43,7 +43,7 @@ Deterministic (non-LLM) nodes in the agent loop — routing, tool dispatch, prep
 See: [04_CONTROL_NODES.md](04_CONTROL_NODES.md)
 
 ### Dayflow Orchestrator
-An autonomous daily workflow engine. Everything actionable is a **work object** (a goal plus a small DAG of nodes in the event-sourced work store); intake items (chat, email, delegations, pods) are triaged and converted to work objects by the evaluator. Each tick dispatches one ready node — to a worker team on a job thread, or to the user as a ticket (`create_dayflow_ticket`).
+An autonomous daily workflow engine. Everything actionable is a **work object** (a goal plus a small DAG of nodes in the event-sourced work store); the evaluator's intake is the brain's concern handoffs (the brain reads every chat message and email, keeps concerns and hands over what is ready) and allowlisted pods; chat and email items remain as wake context for waiting work. Each tick dispatches one ready node — to a worker team on a job thread, or to the user as a ticket (`create_dayflow_ticket`).
 
 See: [05_DAYFLOW.md](05_DAYFLOW.md), [08_WORK_OBJECTS.md](08_WORK_OBJECTS.md)
 
@@ -104,7 +104,7 @@ User message via WebSocket
     -> ManagerInvoker.invoke(master_room_manager, message)
       -> RequestPreprocessor -> ScopeAdapter.apply() (scope narrowed at ingress)
       -> MultiAgentManager loop (deterministic state_map):
-         chat_gate (reply | handoff | dayflow_delegate)
+         chat_gate (reply | handoff | track)
            -> switchboard (on handoff) -> ToolCaller (tool/agent dispatch + gate + approval)
            -> ToolResultHandler -> final_answer
     -> RoomSessionManager persists + delivers the reply via the transport

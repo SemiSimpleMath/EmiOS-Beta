@@ -106,8 +106,9 @@ class IntakeTriagePrepNode(ControlNode):
                 plan_synopses.append(meta)
                 continue
 
-            # Chat items are context but not shown in triage or active items.
-            if source_type == "chat":
+            # Chat and email items are wake context (state_mover), not triaged: the brain reads
+            # every message and email and hands what needs doing over as a concern.
+            if source_type in ("chat", "email"):
                 continue
 
             # Dispatch/result log entries are represented in the action log, not triage.

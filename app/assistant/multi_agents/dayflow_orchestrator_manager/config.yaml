@@ -29,10 +29,6 @@ control_nodes:
     class: TriageSpawnGuardNode
   - name: triage_persist_node
     class: TriagePersistNode
-  - name: context_enricher_prep_node
-    class: ContextEnricherPrepNode
-  - name: context_enricher_persist_node
-    class: ContextEnricherPersistNode
   - name: state_mover_persist_node
     class: StateMoverPersistNode
   - name: strategic_planner_wo_prep_node
@@ -116,12 +112,10 @@ flow_config:
     "intake_triage_prep_node": "dayflow_orchestrator::intake_triage"
     "dayflow_orchestrator::intake_triage": "triage_spawn_guard_node"
     "triage_spawn_guard_node": "triage_persist_node"
-    "triage_persist_node": "context_enricher_prep_node"
-    "context_enricher_prep_node": "context_enricher_persist_node"
+    "triage_persist_node": "strategic_planner_wo_prep_node"
     # --- WORK-OBJECT planning path: steward evaluates → architect (re)plans → state_mover
     #     promotes → materializer/switchboard pick ONE node. The dispatch gate claims it and
     #     opens dayflow_dispatch_manager on its own thread for the call and finalizer. ---
-    "context_enricher_persist_node": "strategic_planner_wo_prep_node"
     "strategic_planner_wo_prep_node": "dayflow_orchestrator::strategic_planner_wo"
     "dayflow_orchestrator::strategic_planner_wo": "strategic_planner_wo_persist_node"
     # The finalizer runs in dayflow_dispatch_manager on the tool-return path, so a result

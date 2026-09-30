@@ -6,6 +6,10 @@ returns, ``get_dayflow_items()`` reflects the current state of the world.
 
 This module replaces the ingestion logic previously scattered across
 ``blackboard_builder.py`` and ``input_message_builder.py``.
+
+Since 2026-09-30 chat and email items are wake context only (state_mover matches them against work
+waiting on a reply); the steward's intake comes from the brain's concern handoffs and from pods.
+The user-delegation lane is retired: the brain reads the user's own message.
 """
 from __future__ import annotations
 
@@ -18,11 +22,8 @@ from app.assistant.dayflow_orchestrator.chat_ingestion import ingest_cross_room_
 from app.assistant.dayflow_orchestrator.contracts import assign_short_ids, get_meta
 from app.assistant.dayflow_orchestrator.input_message_builder import (
     _build_email_message,
-    _build_delegation_message,
     _build_pod_message,
-    _load_dayflow_requests,
     _load_todays_emails,
-    mark_dayflow_requests_ingested,
 )
 from app.assistant.dayflow_orchestrator.orchestrator_status import (
     CHAT_WATERMARK_KEY,
@@ -192,7 +193,9 @@ def _ingest_pods(
 def _ingest_emails(
     existing_ids: set[str], now_utc: datetime,
 ) -> list[Message]:
-    """Ingest today's new important emails (email pods) as dayflow items."""
+    """Ingest today's new important emails (email pods) as dayflow items: wake context for work
+    waiting on a reply (state_mover), like chat items. Since 2026-09-30 they are not intake for the
+    steward: the brain reads every email and hands what needs doing over as a concern."""
     email_events = _load_todays_emails(now_utc=now_utc)
     new: list[Message] = []
     for email_data in email_events:
@@ -201,26 +204,6 @@ def _ingest_emails(
         if item_id not in existing_ids:
             new.append(msg)
     return new
-
-
-def _ingest_delegation_requests(
-    existing_ids: set[str], now_utc: datetime,
-) -> tuple[list[Message], list[Dict[str, Any]]]:
-    """Ingest user delegation requests as dayflow items.
-
-    Returns (new_messages, raw_requests) where raw_requests should be
-    marked as ingested after successful persistence.
-    """
-    requests = _load_dayflow_requests(now_utc=now_utc)
-    new: list[Message] = []
-    ingested_requests: list[Dict[str, Any]] = []
-    for req in requests:
-        msg = _build_delegation_message(request=req, now_utc=now_utc)
-        item_id = str(getattr(msg, "id", "") or "").strip()
-        if item_id not in existing_ids:
-            new.append(msg)
-        ingested_requests.append(req)
-    return new, ingested_requests
 
 
 def run_dayflow_ingestion(
@@ -243,10 +226,9 @@ def run_dayflow_ingestion(
     # 2. Collect new items from each source.
     chat_items, chat_watermark = _ingest_chat(existing_ids, now)
     email_items = _ingest_emails(existing_ids, now)
-    delegation_items, delegation_requests = _ingest_delegation_requests(existing_ids, now)
     pod_items, pod_watermark = _ingest_pods(existing_ids, now)
 
-    all_new = chat_items + email_items + delegation_items + pod_items
+    all_new = chat_items + email_items + pod_items
 
     if not all_new:
         logger.info("run_dayflow_ingestion: no new items to ingest.")
@@ -297,10 +279,6 @@ def run_dayflow_ingestion(
     if batch:
         write_dayflow_items_batch(batch, caller="dayflow_ingestion")
 
-    # 5. Mark delegation requests as ingested.
-    if delegation_requests:
-        mark_dayflow_requests_ingested(delegation_requests)
-
     # Commit cursors only after destination persistence and source acknowledgement.
     cursor_changes = {}
     if chat_watermark is not None:
@@ -313,13 +291,11 @@ def run_dayflow_ingestion(
     summary = {
         "chat": len(chat_items),
         "email": len(email_items),
-        "delegation": len(delegation_items),
         "pod": len(pod_items),
         "total": len(all_new),
     }
     logger.info(
-        "run_dayflow_ingestion: ingested %d item(s). chat=%d email=%d delegation=%d pod=%d",
-        summary["total"], summary["chat"], summary["email"],
-        summary["delegation"], summary["pod"],
+        "run_dayflow_ingestion: ingested %d item(s). chat=%d email=%d pod=%d",
+        summary["total"], summary["chat"], summary["email"], summary["pod"],
     )
     return summary
