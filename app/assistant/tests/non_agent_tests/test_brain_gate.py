@@ -302,3 +302,19 @@ def test_work_reports_render_under_their_work_and_attached_work_under_its_concer
     assert "work attached 2026-03-10T10:00:00+00:00: work_a (done): Check in on stress" in rendered
     assert 'task "Ask" judged achieved' in rendered and "He is less stressed." in rendered
     assert 'said: "less stress now"' in rendered and "ended done" in rendered
+
+
+def test_the_wake_sleeps_until_a_room_goes_quiet_or_a_hold_passes_whichever_is_first(monkeypatch):
+    from app.assistant.subconscious import brain_wake, concern_brief, concern_handoff, concern_store
+    quiet, hold = NOW + timedelta(minutes=4), NOW + timedelta(minutes=2)
+    monkeypatch.setattr(gate, "run_gate", lambda: {"next_ready_at": quiet})
+    monkeypatch.setattr(brain_step, "run_brain_step", lambda: {"matters": 0})
+    monkeypatch.setattr(concern_brief, "run_briefs", lambda: {})
+    monkeypatch.setattr(concern_handoff, "run_handoffs", lambda: {})
+    monkeypatch.setattr(concern_store, "load_register", lambda: {})
+    monkeypatch.setattr(concern_brief, "next_hold_at", lambda register, now: hold)
+    assert brain_wake.run_brain()["next_wake_at"] == hold
+    monkeypatch.setattr(concern_brief, "next_hold_at", lambda register, now: None)
+    assert brain_wake.run_brain()["next_wake_at"] == quiet
+    monkeypatch.setattr(gate, "run_gate", lambda: {"next_ready_at": None})
+    assert brain_wake.run_brain()["next_wake_at"] is None

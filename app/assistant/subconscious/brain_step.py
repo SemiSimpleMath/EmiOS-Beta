@@ -170,7 +170,7 @@ def _calendar(now_utc: datetime) -> str:
 
 
 def _concern_view(label: str, c: Dict[str, Any]) -> Dict[str, Any]:
-    from app.assistant.subconscious import concern_feedback
+    from app.assistant.subconscious import concern_brief
     return {
         "label": label, "title": c.get("title"), "status": c["_status"], "subject": c.get("subject") or "household",
         "kind": c.get("kind"), "severity": c.get("severity"), "horizon": c.get("horizon"),
@@ -178,12 +178,7 @@ def _concern_view(label: str, c: Dict[str, Any]) -> Dict[str, Any]:
         "first_observed": c.get("first_observed"), "notes": c.get("notes") or "",
         "evidence": [{"kind": e.get("kind"), "ref": e.get("ref"), "snippet": _evidence_text(e)}
                      for e in c.get("evidence") or []],
-        "attached_work": [{"work_id": w["work_id"], "title": w.get("title"), "objective": w.get("objective"),
-                           "attached_at": w.get("attached_at"), "status": w.get("status"),
-                           "judgments": [{**j, "replies": [concern_feedback._reply_line(r) for r in j.get("replies") or []]}
-                                         for j in w.get("judgments") or []],
-                           "ended": w.get("ended")}
-                          for w in (c.get("attached_work") or {}).values()],
+        "attached_work": concern_brief.attempts(c),
         "journal": c.get("reinforcement_notes") or "",
     }
 

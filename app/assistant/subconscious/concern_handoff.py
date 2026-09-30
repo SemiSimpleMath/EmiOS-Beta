@@ -79,11 +79,13 @@ def _poke_dayflow() -> None:
 
 
 def _brief_text(concern: Dict[str, Any], bucket: str) -> str:
-    """The brief as the planner reads it: the same template the agents doing the work read."""
+    """The brief and the work on the concern so far, as the planner reads them: the same template the
+    agents doing the work read."""
     from app.assistant.dayflow_orchestrator.work_context import render_view
+    from app.assistant.subconscious import concern_brief
     view = {"concern_id": concern["concern_id"], "title": concern.get("title"), "status": bucket,
             "done_when": concern.get("done_when"), "owner_words": (concern.get("owner_request") or {}).get("words"),
-            "brief": concern["brief"], "brief_current": True}
+            "brief": concern["brief"], "attempts": concern_brief.attempts(concern), "brief_current": True}
     return render_view("concern_brief", concerns=[view]).strip()
 
 

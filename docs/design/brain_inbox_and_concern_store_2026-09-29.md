@@ -369,6 +369,25 @@ stopped the brain at once (routine configs hot-reload, the wake is Python): no b
 17:28 UTC until the restart. Remove a routine's config only in the same restart that starts its
 replacement.
 
+## Holds wake the brain; the steward judges whether another attempt is productive (owner, 2026-09-30)
+
+- The event-driven wake had no clock: a brief holding until a time was re-briefed only when
+  something else woke the brain. The wake now sleeps until the earlier of a quiet room and the
+  earliest hold of a current brief (`concern_brief.next_hold_at`, `run_brain` → `next_wake_at`).
+- Owner: concerns are for every consumer (the meal planner, the wellness proposer, dayflow); a
+  hand-over asks dayflow whether it can take a concrete step; work ending does not settle the
+  concern ("research therapists" done, the concern stays open); "the concern should carry history so
+  the steward knows we just worked on this: is it productive to keep working on it?"
+- The concern's attempts (`concern_brief.attempts`: every attached work, its judgments with the
+  owner's replies, its ending) are rendered in the concern view the steward reads in a hand-over and
+  every work agent reads (shared/work/concern_brief.j2); before, the steward had only the brief
+  writer's one-line `tried`.
+- Steward prompt, section 2a: work only for a concrete step dayflow can take now; another attempt
+  only for a step not yet tried or something new since the last one; otherwise no_action with the
+  reason (journalled on the concern). One step per work object, its criteria that step's own outcome;
+  the brain decides when the concern is settled. (Work stress, 2026-09-30: the steward wrote the
+  concern's whole question into the work and the owner was asked twice.)
+
 ## Requirement for the brain build: association finds dependents (owner, 2026-09-30)
 
 Finding what an event relates to is the most important part of the brain step. A change is rarely

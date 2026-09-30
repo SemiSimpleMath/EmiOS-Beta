@@ -15,6 +15,8 @@ What wakes it:
 - a write to the concern register from outside the brain (a work outcome, the noticer, an edit)
   calls `poke`, so the concern's brief and handoff follow it;
 - a room still talking: the wake sleeps until that room goes quiet, then runs;
+- a brief holding until a time: the wake sleeps until the earliest hold, when the brief is written
+  again (concern_brief.next_hold_at);
 - boot: one run at start picks up whatever arrived while the app was down.
 Nothing else runs it. The wake's own register writes do not wake it again. A run that fails is
 logged and not retried; the next thing that happens wakes it.
@@ -41,11 +43,16 @@ def run_brain() -> Dict[str, Any]:
     from app.assistant.subconscious.concern_brief import run_briefs
     from app.assistant.subconscious.concern_handoff import run_handoffs
     from app.assistant.subconscious.gate import run_gate
+    from app.assistant.subconscious.concern_brief import next_hold_at
+    from app.assistant.subconscious.concern_store import load_register
     gate = run_gate()
     brain = run_brain_step()
     briefs = run_briefs()
     handoffs = run_handoffs()
-    return {**gate, **{f"brain_{k}": v for k, v in brain.items()}, **briefs, **handoffs}
+    due = [t for t in (gate["next_ready_at"], next_hold_at(load_register(), datetime.now(timezone.utc)))
+           if t is not None]
+    return {**gate, **{f"brain_{k}": v for k, v in brain.items()}, **briefs, **handoffs,
+            "next_wake_at": min(due) if due else None}
 
 
 def poke() -> None:
@@ -68,7 +75,7 @@ def _loop() -> None:
         try:
             summary = run_brain()
             logger.info("[brain_wake] ran: %s", summary)
-            due = summary.get("next_ready_at")
+            due = summary.get("next_wake_at")
             if due is not None:
                 wait = max(0.0, (due - datetime.now(timezone.utc)).total_seconds())
         except Exception as exc:

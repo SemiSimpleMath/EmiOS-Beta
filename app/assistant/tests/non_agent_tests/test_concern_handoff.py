@@ -111,3 +111,40 @@ def test_the_planners_answer_is_journalled_on_the_concern(tmp_path):
 def test_citing_a_handoff_item_does_not_look_like_a_concern_ref():
     """The steward cites the item id in based_on, where `concern:` prefixes a concern reference."""
     assert not concern_handoff.item_id("c-bake", "abcdef123456789").startswith("concern:")
+
+
+def test_the_brain_wakes_at_the_earliest_hold_of_a_current_brief(tmp_path):
+    reg = ScratchRegister(tmp_path).write({"active": [
+        {"concern_id": "c-soon", "title": "t", "notes": "n", "evidence": []},
+        {"concern_id": "c-late", "title": "t", "notes": "n", "evidence": []},
+        {"concern_id": "c-none", "title": "t", "notes": "n", "evidence": []}],
+        "addressing": [], "resolved": [], "dormant": []})
+    hold = lambda h: {"decision": "hold", "task": "", "why": "w", "hold_until": "x",
+                      "hold_until_utc": (NOW + timedelta(hours=h)).isoformat()}
+    _with_brief(reg, {"c-soon": hold(1), "c-late": hold(5),
+                      "c-none": {"decision": "no_action", "task": "", "why": "w", "hold_until": None}})
+    assert concern_brief.next_hold_at(reg.read(), NOW) == NOW + timedelta(hours=1)
+    assert concern_brief.next_hold_at(reg.read(), NOW + timedelta(hours=2)) == NOW + timedelta(hours=5)
+    register = reg.read()
+    register["active"][1]["notes"] = "changed"          # its brief is out of date: rewritten on the next run
+    reg.write(register)
+    assert concern_brief.next_hold_at(reg.read(), NOW + timedelta(hours=2)) is None
+
+
+def test_the_steward_sees_every_earlier_attempt_with_the_owners_replies(tmp_path):
+    work = {"work_id": "work_a", "title": "Check in", "objective": "Check in on the bake sale plan",
+            "attached_at": "2026-03-10T10:00:00+00:00", "status": "done",
+            "judgments": [{"node_id": "ask", "title": "Ask", "verdict": "achieved", "next_step": "",
+                           "outcome": "The owner will bake on Sunday.", "at": "2026-03-10T10:30:00+00:00",
+                           "replies": [{"question": "Who bakes?", "user_text": "I will, Sunday"}]}],
+            "ended": {"outcome": "done", "at": "2026-03-10T11:00:00+00:00", "reason": "judged complete"}}
+    reg = ScratchRegister(tmp_path).write({"active": [{"concern_id": "c-bake", "title": "Bake sale", "notes": "n",
+                                                       "evidence": [], "attached_work": {"work_a": work}}],
+                                           "addressing": [], "resolved": [], "dormant": []})
+    _ready(reg, decision="act_now", task="Confirm the cookie count", why="Monday is close", hold_until=None)
+    _, [item], _ = _run(reg)
+    text = item["brief_text"]
+    assert "work on this concern so far:" in text
+    assert "Check in on the bake sale plan (work_a; done; attached 2026-03-10T10:00:00+00:00; ended done" in text
+    assert 'task "Ask" judged achieved' in text and "The owner will bake on Sunday." in text
+    assert 'said: "I will, Sunday"' in text

@@ -15,13 +15,14 @@ writer was shown (evidence, work ids, calendar anchors, reminder refs), or name 
 journal or notes, or the knowledge graph; one correction.
 
 Dayflow reads it through `briefs_for_refs`: every agent working on a work object that cites a
-concern (architect, worker, finalizer) gets that concern's brief whole (dayflow_orchestrator/
-work_context.work_data).
+concern (architect, worker, finalizer) gets that concern's brief whole, and the work attached to
+it so far (`attempts`) (dayflow_orchestrator/work_context.work_data). The steward gets the same view
+in a handoff (concern_handoff._brief_text), so it can judge whether another attempt is productive.
 
 The brief ends in a readiness decision: act_now (with a broad task; subconscious/concern_handoff.py
 hands it to the planner), hold (with a local date and time, stored as `hold_until_utc`; when it
-passes the concern is briefed again, so the decision is remade on what is known then), or
-no_action.
+passes the concern is briefed again, so the decision is remade on what is known then; the brain's
+wake sleeps until the earliest hold, `next_hold_at`), or no_action.
 """
 from __future__ import annotations
 
@@ -56,6 +57,35 @@ def _held_until_passed(brief: Dict[str, Any], now: datetime) -> bool:
     readiness = brief.get("readiness") or {}
     when = readiness.get("hold_until_utc")
     return readiness.get("decision") == "hold" and bool(when) and datetime.fromisoformat(when) <= now
+
+
+def next_hold_at(register: Dict[str, Any], now_utc: datetime) -> Optional[datetime]:
+    """The earliest future time an open concern's current brief holds until, or None. At that time
+    the brief is stale (see `stale`) and is written again, so the brain's wake sleeps until it."""
+    times = []
+    for bucket in ("active", "addressing"):
+        for c in register.get(bucket) or []:
+            brief = c.get("brief") or {}
+            readiness = brief.get("readiness") or {}
+            when = readiness.get("hold_until_utc")
+            if readiness.get("decision") == "hold" and when and brief.get("basis") == basis(c, bucket):
+                at = datetime.fromisoformat(when)
+                if at > now_utc:
+                    times.append(at)
+    return min(times) if times else None
+
+
+def attempts(concern: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The work attached to the concern, oldest first, as every reader shows it: objective, status,
+    each judgment with the owner's replies as lines, and the ending."""
+    from app.assistant.subconscious.concern_feedback import _reply_line
+    works = sorted((concern.get("attached_work") or {}).values(), key=lambda w: str(w.get("attached_at") or ""))
+    return [{"work_id": w["work_id"], "title": w.get("title"), "objective": w.get("objective"),
+             "attached_at": w.get("attached_at"), "status": w.get("status"),
+             "judgments": [{**j, "replies": [_reply_line(r) for r in j.get("replies") or []]}
+                           for j in w.get("judgments") or []],
+             "ended": w.get("ended")}
+            for w in works]
 
 
 def stale(register: Dict[str, Any], now_utc: Optional[datetime] = None) -> List[Tuple[str, Dict[str, Any]]]:
@@ -236,6 +266,6 @@ def briefs_for_refs(refs: List[str]) -> List[Dict[str, Any]]:
         bucket, c = matches[0]
         out.append({"concern_id": c["concern_id"], "title": c.get("title"), "status": bucket,
                     "done_when": c.get("done_when"), "owner_words": (c.get("owner_request") or {}).get("words"),
-                    "brief": c.get("brief"),
+                    "brief": c.get("brief"), "attempts": attempts(c),
                     "brief_current": (c.get("brief") or {}).get("basis") == basis(c, bucket)})
     return out

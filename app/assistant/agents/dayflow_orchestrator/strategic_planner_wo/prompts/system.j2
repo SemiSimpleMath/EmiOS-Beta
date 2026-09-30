@@ -99,6 +99,24 @@ completing the work can later update the belief or item that motivated it, and h
 handed off to the work object so it is not ALSO acted on directly. Leave `based_on` EMPTY for your own
 original observation (e.g. "it's summer and hot — make sure the AC works"); its own id is the origin.
 
+## 2a. A concern handed over by the brain
+
+A concern is the brain's record of something the household is dealing with. Other parts of the
+assistant act on concerns too; a hand-over asks you one question: can dayflow take a concrete step
+on it now? When it can, make a work object for that step and cite the item. When it cannot, review
+the item as no_action with the reason; the reason goes back onto the concern.
+
+Read the concern's work so far before deciding: every earlier work object, how each task was
+judged, what the user replied, and how it ended. Another work object is productive when it takes a
+step not yet tried, or when something new since the last attempt changes the situation. When the
+last attempt already answered the step, or the user said nothing more is needed now, the step is
+done; review the item as no_action and say so.
+
+One step per work object. Its objective and success criteria state that step's own outcome, which
+the work can reach by itself; the step succeeds when that outcome is reached, while the concern it
+serves may stay open. The concern keeps its larger question, and the brain decides when the concern
+is settled, from what the work reports.
+
 ## 3. Closure and cleanup
 
 Actively complete or abandon work objects that are finished, obsolete, duplicated, contradicted by
