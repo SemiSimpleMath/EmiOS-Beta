@@ -12,6 +12,8 @@ Now each reader (gate, noticer) gets the events in groups, each under a line say
   CONVERSATION_GAP, walked back to where the conversation started and forward to where it ended.
 - email, by account, under the account's `description` (configs/oauth_accounts.json). Each event
   sits inside its Gmail thread: every stored email of that thread, in time order.
+- work, by work object: dayflow's reports on work attached to a concern (a finalizer judgment, the
+  work's ending), in time order (subconscious/concern_feedback.py).
 
 Nothing is cut. Events carry the reader's mark (the gate's E-label, the noticer's ref) and
 optionally a note; the other turns are context only. Times are local, with a date header whenever
@@ -174,18 +176,34 @@ def _email_groups(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return groups
 
 
+def _work_groups(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    by_work: Dict[str, List[Dict[str, Any]]] = {}
+    for e in events:
+        by_work.setdefault(e["source_ref"].split(":")[1], []).append(e)
+    groups = []
+    for work_id, evs in by_work.items():
+        turns = sorted((_event_turn(e) for e in evs), key=lambda t: t["at"])
+        groups.append({"heading": f"Work {work_id}",
+                       "description": "Dayflow's work on the concerns it is attached to: each entry is a "
+                                      "finalizer judgment of one of its tasks, or the work's ending.",
+                       "first_at": turns[0]["at"],
+                       "conversations": [{"label": "Progress", "turns": _render_turns(turns)}]})
+    return groups
+
+
 def build(events: List[Dict[str, Any]], *, now_utc: Optional[datetime] = None) -> List[Dict[str, Any]]:
-    """Group events (brain_events rows, each with a `mark` and optionally a `note`) into chat rooms
-    and email inboxes, each with its conversations; groups ordered by their first event. Raises on
+    """Group events (brain_events rows, each with a `mark` and optionally a `note`) into chat rooms,
+    email inboxes and work objects, each with its conversations; groups ordered by their first event. Raises on
     an unknown source, a chat event with no room, or a room or account with no description: the
     reader must know where something was said and to whom."""
     now = now_utc or datetime.now(timezone.utc)
-    by_source: Dict[str, List[Dict[str, Any]]] = {"chat": [], "email": []}
+    by_source: Dict[str, List[Dict[str, Any]]] = {"chat": [], "email": [], "work": []}
     for e in events:
         if e["source"] not in by_source:
             raise ValueError(f"brain event {e['source_ref']} has unknown source {e['source']!r}")
         by_source[e["source"]].append(e)
-    groups = _chat_groups(by_source["chat"], now) + _email_groups(by_source["email"])
+    groups = (_chat_groups(by_source["chat"], now) + _email_groups(by_source["email"])
+              + _work_groups(by_source["work"]))
     groups.sort(key=lambda g: g["first_at"])
     for g in groups:
         del g["first_at"]

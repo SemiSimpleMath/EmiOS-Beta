@@ -264,10 +264,27 @@ def initialize_system():
         else:
             logger.info("⏸️ System audit DISABLED via subsystems.yaml")
 
+        # The brain runs when something arrives (subconscious/brain_wake.py).
+        from app.assistant.subconscious import brain_wake
+        ingest_service.register_subscriber(brain_wake.handle_envelope)
+        logger.info("🧠 Brain wake subscribed to the gut.")
+
         ingest_service.start()
         logger.info("✅ Ingest service initialized")
     else:
         logger.info("⏸️ Ingest service DISABLED via subsystems.yaml")
+
+    # One-time move of concerns to attached work, before anything delivers work feedback
+    # (subconscious/persist.rederive_attached_work; a no-op once every concern has its record).
+    from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+    from app.assistant.subconscious.concern_feedback import report_earlier_endings
+    from app.assistant.subconscious.persist import rederive_attached_work
+    work_store = get_dayflow_work_store()
+    report_earlier_endings(rederive_attached_work(
+        lambda: [work_store.load(s["id"]) for s in work_store.list_work_objects()]))
+
+    from app.assistant.subconscious import brain_wake
+    brain_wake.start()
 
     # Task event lane: a signal-router watch match on a task:: watch resumes its run (the
     # watches themselves are DB-persisted in the router — registered at run start, no boot

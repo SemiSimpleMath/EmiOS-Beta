@@ -1,11 +1,11 @@
-"""Concern back-propagation + noticer rerun (2026-08-01 subconscious audit).
+"""Concern back-propagation (2026-08-01 subconscious audit; attached work 2026-09-30).
 
 Work outcomes never reached the concerns register (19 AC-service re-mints, 4 after
 an explicit user decline). Now: the evaluator cites concern:<prefix> in based_on ->
-work_persist stores it on the work object -> every dayflow closure path calls
-propagate_work_outcome -> the register journals the outcome (user words verbatim),
-user-declined concerns park dormant (the projection reads only `active`, so the
-evaluator pressure stops at the source) -> the noticer is re-run, cooldown-guarded.
+work_persist stores it on the work object, which is attached to the concern -> the
+work's ending is recorded on the concern (user words verbatim); user-declined concerns
+park dormant (the projection reads only `active`, so the evaluator pressure stops at
+the source); otherwise, with no work in progress, the concern is open for the brain.
 """
 from __future__ import annotations
 
@@ -60,22 +60,35 @@ class TestApplyWorkOutcome:
         assert concern["user_declined_at_utc"]
         assert concern["last_disposition_at_count"] == 23   # pressure window reset
 
-    def test_done_moves_to_addressing(self, tmp_path):
+    def test_done_records_the_ending_and_leaves_the_decision_to_the_brain(self, tmp_path):
         path = _register(tmp_path)
         result = apply_work_outcome(_CID, work_id="work_x", outcome="done",
                                     connect=path.connect)
-        assert result == "addressing"
+        assert result == "ended"
         reg = path.read()
-        assert reg["active"] == []
-        concern = reg["addressing"][0]
-        assert "ADDRESSED by work_x" in concern["reinforcement_notes"]
-        assert concern["addressing_since_utc"]
+        concern = reg["active"][0]                      # done work does not settle the concern
+        assert concern["attached_work"]["work_x"]["ended"]["outcome"] == "done"
+        assert "WORK ENDED work_x (done)" in concern["reinforcement_notes"]
+
+    def test_the_last_work_ending_takes_the_concern_out_of_progress(self, tmp_path):
+        path = _register(tmp_path)
+        reg = path.read()
+        concern = reg["active"].pop()
+        concern["attached_work"] = {w: {"work_id": w, "status": "active", "judgments": [], "ended": None}
+                                    for w in ("work_x", "work_y")}
+        reg["addressing"].append(concern)
+        path.write(reg)
+        apply_work_outcome(_CID, work_id="work_x", outcome="done", connect=path.connect)
+        assert len(path.read()["addressing"]) == 1      # work_y is still going
+        apply_work_outcome(_CID, work_id="work_y", outcome="abandoned", connect=path.connect)
+        reg = path.read()
+        assert reg["addressing"] == [] and len(reg["active"]) == 1
 
     def test_system_abandon_without_words_only_journals(self, tmp_path):
         path = _register(tmp_path)
         result = apply_work_outcome(_CID, work_id="work_x", outcome="abandoned",
                                     connect=path.connect)
-        assert result == "journaled"
+        assert result == "ended"
         reg = path.read()
         assert len(reg["active"]) == 1      # a system drop must not silence a real concern
 
@@ -97,24 +110,16 @@ class TestPropagateWorkOutcome:
                                                content=reply_text)
         return SimpleNamespace(id="work_x", constraints={"concern_refs": refs}, nodes=nodes)
 
-    def test_propagates_refs_with_user_words_and_reruns_noticer(self):
-        store = SimpleNamespace(load=lambda wid: self._wo(
-            [f"concern:{_CID[:8]}"], reply_text="Do not arrange this."))
-        with patch("app.assistant.subconscious.persist.apply_work_outcome",
-                   return_value="user_declined") as apply_mock, \
-             patch("app.assistant.subconscious.answer_capture.trigger_noticer",
-                   return_value=True) as trigger_mock:
-            propagate_work_outcome(store, "work_x", "abandoned")
-        apply_mock.assert_called_once_with(
-            f"concern:{_CID[:8]}", work_id="work_x", outcome="abandoned",
-            user_response={"user_text": "Do not arrange this.", "provenance": "legacy_reply"})
-        trigger_mock.assert_called_once()
-
-    def test_no_refs_is_a_silent_noop(self):
-        store = SimpleNamespace(load=lambda wid: self._wo([]))
-        with patch("app.assistant.subconscious.answer_capture.trigger_noticer") as trigger_mock:
-            propagate_work_outcome(store, "work_x", "done")
-        trigger_mock.assert_not_called()
+    def test_work_citing_no_concern_leaves_no_receipt(self, tmp_path):
+        from work_objects.store import WorkStore
+        store = WorkStore(str(tmp_path / "work.db"))
+        try:
+            wo = store.apply("create_work_object", {"title": "Unlinked", "constraints": {}})
+            store.apply("set_work_status", {"work_id": wo.id, "status": "done", "reason": "done"})
+            assert store.pending_concern_feedback() == []
+            propagate_work_outcome(store, wo.id, "done")
+        finally:
+            store.close()
 
     def test_failure_never_raises_into_closure(self):
         def _boom(wid):

@@ -6,10 +6,13 @@ user messages between 60 and 220 characters, newest 12; chat clusters as one-lin
 it, so the flea concern it settled stayed live. Nothing reported to the brain; it pulled a sample.
 
 Now events REPORT. Each source writes one row per thing that happened, keyed by the source's own
-id so it lands exactly once. Chat: every user message, verbatim, whatever its length. Email: every
-email the fetch keeps (email_parser importance >= 5), from its pod, full body; the pod id is the
-ref. The gate (subconscious/gate.py) routes each row against the open concerns —
-`concern` (bears on named concerns), `new_matter`, or `none` — and the brain step
+id so it lands exactly once. Chat: every user message, verbatim, whatever its length, except in
+rooms the brain does not read (EXCLUDED_ROOM_PREFIXES). Email: every email the parser scored at least
+MIN_EMAIL_IMPORTANCE, from its pod, full body; the pod id is the ref. The gate
+(subconscious/gate.py) routes each row against the open concerns once it is ready (`ready`): an
+email at once, a chat room's messages once the room has been quiet for QUIET — `concern` (bears
+on named concerns), `new_matter`, or `none`. Work: dayflow's judgments and endings of work attached
+to a concern (`add_work_event`) arrive routed to those concerns by id, never gated. The brain step
 (subconscious/brain_step.py) reads what the gate passed on, one matter at a time, inside the
 conversations it happened in, then marks it consumed. The `replying_to` column is no longer
 written: the conversation shows what a message answers. `noticer_decision`/`noticer_reason` hold
@@ -59,6 +62,15 @@ SCHEMA = """CREATE TABLE IF NOT EXISTS brain_events (
 # First run only: how far back chat intake reaches when the inbox has no chat rows yet.
 _FIRST_RUN_LOOKBACK = timedelta(hours=72)
 
+# Owner, 2026-09-30: a conversation is finished when the owner has been quiet in the room this long;
+# the brain reads it then, as one chunk, not in slices while it is still going.
+QUIET = timedelta(minutes=5)
+# Owner, 2026-09-30: the brain takes email the parser scored 6 or more. The fetch keeps 5 and up;
+# over 2026-09-27..30 every 5 was a newspaper newsletter or sale, and the gate passed on none of them.
+MIN_EMAIL_IMPORTANCE = 6
+# Owner, 2026-09-30: Slack is relaxed talk with friends, not something to act on. Left out for now.
+EXCLUDED_ROOM_PREFIXES = ("slack/",)
+
 
 def ensure_schema(connect=None) -> None:
     connect = connect or _connect
@@ -78,7 +90,8 @@ def _iso(dt: datetime) -> str:
 # ── sources ─────────────────────────────────────────────────────────────────
 
 def ingest_chat(*, now_utc: Optional[datetime] = None, connect=None, fetch=None) -> int:
-    """Every user message since the last one ingested, verbatim. Returns rows added.
+    """Every user message since the last one ingested, verbatim, except in excluded rooms. Returns
+    rows added.
 
     `fetch(since_utc)` returns the messages as dicts (id, timestamp, room_id, speaker, text);
     production reads unified_log_2026. Idempotent on the message id.
@@ -95,7 +108,7 @@ def ingest_chat(*, now_utc: Optional[datetime] = None, connect=None, fetch=None)
     with connect(True) as c:
         for m in rows:
             text = (m.get("text") or "").strip()
-            if not text:
+            if not text or str(m.get("room_id") or "").startswith(EXCLUDED_ROOM_PREFIXES):
                 continue
             cur = c.execute(
                 "INSERT OR IGNORE INTO brain_events (source, source_ref, occurred_at, room_id, speaker, text, "
@@ -125,7 +138,8 @@ def _fetch_user_messages(since_utc: datetime) -> List[Dict[str, Any]]:
 
 
 def ingest_email(*, now_utc: Optional[datetime] = None, connect=None, fetch=None) -> int:
-    """Every email pod created since the last email ingested. Returns rows added.
+    """Every email pod created since the last email ingested, scored at least MIN_EMAIL_IMPORTANCE.
+    Returns rows added.
 
     `fetch(since_utc)` returns email records (pod_id, created_at, received_at_utc, sender_display,
     sender_email, subject, body); production reads the pod store. The cursor is the latest ingest
@@ -144,6 +158,8 @@ def ingest_email(*, now_utc: Optional[datetime] = None, connect=None, fetch=None
     added = 0
     with connect(True) as c:
         for r in records:
+            if int(r["importance"]) < MIN_EMAIL_IMPORTANCE:
+                continue
             cur = c.execute(
                 "INSERT OR IGNORE INTO brain_events (source, source_ref, occurred_at, room_id, speaker, text, "
                 "received_at) VALUES ('email', ?, ?, NULL, ?, ?, ?)",
@@ -155,6 +171,25 @@ def ingest_email(*, now_utc: Optional[datetime] = None, connect=None, fetch=None
     return added
 
 
+def add_work_event(*, work_id: str, receipt_id: str, occurred_at: str, text: str, concern_ids: List[str],
+                   connect=None) -> bool:
+    """Dayflow's work on concerns reports here (owner, 2026-09-30): each finalizer judgment and each
+    ending of work attached to a concern (concern_feedback.py). The work names its concerns by id, so
+    the event arrives routed to them by code, without the gate. Idempotent on the receipt. Returns
+    True when the row is new."""
+    connect = connect or _connect
+    ensure_schema(connect)
+    now = _iso(datetime.now(timezone.utc))
+    with connect(True) as c:
+        cur = c.execute(
+            "INSERT OR IGNORE INTO brain_events (source, source_ref, occurred_at, room_id, speaker, text, "
+            "received_at, gate_status, route, concern_ids, gate_reasoning, gated_at) "
+            "VALUES ('work', ?, ?, NULL, 'dayflow', ?, ?, 'routed', 'concern', ?, ?, ?)",
+            (f"work:{work_id}:{receipt_id}", occurred_at, text, now, json.dumps(concern_ids),
+             "linked by id: the work cites these concerns", now))
+    return cur.rowcount == 1
+
+
 # ── the gate's side ─────────────────────────────────────────────────────────
 
 def pending(connect=None) -> List[Dict[str, Any]]:
@@ -164,6 +199,29 @@ def pending(connect=None) -> List[Dict[str, Any]]:
     with connect(False) as c:
         return [dict(r) for r in c.execute(
             "SELECT * FROM brain_events WHERE gate_status='pending' ORDER BY occurred_at, id")]
+
+
+def ready(events: List[Dict[str, Any]], now_utc: datetime) -> List[Dict[str, Any]]:
+    """The events whose matter is complete: every email, and the chat of every room whose latest
+    message is at least QUIET old. Messages of a room still talking wait, all of them together."""
+    last = _last_message_by_room(events)
+    return [e for e in events
+            if e["source"] != "chat" or last[e["room_id"]] + QUIET <= now_utc]
+
+
+def next_ready_at(events: List[Dict[str, Any]], now_utc: datetime) -> Optional[datetime]:
+    """When the next room still talking goes quiet, or None when no chat is waiting."""
+    waiting = [t + QUIET for t in _last_message_by_room(events).values() if t + QUIET > now_utc]
+    return min(waiting) if waiting else None
+
+
+def _last_message_by_room(events: List[Dict[str, Any]]) -> Dict[str, datetime]:
+    last: Dict[str, datetime] = {}
+    for e in events:
+        if e["source"] == "chat":
+            at = datetime.fromisoformat(e["occurred_at"])
+            last[e["room_id"]] = max(at, last.get(e["room_id"], at))
+    return last
 
 
 def record_route(event_id: int, route: str, concern_ids: List[str], reasoning: str, connect=None) -> None:

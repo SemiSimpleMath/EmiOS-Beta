@@ -11,8 +11,8 @@ Everything here is assembled by code from links that already exist, no model cal
   work's goal, the steward's reason, success criteria and the node's directive; its source intake
   (emails, pods); the concerns it serves (`constraints.concern_refs`);
 - a noticer question names its question (`trigger_context.question_id`) and through it a concern;
-- each concern: its brief, "done when", the owner's words, earlier asks and answers (its work
-  outcomes);
+- each concern: its brief, "done when", the owner's words, and the work attached to it with every
+  judgment of that work and the owner's replies;
 - the sources the work, the brief and the concern cite, resolved to their text: an email in full
   with the rest of its Gmail thread, a chat message, a pod;
 - the people, places and things named (knowledge graph, subconscious/kg_links.py) and past work
@@ -76,6 +76,11 @@ def _question(question_id: str) -> Optional[Dict[str, Any]]:
         session.close()
 
 
+def _reply_line(reply: Dict[str, Any]) -> str:
+    from app.assistant.subconscious.concern_feedback import _reply_line
+    return _reply_line(reply)
+
+
 def _concern(ref: str) -> Optional[Dict[str, Any]]:
     """A concern by full id or `concern:<8+ chars>`, with the parts a reader needs."""
     from app.assistant.subconscious.concern_store import load_register
@@ -88,9 +93,14 @@ def _concern(ref: str) -> Optional[Dict[str, Any]]:
                 return {"concern_id": cid, "status": bucket, "title": c.get("title"), "subject": c.get("subject"),
                         "done_when": c.get("done_when"), "owner_words": (c.get("owner_request") or {}).get("words"),
                         "brief": c.get("brief"),
-                        "earlier": [{"work_id": w.get("work_id"), "outcome": w.get("outcome"),
-                                     "at": w.get("recorded_at"), "response": w.get("user_response")}
-                                    for w in (c.get("work_outcomes") or {}).values()],
+                        "attached_work": [{"work_id": w["work_id"], "objective": w.get("objective"),
+                                           "status": w.get("status"), "attached_at": w.get("attached_at"),
+                                           "judgments": [{"title": j.get("title"), "verdict": j.get("verdict"),
+                                                          "at": j.get("at"), "outcome": j.get("outcome"),
+                                                          "replies": [_reply_line(r) for r in j.get("replies") or []]}
+                                                         for j in w.get("judgments") or []],
+                                           "ended": w.get("ended")}
+                                          for w in (c.get("attached_work") or {}).values()],
                         "evidence": [str(e.get("ref") or "") for e in c.get("evidence") or []],
                         "evidence_kinds": {str(e.get("ref") or ""): e.get("kind") for e in c.get("evidence") or []}}
     return None
@@ -154,7 +164,8 @@ def ticket_reading(ticket_id: str) -> Dict[str, Any]:
             for ref in _REF.findall(str(fact.get("source") or "")):
                 cited.setdefault(ref, None)
         for ref in c["evidence"]:
-            cited.setdefault(ref, c["evidence_kinds"].get(ref))
+            if not ref.startswith("work:"):          # the attached work is shown with the concern
+                cited.setdefault(ref, c["evidence_kinds"].get(ref))
     sources = []
     for ref, kind in cited.items():
         try:

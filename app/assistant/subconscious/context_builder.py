@@ -733,7 +733,7 @@ def _render_concern_summary(c: Dict[str, Any], *, status: str) -> str:
 def _render_handling_history(c: Dict[str, Any]) -> str:
     """Data only; lifecycle policy belongs in the noticer Jinja prompt."""
     return "\n".join([
-        "  handling_history: " + json.dumps(c.get("work_outcomes") or {}, ensure_ascii=False),
+        "  attached_work: " + json.dumps(c.get("attached_work") or {}, ensure_ascii=False),
         "  journal: " + str(c.get("reinforcement_notes") or ""),
     ])
 

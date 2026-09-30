@@ -126,6 +126,9 @@ def save_register(register: Dict[str, Any], *, connect=None) -> None:
                       [(k, json.dumps(register.get(k))) for k in _META_KEYS])
     if gone:
         logger.warning("[concern_store] %d concern(s) removed from the register: %s", len(gone), sorted(gone))
+    # A changed concern is something happening: its brief and handoff follow (subconscious/brain_wake.py).
+    from app.assistant.subconscious import brain_wake
+    brain_wake.poke()
 
 
 def import_legacy_file(path: Path | None = None, *, connect=None) -> int:

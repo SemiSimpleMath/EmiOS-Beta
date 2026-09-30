@@ -314,6 +314,61 @@ A question a dayflow worker asks through the generic `ask_user` tool carries the
 and `dispatch_epoch`, taken from the execution owner of the attempt it runs in, so its page shows the
 work too. A question asked from chat has no work and shows the message and entities.
 
+## The brain runs when something happens (owner, 2026-09-30)
+
+Owner: event driven, not the constant five-minute churn; chat read in finished chunks; "if I am quiet
+in the chat for that long I am not interacting with it anymore". Replaces the `brain_gate` routine
+(removed with its handler).
+
+- `subconscious/brain_wake.py`: one thread runs `run_brain` (gate, brain step, briefs, handoffs) when
+  the ingest service delivers a chat message or email (`handle_envelope`, a gut subscriber), when the
+  concern register is saved from outside the brain (`concern_store.save_register` calls `poke`: work
+  outcomes, the noticer, edits), when a waiting room goes quiet, and once at boot. Otherwise it
+  sleeps. Its own register writes do not wake it. A failed run is logged and not retried.
+- Chat is ready once the owner has been quiet in that room for `brain_inbox.QUIET` (5 minutes), all
+  of the room's messages together; email is ready at once (`brain_inbox.ready`). The gate routes only
+  ready events and reports when the next room goes quiet (`next_ready_at`); readiness is computed
+  from the stored message times, so a restart loses nothing.
+- Email enters the inbox at parser importance `MIN_EMAIL_IMPORTANCE` = 6 and up. Over 2026-09-27..30
+  all 19 emails at 5 were newspaper newsletters or sales and the gate passed on none of them.
+- Slack rooms (`EXCLUDED_ROOM_PREFIXES`) are left out of the brain for now: relaxed talk with
+  friends, not something to act on.
+- The ingest service polls every 2 minutes, so a message is read 5 to 7 minutes after the owner's
+  last message in the room.
+
+## Work attached to a concern (owner, 2026-09-30)
+
+Owner: "the concern does not become a work object, it has a work object attached to it now so we can
+see how it is progressing and what is being done about it"; "when work objects are worked on and
+finalizer runs we update the concerns"; `addressing` means work is attached and being done,
+`resolved` means completely done.
+
+- The concern keeps `attached_work`: per work object its objective, status, attached time, every
+  finalizer judgment (verdict, account, the owner's replies verbatim) and its ending.
+- The work store writes a receipt in the transaction of each change (work_objects/concern_outbox.py):
+  attached (the work cites the concern, at creation or revision), judged (every judgment of a main
+  task, whatever the verdict), done/abandoned. Delivery (subconscious/concern_feedback.py) runs after
+  creation, each judgment and each closure, and in evaluator prep.
+- Attach: active → addressing. The last attached work ending: addressing → active (an explicit
+  decline still parks it dormant). Only the brain resolves.
+- Each judgment and ending is also a brain inbox event (source `work`), routed to its concerns by id
+  without the gate, rendered under "Work <id>" in the brain's input; the brain notes what it
+  established and resolves when the done-when is met or the owner says nothing more is needed.
+  Work feedback no longer wakes the noticer.
+- One-time startup move (persist.rederive_attached_work, owner-approved): every existing concern got
+  `attached_work` from the work citing it and its old `work_outcomes` (dropped); buckets re-derived;
+  concerns whose work had already ended got that ending as a brain event
+  (concern_feedback.report_earlier_endings). Preview on a copy of the live register, 2026-09-30:
+  65 concerns; work stress, fatigue/sleep, a son's college-event plan and the Claude API outage back to
+  active with their endings sent to the brain; the library fine and the annual physical stay
+  addressing; the Oct 2 flea medication moves to addressing (its work is running).
+- The reading page and the noticer read `attached_work`.
+
+Deploy hazard met on the way: deleting `configs/routines/public/brain_gate.json` before the restart
+stopped the brain at once (routine configs hot-reload, the wake is Python): no brain run from
+17:28 UTC until the restart. Remove a routine's config only in the same restart that starts its
+replacement.
+
 ## Requirement for the brain build: association finds dependents (owner, 2026-09-30)
 
 Finding what an event relates to is the most important part of the brain step. A change is rarely

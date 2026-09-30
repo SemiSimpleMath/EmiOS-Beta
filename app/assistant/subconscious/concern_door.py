@@ -225,7 +225,8 @@ def apply_admission(steps: List[Dict[str, Any]], register: Dict[str, Any], *, so
         if step["action"] != "create":
             continue
         record = {k: v for k, v in step["candidate"].items() if k != "label"}
-        record.update({"concern_id": str(uuid.uuid4()), "origin": source, "created_at_utc": now_iso})
+        record.update({"concern_id": str(uuid.uuid4()), "origin": source, "created_at_utc": now_iso,
+                       "attached_work": {}, "work_receipts": []})
         register.setdefault("active", []).append(record)
         landed[i] = record["concern_id"]
 

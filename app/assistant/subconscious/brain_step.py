@@ -7,6 +7,7 @@ this, the noticer read all of it once a day, in one call, beside twenty other co
 A matter is a group of events read together:
 - events the gate routed to the same concerns;
 - new-matter or unrouted events from the same conversation: a chat room, or a Gmail thread.
+Dayflow's reports on attached work (finalizer judgments, endings) arrive routed to their concerns.
 A split that leaves two matters about one thing is caught by the concern door, which folds the
 second concern into the first.
 
@@ -15,7 +16,8 @@ For each matter `subconscious::brain` gets:
   gate's route;
 - the chat summaries (chat_cluster pods) of those rooms from the 48 hours before the first event,
   and any since, so an event is read with the earlier conversations about it, not just this one;
-- the full record of every concern the events bear on, evidence shown as its text, not its id;
+- the full record of every concern the events bear on, evidence shown as its text, not its id,
+  with the work attached to it and every judgment of that work;
 - the other open concerns, briefly;
 - past work (subconscious/work_links.py): work linked exactly (it cites one of the matter's
   concerns, or came from an email in one of its Gmail threads) and similar past work by meaning;
@@ -168,6 +170,7 @@ def _calendar(now_utc: datetime) -> str:
 
 
 def _concern_view(label: str, c: Dict[str, Any]) -> Dict[str, Any]:
+    from app.assistant.subconscious import concern_feedback
     return {
         "label": label, "title": c.get("title"), "status": c["_status"], "subject": c.get("subject") or "household",
         "kind": c.get("kind"), "severity": c.get("severity"), "horizon": c.get("horizon"),
@@ -175,10 +178,12 @@ def _concern_view(label: str, c: Dict[str, Any]) -> Dict[str, Any]:
         "first_observed": c.get("first_observed"), "notes": c.get("notes") or "",
         "evidence": [{"kind": e.get("kind"), "ref": e.get("ref"), "snippet": _evidence_text(e)}
                      for e in c.get("evidence") or []],
-        "work_outcomes": [{"work_id": w.get("work_id"), "outcome": w.get("outcome"), "recorded_at": w.get("recorded_at"),
-                           "user_response": json.dumps(w.get("user_response"), ensure_ascii=False)
-                           if w.get("user_response") else ""}
-                          for w in (c.get("work_outcomes") or {}).values()],
+        "attached_work": [{"work_id": w["work_id"], "title": w.get("title"), "objective": w.get("objective"),
+                           "attached_at": w.get("attached_at"), "status": w.get("status"),
+                           "judgments": [{**j, "replies": [concern_feedback._reply_line(r) for r in j.get("replies") or []]}
+                                         for j in w.get("judgments") or []],
+                           "ended": w.get("ended")}
+                          for w in (c.get("attached_work") or {}).values()],
         "journal": c.get("reinforcement_notes") or "",
     }
 
@@ -306,6 +311,8 @@ def _agent_call(payload: Dict[str, Any]) -> Any:
 def _evidence(e: Dict[str, Any]) -> Dict[str, Any]:
     if e["source"] == "email":
         return {"kind": "pod", "ref": e["source_ref"], "snippet": e["text"].split("\n", 1)[0]}
+    if e["source"] == "work":
+        return {"kind": "work", "ref": e["source_ref"], "snippet": e["text"]}
     return {"kind": "chat_msg", "ref": e["source_ref"], "snippet": e["text"]}
 
 

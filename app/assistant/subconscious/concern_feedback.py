@@ -1,13 +1,16 @@
-"""Concern back-propagation — work-object outcomes flow into the concerns register.
+"""Concern feedback — the work attached to a concern reports to it, and to the brain.
 
-WorkStore commits a pending receipt with each concern-linked terminal transition,
-including automatic rollup. Dayflow delivers after finalization/explicit closure;
-evaluator prep retries receipts left by a crash or register failure. Each receipt
-is idempotent in the concern register. Generic stores never invoke the noticer.
+WorkStore commits a receipt in the same transaction as each change a concern must hear about
+(work_objects/concern_outbox.py): the work was attached (it cites the concern), the finalizer judged
+one of its tasks, or the work ended, including automatic rollup. Dayflow delivers after creation,
+each judgment and each closure; evaluator prep retries receipts left by a crash or register failure.
 
-Delivery failures never roll back completed work. A pending receipt remains until
-all linked concerns have durably received the outcome. Noticer triggering is a
-best-effort, cooldown-guarded acceleration of its normal scheduled run.
+Delivery writes the work's record on the concern (persist.attach_work / record_judgment /
+apply_work_outcome) and, for a judgment or an ending, a brain inbox event routed to the concerns by
+id (owner, 2026-09-30: when work objects are worked on and the finalizer runs, the concerns are
+updated). The brain reads it with the concern's record and decides whether the concern is settled.
+Each receipt is idempotent in the register and in the inbox. Delivery failures never roll back
+work; a receipt remains until every linked concern and the inbox have it.
 """
 from __future__ import annotations
 
@@ -48,61 +51,103 @@ def _last_user_reply(wo) -> dict:
     return deepcopy(max(replies, key=lambda row: row[:2])[2]) if replies else {}
 
 
+def _reply_line(reply: dict) -> str:
+    """One recorded owner reply as the brain reads it: the question, the choice, the words."""
+    details = reply.get("response_details") or {}
+    history = details.get("response_history") or []
+    latest = history[-1] if history else details
+    said = str(reply.get("user_text") or latest.get("typed_text") or "").strip()
+    choice = str(latest.get("label") or reply.get("action") or "").strip()
+    parts = [f'The owner was asked: "{reply.get("question")}"'] if reply.get("question") else []
+    if choice:
+        parts.append(f"chose: {choice}")
+    if said:
+        parts.append(f'said: "{said}"')
+    return "; ".join(parts) or "The owner replied (no words recorded)."
+
+
+def _event_text(receipt) -> str:
+    """The brain event for a judgment or an ending: what happened, in the finalizer's and the
+    owner's own words."""
+    payload, kind = receipt['payload'], receipt['outcome']
+    if kind == 'judged':
+        task, fin = payload['task'], payload['task']['finalizer']
+        lines = [f'Work "{payload["work"]["title"]}" ({receipt["work_id"]}): the finalizer judged the task '
+                 f'"{task["title"]}": {fin.get("verdict")}, next step {fin.get("next_step") or "none"}.',
+                 f"What happened: {fin.get('outcome')}"]
+        lines += [_reply_line(r) for r in task.get('replies') or []]
+        return "\n".join(lines)
+    context = payload['context']
+    return (f'Work "{context["title"]}" ({receipt["work_id"]}) ended: {kind}. '
+            f'Reason: {(context.get("terminal") or {}).get("reason") or "(none recorded)"}.')
+
+
+def report_earlier_endings(reopened) -> int:
+    """The move to attached work (persist.rederive_attached_work) put concerns whose work had
+    already ended back to `active`. Each gets its ending as a brain event, as a live ending would,
+    so the brain decides whether the concern is settled. Idempotent per concern and work."""
+    from app.assistant.subconscious import brain_inbox, brain_wake
+    added = 0
+    for r in reopened:
+        w = r["work"]
+        added += brain_inbox.add_work_event(
+            work_id=w["work_id"], receipt_id=f"rederive-{r['concern_id']}", occurred_at=w["ended"]["at"],
+            text=(f'Work "{w.get("title")}" ({w["work_id"]}) ended: {w["ended"]["outcome"]}. '
+                  f'Reason: {w["ended"].get("reason") or "(none recorded)"}.'),
+            concern_ids=[r["concern_id"]])
+    if added:
+        brain_wake.poke()
+    return added
+
+
 def _deliver_receipt(store, receipt):
     from types import SimpleNamespace
-    from app.assistant.subconscious.persist import apply_work_outcome
-    payload = receipt['payload']
-    snapshot = SimpleNamespace(nodes={n['id']: SimpleNamespace(**n) for n in payload['reply_nodes']})
-    response = _last_user_reply(snapshot)
-    results = [apply_work_outcome(
-        ref, work_id=receipt['work_id'], outcome=receipt['outcome'], user_response=response,
-        receipt_id=receipt['id'], work_context=payload['context']) for ref in payload['concern_refs']]
+    from app.assistant.subconscious import brain_inbox, brain_wake, persist
+    payload, kind, work_id = receipt['payload'], receipt['outcome'], receipt['work_id']
+    refs = payload['concern_refs']
+    if kind == 'attached':
+        results = [persist.attach_work(ref, work_id=work_id, work=payload['work'], receipt_id=receipt['id'])
+                   for ref in refs]
+    elif kind == 'judged':
+        results = [persist.record_judgment(ref, work_id=work_id, task=payload['task'], receipt_id=receipt['id'])
+                   for ref in refs]
+    else:
+        snapshot = SimpleNamespace(nodes={n['id']: SimpleNamespace(**n) for n in payload['reply_nodes']})
+        response = _last_user_reply(snapshot)
+        results = [persist.apply_work_outcome(
+            ref, work_id=work_id, outcome=kind, user_response=response,
+            receipt_id=receipt['id'], work_context=payload['context']) for ref in refs]
     if 'unresolved' in results:
         raise ValueError('one or more concern references could not be resolved')
+    if kind != 'attached':
+        brain_inbox.add_work_event(
+            work_id=work_id, receipt_id=receipt['id'], occurred_at=receipt['created_at'],
+            text=_event_text(receipt), concern_ids=[persist.concern_id_for(ref) for ref in refs])
+        brain_wake.poke()
     store.acknowledge_concern_feedback(receipt['id'])
-    return any(result != 'already_applied' for result in results)
-
-
-def _trigger(work_id, outcome):
-    from app.assistant.subconscious.answer_capture import trigger_noticer
-    trigger_noticer(reason=f"work_outcome:{work_id}:{outcome}")
 
 
 def recover_pending_concern_feedback(store, *, work_id=None):
-    """Retry committed receipts, isolating failures so unrelated closures can deliver."""
-    delivered = 0
+    """Deliver committed receipts in order, isolating failures so unrelated work can deliver. A work
+    object's receipts stop at its first failure, so a judgment never lands before its attachment."""
+    delivered, stuck = 0, set()
     for receipt in store.pending_concern_feedback(work_id):
+        if receipt['work_id'] in stuck:
+            continue
         try:
-            changed = _deliver_receipt(store, receipt)
+            _deliver_receipt(store, receipt)
             delivered += 1
         except Exception:
-            logger.exception('[concern_feedback] receipt %s for %s could not finish',
-                             receipt['id'], receipt['work_id'])
-            continue
-        if changed:
-            try:
-                _trigger(receipt['work_id'], receipt['outcome'])
-            except Exception:
-                logger.exception('[concern_feedback] outcome saved; noticer wake failed for %s',
-                                 receipt['work_id'])
+            stuck.add(receipt['work_id'])
+            logger.exception('[concern_feedback] receipt %s (%s) for %s could not finish',
+                             receipt['id'], receipt['outcome'], receipt['work_id'])
     return delivered
 
 
 def propagate_work_outcome(store, work_id: str, outcome: str) -> None:
-    """Post-commit delivery; legacy explicit callers without a receipt still work."""
+    """Post-commit delivery of every receipt the work has pending: after creation, after each
+    finalizer judgment, after closure. `outcome` names the change, for the log."""
     try:
-        if hasattr(store, 'pending_concern_feedback'):
-            recover_pending_concern_feedback(store, work_id=work_id)
-            return
-        wo = store.load(work_id)
-        refs = [str(r).strip() for r in ((wo.constraints or {}).get('concern_refs') or []) if str(r).strip()]
-        if not refs:
-            return
-        from app.assistant.subconscious.persist import apply_work_outcome
-        results = [apply_work_outcome(ref, work_id=work_id, outcome=outcome,
-                                     user_response=_last_user_reply(wo)) for ref in refs]
-        if 'unresolved' in results:
-            raise ValueError('one or more concern references could not be resolved')
-        _trigger(work_id, outcome)
+        recover_pending_concern_feedback(store, work_id=work_id)
     except Exception:
-        logger.exception('[concern_feedback] propagation failed for %s (%s)', work_id, outcome)
+        logger.exception('[concern_feedback] delivery failed for %s (%s)', work_id, outcome)

@@ -7,7 +7,7 @@ what it is, why it matters, what is known (each fact with its source), what was 
 went, what the owner said, what depends on it, open questions, and a recommendation.
 
 `subconscious::brief` writes it for every open concern whose record changed since its brief was
-written, run by the brain_gate routine after the brain step. The brief is stored on the concern
+written, run by the brain's wake (subconscious/brain_wake.py) after the brain step. The brief is stored on the concern
 (`brief`, with the `basis` fingerprint of the record it was written from, and of WRITER_VERSION);
 a concern whose brief could not be written carries `brief_error` with the same fingerprint and is
 not retried until its record, or the writer, changes. Every cited source must contain a ref the

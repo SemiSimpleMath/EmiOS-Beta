@@ -61,7 +61,7 @@ orchestrator + worker managers import `work_objects.*`).
 | `result_recorder.py` | Shared tool-result recorder. Preserves the directive, optionally attaches a pod, writes `done`/`failed`, adds evidence in the same transaction. The epoch check, status, pod and evidence commit atomically. Error type, `aborted`, `exit_state=error_exit`, or empty answer means failure. The finalizer judges meaning afterwards |
 | `work_tools.py` | The ten `work_*` tools, built from one `_SPECS` table and injected straight into `tool_registry.registry` at runtime (synthesised contracts: domain `work_graph`, `min_authority` 0); also `pod_summary` and the unused `register_manager_as_tool` |
 | `tools.py` | `WorkGraphTools` — plain-Python op wrappers bound to ONE node, which the registered tools call, so a scripted agent can drive the graph with no LLM. Holds one read method the tool layer never exposes: `graph_neighbors` |
-| `concern_outbox.py` | `ConcernOutboxMixin` + `work_concern_feedback` — a durable outcome receipt for each concern-linked terminal transition, written in the closing transaction. Local SQLite only; no application callbacks |
+| `concern_outbox.py` | `ConcernOutboxMixin` + `work_concern_feedback` — durable receipts for the concerns the work is attached to: attached, each finalizer judgment, the ending; written in the transaction of the change. Local SQLite only; no application callbacks |
 | `belief_outbox.py` | `BeliefOutboxMixin` + `work_belief_feedback` — the same contract for beliefs (2026-09-25). See *Outcome delivery to the sources that caused work* below |
 | `scenarios/_scenario_scope.py` | DEV-ONLY harness scope — production authority always derives from the caller (room / task run) |
 | `ui/blueprint.py` | The `/work` editor (list, graph view, event log, manual node edits) |
@@ -554,7 +554,8 @@ never the row id: a merge deprecates the losing id, but the surviving key still 
 
 **Outcome back.** A terminal transition (`done` / `abandoned`, including automatic rollup) writes
 a receipt row **inside the same transaction as the status change** — `work_concern_feedback` via
-`ConcernOutboxMixin`, `work_belief_feedback` via `BeliefOutboxMixin`. A crash between "work
+`ConcernOutboxMixin`, `work_belief_feedback` via `BeliefOutboxMixin`. Concerns also get a receipt
+when the work is attached to them and at each finalizer judgment (see 05_DAYFLOW, attached work). A crash between "work
 closed" and "source updated" therefore leaves a pending receipt, not a silent divergence. The
 store itself makes no application calls; delivery is post-commit and best-effort, and a failed
 delivery never rolls back completed work.

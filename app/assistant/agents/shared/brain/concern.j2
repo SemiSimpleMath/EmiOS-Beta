@@ -9,8 +9,16 @@
 {% for e in c.evidence -%}
 - evidence ({{ e.kind }} {{ e.ref }}){% if e.snippet %}: {{ e.snippet }}{% endif %}
 {% endfor -%}
-{% for w in c.work_outcomes -%}
-- work {{ w.work_id }}: {{ w.outcome }} ({{ w.recorded_at }}){% if w.user_response %}; the owner's response: {{ w.user_response }}{% endif %}
+{% for w in c.attached_work -%}
+- work attached {{ w.attached_at }}: {{ w.work_id }} ({{ w.status }}): {{ w.objective }}
+{% for j in w.judgments -%}
+{{ "  " }}- task "{{ j.title }}" judged {{ j.verdict }} ({{ j.at }}), next step {{ j.next_step or "none" }}: {{ j.outcome }}
+{% for r in j.replies -%}
+{{ "    " }}- {{ r }}
+{% endfor -%}
+{% endfor -%}
+{% if w.ended %}{{ "  " }}- ended {{ w.ended.outcome }} ({{ w.ended.at }}){% if w.ended.reason %}: {{ w.ended.reason }}{% endif %}
+{% endif -%}
 {% endfor -%}
 {% if c.journal %}- journal:{{ c.journal }}
 {% endif %}

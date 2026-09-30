@@ -68,12 +68,13 @@ function render(data) {
       ["known", (b.known || []).map((f) => f.fact)], ["tried", b.tried], ["your wishes", b.owner_wishes],
       ["depends on it", b.depends_on_it], ["open questions", b.open_questions], ["recommendation", b.recommendation],
     ])));
-    if (c.earlier && c.earlier.length) {
+    (c.attached_work || []).forEach((w) => {
       const list = el("ul", "rt-list");
-      c.earlier.forEach((w) => list.appendChild(el("li", null,
-        `${when(w.at)} · ${w.outcome}${w.response && Object.keys(w.response).length ? " · you said: " + JSON.stringify(w.response) : ""}`)));
-      s.appendChild(block("Earlier on this", null, list));
-    }
+      w.judgments.forEach((j) => list.appendChild(el("li", null,
+        `${when(j.at)} · ${j.title}: ${j.verdict}\n${j.outcome || ""}${j.replies.length ? "\n" + j.replies.join("\n") : ""}`)));
+      if (w.ended) list.appendChild(el("li", null, `${when(w.ended.at)} · ended ${w.ended.outcome}${w.ended.reason ? ": " + w.ended.reason : ""}`));
+      s.appendChild(block(w.objective || w.work_id, `work ${w.status} · attached ${when(w.attached_at)}`, list));
+    });
     a.appendChild(s);
   });
 

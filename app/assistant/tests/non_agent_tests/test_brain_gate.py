@@ -55,8 +55,9 @@ def fake_log(monkeypatch):
 MAIL = {}         # the fake email pods, by pod id
 
 
-def mail(pod_id, minutes, subject, body, thread="t1", account="acct", sender="School Office"):
+def mail(pod_id, minutes, subject, body, thread="t1", account="acct", sender="School Office", importance=7):
     MAIL[pod_id] = {"pod_id": pod_id, "account_id": account, "thread_id": thread, "subject": subject,
+                    "importance": importance,
                     "body": body, "sender_display": sender, "sender_email": "office@school.example",
                     "received_at_utc": (NOW - timedelta(minutes=minutes)).isoformat(),
                     "created_at": (NOW - timedelta(minutes=minutes - 1)).isoformat()}
@@ -97,7 +98,7 @@ def test_routes_are_validated_and_mapped_back_by_code(connect):
         _decisions(("E1", "concern", ["C1"]), ("E2", "new_matter", []), ("E3", "none", [])),
     ])
     out = gate.run_gate(ingest=False, call=lambda payload: next(answers), register=REGISTER, connect=connect)
-    assert out == {"ingested": 0, "routed": 3, "passed_on": 2, "failed": 0}
+    assert out == {"ingested": 0, "routed": 3, "passed_on": 2, "failed": 0, "waiting": 0, "next_ready_at": None}
     reports = brain_step.pending_events(connect)
     assert [(r["text"], r["route"], r["concern_ids"]) for r in reports] == [
         ("Gave the cat the worm tablet.", "concern", ["c-meds"]),
@@ -221,3 +222,83 @@ def test_chat_and_email_share_one_view_and_an_unknown_source_is_refused():
     assert [g["heading"] for g in groups] == ["Room master_room", "Email inbox acct"]
     with pytest.raises(ValueError, match="unknown source"):
         conversations.build([{**email_event, "source": "sms"}], now_utc=NOW)
+
+
+# ── what reaches the gate, and when (owner, 2026-09-30) ────────────────────
+
+def test_slack_and_low_importance_email_stay_out_of_the_brain(connect):
+    batch = [msg(1, 30, "vet on Friday"), msg(2, 20, "lol nice", room="slack/C1")]
+    assert inbox.ingest_chat(now_utc=NOW, connect=connect, fetch=lambda since: batch) == 1
+    kept = mail("datapod:email:a", 60, "Form due", "Sign the form.", importance=6)
+    dropped = mail("datapod:email:b", 50, "Sale ends today", "Subscribe now.", importance=5)
+    assert inbox.ingest_email(now_utc=NOW, connect=connect, fetch=lambda since: [kept, dropped]) == 1
+    assert [e["source_ref"] for e in inbox.pending(connect)] == ["datapod:email:a", "message:m1"]
+
+
+def test_a_room_still_talking_waits_whole_and_email_goes_at_once(connect):
+    inbox.ingest_chat(now_utc=NOW, connect=connect, fetch=lambda since: [
+        msg(1, 30, "Car booked for Tuesday."),                         # master_room: quiet since 2 min ago
+        msg(2, 2, "and the tyres too."),
+        msg(3, 9, "The cat had the tablet.", room="tg_family")])       # tg_family: quiet 9 min
+    inbox.ingest_email(now_utc=NOW, connect=connect, fetch=lambda since: [
+        mail("datapod:email:a", 1, "Form due", "Sign the form.")])
+    seen = []
+
+    def call(payload):
+        text = str(payload["conversations"])
+        seen.append(text)
+        labels = [f"E{i}" for i in range(1, text.count("'mark': 'E") + 1)]
+        return _decisions(*[(e, "new_matter", []) for e in labels])
+
+    out = gate.run_gate(ingest=False, call=call, register=REGISTER, connect=connect, now_utc=NOW)
+    assert (out["routed"], out["waiting"]) == (2, 2)
+    assert out["next_ready_at"] == NOW + timedelta(minutes=3)             # 2 min ago + 5 min quiet
+    assert "The cat had the tablet." in seen[0] and "Form due" in seen[0]
+    assert "Car booked" not in seen[0] and "tyres" not in seen[0]         # neither half of the talking room
+
+    later = gate.run_gate(ingest=False, call=call, register=REGISTER, connect=connect,
+                          now_utc=NOW + timedelta(minutes=3))
+    assert (later["routed"], later["waiting"], later["next_ready_at"]) == (2, 0, None)
+    assert "Car booked" in seen[1] and "tyres" in seen[1]
+
+
+def test_the_wake_runs_on_events_and_register_changes_but_not_on_its_own_writes(monkeypatch):
+    import threading
+    from app.assistant.subconscious import brain_wake
+    brain_wake._poked.clear()
+    brain_wake.handle_envelope(object())
+    assert brain_wake._poked.is_set()
+
+    brain_wake._poked.clear()
+    inside = []
+
+    def own_run():
+        brain_wake._inside.run = True
+        brain_wake.poke()                                              # e.g. the brief writer saving a brief
+        inside.append(brain_wake._poked.is_set())
+    t = threading.Thread(target=own_run)
+    t.start()
+    t.join()
+    assert inside == [False]
+
+
+def test_work_reports_render_under_their_work_and_attached_work_under_its_concern(monkeypatch):
+    from app.assistant.dayflow_orchestrator import work_context
+    event = {"source": "work", "source_ref": "work:work_a:000-r1", "occurred_at": (NOW - timedelta(minutes=3)).isoformat(),
+             "room_id": None, "speaker": "dayflow", "mark": "E1",
+             "text": 'Work "Check in" (work_a): the finalizer judged the task "Ask": achieved.'}
+    text = conversations.render(conversations.build([event], now_utc=NOW))
+    assert "### Work work_a" in text and '[E1] dayflow: Work "Check in"' in text
+    monkeypatch.setattr(brain_step, "_evidence_text", lambda e: e.get("snippet") or "")
+    concern = {"concern_id": "c1", "title": "Stress", "_status": "addressing", "evidence": [],
+               "attached_work": {"work_a": {"work_id": "work_a", "title": "Check in", "objective": "Check in on stress",
+                   "attached_at": "2026-03-10T10:00:00+00:00", "status": "done", "ended": {
+                       "outcome": "done", "at": "2026-03-10T11:00:00+00:00", "reason": "judged complete"},
+                   "judgments": [{"node_id": "ask", "title": "Ask", "verdict": "achieved", "next_step": "",
+                                  "outcome": "He is less stressed.", "at": "2026-03-10T10:30:00+00:00",
+                                  "replies": [{"question": "How is work?", "user_text": "less stress now"}]}]}}}
+    c = brain_step._concern_view("C1", concern)
+    rendered = work_context._ENV.from_string("{% include 'shared/brain/concern.j2' %}").render(c=c)
+    assert "work attached 2026-03-10T10:00:00+00:00: work_a (done): Check in on stress" in rendered
+    assert 'task "Ask" judged achieved' in rendered and "He is less stressed." in rendered
+    assert 'said: "less stress now"' in rendered and "ended done" in rendered

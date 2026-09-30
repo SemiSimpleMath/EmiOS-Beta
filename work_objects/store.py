@@ -265,7 +265,7 @@ class StaleResult(ValueError):
 from work_objects.execution_store import ExecutionStoreMixin, SCHEMA as EXECUTION_SCHEMA
 
 
-from work_objects.concern_outbox import ConcernOutboxMixin, SCHEMA as CONCERN_FEEDBACK_SCHEMA
+from work_objects.concern_outbox import ConcernOutboxMixin, SCHEMA as CONCERN_FEEDBACK_SCHEMA, concern_snapshot
 from work_objects.belief_outbox import BeliefOutboxMixin, SCHEMA as BELIEF_FEEDBACK_SCHEMA
 
 
@@ -416,6 +416,7 @@ class WorkStore(ConcernOutboxMixin, BeliefOutboxMixin, ExecutionStoreMixin):
                     if pending["status"] != target:
                         raise ValueError(f"Conflicting pending closure for {wid}")
                     continue
+                before = concern_snapshot(wo)
                 if wid in (goal_updates or {}):
                     # Preserve same-pass source handoffs before making the goal terminal.
                     self._op_revise_goal(wo, goal_updates[wid], now, actor)
@@ -424,6 +425,7 @@ class WorkStore(ConcernOutboxMixin, BeliefOutboxMixin, ExecutionStoreMixin):
                 self._conn.execute("INSERT INTO events(work_id, ts, actor, op, data) VALUES(?,?,?,?,?)",
                                    (wid, now, actor, "request_work_closure", json.dumps(intent)))
                 self._persist(wo, now)
+                self._queue_concern_feedback(wo, wo.status, now, before)
 
     def pending_work_closures(self):
         """Read durable requests without loading unrelated graphs."""
@@ -444,6 +446,7 @@ class WorkStore(ConcernOutboxMixin, BeliefOutboxMixin, ExecutionStoreMixin):
         with self._lock, self._conn:  # serialize writers; atomic event + projection
             self._conn.execute("BEGIN IMMEDIATE")  # fence the read, not only the later write
             previous_status = None
+            before = concern_snapshot(None)
             if op == "create_work_object":
                 from work_objects.runtime import peek_work_context
                 if peek_work_context() is not None:
@@ -455,6 +458,7 @@ class WorkStore(ConcernOutboxMixin, BeliefOutboxMixin, ExecutionStoreMixin):
                     raise ValueError(f"op {op!r} requires work_id")
                 wo = self._load(wid)
                 previous_status = wo.status
+                before = concern_snapshot(wo)
                 if (wo.constraints.get("pending_work_closure")
                         and op not in {"set_work_status", "record_result", "finalize_task"}):
                     from work_objects.execution_store import ExecutionBlocked
@@ -474,7 +478,7 @@ class WorkStore(ConcernOutboxMixin, BeliefOutboxMixin, ExecutionStoreMixin):
                 (wo.id, now, actor, op, json.dumps(data, default=str)),
             )
             self._persist(wo, now)
-            self._queue_concern_feedback(wo, previous_status, now)
+            self._queue_concern_feedback(wo, previous_status, now, before)
             self._queue_belief_feedback(wo, previous_status, now)
         if execution_revoked:
             from app.assistant.manager_runtime.execution import REGISTRY

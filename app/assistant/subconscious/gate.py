@@ -10,11 +10,14 @@ Labels are request-local (E1… for events, C1… for concerns) and mapped back 
 never copies a concern_id or a message id. Events are shown inside their conversations, grouped by
 room under the room's description (subconscious/conversations.py); unlabelled turns are context.
 
-What is passed on (concern or new_matter) is read by the brain step, run right after the gate by the
-brain_gate routine (subconscious/brain_step.py).
+Only ready events are routed (brain_inbox.ready): an email at once, a chat room's messages once the
+room has been quiet for brain_inbox.QUIET, all of them together. What is passed on (concern or
+new_matter) is read by the brain step, run right after the gate by the brain's wake
+(subconscious/brain_wake.py, subconscious/brain_step.py).
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from app.assistant.utils.logging_config import get_logger
@@ -102,17 +105,22 @@ def _agent_call(payload: Dict[str, Any]) -> Any:
 
 
 def run_gate(*, ingest: bool = True, call: Optional[Callable[[Dict[str, Any]], Any]] = None,
-             register: Optional[Dict[str, Any]] = None, connect=None) -> Dict[str, Any]:
-    """Ingest new chat and email and route every pending event. Free when nothing is pending (no
-    model call). The keyword arguments are test seams."""
+             register: Optional[Dict[str, Any]] = None, connect=None,
+             now_utc: Optional[datetime] = None) -> Dict[str, Any]:
+    """Ingest new chat and email and route every ready event. Free when nothing is ready (no model
+    call). `next_ready_at` is when the next room still talking goes quiet (None: none is). The
+    keyword arguments are test seams."""
     from app.assistant.subconscious import brain_inbox as inbox
     from belief_engine.matching.context import pages
 
+    now_utc = now_utc or datetime.now(timezone.utc)
     kw = {"connect": connect} if connect else {}
-    ingested = (inbox.ingest_chat(**kw) + inbox.ingest_email(**kw)) if ingest else 0
-    events = inbox.pending(**kw)
+    ingested = (inbox.ingest_chat(now_utc=now_utc, **kw) + inbox.ingest_email(now_utc=now_utc, **kw)) if ingest else 0
+    pending = inbox.pending(**kw)
+    events = inbox.ready(pending, now_utc)
+    waiting = {"waiting": len(pending) - len(events), "next_ready_at": inbox.next_ready_at(pending, now_utc)}
     if not events:
-        return {"ingested": ingested, "routed": 0, "passed_on": 0, "failed": 0}
+        return {"ingested": ingested, "routed": 0, "passed_on": 0, "failed": 0, **waiting}
     if register is None:
         from app.assistant.subconscious.concern_store import load_register
         register = load_register()
@@ -135,5 +143,6 @@ def run_gate(*, ingest: bool = True, call: Optional[Callable[[Dict[str, Any]], A
             inbox.record_route(event_id, d["route"], d["concern_ids"], d["reasoning"], **kw)
             routed += 1
             passed += d["route"] != "none"
-    logger.info("[gate] ingested=%d routed=%d passed_on=%d failed=%d", ingested, routed, passed, failed)
-    return {"ingested": ingested, "routed": routed, "passed_on": passed, "failed": failed}
+    logger.info("[gate] ingested=%d routed=%d passed_on=%d failed=%d waiting=%d", ingested, routed, passed,
+                failed, waiting["waiting"])
+    return {"ingested": ingested, "routed": routed, "passed_on": passed, "failed": failed, **waiting}

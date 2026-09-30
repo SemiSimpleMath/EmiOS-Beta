@@ -628,25 +628,28 @@ an abandoned concern; typed qualifiers and other replies remain for noticer judg
 Historical `created_by=reply` evidence stays readable as unclassified user words.
 
 
-### Durable concern outcomes (DF40)
+### Durable concern feedback: attached work (DF40; attached work 2026-09-30)
 
-Every new concern-linked transition to done/abandoned writes a receipt snapshot
-to `work_concern_feedback` in the same SQLite transaction as the graph. This
-includes automatic goal rollup. Dayflow finalization and explicit closure deliver
-after commit; evaluator prep retries pending receipts. Register failures or unknown
-concern refs leave receipts pending. Per-concern receipt IDs prevent duplicate
-journals after partial delivery or a crash before acknowledgment. Generic WorkStore
-has no register/model side effects. There is no historical backfill.
+A concern never becomes a work object; work citing it is attached to it. The store writes a
+receipt to `work_concern_feedback` in the same SQLite transaction as each change the concern must
+hear about (work_objects/concern_outbox.py): `attached` (the work cites a concern it did not cite
+before, at creation or revision), `judged` (the finalizer judged one of its main tasks, whatever
+the verdict; the receipt carries the verdict, the account and the user's replies to that task),
+and `done`/`abandoned` (including automatic goal rollup). Receipts of one transaction keep their
+order. Dayflow delivers after creation, each judgment and explicit closure; evaluator prep
+retries pending receipts. Register failures or unknown concern refs leave receipts pending, and a
+work object's later receipts wait behind its first undelivered one. Per-concern receipt IDs prevent
+duplicate writes after partial delivery or a crash before acknowledgment. Generic WorkStore has
+no register/model side effects.
 
-The register's `work_outcomes` preserves objective, terminal reason, main-task
-finalizer judgments and the latest attributed user response from the closure
-snapshot. Both tracked and recently closed concern projections include this and
-the journal, independent of recent Dayflow log retention. Done work moves an active
-concern to addressing; it does not prove the underlying need resolved. Noticer
-policy requires new evidence or an agreed follow-up before repeating a settled ask.
-Addressing reviews restart their four-day review interval without changing when
-handling originally began. A noticer wake is best effort/cooldown guarded; delivery
-does not wait for an LLM, and ordinary chat gains no new work.
+The concern keeps `attached_work`: per work object its objective, status, every judgment and its
+ending, independent of Dayflow log retention. `addressing` means attached work is in progress: an
+attachment moves an active concern there, and the last attached work ending moves it back to
+active. Judgments and endings also become brain inbox events routed to the concerns by id
+(subconscious/concern_feedback.py); the brain reads them with the concern's record and decides
+whether it is settled. Done work does not prove the underlying need resolved. A one-time
+startup move (persist.rederive_attached_work) built `attached_work` for the concerns that
+existed on 2026-09-30 and reported already-ended work to the brain.
 
 
 ### Scheduler readiness checks (DF41)

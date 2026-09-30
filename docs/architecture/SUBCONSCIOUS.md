@@ -29,9 +29,10 @@ The Subconscious is EmiOS's autonomous background "mind." It runs while the user
        └─► answer_capture ──► subconscious::answer_matcher ──► mark_answered
                               ──► annotate_concern ──► trigger_noticer (cooldown)
 
-   dayflow work-object closure (concern-linked) ──► concern_feedback.propagate_work_outcome
-       ──► persist.apply_work_outcome (done→addressing; user-declined→DORMANT with the
-           user's verbatim words; system-abandon→journal only) ──► trigger_noticer (cooldown)
+   dayflow work attached to a concern (receipts: attached, each judgment, the ending)
+       ──► concern_feedback ──► persist.attach_work (active→addressing) / record_judgment /
+           apply_work_outcome (last work ended: addressing→active; user-declined→DORMANT)
+       ──► brain inbox event per judgment and ending ──► the brain decides (brain_wake)
 ```
 
 The register is the **spine**: every other component either feeds it (noticer, answer-capture, work-outcome propagation) or reads it (proposers, digest, dashboard). The noticer is the only LLM that mutates concern lifecycle — the propagation writers are deterministic id-joins (2026-08-01: the evaluator cites `[concern:<prefix>]` ids in `based_on`, work objects carry `constraints.concern_refs`, and every dayflow closure path back-propagates; before this, 19 duplicate AC-service work objects were minted because outcomes never reached the register).
@@ -141,7 +142,7 @@ The Dayflow conversation_starter stage (§6) also calls `pick_question_for_nudge
 
 `check_open_questions` is **free in the common case**: no asked-unanswered questions → pure SQL, no LLM. For each open question it pulls candidate user messages in the asked room since `asked_at` (cap 12), and judges them with one `subconscious::answer_matcher` call (`gpt-5.6-luna`, no tools). The matcher returns `verdict` ∈ `{answered, partial, no_answer}` + `answer_text` / `answer_message_id` / `confidence` / `notes`; it biases to `partial`+low-confidence when unsure because a wrong captured answer corrupts the concern it routes back to.
 
-On `answered`: `mark_answered` → if `related_concern_id`, `annotate_concern_answer` journals the answer onto the concern immediately (atomic write) → after the loop, `trigger_noticer(...)` fires one background noticer tick, guarded by a **600s monotonic cooldown** (the tick reads all captured answers anyway), so the register reacts within minutes instead of at the next daily tick. Work-outcome propagation (2026-08-01) fires the same trigger when a concern-linked work object closes.
+On `answered`: `mark_answered` → if `related_concern_id`, `annotate_concern_answer` journals the answer onto the concern immediately (atomic write) → after the loop, `trigger_noticer(...)` fires one background noticer tick, guarded by a **600s monotonic cooldown** (the tick reads all captured answers anyway), so the register reacts within minutes instead of at the next daily tick. Work feedback no longer wakes the noticer (2026-09-30): judgments and endings of attached work go to the brain as inbox events.
 
 ## 6. Proactive Outreach
 

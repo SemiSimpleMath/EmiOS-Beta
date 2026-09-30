@@ -251,13 +251,18 @@ Claims, result recording, finalizer judgments and architect revision batches are
 
 ### Concern outcome delivery
 
-Concern-linked terminal transitions enqueue `work_concern_feedback` in the same
-WorkStore transaction, including automatic rollup. Keep register/model calls outside
-the generic store. Dayflow finalization/closure deliver after commit; evaluator prep
-recovers pending receipts. Register writes are receipt-idempotent; acknowledge only
-after every linked concern is updated. Preserve `work_outcomes` in concern context,
-including attributed user replies and finalizer judgments. A completed notification
-does not prove the underlying need resolved. Noticer recurrence policy lives in Jinja.
+A concern never becomes a work object: work citing it (`constraints.concern_refs`) is
+ATTACHED to it, recorded on the concern as `attached_work` (objective, status, every
+finalizer judgment with the user's replies, the ending). The store enqueues
+`work_concern_feedback` receipts in the same transaction as each change: `attached`
+(refs added at creation or revision), `judged` (each finalizer judgment of a main task,
+achieved or not), `done`/`abandoned` (including automatic rollup). Keep register/model
+calls outside the generic store. Dayflow delivers after creation, each judgment and
+closure; evaluator prep recovers pending receipts. Register writes are receipt-idempotent;
+acknowledge only after every linked concern and the brain inbox have it. `addressing`
+means attached work is in progress: set on attach, left when the last attached work ends.
+Judgments and endings become brain inbox events routed to the concerns by id; only the
+brain resolves a concern. A completed notification does not prove the need resolved.
 
 
 ### Belief outcome delivery

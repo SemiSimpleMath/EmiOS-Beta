@@ -8,9 +8,9 @@ after the persist node in the same tick and lays the goal's DAG. (`advance_work_
 "decomposed by the worker when first advanced" cold-start both went with the pre-architect design —
 there is no advance directive any more, and dispatch runs every ready node.)
 
-`based_on` entries prefixed `concern:` are lifted into `constraints.concern_refs` at creation so a
-terminal outcome can be back-propagated to the subconscious register; complete/abandon call
-`propagate_work_outcome` here, directly. Work made from an intake item the brain handed over carries
+`based_on` entries prefixed `concern:` are lifted into `constraints.concern_refs` at creation: the
+work is attached to those concerns, which then hear of each judgment and of its ending
+(concern_feedback.propagate_work_outcome, called here after creation, revision and closure). Work made from an intake item the brain handed over carries
 that item's concern whatever the steward cites (work_intake.concern_refs_of).
 """
 from __future__ import annotations
@@ -92,6 +92,8 @@ def persist_steward_output(store, output: Dict[str, Any], *, admitted_artifacts=
             store.apply("set_status", {
                 "work_id": wo.id, "node_id": wo.goal_node_id, "status": "dispatched",
             }, actor="steward")
+            from app.assistant.subconscious.concern_feedback import propagate_work_outcome
+            propagate_work_outcome(store, wo.id, "attached")
             created.append({"objective": objective, "work_id": wo.id, "rationale": rationale,
                             "based_on": list(spec.get("based_on") or [])})
         else:
@@ -99,6 +101,8 @@ def persist_steward_output(store, output: Dict[str, Any], *, admitted_artifacts=
             update = goal_update(wo, objective=objective, sources=sources,
                                  success_criteria=spec.get("success_criteria"))
             store.apply("revise_goal", update, actor="steward")
+            from app.assistant.subconscious.concern_feedback import propagate_work_outcome
+            propagate_work_outcome(store, work_id, "attached")
             changed.append(work_id)
             changed_records.append({"work_id": work_id, "based_on": list(spec.get("based_on") or [])})
 

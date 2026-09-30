@@ -182,9 +182,11 @@ class WorkFinalizerNode(ControlNode):
             }, actor="finalizer")
         except StaleResult:
             return []
-        if dayflow_delivery and updated.status in {"done", "abandoned"}:
+        if dayflow_delivery:
+            # Every judgment reaches the concerns the work is attached to, not only the ending.
             from app.assistant.subconscious.concern_feedback import propagate_work_outcome
-            propagate_work_outcome(store, updated.id, updated.status)
+            propagate_work_outcome(store, updated.id, "judged")
+        if dayflow_delivery and updated.status in {"done", "abandoned"}:
             from belief_engine.work_feedback import propagate_work_outcome_to_beliefs
             propagate_work_outcome_to_beliefs(store, updated.id, updated.status)
         fin = updated.nodes[node.id].payload["finalizer"]
