@@ -20,7 +20,9 @@ For each matter `subconscious::brain` gets:
 - past work (subconscious/work_links.py): work linked exactly (it cites one of the matter's
   concerns, or came from an email in one of its Gmail threads) and similar past work by meaning;
 - what is already in motion: active work, live scheduled reminders, and the calendar for the next
-  CALENDAR_DAYS, so the brain can name everything that depends on a fact that changed.
+  CALENDAR_DAYS, so the brain can name everything that depends on a fact that changed;
+- the people, places and things the events name, from the knowledge graph, and what joins them
+  (subconscious/kg_links.py).
 
 It answers with notes and resolutions on concerns, new concerns (with done-when, and the owner's
 words verbatim when the owner asked for it), and a decision on every event. Code validates the
@@ -186,7 +188,7 @@ def build_payload(events: List[Dict[str, Any]], register: Dict[str, Any],
                   calendar: Optional[str] = None) -> Tuple[Dict[str, Any], Dict[str, Dict], Dict[str, str]]:
     """The brain's input for one matter. Returns (payload, event by label, concern_id by label).
     `calendar` is the run's calendar text, read once per run; omitted, it is read here."""
-    from app.assistant.subconscious import conversations, work_links
+    from app.assistant.subconscious import conversations, kg_links, work_links
     from app.assistant.utils.time_utils import utc_to_local
     now = now_utc or datetime.now(timezone.utc)
     open_concerns = [{**c, "_status": b} for b in ("active", "addressing") for c in register.get(b) or []]
@@ -204,6 +206,7 @@ def build_payload(events: List[Dict[str, Any]], register: Dict[str, Any],
         if e["source"] == "email":
             record = conversations._load_email(e["source_ref"])
             threads.append({"account_id": record.get("account_id"), "thread_id": record.get("thread_id")})
+    entities = kg_links.find_entities([e["text"] for e in events])
     linked = work_links.linked_work(named, threads)
     similar = work_links.similar_work([e["text"] for e in events] + [by_id[cid].get("title") for cid in named],
                                       exclude=[w["work_id"] for w in linked])
@@ -220,6 +223,8 @@ def build_payload(events: List[Dict[str, Any]], register: Dict[str, Any],
         "active_work": work_links.active_work(),
         "reminders": work_links.live_reminders(now),
         "calendar": calendar if calendar is not None else _calendar(now),
+        "entities": entities,
+        "shared": kg_links.shared([x["node_id"] for x in entities]),
     }
     return payload, {e["mark"]: e for e in marked}, labels
 

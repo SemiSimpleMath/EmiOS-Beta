@@ -211,6 +211,33 @@ work as depending on it, and put what is unknown (medication on hand, dose given
 the library-fine brief sourced every fact to the school's email and found in past work that two
 earlier attempts to get the owner's choice expired unanswered.
 
+## Knowledge-graph entities for the brain and the brief (2026-09-30)
+
+`app/assistant/subconscious/kg_links.py`. The chat's card-based detector knows only carded entities
+(Karjalohja has no card), and the context engine's convergence walk took over an hour a run (bug
+list). Owner: search the entity nodes directly.
+
+- `find_entities`: every Entity node (1,561) whose label or alias appears as whole words, the card
+  detector's rules (possessive allowed), longest name first so "South Lake Middle School" does not
+  also match "Lake". Multi-word names in any case; a single-word name only where the text
+  capitalizes it, unless the text is all lowercase or the entity is central (PageRank >= 0.005: 39
+  entities, the household's people, dogs and places). Without the case rule, a concern's long chat
+  summaries matched Bed, Water, Dinner, Pizza, Ship. The primary user's nodes are left out.
+- `shared`: in one set-based query, the Event/State nodes linked to two or more of the named entities
+  (the graph joins entities through them) and the entities reached from two or more through one such
+  node; 10 most important of each. The owner's brother + Karjalohja: the owner's wife and father, in 0.09 s.
+- Both the brain (events' text) and the brief writer (title, notes, evidence text) get a "Named here"
+  section: each entity's description, and what joins them.
+
+Brief writer v2 (`WRITER_VERSION`, part of every brief's basis, so raising it rewrites every brief and
+retries every failure): the first live run wrote 1 brief and failed 3 on source format, not
+invention: the writer cited evidence as displayed ("pod datapod:…"), older bare ids, and two sources
+at once. A source part is now valid when it contains a ref that was shown (or its id without the
+`kind:` prefix), several may be separated by ";", and `journal`, `notes`, `knowledge graph` are
+named sources. Scheduled reminders carry `reminder:<id>`: the writer had invented
+"calendar:<a friend>'s birthday" for one. Live re-run of the three: all valid; the friend's-birthday brief cited the
+reminder by its ref.
+
 ## Requirement for the brain build: association finds dependents (owner, 2026-09-30)
 
 Finding what an event relates to is the most important part of the brain step. A change is rarely

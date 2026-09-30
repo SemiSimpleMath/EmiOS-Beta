@@ -8,9 +8,10 @@ class Fact(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     fact: str = Field(description="One thing known about the matter, stated plainly.")
-    source: str = Field(description="Where it comes from, copied exactly as shown in the context: an evidence "
-                                    "ref (message:..., datapod:...), a work id (work_...), a calendar:... anchor, "
-                                    "or the single word journal (or notes) for what the concern's own journal (or notes) say.")
+    source: str = Field(description="Where it comes from, as shown in the context: an evidence ref, a work id "
+                                    "(work_...), a calendar:... anchor or a reminder:... ref; several separated by ';'. "
+                                    "For a fact from the concern's own journal or notes, or from the knowledge graph's "
+                                    "description of a person or place: journal, notes or knowledge graph.")
 
 
 class AgentForm(BaseModel):

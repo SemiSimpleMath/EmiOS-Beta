@@ -27,6 +27,7 @@ Now: {{ agent_input.now }}
 {% else -%}
 (none)
 {% endfor %}
+{% include 'shared/brain/entities.j2' %}
 {% include 'shared/brain/work_and_motion.j2' %}
 {% if agent_input.correction %}
 ## Correct your previous answer

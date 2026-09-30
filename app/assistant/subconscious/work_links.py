@@ -215,14 +215,15 @@ def live(rows: List[Any], now: datetime) -> List[Dict[str, Any]]:
         return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
     out = []
-    for event_type, interval, start, end, payload in rows:
+    for event_id, event_type, interval, start, end, payload in rows:
         start_dt, end_dt = parse(start), parse(end)
         if event_type == "one_time_event" and start_dt is not None and start_dt < now:
             continue
         if end_dt is not None and end_dt < now:
             continue
         p = json.loads(payload or "{}")
-        out.append({"title": str(p.get("event_title") or p.get("title") or p.get("message") or ""),
+        out.append({"ref": f"reminder:{event_id}",
+                    "title": str(p.get("event_title") or p.get("title") or p.get("message") or ""),
                     "kind": "one time" if event_type == "one_time_event" else "recurring",
                     "repeats": _repeats(interval),
                     "start": utc_to_local(start_dt).strftime("%a %Y-%m-%d %H:%M") if start_dt else "",
@@ -235,5 +236,6 @@ def live_reminders(now_utc: Optional[datetime] = None) -> List[Dict[str, Any]]:
     from app.models.db_manager import get_db_manager
     with get_db_manager().read_session() as session:
         raw = session.connection().connection.driver_connection
-        rows = raw.execute("SELECT event_type, interval, start_date, end_date, event_payload FROM time_events").fetchall()
+        rows = raw.execute("SELECT event_id, event_type, interval, start_date, end_date, event_payload "
+                           "FROM time_events").fetchall()
     return live(rows, now_utc or datetime.now(timezone.utc))

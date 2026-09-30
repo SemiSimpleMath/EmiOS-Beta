@@ -24,7 +24,7 @@ Active work:
 {% endfor %}
 Scheduled reminders:
 {% for r in agent_input.reminders -%}
-- {{ r.title }} ({{ r.kind }}{% if r.repeats %}, {{ r.repeats }}{% endif %}; {% if r.kind == "one time" %}at{% else %}from{% endif %} {{ r.start }}{% if r.end %} until {{ r.end }}{% endif %})
+- [{{ r.ref }}] {{ r.title }} ({{ r.kind }}{% if r.repeats %}, {{ r.repeats }}{% endif %}; {% if r.kind == "one time" %}at{% else %}from{% endif %} {{ r.start }}{% if r.end %} until {{ r.end }}{% endif %})
 {% else -%}
 (none)
 {% endfor %}

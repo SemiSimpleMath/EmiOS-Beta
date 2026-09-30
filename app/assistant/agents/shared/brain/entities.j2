@@ -1,0 +1,18 @@
+{#- People, places and things named here, from the knowledge graph (subconscious/kg_links.py).
+    Expects `agent_input` with entities and shared. -#}
+## Named here, from the knowledge graph
+
+{% for e in agent_input.entities -%}
+- {{ e.label }}: {{ e.description or "(no description recorded)" }}
+{% else -%}
+(no person, place or thing in the knowledge graph is named here)
+{% endfor %}
+{% if agent_input.shared and (agent_input.shared.links or agent_input.shared.entities) -%}
+What joins them in the knowledge graph (recorded before today):
+{% for l in agent_input.shared.links -%}
+- {{ l.type }} "{{ l.label }}"{% if l.start %} ({{ l.start }}{% if l.end and l.end != l.start %} to {{ l.end }}{% endif %}){% endif %}: {{ l.description or "(no description)" }}
+{% endfor -%}
+{% for s in agent_input.shared.entities -%}
+- connected to both: {{ s.label }}: {{ s.description or "(no description)" }}
+{% endfor %}
+{% endif %}

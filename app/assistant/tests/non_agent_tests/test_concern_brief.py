@@ -27,6 +27,9 @@ def fakes(monkeypatch):
     monkeypatch.setattr(work_links, "similar_work", lambda texts, exclude=(): [])
     monkeypatch.setattr(work_links, "active_work", lambda: [])
     monkeypatch.setattr(work_links, "live_reminders", lambda now=None: [])
+    from app.assistant.subconscious import kg_links
+    monkeypatch.setattr(kg_links, "find_entities", lambda texts: [])
+    monkeypatch.setattr(kg_links, "shared", lambda ids: {"links": [], "entities": []})
     from app.assistant.subconscious import brain_step
     monkeypatch.setattr(brain_step, "_message_text", lambda mid: f"(message {mid})")
 
@@ -112,8 +115,34 @@ def test_the_brief_prompt_renders_the_concern_and_what_is_in_motion():
     from app.assistant.subconscious import brain_step
     payload = {"now": "Tue", "concern": brain_step._concern_view("C1", {**_concern(), "_status": "active"}),
                "linked_work": [], "similar_work": [], "active_work": [],
-               "reminders": [{"title": "Flea dose", "kind": "recurring", "repeats": "every month", "start": "Thu", "end": ""}],
-               "calendar": "- [calendar:flea] Flea medication @ Oct 2", "correction": None}
+               "reminders": [{"ref": "reminder:r9", "title": "Flea dose", "kind": "recurring", "repeats": "every month",
+                              "start": "Thu", "end": ""}],
+               "calendar": "- [calendar:flea] Flea medication @ Oct 2",
+               "entities": [{"label": "Bonnie", "description": "A dog."}], "shared": {"links": [], "entities": []},
+               "correction": None}
     user = work_context._ENV.get_template("subconscious/brief/prompts/user.j2").render(agent_input=payload)
     assert "### [C1] Flea medication due (active)" in user and "- done when: dose given" in user
-    assert "- Flea dose (recurring, every month; from Thu)" in user and "[calendar:flea]" in user
+    assert "- [reminder:r9] Flea dose (recurring, every month; from Thu)" in user and "[calendar:flea]" in user
+    assert "- Bonnie: A dog." in user
+
+
+def test_a_source_may_name_what_was_shown_in_the_form_it_was_shown():
+    payload = {"concern": {"evidence": [{"kind": "pod", "ref": "datapod:chat_cluster:1f50d3a4eaa414a6"},
+                                        {"kind": "chat_msg", "ref": "2c45a0e7-6af9-41d9-8a26"}]},
+               "linked_work": [{"work_id": "work_17b43a46f546"}], "similar_work": [], "active_work": [],
+               "calendar": "- [calendar:evt_1_20261002T000000Z] Flea dose @ Oct 2",
+               "reminders": [{"ref": "reminder:9adcde00", "title": "A friend's birthday"}]}
+    refs = concern_brief.allowed_refs(payload)
+    good = [{"fact": f, "source": s} for f, s in [
+        ("a", "pod datapod:chat_cluster:1f50d3a4eaa414a6"), ("b", "chat_msg 2c45a0e7-6af9-41d9-8a26"),
+        ("c", "work_17b43a46f546; calendar:evt_1_20261002T000000Z"), ("d", "reminder:9adcde00"),
+        ("e", "knowledge graph"), ("f", "journal")]]
+    assert concern_brief._problems({**BRIEF, "known": good}, refs) == []
+    bad = [{"fact": "x", "source": "calendar:A friend's birthday"}, {"fact": "y", "source": "work_1; invented"}]
+    assert len(concern_brief._problems({**BRIEF, "known": bad}, refs)) == 2
+
+
+def test_a_new_writer_version_rewrites_every_brief(monkeypatch):
+    before = concern_brief.basis(_concern(), "active")
+    monkeypatch.setattr(concern_brief, "WRITER_VERSION", concern_brief.WRITER_VERSION + 1)
+    assert concern_brief.basis(_concern(), "active") != before

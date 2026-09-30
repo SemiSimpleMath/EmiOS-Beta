@@ -8,9 +8,11 @@ went, what the owner said, what depends on it, open questions, and a recommendat
 
 `subconscious::brief` writes it for every open concern whose record changed since its brief was
 written, run by the brain_gate routine after the brain step. The brief is stored on the concern
-(`brief`, with the `basis` fingerprint of the record it was written from); a concern whose brief
-could not be written carries `brief_error` with the same fingerprint and is not retried until its
-record changes again. Every cited source must appear in what the writer was shown; one correction.
+(`brief`, with the `basis` fingerprint of the record it was written from, and of WRITER_VERSION);
+a concern whose brief could not be written carries `brief_error` with the same fingerprint and is
+not retried until its record, or the writer, changes. Every cited source must contain a ref the
+writer was shown (evidence, work ids, calendar anchors, reminder refs), or name the concern's
+journal or notes, or the knowledge graph; one correction.
 
 Dayflow reads it through `briefs_for_refs`: every agent working on a work object that cites a
 concern (architect, worker, finalizer) gets that concern's brief whole (dayflow_orchestrator/
@@ -20,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -28,15 +31,19 @@ from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 _AGENT = "subconscious::brief"
+# Part of every brief's basis: raising it rewrites every brief, and retries every brief the older
+# writer failed on. 2: sources are checked against the refs shown, reminders carry refs, KG entities.
+WRITER_VERSION = 2
 _OWN_KEYS = ("brief", "brief_error")
 _FIELDS = ("what", "why_it_matters", "tried", "owner_wishes", "recommendation")
-_OWN_RECORD = ("journal", "notes")   # a fact from the concern's own journal or notes has no other ref
+# A fact from the concern's own journal or notes, or from a knowledge-graph description, has no ref.
+_NAMED_SOURCES = ("journal", "notes", "knowledge graph")
 
 
 def basis(concern: Dict[str, Any], bucket: str) -> str:
     """Fingerprint of the concern's record, excluding the brief itself."""
     record = {k: v for k, v in concern.items() if k not in _OWN_KEYS}
-    return hashlib.sha256(json.dumps([bucket, record], sort_keys=True, ensure_ascii=False,
+    return hashlib.sha256(json.dumps([WRITER_VERSION, bucket, record], sort_keys=True, ensure_ascii=False,
                                      default=str).encode("utf-8")).hexdigest()
 
 
@@ -54,28 +61,53 @@ def stale(register: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
 
 
 def build_payload(concern: Dict[str, Any], bucket: str, *, calendar: str, now_utc: datetime) -> Dict[str, Any]:
-    from app.assistant.subconscious import brain_step, work_links
+    from app.assistant.subconscious import brain_step, kg_links, work_links
     from app.assistant.utils.time_utils import utc_to_local
     linked = work_links.linked_work([concern["concern_id"]], [])
     similar = work_links.similar_work([concern.get("title") or "", concern.get("notes") or ""],
                                       exclude=[w["work_id"] for w in linked])
+    view = brain_step._concern_view("C1", {**concern, "_status": bucket})
+    entities = kg_links.find_entities([view["title"] or "", view["notes"]] + [e["snippet"] for e in view["evidence"]])
     return {
         "now": utc_to_local(now_utc.isoformat()).strftime("%a %Y-%m-%d %H:%M"),
-        "concern": brain_step._concern_view("C1", {**concern, "_status": bucket}),
+        "concern": view,
+        "entities": entities, "shared": kg_links.shared([x["node_id"] for x in entities]),
         "linked_work": linked, "similar_work": similar,
         "active_work": work_links.active_work(), "reminders": work_links.live_reminders(now_utc),
         "calendar": calendar,
     }
 
 
-def _problems(data: Any, shown: str) -> List[str]:
+def allowed_refs(payload: Dict[str, Any]) -> List[str]:
+    """Every ref the writer is shown: the concern's evidence, work ids, calendar anchors, reminders."""
+    refs = [str(e.get("ref") or "") for e in payload["concern"]["evidence"]]
+    refs += [w["work_id"] for key in ("linked_work", "similar_work", "active_work") for w in payload[key]]
+    refs += re.findall(r"calendar:[^\s\]\)]+", payload.get("calendar") or "")
+    refs += [r["ref"] for r in payload["reminders"]]
+    return [r for r in refs if r]
+
+
+def _cites_shown(part: str, refs: List[str]) -> bool:
+    """A cited source part is good when it contains a shown ref, or a shown ref's id without its
+    `kind:` prefix (evidence is displayed as "kind ref", and older evidence refs are bare ids)."""
+    for ref in refs:
+        bare = ref.split(":", 1)[-1]
+        if ref in part or (len(bare) >= 8 and bare in part):
+            return True
+    return False
+
+
+def _problems(data: Any, refs: List[str]) -> List[str]:
     if not isinstance(data, dict):
         return ["no brief"]
     out = [f"{f} is empty" for f in _FIELDS if not str(data.get(f) or "").strip()]
     for fact in data.get("known") or []:
         source = str(fact.get("source") or "").strip()
-        if not source or (source not in _OWN_RECORD and source not in shown):
-            out.append(f"source {source!r} (for {str(fact.get('fact'))!r}) was not shown; cite a ref exactly as shown, or the word journal or the word notes")
+        parts = [p.strip() for p in re.split(r";", source) if p.strip()]
+        bad = [p for p in parts if p.lower() not in _NAMED_SOURCES and not _cites_shown(p, refs)]
+        if not parts or bad:
+            out.append(f"source {source!r} (for {str(fact.get('fact'))!r}) names nothing that was shown: "
+                       "cite the ref as shown, or journal, notes or knowledge graph")
     return out
 
 
@@ -90,14 +122,14 @@ def write_brief(concern: Dict[str, Any], bucket: str, *, calendar: str,
     """The brief for one concern; raises when still invalid after one correction."""
     now = datetime.now(timezone.utc)
     payload = build_payload(concern, bucket, calendar=calendar, now_utc=now)
-    shown = json.dumps(payload, ensure_ascii=False)
+    refs = allowed_refs(payload)
     call = call or _agent_call
     data = call(payload)
-    problems = _problems(data, shown)
+    problems = _problems(data, refs)
     if problems:
         logger.warning("[brief] invalid brief for %s, one correction: %s", concern["concern_id"], problems)
         data = call({**payload, "correction": "; ".join(problems)})
-        problems = _problems(data, shown)
+        problems = _problems(data, refs)
         if problems:
             raise ValueError(f"brief still invalid after one correction: {problems}")
     return {k: data.get(k) for k in ("what", "why_it_matters", "known", "tried", "owner_wishes",

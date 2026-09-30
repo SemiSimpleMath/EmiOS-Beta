@@ -43,6 +43,9 @@ def fakes(monkeypatch):
     monkeypatch.setattr(work_links, "similar_work", lambda texts, exclude=(): [])
     monkeypatch.setattr(work_links, "active_work", lambda: [])
     monkeypatch.setattr(work_links, "live_reminders", lambda now=None: [])
+    from app.assistant.subconscious import kg_links
+    monkeypatch.setattr(kg_links, "find_entities", lambda texts: [])
+    monkeypatch.setattr(kg_links, "shared", lambda ids: {"links": [], "entities": []})
 
 
 @pytest.fixture
@@ -202,8 +205,12 @@ def test_the_brain_prompt_renders_every_section():
                                 "outcomes": [{"verdict": "achieved", "outcome": "Two dozen baked."}]}],
                "similar_work": [],
                "active_work": [{"work_id": "w2", "title": "Remind about the sale", "objective": "", "created": "Mon"}],
-               "reminders": [{"title": "Bake cookies", "kind": "one time", "repeats": "", "start": "Thu 18:00", "end": ""}],
+               "reminders": [{"ref": "reminder:r1", "title": "Bake cookies", "kind": "one time", "repeats": "",
+                              "start": "Thu 18:00", "end": ""}],
                "calendar": "- [calendar:bake] Bake sale @ Fri 08:00",
+               "entities": [{"label": "Karjalohja", "description": "A place the family travels to."}],
+               "shared": {"links": [{"type": "Event", "label": "Summer Trip", "start": "2019-07-01", "end": "",
+                                     "description": "At the cottage."}], "entities": []},
                "correction": None}
     user = work_context._ENV.get_template("subconscious/brain/prompts/user.j2").render(agent_input=payload)
     assert "## Earlier in master_room" in user and "Talked about the dose." in user
@@ -211,8 +218,10 @@ def test_the_brain_prompt_renders_every_section():
     assert "- [C2] Car service (active; about owner; done when: (not stated))" in user
     assert "### Bake cookies for the sale [w1; done; started Mon, last changed Tue; cites a concern of this matter]" in user
     assert "OUTCOME: Two dozen baked." in user and "(none close enough)" in user
-    assert "- Remind about the sale [w2] (started Mon)" in user and "- Bake cookies (one time; at Thu 18:00)" in user
+    assert "- Remind about the sale [w2] (started Mon)" in user and "- [reminder:r1] Bake cookies (one time; at Thu 18:00)" in user
     assert "- [calendar:bake] Bake sale @ Fri 08:00" in user
+    assert "- Karjalohja: A place the family travels to." in user
+    assert '- Event "Summer Trip" (2019-07-01): At the cottage.' in user
     system = work_context._ENV.get_template("subconscious/brain/prompts/system.j2").render(
         resource_assistant_data={"name": "the assistant"}, resource_user_data={"first_name": "Sam"})
     assert "closes only when its done-when is met or Sam says" in system

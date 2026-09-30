@@ -81,12 +81,12 @@ def test_the_index_embeds_only_what_changed(connect, fakes):
 
 def test_only_reminders_that_can_still_fire_are_shown():
     now = datetime(2026, 9, 30, 12, 0, tzinfo=timezone.utc)
-    rows = [("interval", 604800, "2025-11-03T18:00:00", None, '{"event_title": "Timesheets due"}'),
-            ("interval", 86400, "2025-08-14T15:00:00", "2025-08-21T15:00:00", '{"event_title": "Ended course"}'),
-            ("one_time_event", None, "2026-10-05T15:30:00", None, '{"event_title": "History quiz"}'),
-            ("one_time_event", None, "2026-09-01T15:30:00", None, '{"event_title": "Past one-off"}'),
-            ("interval", 31557600, "2026-10-16T16:00:00", None, '{"event_title": "Birthday (annual)"}')]
+    rows = [("r1", "interval", 604800, "2025-11-03T18:00:00", None, '{"event_title": "Timesheets due"}'),
+            ("r2", "interval", 86400, "2025-08-14T15:00:00", "2025-08-21T15:00:00", '{"event_title": "Ended course"}'),
+            ("r3", "one_time_event", None, "2026-10-05T15:30:00", None, '{"event_title": "History quiz"}'),
+            ("r4", "one_time_event", None, "2026-09-01T15:30:00", None, '{"event_title": "Past one-off"}'),
+            ("r5", "interval", 31557600, "2026-10-16T16:00:00", None, '{"event_title": "Birthday (annual)"}')]
     live = work_links.live(rows, now)
-    assert [(r["title"], r["kind"], r["repeats"]) for r in live] == [
-        ("Birthday (annual)", "recurring", "every year"), ("History quiz", "one time", ""),
-        ("Timesheets due", "recurring", "every week")]
+    assert [(r["ref"], r["title"], r["kind"], r["repeats"]) for r in live] == [
+        ("reminder:r5", "Birthday (annual)", "recurring", "every year"), ("reminder:r3", "History quiz", "one time", ""),
+        ("reminder:r1", "Timesheets due", "recurring", "every week")]
