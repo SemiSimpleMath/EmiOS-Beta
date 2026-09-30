@@ -20,7 +20,8 @@ Hard guards, independent of policy:
   a delete policy).
 
 Deletes are hard deletes: pods are derived artifacts — chat stays in
-unified_log, emails in the event repository, plans supersede daily. Runs
+unified_log, plans supersede daily. Email pods ARE the email store (pod_store/email_pods.py):
+a retention policy on kind=email deletes the email itself. Runs
 through the single application writer (db_manager), one short transaction
 per kind.
 """

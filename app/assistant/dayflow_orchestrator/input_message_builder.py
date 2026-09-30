@@ -98,39 +98,9 @@ def _build_calendar_message_from_structured(*, event: Dict[str, Any], now_utc: d
     )
 
 
-def _email_pod_id(*, account_id: str, uid: str) -> str:
-    """The pod holding this email's full body, or "" when none has been minted yet.
-
-    2026-09-13: a worker was handed "the answer is in newsletter [7667]" and could not open
-    it. `short_id` is an integer that no tool accepts, and it is not even unique — 7667 was
-    assigned to both a school newsletter and an unrelated June chat about broken monitors.
-    The worker asked the user three times, watched those tickets expire, then spent 117
-    nodes and fifteen levels of recursion reconstructing from the open web what was sitting
-    in a 1,978-character pod the whole time.
-
-    The join is deterministic on the upstream id the pod records in its source_refs, so
-    there is no guessing. Empty string when the classifier has not minted the pod yet:
-    ordering is usually in our favour (the classifier ran two minutes before ingestion in
-    the observed case) but it is not guaranteed, and an absent handle is honest whereas a
-    wrong one is the bug we are fixing.
-    """
-    if not uid:
-        return ""
-    try:
-        from app.assistant.pod_store.pod_store import PodStore
-
-        ref = f"repo_email::{account_id}::{uid}" if account_id else f"repo_email::{uid}"
-        pod = PodStore().find_by_source_ref(ref, kind="email")
-        return str(getattr(pod, "pod_id", "") or "") if pod else ""
-    except Exception as e:
-        # Never block ingestion over a missing handle; the item is still worth having.
-        logger.error("[email_ingest] pod lookup failed for uid=%s: %s", uid, e, exc_info=True)
-        return ""
-
-
 def _build_email_message(*, email_data: Dict[str, Any], now_utc: datetime) -> Message:
     """
-    Convert an event-repository email dict into a dayflow Message.
+    Convert an email record (email_pods.email_record) into a dayflow Message.
 
     Uses a ``dayflow_email:`` ID prefix so the dayflow upsert never collides
     with the raw email record already stored as ``email:{account}:{uid}``.
@@ -205,10 +175,12 @@ def _build_email_message(*, email_data: Dict[str, Any], now_utc: datetime) -> Me
         "cooldown_until": None,
         "linked_item_ids": [],
         "linked_email_unified_id": raw_email_unified_id,
-        # The pod holding the FULL body, so an agent has a handle it can actually open.
-        # Prompts used to reference an item only by `short_id`, an integer no tool accepts
-        # and which is not unique. See _email_pod_id below for what that cost.
-        "pod_id": _email_pod_id(account_id=account_id, uid=uid),
+        # The pod holding the FULL body, so an agent has a handle it can actually open. The email
+        # IS that pod (email_pods.py), so the handle is exact. Prompts used to reference an item
+        # only by `short_id`, an integer no tool accepts and which is not unique: on 2026-09-13 a
+        # worker told its answer was in "newsletter [7667]" asked the user three times and then
+        # rebuilt from the open web what was sitting in a 1,978-character pod the whole time.
+        "pod_id": email_data["pod_id"],
         "email_uid": uid,
         "email_account_id": account_id,
         "email_thread_id": str(email_data.get("thread_id") or "").strip(),
@@ -337,54 +309,14 @@ def _build_pod_message(*, pod: Any, now_utc: datetime) -> Message:
     )
 
 
-def _load_emails_from_event_repo(*, now_utc: datetime) -> List[Dict[str, Any]]:
-    """Load today's important emails (importance >= 5) from the event repository."""
-    import json
-
-    from app.assistant.event_repository.event_repository import EventRepositoryManager
+def _load_todays_emails(*, now_utc: datetime) -> List[Dict[str, Any]]:
+    """Today's important emails (email_parser importance >= 5, received since local midnight), read
+    from the email pods — the only email store."""
+    from app.assistant.pod_store.email_pods import recent_emails
 
     now_local = utc_to_local(now_utc)
     today_midnight_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
-
-    repo = EventRepositoryManager()
-    raw_json = repo.search_events(data_type="email")
-    all_events: list = json.loads(raw_json) if raw_json else []
-
-    result: List[Dict[str, Any]] = []
-    for event in all_events:
-        data = event.get("data", {})
-        if isinstance(data, str):
-            try:
-                data = json.loads(data)
-            except Exception as e:
-                logger.error("_load_emails_from_event_repo: unparseable event data JSON: %s", e)
-                logger.debug("_load_emails_from_event_repo data JSON parse exception details", exc_info=True)
-                raise
-
-        importance = data.get("importance")
-        if importance is None:
-            continue
-        try:
-            if int(importance) < 5:
-                continue
-        except (ValueError, TypeError):
-            continue
-
-        date_str = (data.get("date_received") or "").strip()
-        if date_str and date_str != "[No Date]":
-            try:
-                from email.utils import parsedate_to_datetime
-                email_dt_local = utc_to_local(parsedate_to_datetime(date_str))
-                if email_dt_local < today_midnight_local:
-                    continue
-            except Exception as e:
-                logger.error("_load_emails_from_event_repo: could not parse date %r: %s", date_str, e)
-                logger.debug("_load_emails_from_event_repo date parse exception details", exc_info=True)
-                raise
-
-        result.append(data)
-
-    return result
+    return recent_emails(received_since=today_midnight_local.astimezone(timezone.utc))
 
 
 def _load_expected_calendar() -> Dict[str, Any]:

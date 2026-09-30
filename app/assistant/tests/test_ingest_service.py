@@ -1,7 +1,7 @@
 """Tests for IngestService.
 
 Uses fake sources to exercise the fan-out logic in isolation. The real
-sources (UnifiedLogSource, EmailRepoSource) have their own dedicated
+sources (UnifiedLogSource, EmailPodSource) have their own dedicated
 test files.
 """
 import app.assistant.tests.test_setup  # noqa: F401

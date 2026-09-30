@@ -68,7 +68,7 @@ class UnifiedLogSource:
         Pinning to max(rowid) on first run is critical: without it, a fresh
         install polls every master_room / slack / telegram row ever written
         and invokes the watcher LLM on each one. Mirrors the "don't
-        re-ingest history" behavior EmailRepoSource uses.
+        re-ingest history" behavior EmailPodSource uses.
         """
         raw = self._cursor_store.get(_CURSOR_KEY)
         if raw is not None:

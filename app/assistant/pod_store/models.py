@@ -46,7 +46,7 @@ class PodRow(Base):
     body = Column(Text, nullable=True)
 
     # List of {kind, id} pointers back to evidence. At least one usually.
-    # kind ∈ {"unified_log", "event_repository:email", "resource"}
+    # kind ∈ {"unified_log", "gmail", "resource", "image_file", "pod"} (contracts.PodSourceKind)
     source_refs_json = Column(JSON, nullable=False, default=list)
 
     # Informational only. The tag-subscription routing this denormalized for

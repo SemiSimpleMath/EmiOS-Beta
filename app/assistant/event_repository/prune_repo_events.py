@@ -1,6 +1,5 @@
 from collections import defaultdict
 from datetime import timedelta
-from email.utils import parsedate_to_datetime
 
 from datetime import timezone
 
@@ -15,8 +14,6 @@ def format_time_short(dt):
 def prune_events_by_type(category: str, events: list) -> list:
     if category == "calendar":
         return prune_calendar_events(events)
-    elif category == "email":
-        return prune_email_events(events)
     elif category == "todo_task":
         return prune_todo_events(events)
     else:
@@ -88,52 +85,6 @@ def prune_calendar_events(events: list) -> list:
 
     return pruned
 
-
-
-def prune_email_events(events: list) -> list:
-    """
-    Keep only recent emails (last 10 hours). Strip promotional subjects.
-    Keep: sender, subject, summary, date, action_items, id
-    """
-    from datetime import timedelta
-    now_local = utc_to_local(datetime.now(timezone.utc))
-    cutoff = now_local - timedelta(hours=10)
-
-    pruned = []
-    for e in events:
-        d = e.get("data", {})
-        subject = d.get("subject", "").strip()
-        sender = d.get("sender", "").strip()
-        summary = d.get("summary", "").strip()
-        date_str = d.get("date_received", "").strip()
-        action_items = d.get("action_items", [])
-        event_id = d.get("id")
-        importance = d.get("importance")
-
-        if importance and importance < 4:
-            continue
-        try:
-            email_datetime = utc_to_local(parsedate_to_datetime(date_str))
-        except Exception:
-            continue
-
-        # Only include emails from the last 60 minutes
-        if email_datetime < cutoff:
-            continue
-
-        keep = {
-            "sender": sender,
-            "subject": subject,
-            "summary": summary,
-            "date": date_str,
-        }
-        if action_items:
-            keep["action_items"] = action_items
-        if event_id:
-            keep["id"] = event_id
-
-        pruned.append(keep)
-    return pruned
 
 
 def prune_todo_events(events: list) -> list:
@@ -306,7 +257,7 @@ if __name__ == "__main__":
 
     print("🔍 Running pruning test from repo...\n")
     repo = EventRepositoryManager()
-    categories = ["calendar", "email", "todo_task"]
+    categories = ["calendar", "todo_task"]
 
     for cat in categories:
         print(f"\n=== {cat.upper()} ===")

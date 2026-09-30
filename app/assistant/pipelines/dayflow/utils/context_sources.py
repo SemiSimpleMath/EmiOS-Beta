@@ -221,69 +221,6 @@ def get_calendar_events_completed(hours: int = 4) -> List[Dict[str, Any]]:
     return result
 
 
-def get_emails_for_orchestrator() -> List[Dict[str, Any]]:
-    """
-    Return today's emails from the event repo with importance >= 5, sorted newest first.
-
-    "Today" is anchored to local midnight so the list stays stable throughout the day
-    and does not drift with a rolling-hour window.
-    """
-    try:
-        from email.utils import parsedate_to_datetime
-
-        from app.assistant.event_repository.event_repository import EventRepositoryManager
-        from app.assistant.utils.time_utils import utc_to_local
-
-        now_utc = datetime.now(timezone.utc)
-        now_local = utc_to_local(now_utc)
-        today_midnight_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
-
-        repo = EventRepositoryManager()
-        raw_json = repo.search_events(data_type="email")
-        all_events: list = json.loads(raw_json) if raw_json else []
-
-        result: List[Dict[str, Any]] = []
-        for event in all_events:
-            data = event.get("data", {})
-            if isinstance(data, str):
-                try:
-                    data = json.loads(data)
-                except Exception:
-                    logger.debug("context_sources: skipping event with unparseable data field", exc_info=True)
-                    continue
-
-            importance = data.get("importance")
-            if importance is None or int(importance) < 5:
-                continue
-
-            date_str = (data.get("date_received") or "").strip()
-            try:
-                email_dt_local = utc_to_local(parsedate_to_datetime(date_str))
-            except Exception:
-                logger.debug("context_sources: could not parse email date_received: %r", date_str, exc_info=True)
-                continue
-
-            if email_dt_local < today_midnight_local:
-                continue
-
-            result.append(
-                {
-                    "sender": (data.get("sender") or "").strip(),
-                    "subject": (data.get("subject") or "").strip(),
-                    "summary": (data.get("summary") or "").strip(),
-                    "importance": int(importance),
-                    "time": email_dt_local.strftime("%I:%M %p"),
-                    "action_items": data.get("action_items") or [],
-                }
-            )
-
-        result.sort(key=lambda x: x["time"], reverse=True)
-        return result
-    except Exception as e:
-        logger.warning("Could not load emails for orchestrator: %s", e)
-        return []
-
-
 def get_calendar_events_for_orchestrator(hours: int = 4) -> List[Dict[str, Any]]:
     now = datetime.now(timezone.utc)
     window_end = now + timedelta(hours=hours)

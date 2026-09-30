@@ -228,10 +228,10 @@ def initialize_system():
     # dispatched into an empty subscriber list.
     if is_subsystem_enabled("ingest"):
         from app.assistant.ingest import IngestService
-        from app.assistant.ingest.sources import EmailRepoSource, UnifiedLogSource
+        from app.assistant.ingest.sources import EmailPodSource, UnifiedLogSource
 
         ingest_service = IngestService(
-            sources=[UnifiedLogSource(), EmailRepoSource()],
+            sources=[UnifiedLogSource(), EmailPodSource()],
             poll_interval_seconds=120,
             startup_delay_seconds=45,   # quiet window after boot before the first poll
         )

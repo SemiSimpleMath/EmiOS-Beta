@@ -33,7 +33,7 @@ The canonical regex lives in `app/assistant/pod_store/pod_uri.py:23`:
 | `tags_json` | JSON list | tag names from `configs/pod_tags.yaml` |
 | `one_liner` | text | terse 3–6 word subject line; load-bearing — shown to agents without hydration |
 | `body` | text, nullable | full content if small enough to inline; null when better resolved from `source_refs` — or when the pod's values live in `PodProjection` rows (secret pods) |
-| `source_refs_json` | JSON list of `{kind, id}` | back-pointers to evidence: `unified_log`, `event_repository:email`, `resource`, `image_file` |
+| `source_refs_json` | JSON list of `{kind, id}` | back-pointers to evidence: `unified_log`, `gmail`, `resource`, `image_file` |
 | `for_agents_json` | JSON list | union of agents whose `pod_interest.tags` intersect this pod's tags — denormalized for fast query-by-agent |
 | `scope_id` | str, nullable, indexed | originating room_id; null = system-wide |
 | `min_authority` | int, default 50 | **read floor.** Scope authority must clear this to read the body. Defaults to `AUTH_CHAT` (50); content pods carrying sensitive payloads set higher. Bands in `pod_store/authority.py`. |
@@ -95,7 +95,7 @@ the user --has_profile_image--> datapod:image:abc...  (canonical profile photo)
 ```
 ┌──────────────────────────┐
 │ unified_log_2026         │  (chat rows; rowid-cursored)
-│ event_repository.emails  │  (email rows; timestamp-cursored)
+│ pod_store kind=email     │  (fetched email pods; created_at-cursored)
 └────────────┬─────────────┘
              │ pull()
              ▼
@@ -144,7 +144,7 @@ Design choices documented in the module docstring (`:1`):
 
 Sources today (`app/assistant/ingest/sources/`):
 - `UnifiedLogSource` — pulls new chat-like rows from `unified_log_2026`, filtered by an explicit positive room list (`master_room`, `slack/*`, `tg_*`, `telegram/*`). rowid-based cursor; on first run pins to current `MAX(rowid)` so a fresh install does not re-ingest history.
-- `EmailRepoSource` — pulls new rows from `EventRepository` for type `email`. Timestamp-cursored. First run pins to `now`.
+- `EmailPodSource` — pulls email pods written by the email fetch (`created_by="email_fetch"`) from the pod store. `created_at`-cursored, half-open windows. First run pins to `now`. Feeds the signal router; the pod classifier ignores email envelopes.
 
 Cursors persist in the `ingest_cursor` table via `IngestCursorStore` (`app/assistant/ingest/cursors.py`).
 
@@ -152,7 +152,7 @@ Wiring lives in `app/assistant/initialize_system.py:85-113`:
 
 ```
 ingest_service = IngestService(
-    sources=[UnifiedLogSource(), EmailRepoSource()],
+    sources=[UnifiedLogSource(), EmailPodSource()],
     poll_interval_seconds=120,
 )
 ingest_service.register_subscriber(signal_router.handle_envelope)
@@ -288,24 +288,22 @@ This is the agent's invitation to call `pod_fetch` if it actually needs the body
 
 ### Id design
 
-The `[a-z0-9]{6,}` regex (`pod_uri.POD_URI_RE`) accepts every minter's id shape. In practice three are emitted: `sha256[:24]` (`_make_cluster_pod_id` for chat clusters, `_make_email_pod_id`, `file_ingest`), `blake2b` 12-hex (`canonical_pod_id` — the SSOT builder used for `research_finding` and any new code), and `uuid4().hex[:16]` (secret pods in `put_secret_pod`). All deterministic except the secret-pod uuid, so re-minting the same logical unit upserts one row.
+The `[a-z0-9]{6,}` regex (`pod_uri.POD_URI_RE`) accepts every minter's id shape. In practice three are emitted: `sha256[:24]` (`_make_cluster_pod_id` for chat clusters, `email_pods.email_pod_id`, `file_ingest`), `blake2b` 12-hex (`canonical_pod_id` — the SSOT builder used for `research_finding` and any new code), and `uuid4().hex[:16]` (secret pods in `put_secret_pod`). All deterministic except the secret-pod uuid, so re-minting the same logical unit upserts one row.
 
 ## Email pods
 
-`PodClassifierService.handle_envelope` dispatches on `signal_type`:
-
-- `unified_log` → chat-burst path (existing — buffered per room, three-pass classifier).
-- `email` → single-shot path (`_process_email`, no buffering): every email envelope from `EmailRepoSource` mints exactly one `kind="email"` pod immediately.
+Emails live only in the pod store (since 2026-09-29; `app/assistant/pod_store/email_pods.py`). The email fetch (`lib/core_tools/email_tool/utils/email_utils.py`) runs each email through `email_parser` and writes the ones it keeps (importance >= 5) directly as pods with `put_email_pod`; the event repository holds no email. Readers go through `email_pods`: dayflow intake (`recent_emails` since local midnight), the UI email widget (`/render_repo`, last 10 hours), and `EmailPodSource` for the signal router. A new pod publishes `repo_update` (content `email`) so the dayflow scheduler and the UI refresh. `migrate_repository_emails` (run at startup) moved the old repository rows into pods once.
 
 The email path is deliberately simpler than the chat path. Each email is already an atomic unit with structured metadata (subject, sender, body) — there's no "burst" to buffer, no entity-resolution problem (sender/recipient are explicit headers), and no need for the chat critic's spam/churn filter (Gmail labels did that upstream). For v1 there is no LLM tagging pass — `tags=[]` for email pods; consumers filter by `kind="email"` + `query` (sender/subject substring) + `since` instead.
 
 Pod shape:
 - `kind="email"`, `one_liner = "<sender>: <subject>"`, `body = full email text`.
-- `source_refs = [{kind: "event_repository:email", id: "<signal_id>"}]`.
+- `source_refs = [{kind: "gmail", id: "<account_id>:<uid>"}]`.
 - `scope_id = account_id` so multi-account works.
-- `metadata` carries `subject`, `sender_display`, `sender_email`, `account_id`, `uid`, `occurred_at_utc` for cheap consumer-side filtering without `pod_fetch`.
+- `importance` = the email_parser score.
+- `metadata` carries every header and email_parser field (`subject`, `summary`, `action_items`, `importance`, `thread_id`, `date_received`, ...) plus `sender_display`, `sender_email`, `account_id`, `uid`, `received_at_utc`. Readers filter on `received_at_utc`, not pod creation time.
 
-Idempotency: `pod_id = sha256(signal_id)[:24]` (mirrors the chat-cluster shape). Re-receiving the same email envelope no-ops via `PodStore.get`-then-skip rather than overwriting.
+Idempotency: `pod_id = "datapod:email:" + sha256("repo_email::<account>::<uid>")[:24]` — the id every email pod already had. Storing the same email again no-ops via `PodStore.get`-then-skip rather than overwriting.
 
 The first email-pod consumer is the `personal_admin` planner — its prompt teaches it to prefer `pod_search(kind="email", query=<sender>, since=...)` over Gmail-hitting tools for find-by-sender / scan-recent tasks. Workflow: pass `pod_id` strings forward, never inline bodies; downstream agents `pod_fetch` only when they need to act.
 
@@ -424,7 +422,8 @@ What is planned but not built:
 | `app/assistant/ingest/ingest_service.py` | The gut — poll + fan-out |
 | `app/assistant/ingest/contracts.py` | `IngestEnvelope`, `IngestSource`, `IngestSubscriber` |
 | `app/assistant/ingest/sources/unified_log_source.py` | Chat source |
-| `app/assistant/ingest/sources/email_repo_source.py` | Email source |
+| `app/assistant/ingest/sources/email_pod_source.py` | Email source (fetched email pods → signal router) |
+| `app/assistant/pod_store/email_pods.py` | Email pod build/store/read + the one-time repository move |
 | `app/assistant/ingest/cursors.py` | `IngestCursorStore` |
 | `app/assistant/signal_router/signal_router_service.py` | Sibling subscriber: reactive watch matching |
 | `app/assistant/lib/core_tools/pod_store/pod_store_tool.py` | `pod_search` and `pod_fetch` handlers (scope + authority walls) |

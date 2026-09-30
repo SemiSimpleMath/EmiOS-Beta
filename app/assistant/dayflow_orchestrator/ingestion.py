@@ -21,7 +21,7 @@ from app.assistant.dayflow_orchestrator.input_message_builder import (
     _build_delegation_message,
     _build_pod_message,
     _load_dayflow_requests,
-    _load_emails_from_event_repo,
+    _load_todays_emails,
     mark_dayflow_requests_ingested,
 )
 from app.assistant.dayflow_orchestrator.orchestrator_status import (
@@ -192,8 +192,8 @@ def _ingest_pods(
 def _ingest_emails(
     existing_ids: set[str], now_utc: datetime,
 ) -> list[Message]:
-    """Ingest new emails from event repository as dayflow items."""
-    email_events = _load_emails_from_event_repo(now_utc=now_utc)
+    """Ingest today's new important emails (email pods) as dayflow items."""
+    email_events = _load_todays_emails(now_utc=now_utc)
     new: list[Message] = []
     for email_data in email_events:
         msg = _build_email_message(email_data=email_data, now_utc=now_utc)

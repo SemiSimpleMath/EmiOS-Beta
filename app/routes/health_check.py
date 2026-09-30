@@ -21,7 +21,7 @@ def _event_repo_counts():
     import json
     from app.assistant.event_repository.event_repository import EventRepositoryManager
     event_repo = EventRepositoryManager()
-    categories = ["calendar", "scheduler", "email", "weather", "todo_task", "news"]
+    categories = ["calendar", "scheduler", "weather", "todo_task", "news"]
     counts, healthy, error = {}, True, None
     for category in categories:
         try:

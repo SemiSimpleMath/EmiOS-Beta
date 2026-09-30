@@ -12,7 +12,6 @@ from app.assistant.utils.pydantic_classes import (
     ScopeContext,
     ScopeResourcePolicy,
 )
-from app.assistant.event_repository.event_repository import EventRepositoryManager
 from app.assistant.ServiceLocator.service_locator import DI
 from sqlalchemy import select
 
@@ -43,7 +42,6 @@ class EmailUtils:
         """Initialize Gmail API client"""
         self._gmail_clients: dict[str, GmailAPIClient] = {}
         self.gmail_client = self._get_gmail_client(None)
-        self.repo_manager = EventRepositoryManager()
 
     def _get_gmail_client(self, account_id: str | None) -> GmailAPIClient:
         key = str(account_id or "").strip() or "__default__"
@@ -73,18 +71,18 @@ class EmailUtils:
             start_date: Start date string in Gmail format (YYYY/MM/DD)
             unseen: Whether to search only unseen emails
             search_string: Optional text search string
-            repo_update: If True, store emails in EventRepository
+            repo_update: If True, store the kept emails as email pods (the only email store)
             start_timestamp: Optional datetime for client-side filtering (inclusive)
             end_timestamp: Optional datetime for client-side filtering (inclusive)
 
         For repo_update=True (scheduler):
-          - Store all qualifying emails in EventRepository (data_type='email').
-          - Call sync_events_with_server once with all seen UIDs.
-          - sync_events_with_server will prune email events older than 10 hours
-            that were not seen in this run.
+          - Store each email email_parser keeps (importance >= 5) as a kind="email" pod
+            (pod_store/email_pods.py), with a one-line unified_log entry.
+          - Publish one repo_update event (content "email") when a new email was stored,
+            so the UI widget and the dayflow scheduler react.
 
         For repo_update=False (agent queries):
-          - Do not touch the repo at all. Just return processed_emails.
+          - Store nothing. Just return processed_emails.
         """
         # Build Gmail query using unix timestamps (more precise than date strings)
         start_ts = None
@@ -205,9 +203,8 @@ class EmailUtils:
             skipped_outside_timerange,
         )
         
-        # Step 2: Repository ingest path for watcher/runtime (background scheduler).
-        # Run each email through email_parser so importance/summary/action_items are populated
-        # before storing — these fields drive the UI email widget display.
+        # Step 2: Scheduler ingest path. Run each email through email_parser so
+        # importance/summary/action_items are populated, then store the kept ones as email pods.
         if repo_update:
             summary_agent = DI.agent_factory.create_agent("email_parser")
             processed_emails = []
@@ -275,7 +272,7 @@ class EmailUtils:
                 email_ids.append(email_meta["uid"])
 
             if email_ids:
-                logger.debug("Batch writing %d inbound emails to repository.", len(processed_emails))
+                from app.assistant.pod_store.email_pods import put_email_pod
                 recipient_source = str(os.getenv("EMAIL_ADDR") or "").strip().lower() or "email"
                 unified_messages = []
 
@@ -297,13 +294,10 @@ class EmailUtils:
                 finally:
                     session.close()
 
+                new_pods = 0
                 for email_data in processed_emails:
-                    event_id = f"{resolved_account_id}:{email_data['uid']}"
-                    self.repo_manager.store_event(
-                        event_id,
-                        event_data=email_data,
-                        data_type="email",
-                    )
+                    _pod_id, created = put_email_pod(email_data)
+                    new_pods += created
 
                     stable_email_id = f"email:{resolved_account_id}:{str(email_data.get('uid') or '').strip()}"
                     if not stable_email_id:
@@ -351,53 +345,54 @@ class EmailUtils:
                         if joined_items:
                             content += f" Mentioned items: {joined_items}."
 
-                        unified_messages.append(
-                            {
-                                "id": stable_email_id,
-                                "timestamp": email_timestamp,
-                                "role": "system",
-                                "message": content,
-                                "source": recipient_source,
-                                "processed": False,
-                                "request_id": None,
-                                "room_id": None,
-                                "room_surface": None,
-                                "room_context_id": None,
-                                "direction": str(email_data.get("direction") or "inbound").strip(),
-                                "speaker_id": None,
-                                "speaker_name": sender_name or None,
-                                "speaker_role": "email_sender",
-                                "speaker_external_id": str(email_data.get("email_address") or "").strip() or None,
-                                "transport_message_id": str(email_data.get("message_id") or "").strip() or None,
-                                "transport_from": str(email_data.get("email_address") or "").strip() or None,
-                                "transport_to": resolved_account_id,
-                                "content_type": "text",
-                                "media_items_json": None,
-                                "link_items_json": None,
-                                "metadata_json": {
-                                    "data_type": "email",
-                                    "sub_data_type": ["email_event"],
-                                    "email_uid": str(email_data.get("uid") or "").strip(),
-                                    "provider_message_id": str(email_data.get("message_id") or "").strip(),
-                                    "thread_id": str(email_data.get("thread_id") or "").strip(),
-                                    "account_id": resolved_account_id,
-                                    "subject": subject,
-                                    "date_received_raw": date_received_raw,
-                                    "importance": importance,
-                                    "email_summary": summary,
-                                    "source_system": "email_parser",
-                                    "email_ingested_tf": True,
-                                },
-                                "data_json": {
-                                    "data_type": "email",
-                                    "action_items": action_items,
-                                },
-                            }
-                        )
+                    unified_messages.append(
+                        {
+                            "id": stable_email_id,
+                            "timestamp": email_timestamp,
+                            "role": "system",
+                            "message": content,
+                            "source": recipient_source,
+                            "processed": False,
+                            "request_id": None,
+                            "room_id": None,
+                            "room_surface": None,
+                            "room_context_id": None,
+                            "direction": str(email_data.get("direction") or "inbound").strip(),
+                            "speaker_id": None,
+                            "speaker_name": sender_name or None,
+                            "speaker_role": "email_sender",
+                            "speaker_external_id": str(email_data.get("email_address") or "").strip() or None,
+                            "transport_message_id": str(email_data.get("message_id") or "").strip() or None,
+                            "transport_from": str(email_data.get("email_address") or "").strip() or None,
+                            "transport_to": resolved_account_id,
+                            "content_type": "text",
+                            "media_items_json": None,
+                            "link_items_json": None,
+                            "metadata_json": {
+                                "data_type": "email",
+                                "sub_data_type": ["email_event"],
+                                "email_uid": str(email_data.get("uid") or "").strip(),
+                                "provider_message_id": str(email_data.get("message_id") or "").strip(),
+                                "thread_id": str(email_data.get("thread_id") or "").strip(),
+                                "account_id": resolved_account_id,
+                                "subject": subject,
+                                "date_received_raw": date_received_raw,
+                                "importance": importance,
+                                "email_summary": summary,
+                                "source_system": "email_parser",
+                                "email_ingested_tf": True,
+                            },
+                            "data_json": {
+                                "data_type": "email",
+                                "action_items": action_items,
+                            },
+                        }
+                    )
 
                 if unified_messages:
                     save_to_unified_db(unified_messages, recipient_source)
-                logger.debug("Batch write complete.")
+                if new_pods:
+                    self._publish_email_update()
 
                 for uid in email_ids:
                     try:
@@ -407,7 +402,7 @@ class EmailUtils:
                 logger.debug("Marked %d ingested emails as read.", len(email_ids))
 
                 logger.info(
-                    "Inbound repo email ingest complete: fetched=%d stored=%d "
+                    "Inbound email ingest complete: fetched=%d stored=%d "
                     "skipped_low_importance=%d skipped_missing_importance=%d "
                     "skipped_outside_range=%d account_id=%s",
                     len(emails),
@@ -422,7 +417,6 @@ class EmailUtils:
         # Step 3: Triage path (non-repo_update): summarize/filter for planner use.
         # PHASE A: Process all emails with LLM (no DB writes)
         processed_emails = []
-        email_ids = []
         skipped_low_importance = 0
         skipped_missing_importance = 0
         
@@ -484,23 +478,6 @@ class EmailUtils:
                 continue
 
             processed_emails.append(email_data)
-            if repo_update:
-                email_ids.append(email_meta["uid"])
-
-        # PHASE B: Batch write to database (quick, single burst)
-        # This ensures DB lock is held for minimal time
-        if repo_update and email_ids:
-            logger.debug("Batch writing %d emails to repository.", len(email_ids))
-            for email_data in processed_emails:
-                event_id = f"{resolved_account_id}:{email_data['uid']}"
-                self.repo_manager.store_event(
-                    event_id,
-                    event_data=email_data,
-                    data_type="email",
-                )
-            # Single sync call enforces 10 hour policy for emails
-            self.repo_manager.sync_events_with_server(email_ids, "email")
-            logger.debug("Batch write complete.")
 
         # Debug summary
         logger.info(
@@ -512,6 +489,13 @@ class EmailUtils:
         )
 
         return processed_emails
+
+    @staticmethod
+    def _publish_email_update() -> None:
+        """Tell the UI email widget and the dayflow scheduler that new email arrived."""
+        repo_msg = Message(sender="email_fetch", receiver=None, data_type="agent_msg", content="email")
+        repo_msg.event_topic = "repo_update"
+        DI.event_hub.publish(repo_msg)
 
     def fetch_and_filter_emails(
         self,
@@ -525,10 +509,9 @@ class EmailUtils:
         Triage-path email fetch: inbox only, no repo write, LLM importance filter applied.
 
         Fetches emails for the given window, runs each through the email_parser agent,
-        and returns only messages with importance >= 5.  Nothing is written to the
-        EventRepository or any file.  This is the correct method to call from an agent
-        that wants the user's filtered daily email — as opposed to fetch_and_store_emails
-        which is the scheduler/repo-ingest path.
+        and returns only messages with importance >= 5.  Nothing is stored.  This is the
+        correct method to call from an agent that wants the user's filtered daily email —
+        as opposed to fetch_and_store_emails, the scheduler path that stores email pods.
 
         Args:
             start_timestamp: Inclusive lower bound (timezone-aware UTC datetime).

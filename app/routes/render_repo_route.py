@@ -7,12 +7,16 @@ from app.assistant.utils.time_utils import utc_to_local, get_local_timezone
 from app.assistant.event_repository.event_repository import EventRepositoryManager
 
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from app.assistant.utils.logging_config import get_logger
 
 render_repo_route_bp = Blueprint('render_repo_route', __name__)
 logger = get_logger(__name__)
+
+# The email widget shows what arrived in the last 10 hours (the window the event repository kept
+# when it stored email).
+_EMAIL_WINDOW_HOURS = 10
 
 
 def _load_expected_calendar_for_today():
@@ -67,8 +71,8 @@ def _load_expected_calendar_for_today():
 @render_repo_route_bp.route('/render_repo_route', methods=['POST'])
 def render_repo_route():
     """
-    Fetch all repo data (calendar, scheduler, email, weather, todo_task, news)
-    and format it properly for UI widget rendering.
+    Fetch the widget data (calendar, scheduler, weather, todo_task, news from the event
+    repository; email from the email pods) and format it for UI widget rendering.
 
     For today's calendar, prefers the expected calendar produced by the dayflow
     pipeline (enriched with statuses and user-added events).  Falls back to raw
@@ -76,7 +80,7 @@ def render_repo_route():
     """
     try:
         event_repo = EventRepositoryManager()
-        categories = ["calendar", "scheduler", "email", "weather", "todo_task", "news"]
+        categories = ["calendar", "scheduler", "weather", "todo_task", "news"]
         widget_data = []
 
         category_counts = {}
@@ -88,14 +92,6 @@ def render_repo_route():
             try:
                 events = event_repo.search_events(data_type=category)
                 events = json.loads(events)
-
-                if category == "email":
-                    before = len(events)
-                    events = [
-                        e for e in events
-                        if int((e.get("data") or {}).get("importance") or 0) > 4
-                    ]
-                    logger.debug(f"Email: Filtered {before} -> {len(events)} (importance > 4)")
 
                 if category == "calendar":
                     if expected_cal is not None:
@@ -186,7 +182,7 @@ def render_repo_route():
 
                 for event in events:
                     data = event["data"]
-                    if category in ["calendar", "scheduler", "email", "weather", "news"]:
+                    if category in ["calendar", "scheduler", "weather", "news"]:
                         payload = data.get("event_payload", {})
                         if "title" not in data and "title" in payload:
                             data["title"] = payload["title"]
@@ -202,6 +198,18 @@ def render_repo_route():
                 logger.error(f"Error loading {category}: {e}")
                 errors.append(f"{category}: {str(e)}")
                 category_counts[category] = 0
+
+        # Email: the pods of the last _EMAIL_WINDOW_HOURS (the window the repository kept), importance >= 5.
+        try:
+            from app.assistant.pod_store.email_pods import recent_emails
+            since = datetime.now(timezone.utc) - timedelta(hours=_EMAIL_WINDOW_HOURS)
+            emails = recent_emails(received_since=since)
+            widget_data.extend({"data": record, "data_type": "email"} for record in emails)
+            category_counts["email"] = len(emails)
+        except Exception as e:
+            logger.error(f"Error loading email: {e}")
+            errors.append(f"email: {str(e)}")
+            category_counts["email"] = 0
 
         if errors:
             logger.warning(f"render_repo_route had partial errors: {errors}")

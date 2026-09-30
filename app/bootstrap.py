@@ -175,6 +175,12 @@ def initialize_services(app):
     from app.assistant.subconscious.concern_store import import_legacy_file_if_pending
     import_legacy_file_if_pending()
 
+    # One-time move of email out of the event repository into the email pods (2026-09-29):
+    # rewrites old pods' source refs (before any pod is loaded), backfills parser fields,
+    # deletes the repository rows. A no-op once done.
+    from app.assistant.pod_store.email_pods import migrate_repository_emails
+    migrate_repository_emails()
+
     # Register user settings manager
     from app.assistant.user_settings_manager.user_settings import UserSettingsManager
     user_settings = UserSettingsManager()

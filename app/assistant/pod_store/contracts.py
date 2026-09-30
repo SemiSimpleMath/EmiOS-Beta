@@ -13,7 +13,8 @@ from pydantic import BaseModel, Field
 
 PodSourceKind = Literal[
     "unified_log",
-    "event_repository:email",
+    # A Gmail message, id "<account_id>:<uid>" — an email pod's own origin (email_pods.py).
+    "gmail",
     "resource",
     "image_file",
     # A pod built FROM other pods (a plan referencing its intentions, a

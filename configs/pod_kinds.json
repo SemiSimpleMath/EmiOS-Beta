@@ -12,7 +12,7 @@
     },
 
     "email": {
-      "description": "Inbound email. one_liner=subject, body=email body verbatim. Source refs back to the event_repository row.",
+      "description": "Inbound email, the only store of email (email_pods.py). one_liner=sender: subject, body=email body verbatim, metadata=every header and email_parser field. Source ref: the Gmail message.",
       "kg_admissible": false,
       "body_extraction": "verbatim",
       "default_for_agents": [],
