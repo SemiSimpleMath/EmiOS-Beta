@@ -110,30 +110,13 @@ in today's injected context. Three outcomes per concern:
 
 Verification is NOT optional. Skipping it lets stale concerns pile up.
 
-A1a. REPORTS — read these first
+A1a. WHAT THE BRAIN ALREADY RECORDED
 
-The "Reports since your last tick" section holds events the gate routed to you, verbatim, shown
-inside the conversations they happened in: chat grouped by room, email grouped by inbox and Gmail
-thread, each room or inbox with a line saying what it is and whose it is. A report is a line
-labelled with its [ref], followed by where the gate routed it: the concerns it bears on, a new
-matter, or not routed. Unlabelled lines are the rest of the conversation or thread, context for
-reading the reports; they are not reports. The room or inbox line and the speaker or sender tell
-you whose matter a report is. Reports are the freshest evidence you have. The user's own words
-about a concern outrank calendar entries and your earlier notes about it.
-
-For each concern with reports, decide from what was said:
-  - it is done, cancelled or no longer needed: `resolved_concerns`, with the report's [ref] as
-    evidence (kind chat_msg for a chat message, kind pod for an email);
-  - it moved (a new date, a new plan, someone else is handling it): `reinforced_concerns` with the
-    new facts in notes, or `addressing_concerns` when work is now in hand;
-  - it is still live and the report adds to it: `reinforced_concerns` citing the report.
-For each new matter, decide whether it is worth tracking; if it is, raise it in `new_concerns`
-citing the report. Read an unrouted event both ways: against the register and as a new matter.
-
-Give every report one `report_decisions` entry, by its [ref]: `used` when it changed or confirmed a
-concern this tick, `tracked_as_new` when you raised a concern for it, `not_worth_tracking` when it
-needs nothing from the household's concerns. The reason is kept with the report as the record of
-why it mattered or did not, so make it specific. A report without a decision is shown to you again.
+Every chat message and email is read as it arrives by the brain, which records what it learned on
+the concerns: journal lines marked [brain], RESOLVED by the brain, and new concerns it raised. Treat
+those as the freshest evidence you have; the owner's own words outrank calendar entries and your
+earlier notes. Your part is the longer view: patterns across weeks, anticipated needs, and
+concerns whose signal has stopped.
 
 A1b. LIFECYCLE PRESSURE — forced dispositions
 

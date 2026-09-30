@@ -4,6 +4,8 @@
 ### [{{ c.label }}] {{ c.title }}
 - about: {{ c.subject }}; kind: {{ c.kind }}; horizon: {{ c.horizon }}{% if c.anchor %}; anchor: {{ c.anchor }}{% endif %}
 - done when: {{ c.done_when }}
+{% if c.owner_words %}- the owner asked for this: "{{ c.owner_words }}"
+{% endif -%}
 - notes: {{ c.notes }}
 {% for e in c.evidence -%}
 - evidence ({{ e.kind }} {{ e.ref }}){% if e.snippet %}: {{ e.snippet }}{% endif %}
@@ -15,6 +17,8 @@
 ### [{{ c.label }}] {{ c.title }} ({{ c.status }}{% if c.closed_on %}, closed {{ c.closed_on }}{% endif %})
 - about: {{ c.subject }}; kind: {{ c.kind }}{% if c.anchor %}; anchor: {{ c.anchor }}{% endif %}; first observed: {{ c.first_observed }}
 {% if c.done_when %}- done when: {{ c.done_when }}
+{% endif -%}
+{% if c.owner_words %}- the owner asked for this: "{{ c.owner_words }}"
 {% endif -%}
 {% if c.closed_because %}- closed because: {{ c.closed_because }}
 {% endif -%}

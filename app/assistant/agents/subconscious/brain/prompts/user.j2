@@ -1,0 +1,50 @@
+Now: {{ agent_input.now }}
+
+## The events
+
+{{ agent_input.events }}
+{% for r in agent_input.room_history -%}
+## Earlier in {{ r.room }} (chat summaries, from 48 hours before these events)
+
+{% for s in r.summaries -%}
+- {{ s.when }}: {{ s.title }}
+{{ s.body }}
+{% else -%}
+(no chat summaries for this room in that window)
+{% endfor %}
+{% endfor -%}
+## Concerns these events bear on
+
+{% for c in agent_input.concerns -%}
+### [{{ c.label }}] {{ c.title }} ({{ c.status }})
+- about: {{ c.subject }}; kind: {{ c.kind }}; severity: {{ c.severity }}; horizon: {{ c.horizon }}
+{% if c.owner_words %}- the owner asked for this: "{{ c.owner_words }}"
+{% endif -%}
+- done when: {{ c.done_when or "(not stated)" }}
+- first observed: {{ c.first_observed }}
+- notes: {{ c.notes }}
+{% for e in c.evidence -%}
+- evidence ({{ e.kind }} {{ e.ref }}){% if e.snippet %}: {{ e.snippet }}{% endif %}
+{% endfor -%}
+{% for w in c.work_outcomes -%}
+- work {{ w.work_id }}: {{ w.outcome }} ({{ w.recorded_at }}){% if w.user_response %}; the owner's response: {{ w.user_response }}{% endif %}
+{% endfor -%}
+{% if c.journal %}- journal:{{ c.journal }}
+{% endif %}
+{% else -%}
+(the gate named no concern: these events are a new matter, or the gate could not route them)
+{% endfor %}
+## Other open concerns
+
+{% for c in agent_input.other_concerns -%}
+- [{{ c.label }}] {{ c.title }} ({{ c.status }}; about {{ c.subject }}; done when: {{ c.done_when or "(not stated)" }})
+{% else -%}
+(none)
+{% endfor %}
+{% if agent_input.correction %}
+## Correct your previous answer
+
+It did not satisfy the contract: {{ agent_input.correction }}
+Answer again, deciding every event exactly once and using only the labels above.
+{% endif %}
+Decide what this matter changes.

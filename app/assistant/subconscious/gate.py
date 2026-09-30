@@ -3,15 +3,15 @@
 One `subconscious::gate` call per page of pending events. Each event gets exactly one route —
 `concern` (with the concerns it bears on), `new_matter` or `none` — validated here: every event
 answered once, only the labels given, a concern route names at least one concern. One correction
-round; an answer still invalid after it marks the page `failed`, which the noticer still reads
+round; an answer still invalid after it marks the page `failed`, which the brain still reads
 (a routing failure must not drop an event).
 
 Labels are request-local (E1… for events, C1… for concerns) and mapped back by code, so the model
 never copies a concern_id or a message id. Events are shown inside their conversations, grouped by
 room under the room's description (subconscious/conversations.py); unlabelled turns are context.
 
-When anything is passed on (concern or new_matter), a noticer tick is triggered — cooldown-guarded,
-shared with answer capture — so a report reaches the brain within minutes, not at tomorrow's 04:00.
+What is passed on (concern or new_matter) is read by the brain step, run right after the gate by the
+brain_gate routine (subconscious/brain_step.py).
 """
 from __future__ import annotations
 
@@ -102,10 +102,9 @@ def _agent_call(payload: Dict[str, Any]) -> Any:
 
 
 def run_gate(*, ingest: bool = True, call: Optional[Callable[[Dict[str, Any]], Any]] = None,
-             register: Optional[Dict[str, Any]] = None, trigger: Optional[Callable[[str], Any]] = None,
-             connect=None) -> Dict[str, Any]:
-    """Ingest new chat and email, route every pending event, trigger the noticer if anything was passed on.
-    Free when nothing is pending (no model call). The keyword arguments are test seams."""
+             register: Optional[Dict[str, Any]] = None, connect=None) -> Dict[str, Any]:
+    """Ingest new chat and email and route every pending event. Free when nothing is pending (no
+    model call). The keyword arguments are test seams."""
     from app.assistant.subconscious import brain_inbox as inbox
     from belief_engine.matching.context import pages
 
@@ -125,7 +124,7 @@ def run_gate(*, ingest: bool = True, call: Optional[Callable[[Dict[str, Any]], A
         try:
             decisions = route_page(page, concerns, call)
         except Exception as exc:
-            logger.error("[gate] %d event(s) could not be routed; the noticer reads them unrouted: %s",
+            logger.error("[gate] %d event(s) could not be routed; the brain reads them unrouted: %s",
                          len(page), exc, exc_info=True)
             inbox.record_failure([e["id"] for e in page], str(exc), **kw)
             failed += len(page)
@@ -134,12 +133,5 @@ def run_gate(*, ingest: bool = True, call: Optional[Callable[[Dict[str, Any]], A
             inbox.record_route(event_id, d["route"], d["concern_ids"], d["reasoning"], **kw)
             routed += 1
             passed += d["route"] != "none"
-    if passed or failed:
-        (trigger or _trigger_noticer)(f"gate passed on {passed} event(s), {failed} unrouted")
     logger.info("[gate] ingested=%d routed=%d passed_on=%d failed=%d", ingested, routed, passed, failed)
     return {"ingested": ingested, "routed": routed, "passed_on": passed, "failed": failed}
-
-
-def _trigger_noticer(reason: str) -> Any:
-    from app.assistant.subconscious.answer_capture import trigger_noticer
-    return trigger_noticer(reason)

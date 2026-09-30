@@ -9,12 +9,13 @@ Now events REPORT. Each source writes one row per thing that happened, keyed by 
 id so it lands exactly once. Chat: every user message, verbatim, whatever its length. Email: every
 email the fetch keeps (email_parser importance >= 5), from its pod, full body; the pod id is the
 ref. The gate (subconscious/gate.py) routes each row against the open concerns —
-`concern` (bears on named concerns), `new_matter`, or `none` — and the noticer reads every routed
-row verbatim, inside the conversation it happened in (subconscious/conversations.py), then marks it
-consumed. The `replying_to` column is no longer written: the conversation shows what a message
-answers. Nothing is decided here: the
-inbox records, the gate proposes, the noticer decides. A `none` row stays in the table, so what
-the gate held back can be audited.
+`concern` (bears on named concerns), `new_matter`, or `none` — and the brain step
+(subconscious/brain_step.py) reads what the gate passed on, one matter at a time, inside the
+conversations it happened in, then marks it consumed. The `replying_to` column is no longer
+written: the conversation shows what a message answers. `noticer_decision`/`noticer_reason` hold
+the noticer's decisions from before 2026-09-30; the brain's decisions live in `brain_matters`.
+Nothing is decided here: the inbox records, the gate proposes, the brain decides. A `none` row
+stays in the table, so what the gate held back can be audited.
 
 The brain's own output never enters: chat intake takes role='user' rows only, so the digest, the
 noticer's questions and the assistant's replies cannot come back as events.
@@ -182,65 +183,3 @@ def record_failure(event_ids: List[int], error: str, connect=None) -> None:
     with connect(True) as c:
         c.executemany("UPDATE brain_events SET gate_status='failed', gate_error=?, gated_at=? WHERE id=?",
                       [(error, _iso(datetime.now(timezone.utc)), i) for i in event_ids])
-
-
-# ── the noticer's side ──────────────────────────────────────────────────────
-
-def unconsumed_reports(connect=None) -> List[Dict[str, Any]]:
-    """Everything the noticer has not read yet that the gate passed on (or could not route)."""
-    connect = connect or _connect
-    ensure_schema(connect)
-    with connect(False) as c:
-        rows = [dict(r) for r in c.execute(
-            "SELECT * FROM brain_events WHERE consumed_at IS NULL AND "
-            "(gate_status='failed' OR (gate_status='routed' AND route IN ('concern','new_matter'))) "
-            "ORDER BY occurred_at, id")]
-    for r in rows:
-        r["concern_ids"] = json.loads(r["concern_ids"]) if r.get("concern_ids") else []
-    return rows
-
-
-def render_reports(reports: List[Dict[str, Any]], concerns: Dict[str, Dict[str, Any]]) -> str:
-    """The reports as the noticer reads them: each labelled with its ref inside its conversation,
-    followed by where the gate routed it. Verbatim; times in local time."""
-    if not reports:
-        return "(no new reports since your last tick)"
-    from app.assistant.subconscious import conversations
-
-    def note(r: Dict[str, Any]) -> str:
-        if r["gate_status"] == "failed":
-            return "not routed: the gate failed on this one; read it against the register and as a new matter"
-        if r["route"] == "new_matter":
-            return "gate: new matter, no open concern covers it"
-        named = []
-        for cid in r["concern_ids"]:
-            c = concerns.get(cid)
-            named.append(f"{c.get('title')} [{c.get('_bucket')}] ({cid})" if c
-                         else f"{cid} (not in the register any more)")
-        return "gate: bears on " + "; ".join(named)
-
-    rooms = conversations.build([{**r, "mark": r["source_ref"], "note": note(r)} for r in reports])
-    return conversations.render(rooms)
-
-
-def mark_consumed(reports: List[Dict[str, Any]], decisions: List[Dict[str, Any]], connect=None) -> List[str]:
-    """Record the noticer's decision on each report it read and mark those consumed. A report the
-    noticer gave no decision stays unconsumed and is shown again next tick; its ref is returned."""
-    connect = connect or _connect
-    by_ref = {str(d.get("ref") or "").strip(): d for d in decisions or []}
-    now = _iso(datetime.now(timezone.utc))
-    undecided, rows = [], []
-    for r in reports:
-        d = by_ref.get(r["source_ref"])
-        if d is None:
-            undecided.append(r["source_ref"])
-            continue
-        rows.append((now, d.get("decision"), d.get("reason"), r["id"]))
-    if rows:
-        with connect(True) as c:
-            c.executemany("UPDATE brain_events SET consumed_at=?, noticer_decision=?, noticer_reason=? WHERE id=?",
-                          rows)
-    if undecided:
-        logger.warning("[brain_inbox] noticer gave no decision on %d report(s); shown again next tick: %s",
-                       len(undecided), undecided)
-    return undecided

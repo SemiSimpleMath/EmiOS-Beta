@@ -191,6 +191,58 @@ def _settled_anchors(register: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     return settled
 
 
+def _refuse_owner_close(concern: Dict[str, Any], now_iso: str, what: str) -> bool:
+    """A concern the owner asked for closes only when its done_when is met (work achieved it) or
+    the owner says it is over (the brain step reads the owner's words). The noticer infers; it does
+    not get to close one. Refused attempts are journalled on the concern."""
+    if not concern.get("owner_request"):
+        return False
+    _journal_on(concern, now_iso, f"REFUSED a noticer {what}: the owner asked for this; it closes when "
+                                  "its done-when is met or the owner says it is over")
+    logger.warning("[noticer.persist] refused to close owner-requested concern %s: %s",
+                   concern.get("concern_id"), what)
+    return True
+
+
+def apply_brain_matter(updates: List[Dict[str, Any]], plan: List[Dict[str, Any]], *,
+                       source: str = "brain", connect=None) -> Dict[str, Optional[str]]:
+    """Apply one brain matter (subconscious/brain_step.py) under the register lock: notes and
+    resolutions on open concerns, then new concerns through the concern door (`plan` was made
+    before the lock). Returns new-concern label -> the concern it landed in.
+
+    A note records new facts with the events as evidence; it is not a reinforcement of the same
+    signal, so it does not count toward the noticer's disposition pressure. An update naming a
+    concern that is no longer open raises: the matter is recorded failed, nothing is half-written."""
+    from app.assistant.subconscious import concern_door
+    with _REGISTER_LOCK:
+        register = _load_register(connect)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        open_by_id = {c.get("concern_id"): (b, c) for b in ("active", "addressing") for c in register.get(b) or []}
+        for u in updates:
+            if u["concern_id"] not in open_by_id:
+                raise KeyError(f"concern {u['concern_id']} is no longer open")
+            bucket, concern = open_by_id[u["concern_id"]]
+            concern.setdefault("evidence", []).extend(u["evidence"])
+            if u["action"] == "note":
+                concern["last_reinforced_utc"] = now_iso
+                _journal_on(concern, now_iso, f"[{source}] {u['note']}")
+                _trim_evidence(concern)
+            elif u["action"] == "resolve":
+                concern["resolved_at_utc"] = now_iso
+                concern["resolution_reason"] = u["note"]
+                concern["resolution_evidence"] = u["evidence"]
+                _journal_on(concern, now_iso, f"RESOLVED by the {source}: {u['note']}")
+                register[bucket] = [c for c in register[bucket] if c.get("concern_id") != u["concern_id"]]
+                register.setdefault("resolved", []).append(concern)
+                del open_by_id[u["concern_id"]]
+            else:
+                raise ValueError(f"unknown brain update action {u['action']!r}")
+        admitted = concern_door.apply_admission(plan, register, source=source, now_iso=now_iso)
+        register["last_updated_utc"] = now_iso
+        _save_register(connect, register)
+    return admitted
+
+
 def _apply_noticer_output_locked(
     output: Dict[str, Any],
     plan: List[Dict[str, Any]],
@@ -285,6 +337,8 @@ def _apply_noticer_output_locked(
             logger.warning("[noticer.persist] resolution targets unknown concern %s", cid)
             continue
         existing = by_id[cid]
+        if _refuse_owner_close(existing, now_utc_iso, f"resolution ({r.get('reason', '')})"):
+            continue
         existing["resolved_at_utc"] = now_utc_iso
         existing["resolution_reason"] = r.get("reason", "")
         existing["resolution_evidence"] = r.get("evidence", [])
@@ -323,6 +377,8 @@ def _apply_noticer_output_locked(
             + f"\n[{now_utc_iso}] disposition={action}: {reason}"
         )
 
+        if action == "accept_chronic" and _refuse_owner_close(existing, now_utc_iso, f"accept_chronic ({reason})"):
+            continue
         if action == "accept_chronic":
             # Known long-term pattern; stop tracking it tick-by-tick. Keeps a
             # compact record in `dormant` (founding + freshest evidence only).

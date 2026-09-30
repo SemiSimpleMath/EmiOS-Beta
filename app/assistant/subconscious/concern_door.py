@@ -23,6 +23,10 @@ Two phases, so the model call never runs under the register lock:
 
 Every candidate states `done_when`: the outcome that closes it. It is required here, not only in a
 model's schema, because every closing path measures against it.
+
+A candidate the owner asked for carries `owner_request` ({words, at, ref}: the owner's words verbatim
+and the event they came from). The owner asking for something makes it live, so such a candidate is
+never judged the same as a closed matter; folded into an open concern, it carries the request there.
 """
 from __future__ import annotations
 
@@ -77,6 +81,7 @@ def build_payload(candidates: List[Dict[str, Any]], existing: List[Dict[str, Any
             "label": f"N{i}", "title": c.get("title"), "subject": c.get("subject") or "household",
             "kind": c.get("kind"), "horizon": c.get("horizon"), "anchor": c.get("anchor"),
             "done_when": c.get("done_when"), "notes": c.get("notes") or "",
+            "owner_words": (c.get("owner_request") or {}).get("words"),
             "evidence": [{"kind": e.get("kind"), "ref": e.get("ref"), "snippet": e.get("snippet")}
                          for e in c.get("evidence") or []],
         } for i, c in enumerate(candidates, 1)],
@@ -84,6 +89,7 @@ def build_payload(candidates: List[Dict[str, Any]], existing: List[Dict[str, Any
             "label": f"C{i}", "status": c["_status"], "title": c.get("title"),
             "subject": c.get("subject") or "household", "kind": c.get("kind"), "anchor": c.get("anchor"),
             "done_when": c.get("done_when"), "notes": c.get("notes") or "",
+            "owner_words": (c.get("owner_request") or {}).get("words"),
             "first_observed": c.get("first_observed"),
             "closed_on": _local_date(c.get("resolved_at_utc") or c.get("dormant_at_utc")),
             "closed_because": closed_because(c) if c["_status"] in ("resolved", "dormant") else "",
@@ -92,7 +98,8 @@ def build_payload(candidates: List[Dict[str, Any]], existing: List[Dict[str, Any
     }
 
 
-def _problems(data: Any, cand_labels: List[str], open_labels: List[str], closed_labels: List[str]) -> List[str]:
+def _problems(data: Any, cand_labels: List[str], open_labels: List[str], closed_labels: List[str],
+              owner_labels: List[str] = ()) -> List[str]:
     if not isinstance(data, dict) or not isinstance(data.get("decisions"), list):
         return ["no decisions list"]
     out, seen, by_label = [], [], {}
@@ -113,6 +120,8 @@ def _problems(data: Any, cand_labels: List[str], open_labels: List[str], closed_
             out.append(f"{label}: same_open must name an open concern label, got {target!r}")
         elif decision == "same_closed" and target not in closed_labels:
             out.append(f"{label}: same_closed must name a closed concern label, got {target!r}")
+        elif decision == "same_closed" and label in owner_labels:
+            out.append(f"{label}: the owner asked for it, so it is live: it cannot be same_closed")
         elif decision == "same_candidate":
             if target == label or target not in cand_labels:
                 out.append(f"{label}: same_candidate must name another candidate, got {target!r}")
@@ -170,14 +179,15 @@ def plan_admission(candidates: List[Dict[str, Any]], register: Dict[str, Any], *
         ex_labels = [f"C{k}" for k in range(1, len(existing) + 1)]
         open_labels = [lab for lab, c in zip(ex_labels, existing) if c["_status"] in ("active", "addressing")]
         closed_labels = [lab for lab in ex_labels if lab not in open_labels]
+        owner_labels = [lab for lab, c in zip(cand_labels, batch) if c.get("owner_request")]
         payload = build_payload(batch, existing)
         call = judge or _agent_call
         data = call(payload)
-        problems = _problems(data, cand_labels, open_labels, closed_labels)
+        problems = _problems(data, cand_labels, open_labels, closed_labels, owner_labels)
         if problems:
             logger.warning("[concern_door] invalid decisions, one correction: %s", problems)
             data = call({**payload, "correction": "; ".join(problems)})
-            problems = _problems(data, cand_labels, open_labels, closed_labels)
+            problems = _problems(data, cand_labels, open_labels, closed_labels, owner_labels)
             if problems:
                 raise ValueError(f"concern_door decisions still invalid after one correction: {problems}")
         by_ex = dict(zip(ex_labels, existing))
@@ -228,6 +238,8 @@ def apply_admission(steps: List[Dict[str, Any]], register: Dict[str, Any], *, so
             target_id = step["target"] if action == "merge_open" else landed[step["target"]]
             target = _find(register, target_id)
             target.setdefault("evidence", []).extend(c.get("evidence") or [])
+            if c.get("owner_request") and not target.get("owner_request"):
+                target["owner_request"] = c["owner_request"]
             persist._bump_reinforcement_count(target)
             target["last_reinforced_utc"] = now_iso
             persist._journal_on(target, now_iso, f"MERGED a re-raise from {source}: {title} ({step['reason']})")

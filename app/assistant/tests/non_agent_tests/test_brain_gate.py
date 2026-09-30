@@ -3,7 +3,7 @@
 2026-09-28: "OK I HAVE GIVEN [THE DOGS] THEIR FLEA MEDICATION!" (55 characters) was dropped
 by the noticer's 60-character filter and the flea concern stayed live. These tests pin the new path:
 messages land verbatim whatever their length, the gate's routing is validated and mapped back by
-code, a routing failure still reaches the noticer, and every reader sees events inside their
+code, a routing failure still reaches the brain, and every reader sees events inside their
 conversations — chat by room, email by inbox and Gmail thread — under a line saying what each room
 or inbox is, with the rest of the conversation or thread as unlabelled context. Scratch sqlite file; the gate model and the chat log are fakes. Invented data only.
 """
@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.assistant.subconscious import brain_inbox as inbox
-from app.assistant.subconscious import conversations, gate
+from app.assistant.subconscious import brain_step, conversations, gate
 from belief_engine.intake.store import sqlite_file
 
 NOW = datetime(2026, 3, 10, 18, 0, tzinfo=timezone.utc)
@@ -96,23 +96,19 @@ def test_routes_are_validated_and_mapped_back_by_code(connect):
         _decisions(("E1", "concern", ["C9"])),                      # bad label, missing events
         _decisions(("E1", "concern", ["C1"]), ("E2", "new_matter", []), ("E3", "none", [])),
     ])
-    triggered = []
-    out = gate.run_gate(ingest=False, call=lambda payload: next(answers), register=REGISTER,
-                        trigger=triggered.append, connect=connect)
+    out = gate.run_gate(ingest=False, call=lambda payload: next(answers), register=REGISTER, connect=connect)
     assert out == {"ingested": 0, "routed": 3, "passed_on": 2, "failed": 0}
-    assert triggered, "a passed-on event triggers a noticer tick"
-    reports = inbox.unconsumed_reports(connect)
+    reports = brain_step.pending_events(connect)
     assert [(r["text"], r["route"], r["concern_ids"]) for r in reports] == [
         ("Gave the cat the worm tablet.", "concern", ["c-meds"]),
         ("School trip form is due Friday.", "new_matter", [])]
 
 
-def test_a_routing_failure_still_reaches_the_noticer(connect):
+def test_a_routing_failure_still_reaches_the_brain(connect):
     inbox.ingest_chat(now_utc=NOW, connect=connect, fetch=lambda since: [msg(1, 5, "Car booked for Tuesday.")])
-    out = gate.run_gate(ingest=False, call=lambda payload: {"decisions": []}, register=REGISTER,
-                        trigger=lambda reason: None, connect=connect)
+    out = gate.run_gate(ingest=False, call=lambda payload: {"decisions": []}, register=REGISTER, connect=connect)
     assert out["failed"] == 1
-    [r] = inbox.unconsumed_reports(connect)
+    [r] = brain_step.pending_events(connect)
     assert r["gate_status"] == "failed" and "not answered" in r["gate_error"]
 
 
@@ -120,27 +116,6 @@ def test_nothing_pending_costs_nothing(connect):
     def no_call(payload):
         raise AssertionError("the gate model must not be called")
     assert gate.run_gate(ingest=False, call=no_call, register=REGISTER, connect=connect)["routed"] == 0
-
-
-def test_the_noticer_reads_reports_under_their_concern_then_forgets_them(connect):
-    inbox.ingest_chat(now_utc=NOW, connect=connect, fetch=lambda since: [msg(1, 5, "done!")])
-    gate.run_gate(ingest=False, call=lambda p: _decisions(("E1", "concern", ["C1"])), register=REGISTER,
-                  trigger=lambda reason: None, connect=connect)
-    reports = inbox.unconsumed_reports(connect)
-    concerns = {c["concern_id"]: {**c, "_bucket": b} for b in ("active", "addressing") for c in REGISTER[b]}
-    text = inbox.render_reports(reports, concerns)
-    assert "### Room master_room\nAbout master_room." in text
-    assert "[message:m1] Owner: done!" in text
-    assert "(gate: bears on The cat's worm tablet is due soon [active] (c-meds))" in text
-    # No decision: the report comes back next tick.
-    assert inbox.mark_consumed(reports, [], connect) == ["message:m1"]
-    assert len(inbox.unconsumed_reports(connect)) == 1
-    inbox.mark_consumed(reports, [{"ref": "message:m1", "decision": "used", "reason": "settles it"}], connect)
-    assert inbox.unconsumed_reports(connect) == []
-    with connect(False) as c:
-        assert tuple(c.execute("SELECT noticer_decision, noticer_reason FROM brain_events").fetchone()) == (
-            "used", "settles it")
-    assert inbox.render_reports([], concerns) == "(no new reports since your last tick)"
 
 
 def test_gate_prompts_render_with_every_event_and_concern():

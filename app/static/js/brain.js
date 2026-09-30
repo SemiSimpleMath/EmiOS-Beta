@@ -36,7 +36,7 @@ async function loadInbox() {
     const kind = e.gate_status === "routed" ? e.route : e.gate_status;
     head.appendChild(el("span", "br-badge " + kind, kind));
     head.appendChild(el("span", null, `${e.occurred_at} · ${e.room_id || e.source} · ${e.speaker || "user"} · ${e.source_ref}`));
-    if (e.consumed_at) head.appendChild(el("span", "br-badge", "read by noticer"));
+    if (e.consumed_at) head.appendChild(el("span", "br-badge", e.brain_decision ? "read by brain" : "read by noticer"));
     box.appendChild(head);
     box.appendChild(el("div", "br-ev-text", e.text));
     const meta = el("div", "br-ev-meta");
@@ -50,6 +50,8 @@ async function loadInbox() {
     line("concerns:", (e.concerns || []).map((c) => `${c.title} (${c.id.slice(0, 8)})`).join("; "));
     line("gate:", e.gate_reasoning);
     line("gate error:", e.gate_error);
+    line("brain:", e.brain_decision ? `${e.brain_decision} — ${e.brain_reason || ""}` : "");
+    line("brain error:", e.brain_error);
     line("noticer:", e.noticer_decision ? `${e.noticer_decision} — ${e.noticer_reason || ""}` : "");
     box.appendChild(meta);
     list.appendChild(box);
@@ -65,7 +67,7 @@ async function loadNoticer() {
   const data = await r.json();
   if (data.error || !r.ok) { $("#n-status").textContent = "failed: " + (data.error || r.status); return; }
   const total = (data.inputs || []).reduce((a, i) => a + i.chars, 0);
-  $("#n-status").textContent = `${data.inputs.length} inputs · ${fmtChars(total)} · ${data.reports_unconsumed} unread report(s)`;
+  $("#n-status").textContent = `${data.inputs.length} inputs · ${fmtChars(total)} · ${data.reports_unconsumed} event(s) waiting for the brain`;
   body.appendChild(el("div", "br-h", "Inputs (largest first)"));
   [...data.inputs].sort((a, b) => b.chars - a.chars).forEach((i) => body.appendChild(section(i.key, i.text, false)));
   body.appendChild(el("div", "br-h", "Rendered prompts"));

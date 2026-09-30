@@ -46,8 +46,9 @@ Step 1: information arrives.
   when missing — `oauth_registry.get_description`), each email inside its Gmail thread (every stored
   email of the thread, in time order). The gate routes newsletters and promotions `none` unless
   their content bears on a concern.
-- **Noticer reads reports.** New context item `brain_reports`: every unconsumed routed event,
-  verbatim, inside its conversation, with its route (concerns it bears on, new matter, unrouted). Prompt
+- **Noticer reads reports** (until step 3, 2026-09-30, when the brain step took this over).
+  Context item `brain_reports`: every unconsumed routed event, verbatim, inside its conversation,
+  with its route. Prompt
   section A1a: a user's own words about a concern outrank calendar entries and earlier notes.
 - **Every report gets a decision.** AgentForm `report_decisions`: `used` / `tracked_as_new` /
   `not_worth_tracking` with a reason, stored on the event (`noticer_decision`, `noticer_reason`).
@@ -118,6 +119,40 @@ raised from the first email run.
 Not in step 2, deliberately: enforcement that an owner-created concern closes only when its
 `done_when` is met or the owner says so (owner-created concerns first exist with the brain step),
 and the record of what was created for a concern (its writers are the dayflow handoff).
+
+## Step 3: the brain step (2026-09-30)
+
+`app/assistant/subconscious/brain_step.py`, agent `subconscious::brain`, run by the brain_gate routine
+right after the gate. It replaces the noticer as the reader of what the gate passes on; the noticer no
+longer has a reports section or `report_decisions` and reads the brain's work in the register
+(journal lines `[brain] …`, `RESOLVED by the brain`, new concerns with `origin: brain`).
+
+- Matters, grouped by code: events routed to the same concerns; new-matter or unrouted events of one
+  conversation (chat room, or Gmail thread). A split that leaves two concerns about one thing is
+  folded together by the concern door.
+- Context per matter: the events inside their conversations with the gate's route on each; the
+  room's chat summaries (chat_cluster pods) from 48 hours before the first event, and any since
+  (owner request 2026-09-30: more than the current conversation, and the chat pod); the full record
+  of every concern the events bear on, with evidence rendered as its text (the chat message, the
+  pod) rather than its id, work outcomes and journal; the other open concerns, briefly.
+- Answer: notes and resolutions on concerns, new concerns (done-when; the owner's words verbatim
+  when the owner asked), and a decision with a reason on every event. Code checks labels, that each
+  decision agrees with what cites the event, and that owner_words appear exactly in one of the
+  concern's events; one correction round.
+- Apply: new concerns through the concern door (source `brain`), notes and resolutions under the
+  register lock (`persist.apply_brain_matter`; a note does not count toward disposition pressure),
+  events marked consumed, the matter recorded in `brain_matters` (decisions, admitted ids). A matter
+  still invalid, or one that fails to apply, is recorded `failed`: nothing written, its events stay
+  in the inbox and are not retried automatically.
+- Concerns the owner asked for carry `owner_request` {words, at, ref}. The noticer's resolutions and
+  accept_chronic on them are refused and journalled; the concern door never judges one the same as a
+  closed matter, and a merge carries the request onto the concern it joins.
+
+Live dry run (2026-09-30, nothing applied): the 2026-09-28 "given the flea medication" message,
+read as a new matter against today's register, resolved the flea concern the noticer had raised that
+morning for the 2 October calendar entry; the school library-fine email became a note on the open
+library-fine concern, with the pay-or-return details. Each without a gate route: the brain found the
+concern from the list of open concerns.
 
 ## Requirement for the brain build: association finds dependents (owner, 2026-09-30)
 

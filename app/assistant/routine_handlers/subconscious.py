@@ -109,9 +109,7 @@ def noticer_run(
         logger.info("[noticer_run] another noticer tick is in flight — skipping this one")
         return {"status": "skipped_concurrent_run"}
     try:
-        from app.assistant.subconscious import brain_inbox
-        reports = brain_inbox.unconsumed_reports()
-        context = build_noticer_context(trigger_mode="daily", reports=reports)
+        context = build_noticer_context(trigger_mode="daily")
         output = _run_subconscious_agent(
             handler_label="noticer_run",
             agent_name="subconscious::noticer",
@@ -120,10 +118,6 @@ def noticer_run(
             actor_id="routine::noticer_run",
         )
         summary = apply_noticer_output(output) or {}
-        # Only after the tick is applied: a failed tick leaves its reports for the next one.
-        undecided = brain_inbox.mark_consumed(reports, output.get("report_decisions") or [])
-        summary["reports_read"] = len(reports)
-        summary["reports_undecided"] = len(undecided)
         logger.info(
             "[noticer_run] new=%d reinforced=%d resolved=%d escalated=%d beliefs=%d questions=%d",
             len(output.get("new_concerns") or []),
@@ -150,11 +144,14 @@ def brain_gate_run(
     routine: Any = None,
     event_message: Any = None,
 ) -> Dict[str, Any]:
-    """Ingest new user messages into the brain inbox and route each against the open concerns.
-    Free when nothing new arrived (no model call). Triggers a noticer tick when anything is passed
-    on; see subconscious/gate.py."""
+    """Ingest new chat and email into the brain inbox, route each event against the open concerns
+    (subconscious/gate.py), then let the brain decide every matter the gate passed on
+    (subconscious/brain_step.py). Free when nothing new arrived (no model call)."""
+    from app.assistant.subconscious.brain_step import run_brain_step
     from app.assistant.subconscious.gate import run_gate
-    return {"status": "ok", **run_gate()}
+    gate = run_gate()
+    brain = run_brain_step()
+    return {"status": "ok", **gate, **{f"brain_{k}": v for k, v in brain.items()}}
 
 
 # ---------------------------------------------------------------------------

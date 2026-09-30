@@ -32,14 +32,11 @@ def build_noticer_context(
     *,
     trigger_mode: str = "daily",
     household_members: Optional[List[str]] = None,
-    reports: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, str]:
     """Assemble the full context dict for one noticer tick.
 
     Returns a dict keyed by the user_context_items names in the noticer's
     config.yaml. Each value is a string ready to interpolate into user.j2.
-    `reports` are the brain-inbox events this tick reads (the caller marks exactly these consumed
-    after the tick is applied); omitted, the unconsumed ones are read.
     """
     now_local = get_local_time()
     now_utc = datetime.now(timezone.utc)
@@ -63,7 +60,6 @@ def build_noticer_context(
         "family_roster": _build_family_roster(household_members),
         "kg_household_digests": _build_kg_household_digests(household_members),
         "ambient_state_digest": _build_ambient_state_digest(household_members),
-        "brain_reports": _build_brain_reports(reports),
         "concerns_register_active": _build_concerns_register_active(),
         "concerns_recently_closed": _build_concerns_recently_closed(),
         "question_mailbox": _build_question_mailbox(),
@@ -553,19 +549,6 @@ def _build_ambient_state_digest(members: List[str]) -> str:
     return _NO_DATA_FMT.format(kind="ambient state")
 
 
-def _build_brain_reports(reports: Optional[List[Dict[str, Any]]]) -> str:
-    """The brain inbox's routed events, grouped under the concern each bears on."""
-    from app.assistant.subconscious import brain_inbox
-    from app.assistant.subconscious.concern_store import load_register
-    if reports is None:
-        reports = brain_inbox.unconsumed_reports()
-    register = load_register()
-    concerns = {c.get("concern_id"): {**c, "_bucket": bucket}
-                for bucket in ("active", "addressing", "resolved", "dormant")
-                for c in register.get(bucket) or []}
-    return brain_inbox.render_reports(reports, concerns)
-
-
 def _build_concerns_register_active() -> str:
     """Render the active + addressing concerns from the concerns table."""
     from app.assistant.subconscious.concern_store import load_register
@@ -737,6 +720,10 @@ def _render_concern_summary(c: Dict[str, Any], *, status: str) -> str:
         f"  domain_tags: {', '.join(c.get('domain_tags') or [])}",
         f"  addressable_by: {', '.join(c.get('addressable_by') or [])}",
         f"  first_observed: {c.get('first_observed')}",
+        f"  done_when: {c.get('done_when') or '(not stated)'}",
+        *([f"  the owner asked for this: \"{c['owner_request']['words']}\" "
+           "(it closes when its done_when is met or the owner says it is over; you cannot resolve it or "
+           "accept it as chronic)"] if c.get("owner_request") else []),
         f"  notes: {(c.get('notes') or '')[:300]}",
     ]
     parts.append(_render_handling_history(c))

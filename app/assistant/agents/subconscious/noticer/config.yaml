@@ -35,7 +35,6 @@ user_context_items:
   - family_roster
   - kg_household_digests
   - ambient_state_digest
-  - brain_reports
   - concerns_register_active
   - concerns_recently_closed
   - question_mailbox

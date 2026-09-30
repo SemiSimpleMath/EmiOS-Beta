@@ -1,0 +1,26 @@
+name: subconscious::brain
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.6-luna"
+  model_tier: "smart"
+
+# The brain step: reads one matter (events the gate passed on, inside their conversations) with the
+# full record of every concern it bears on, and decides what it changes: notes, resolutions, new
+# concerns, and a decision on every event. Context is fully pre-injected by
+# subconscious/brain_step.py; code validates and applies the answer.
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+accept_auto_skills: false
+
+user_context_items:
+  - agent_input
+
+required_context_items:
+  - agent_input
+
+system_context_items:
+  - resource_assistant_data
+  - resource_user_data

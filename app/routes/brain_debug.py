@@ -78,13 +78,27 @@ def brain_inbox_api():
         counts = {r[0] or "pending": r[1] for r in c.execute(
             "SELECT CASE WHEN gate_status='routed' THEN route ELSE gate_status END, COUNT(*) FROM brain_events "
             "GROUP BY 1")}
+    import json
+    from app.assistant.subconscious import brain_step
     from app.assistant.subconscious.concern_store import load_register
     titles = {c.get("concern_id"): c.get("title") for b, items in load_register().items()
               if isinstance(items, list) for c in items}
+    # The brain's decision on each event, from the matter that read it.
+    brain_step.ensure_schema()
+    decided, failed = {}, {}
+    with brain_inbox._connect(False) as c:
+        for status, decisions, error in c.execute("SELECT status, decisions, error FROM brain_matters"):
+            if status == "applied":
+                decided.update(json.loads(decisions)["events"])
+    with brain_inbox._connect(False) as c:
+        for event_ids, error in c.execute("SELECT event_ids, error FROM brain_matters WHERE status='failed'"):
+            failed.update({i: error for i in json.loads(event_ids)})
     for r in rows:
-        import json
         r["concern_ids"] = json.loads(r["concern_ids"]) if r.get("concern_ids") else []
         r["concerns"] = [{"id": cid, "title": titles.get(cid, "(not in the register)")} for cid in r["concern_ids"]]
+        d = decided.get(r["source_ref"])
+        r["brain_decision"], r["brain_reason"] = (d["decision"], d["reason"]) if d else (None, None)
+        r["brain_error"] = failed.get(r["id"])
     return jsonify({"events": rows, "counts": counts})
 
 
@@ -92,13 +106,12 @@ def brain_inbox_api():
 def brain_noticer_api():
     """Every noticer context input, sized, plus the rendered prompts. Builds live context (reads the
     calendar), so it takes a few seconds."""
-    from app.assistant.subconscious import brain_inbox
+    from app.assistant.subconscious import brain_step
     from app.assistant.subconscious.context_builder import build_noticer_context
-    reports = brain_inbox.unconsumed_reports()
-    context = build_noticer_context(trigger_mode="daily", reports=reports)
+    context = build_noticer_context(trigger_mode="daily")
     inputs: List[Dict[str, Any]] = [{"key": k, "chars": len(str(v)), "text": str(v)} for k, v in context.items()]
     prompts = _render_prompts("subconscious::noticer", context, "subconscious::noticer")
-    return jsonify({"inputs": inputs, "reports_unconsumed": len(reports), **prompts})
+    return jsonify({"inputs": inputs, "reports_unconsumed": len(brain_step.pending_events()), **prompts})
 
 
 @brain_debug_bp.route("/api/brain/gate")
