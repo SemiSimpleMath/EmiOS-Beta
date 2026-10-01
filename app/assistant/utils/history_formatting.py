@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 from datetime import datetime
 from typing import Any, Iterable
 
@@ -38,9 +37,15 @@ def _is_internal_agent_result(m: Any) -> bool:
     return sender in {"shared::tool_arguments"}
 
 
-def _display_tool_call_payload(tool_name: str, args: str | None) -> str:
+def _args_text(args: Any) -> str:
+    return args if isinstance(args, str) else json.dumps(args, ensure_ascii=False)
+
+
+def _display_tool_call_payload(tool_name: str, args: Any) -> str:
     parsed_args: Any = {}
-    if isinstance(args, str) and args.strip():
+    if args is not None and not isinstance(args, str):
+        parsed_args = args
+    elif isinstance(args, str) and args.strip():
         raw = args.strip()
         try:
             parsed_args = json.loads(raw)
@@ -168,18 +173,6 @@ def format_recent_history(agent_messages: Iterable[Any]) -> str:
         if tid:
             summarized_ids.add(tid)
 
-    def _parse_tool_request(content: str) -> tuple[str | None, str | None]:
-        m = re.match(r"Calling tool\\s+([^\\s]+)\\s+with arguments\\s+(.+)", content.strip())
-        if not m:
-            return None, content.strip() or None
-        return m.group(1), m.group(2)
-
-    def _parse_agent_request(content: str) -> tuple[str | None, str | None]:
-        m = re.match(r"Calling agent\\s+'([^']+)'\\s+with arguments:\\s+(.+)", content.strip())
-        if not m:
-            return None, None
-        return m.group(1), m.group(2)
-
     def _finalize_pending_request() -> None:
         nonlocal pending_request
         if not pending_request:
@@ -190,7 +183,7 @@ def format_recent_history(agent_messages: Iterable[Any]) -> str:
         args = pending_request.get("args")
         lines = []
         if args:
-            lines.append(f"Args: {args}")
+            lines.append(f"Args: {_args_text(args)}")
         combined = _emit(hid, time_s, tool_name, lines)
         if combined:
             pieces.append(combined)
@@ -201,22 +194,23 @@ def format_recent_history(agent_messages: Iterable[Any]) -> str:
         dt = getattr(m, "data_type", None)
 
         if dt == "tool_request":
-            req_hid = _meta(m).get("history_id", 0)
-            content = _safe_content(m)
-            agent_name, agent_args = _parse_agent_request(content)
-            if agent_name:
+            # ToolCaller records the call's name and arguments in metadata. A request without them
+            # (the DAG request) shows its sub_data_type and its content as written.
+            meta = _meta(m)
+            req_hid = meta.get("history_id", 0)
+            if meta.get("agent_name"):
                 pending_agent_request = {
                     "time_s": _fmt_time(m),
-                    "agent_name": agent_name,
-                    "args": agent_args,
+                    "agent_name": meta["agent_name"],
+                    "args": meta.get("arguments"),
                     "history_id": req_hid,
                 }
             else:
-                tool_name, args = _parse_tool_request(content)
+                sub = getattr(m, "sub_data_type", None)
                 pending_request = {
                     "time_s": _fmt_time(m),
-                    "tool_name": tool_name or "tool",
-                    "args": args,
+                    "tool_name": meta.get("tool_name") or (str(sub[0]) if isinstance(sub, list) and sub and sub[0] else None),
+                    "args": meta["arguments"] if "tool_name" in meta else (_safe_content(m) or None),
                     "history_id": req_hid,
                 }
             i += 1
@@ -244,7 +238,8 @@ def format_recent_history(agent_messages: Iterable[Any]) -> str:
             entry = {
                 "history_id": hid,
                 "time_s": _fmt_time(m),
-                "tool_name": tool_name or (pending_request or {}).get("tool_name") or "tool",
+                # The request names the tool; a result's sub_data_type is its result_type.
+                "tool_name": (pending_request or {}).get("tool_name") or tool_name or "tool",
                 "args": (pending_request or {}).get("args"),
                 "tool_result_id": tid,
                 "summary": None,
@@ -320,7 +315,7 @@ def format_recent_history(agent_messages: Iterable[Any]) -> str:
                 args = pending_agent_request.get("args")
                 lines: list[str] = []
                 if args:
-                    lines.append(f"Args: {args}")
+                    lines.append(f"Args: {_args_text(args)}")
                 result_body = _safe_content(m)
                 if result_body:
                     lines.append(f"Result: {result_body}")

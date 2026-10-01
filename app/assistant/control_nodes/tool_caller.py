@@ -267,7 +267,8 @@ class ToolCaller(ControlNode):
         tool_request_msg = Message(
             data_type='tool_request',
             sender=calling_agent,
-            content=f"Calling agent '{called_agent_name}' with arguments: {json.dumps(arguments)}."
+            content=f"Calling agent '{called_agent_name}' with arguments: {json.dumps(arguments)}.",
+            metadata={"agent_name": called_agent_name, "arguments": arguments},
         )
         self.blackboard.add_msg(tool_request_msg)
 
@@ -344,6 +345,7 @@ class ToolCaller(ControlNode):
                 data_type="tool_request",
                 sender=calling_agent,
                 content=f"Calling tool {tool_name} with arguments {json.dumps(arguments)}",
+                metadata={"tool_name": tool_name, "arguments": arguments},
             )
         )
 

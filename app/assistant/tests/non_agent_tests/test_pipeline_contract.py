@@ -73,6 +73,55 @@ def test_pipeline_order_tool_request_before_result():
     assert isinstance(handler.last_tool_result, ToolResult)
 
 
+def test_history_shows_the_called_tool_and_its_arguments():
+    """The planner's history names the tool ToolCaller called, with its arguments, read from the
+    request's metadata, not the result's result_type."""
+    bb = Blackboard()
+    handler = _ToolResultHandlerStub(bb)
+    bb.update_state_value("action", "simple_tool")
+    bb.update_state_value("tool_arguments", {"target_name": "simple_tool", "arguments": {"query": "thermostat"}})
+    bb.update_state_value("calling_agent", "test_agent")
+    ToolCaller("tool_caller", bb, _AgentRegistryStub(tool_result_handler=handler),
+               _ToolRegistryStub(_SimpleTool)).action_handler(Message(data_type="agent_activation"))
+    bb.add_msg(Message(data_type="tool_result", sub_data_type=["tool_success"], sender="tool",
+                       receiver="test_agent", content="ok"))
+
+    out = format_recent_history(bb.get_messages())
+    assert 'TOOL CALL: {"tool_name": "simple_tool", "arguments": {"query": "thermostat"}}' in out
+    assert "Calling tool" not in out
+
+
+class _HelperAgentStub:
+    def action_handler(self, _message):
+        return ToolResult(result_type="agent_result", content="helper says hi")
+
+
+class _AgentResultHandlerStub:
+    """Records the callee's result as an agent_result and unwinds the call, as ToolResultHandler does."""
+    def __init__(self, bb: Blackboard):
+        self.bb = bb
+
+    def action_handler(self, _message):
+        result = self.bb.get_state_value("helper_result")
+        self.bb.pop_call_context()
+        self.bb.add_msg(Message(data_type="agent_result", sender="helper", receiver="test_agent",
+                                content=str(result)))
+
+
+def test_history_pairs_an_agent_call_with_its_result():
+    bb = Blackboard()
+    registry = _AgentRegistryStub()
+    registry.get_agent_instance = {"helper": _HelperAgentStub(),
+                                   "tool_result_handler": _AgentResultHandlerStub(bb)}.get
+    ToolCaller("tool_caller", bb, registry, _ToolRegistryStub(_SimpleTool))._execute_agent_call(
+        "test_agent", "helper", {"question": "hi?"}, scope_context=None)
+
+    out = format_recent_history(bb.get_messages())
+    assert "- Calling agent helper" in out
+    assert 'Args: {"question": "hi?"}' in out
+    assert "Result: helper says hi" in out
+
+
 def test_critic_post_routes_to_resume_target():
     """After a no-revise critic verdict, critic_post routes to the saved
     resume target and clears the per-trigger critic state. The subject
