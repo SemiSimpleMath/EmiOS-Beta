@@ -1,8 +1,8 @@
 """dayflow_orchestrator.work_architect_apply — lay a work_architect DAG onto a work object's graph.
 
-The architect emits node specs (node_id slug, title, detail, depends_on, wake_kind/wake_at/wake_ref).
-This prepares nodes, dependency edges and wait gates, then commits them as one validated
-revision. A rejected operation leaves the previous graph unchanged. The LLM reasoning already happened in the
+The architect emits node specs (node_id slug, title, detail, depends_on, wake_kind/wake_at/wake_ref),
+and, owning the goal to its end, may revise its objective or end it. This prepares nodes, dependency
+edges, wait gates and those goal changes, then commits them as one validated revision. A rejected operation leaves the previous graph unchanged. The LLM reasoning already happened in the
 agent; this is pure mechanics. wake_at is parsed to a datetime (the substrate stores it typed and
 is_ready compares it to now).
 """
@@ -91,6 +91,10 @@ def apply_architect_dag(store, work_id: str, nodes: List[Dict[str, Any]],
                         licensed: bool = False,
                         duplicate_of: Dict[str, str] | None = None,
                         finalizer_instructions: list[dict] | None = None,
+                        goal_instructions: list[dict] | None = None,
+                        review_fingerprint: str | None = None,
+                        revise_objective: Dict[str, Any] | None = None,
+                        end_goal: Dict[str, Any] | None = None,
                         expected_updated_at=None) -> Dict[str, Any]:
     """Apply an architect DELTA onto a work object's graph. On a fresh decompose it just adds nodes; on a
     RE-PLAN it can also PRUNE: abandon each `abandon_node_ids` node + its un-finished ownership subtree
@@ -101,7 +105,12 @@ def apply_architect_dag(store, work_id: str, nodes: List[Dict[str, Any]],
     deterministically by the CALLER from typed flags, never from wording. Only a licensed replan may
     abandon queued (`actionable`) or held (future-wake `waiting`) nodes; the store's churn fence
     refuses those prunes otherwise, aborting the entire revision.
-    Returns {added, edges, waits, abandoned}."""
+
+    Goal changes ride the same batch, after the task changes: `revise_objective` (the goal's premise
+    changed; work continues toward the new objective), then the steward's `goal_instructions` marked
+    acted on and the stranded `review_fingerprint` recorded, then `end_goal` (done | abandoned, with
+    its reason) last, so an ending cascades over the finished graph.
+    Returns {added, edges, waits, abandoned, deduplicated, revised, ended}."""
     wo = store.load(work_id)
     operations = []
     def queue(op, data, actor=None):
@@ -235,12 +244,44 @@ def apply_architect_dag(store, work_id: str, nodes: List[Dict[str, Any]],
     for entry in finalizer_instructions or []:
         queue("consume_finalizer_instruction", {"node_id": entry["node_id"],
               "expected_finalizer": {key: value for key, value in entry.items() if key != "node_id"}})
+
+    # 4) goal changes. revise_goal writes the whole constraints dict prepared from `wo`, so it goes
+    #    before the ops that add to the constraints.
+    revised = None
+    if revise_objective:
+        from app.assistant.dayflow_orchestrator.work_intake import goal_update
+        objective = str(revise_objective.get("objective") or "").strip()
+        reason = str(revise_objective.get("reason") or "").strip()
+        if not objective or not reason:
+            raise ValueError("architect: revise_objective needs an objective and a reason")
+        update = goal_update(wo, objective=objective,
+                             success_criteria=str(revise_objective.get("success_criteria") or "").strip() or None)
+        previous = (wo.constraints or {}).get("objective") or (wo.nodes[goal_id].content or wo.nodes[goal_id].title)
+        update["constraints"]["objective_revisions"] = [
+            *((wo.constraints or {}).get("objective_revisions") or []),
+            {"from": previous, "to": objective, "reason": reason,
+             "at": datetime.now(timezone.utc).isoformat()}]
+        queue("revise_goal", update)
+        revised = objective
+    if goal_instructions:
+        queue("consume_goal_instructions", {"at": [entry["at"] for entry in goal_instructions]})
+    if review_fingerprint:
+        queue("record_goal_review", {"fingerprint": review_fingerprint})
+    ended = None
+    if end_goal:
+        status = end_goal.get("status")
+        reason = str(end_goal.get("reason") or "").strip()
+        if status not in ("done", "abandoned") or not reason:
+            raise ValueError("architect: end_goal needs status done|abandoned and a reason")
+        queue("set_work_status", {"work_id": work_id, "status": status, "reason": f"architect: {reason}"})
+        ended = status
+
     if operations:
         store.apply("batch", {"work_id": work_id, "expected_updated_at": expected_updated_at or wo.updated_at,
                               "operations": operations}, actor="architect")
 
     logger.info("apply_architect_dag(%s): +%d nodes, +%d deps, +%d waits, -%d abandoned "
-                "(%d de-duplicated)", work_id, len(added), edges, waits, len(abandoned),
-                len(deduplicated))
+                "(%d de-duplicated), objective revised: %s, ended: %s", work_id, len(added), edges, waits,
+                len(abandoned), len(deduplicated), bool(revised), ended)
     return {"added": added, "edges": edges, "waits": waits, "abandoned": abandoned,
-            "deduplicated": deduplicated}
+            "deduplicated": deduplicated, "revised": revised, "ended": ended}

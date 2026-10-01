@@ -114,7 +114,7 @@ Global service registry: `DI` from `app/assistant/ServiceLocator/service_locator
 
 ### Dayflow Orchestrator
 
-**Evaluator closure:** complete/abandon decisions first save durable `pending_work_closure` intents. A failed closure stops the pass and blocks further execution for that work; evaluator prep retries before planning. Do not clear the intent to make work runnable. Concern feedback is post-commit and best-effort.
+**Goal ownership:** the steward decides what work exists; the architect owns each work object from creation to end (docs/design/dayflow_goal_ownership_2026-09-30.md). The architect revises the objective (`revise_objective`) and completes or abandons the goal (`end_goal`, with its reason) in its own revision batch. It is woken by a finalizer instruction, a steward end request (`end_requests`, recorded on the work object via `instruct_goal`), the steward's replan flags, or the goal being stranded (nothing in it can run and no scheduled time lies ahead, `stranded_fingerprint`). The steward has no complete/abandon lists. Concern and belief feedback are delivered after the architect's commit.
 
 **Execution ownership:** use standard ManagerInvoker, agent activation, tool dispatch,
 and monitored thread/executor helpers. WorkContext preserves the main task's captured

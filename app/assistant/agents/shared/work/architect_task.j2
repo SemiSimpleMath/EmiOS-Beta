@@ -1,6 +1,14 @@
 {{ objective }}
 {% if mode == 'replan' %}
 {{ finalizer_block }}
+{%- if goal_instructions is defined and goal_instructions %}
+THE STEWARD ASKS YOU TO END THIS GOAL. It sees the whole portfolio and new intake; you hold this goal's plan, so the decision is yours. End it (end_goal) when its reason stands against what the graph shows; otherwise keep the goal and say in architect_summary why it continues.
+{% for entry in goal_instructions %}- {{ entry.at }}: {{ entry.reason }}
+{% endfor %}
+{%- endif %}
+{%- if stranded is defined and stranded %}
+THIS GOAL IS STRANDED: nothing in its graph can run any more (no step in flight, no step waiting on a time ahead or on the outside world, the rest blocked or finished) and it is not achieved. Decide its future now: add the step that moves it (when the user is needed first, a step that tells or asks them, with the retry depending on the answer), revise the objective to what is still needed, or end it with the reason.
+{%- endif %}
 This goal ALREADY has a work graph (below). Revise it as a DELTA per the verdict above and the CONTEXT: ADD the steps still missing, and ABANDON (list their node_ids in abandon_node_ids) only nodes the EVIDENCE — epitaphs, recorded results, user directives — makes moot or wrong; unfinished internal records go with them. Queued (actionable) and held (future-wake) nodes remain planned: never prune one for slowness. Do NOT recreate existing nodes (reference their node_ids in depends_on). Output the delta only.
 Existing nodes:
 {{ graph }}

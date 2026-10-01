@@ -308,8 +308,6 @@ class WorkObject(BaseModel):
     def is_ready(self, node: WorkNode, now: Optional[datetime] = None, *, ignore_external_wake: bool = False) -> bool:
         # proposed/waiting = gate-checkable (state_mover reads this to decide promotion);
         # actionable = already state_mover-promoted but not yet dispatched — still "ready".
-        if self.constraints.get("pending_work_closure"):
-            return False
         if node.status not in {"proposed", "waiting", "actionable"}:
             return False
         if self.is_work_unit(node) and (self.status != "active" or self.has_pending_revision()):

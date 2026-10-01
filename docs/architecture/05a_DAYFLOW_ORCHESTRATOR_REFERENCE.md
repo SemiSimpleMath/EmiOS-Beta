@@ -336,11 +336,12 @@ action log). **Id-chain context (25cf2b5b):** every ticket reply is annotated wi
 never by wording), and `expected_schedule_view` renders today's expected schedule with per-row provenance
 (`_resolve_ticket_provenance`) so the evaluator can SEE that a reminder already exists / was answered /
 was dropped (drop reasons included) instead of re-minting it. The model judges; it never links. Each tick it judges the portfolio + new intake and decides only **what changes** — create /
-change-objective / flag-for-replan / complete / abandon — never decomposing or executing. Output
-(`new_or_changed`, `replan_work_ids`, `complete_work_ids`, `abandon_work_ids`) is applied by
+change-objective / flag-for-replan / request an end — never decomposing, executing or ending work.
+Output (`new_or_changed`, `replan_work_ids`, `end_requests`) is applied by
 `strategic_planner_wo_persist_node` via `work_persist.persist_steward_output`: an empty `work_id` →
 `create_work_object` then `set_status → dispatched` (the goal node); a non-empty one → in-place objective
-change; complete/abandon → `set_work_status`. It then **consumes intake** — artifacts a new WO cites in
+change; an end request → `instruct_goal`, for the architect, which owns the work object to its end
+(05_DAYFLOW, "Goal ownership"). It then **consumes intake** — artifacts a new WO cites in
 `based_on` are folded into the goal content and their source items closed
 (`converted_to_work_object:<wid>`) — and leaves `replan_work_ids` for the architect.
 

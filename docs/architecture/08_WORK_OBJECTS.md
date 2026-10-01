@@ -566,7 +566,7 @@ the reader has to be able to see that a delivery satisfied the *work* while the 
 condition was stricter.
 
 **Delivery sites** (identical for both lanes): `work_finalizer_node` after an atomic
-finalization, `work_persist.recover_pending_work_closures` after an explicit steward closure, and
+finalization, `work_architect_node` after the architect ends a goal, and
 `strategic_planner_wo_prep_node` as crash recovery before the next planning pass.
 
 **Who decides what it means.** `belief_engine::work_outcome` returns `no_change` | `resolve` |

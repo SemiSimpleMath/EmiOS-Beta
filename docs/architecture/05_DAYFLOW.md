@@ -90,7 +90,8 @@ wake ran the full pipeline.)
 
 **Creation.** The evaluator judges the portfolio + new intake each tick and emits only WHAT changed:
 new/changed objectives (with a prose `rationale` brief for the architect and `based_on` provenance),
-`replan_work_ids`, `complete_work_ids`, `abandon_work_ids`. Consumed intake items are closed
+`replan_work_ids`, and `end_requests` (a work object it judges should end, with the reason, for the
+architect to decide; 2026-09-30, see "Goal ownership" below). Consumed intake items are closed
 (`converted_to_work_object:<id>`) and their summaries folded into the goal content. Its context is
 id-chain annotated (2026-08-01): ticket replies render with their resolved work object and status
 (`[work_x — done]` via `trigger_context.work_node`), and TODAY'S SCHEDULE renders as
@@ -379,11 +380,10 @@ turns the decision into graph state via `_STATUS_FOR`, and the store refuses any
 an illegal transition.
 
 **Its reach is the node it judged.** A third verdict, RESOLVE, used to let it set the whole
-WorkObject done or abandoned from a single node's result. That belongs to the STEWARD, which already
-owns `complete_work_ids` / `abandon_work_ids` and sees every work object's outcomes each tick;
-ordinary completion needs nobody, since the store's rollup completes a goal once `is_satisfied`. A
-finalizer that thinks the goal is finished or moot says so in `outcome`, and the steward rules on
-it next tick.
+WorkObject done or abandoned from a single node's result. Ending a goal belongs to the ARCHITECT,
+which owns the work object to its end (since 2026-09-30; before that, the steward); ordinary completion
+needs nobody, since the store's rollup completes a goal once `is_satisfied`. A finalizer that thinks the
+goal is finished or moot says so in `outcome` with a `stop` route, and the architect ends it.
 
 **The rollup yields to a pending instruction.** `achieved_plan_changes` closes the node with a
 `plan_changes` route. Closing the last node would otherwise complete the goal before the architect
@@ -443,8 +443,9 @@ node gets its own blackboard; what it needs arrives through the Message or as a 
 - **The ROUTINE reads as a backlog.** It is timing context ("judge the goal's timing against this")
   but is written as imperatives — "Issue the cooling-stop action" — and the architect turns lines
   into nodes.
-- **`abandon_work_ids` has no reason field**, so `work_persist` writes a hardcoded tautology on every
-  abandon (448 of 592 historic rows). `propagate_work_outcome` then finds no user words, the
+- **`abandon_work_ids` had no reason field** (retired 2026-09-30), so `work_persist` wrote a
+  hardcoded tautology on every abandon (448 of 592 historic rows); the architect's `end_goal` now
+  carries its reason. `propagate_work_outcome` then finds no user words, the
   originating concern stays active, and the goal is re-minted the next morning.
 - **The failure ceiling counts per goal, not per action.** `goal_unmet_attempts` survives a re-plan
   but not the steward minting a fresh work object for the same action tomorrow. Catching that needs a
@@ -584,25 +585,27 @@ transferred sources remain eligible to release existing work gates. This is queu
 not cancellation of existing work or deletion of historical source context.
 
 
-### Reliable evaluator closure (DF38)
+### Goal ownership (2026-09-30; replaces DF38's evaluator closure)
 
-Before other evaluator mutations, complete/abandon decisions are saved as an atomic
-batch of `constraints.pending_work_closure` intents in existing work objects. Each
-terminal `set_work_status` removes its intent in the same commit as closure. Failure
-raises and stops the pass; remaining intents block readiness, claims, revisions,
-worker writes and new tool calls. Evaluator prep retries them before rendering its
-portfolio, so recovery does not rely on the old blackboard or another model decision.
-Result recording/finalization may still preserve outcomes from already-started calls.
-The whole evaluator output is not one transaction; earlier completed closures stay closed.
-Concern feedback is separate best-effort post-commit work. Failure to save the initial
-intent batch stops the pass but cannot leave a durable intent. An external operation
-already in progress cannot be recalled by this mechanism.
+The steward decided whether a work object ended and the architect held its plan, so they fought: on
+2026-09-30 the finalizer judged the 7:00 thermostat work `unrecoverable` with `ask_user`, the architect
+planned the question for 10:20, and at 7:20 the steward abandoned the work because 7:00 had passed; the
+abandon cascaded over the question. Now the architect owns each work object from creation to end
+(docs/design/dayflow_goal_ownership_2026-09-30.md):
 
-Same-pass source/objective updates for a closing work object are committed with its
-closure intent, preserving incoming user context before the object becomes terminal.
-Verification: injected terminal-write failures, restart/second-connection recovery,
-blocked claims/tool calls, atomic intent batches, partial closure progress, separate
-feedback failures, and existing intake/execution/finalization regressions.
+- its output gains `revise_objective` and `end_goal` (done | abandoned, with the reason), applied in
+  its revision batch after the task changes (`revise_goal` first, since it writes the whole
+  constraints; `set_work_status` last);
+- it is woken by a finalizer instruction, a steward end request, the steward's replan flags, or the
+  goal being stranded: active, not achieved, no judgment pending, and no task that can still run (in
+  flight, waiting on a time ahead or on the outside world, or runnable). A reviewed stranded state is
+  recorded (`record_goal_review`) and not reviewed again until it changes;
+- the steward's `end_requests` (work_id + reason) are recorded on the work object (`instruct_goal`);
+  the architect ends it or keeps it, marking them acted on (`consume_goal_instructions`);
+- concern and belief feedback for an ended goal is delivered after the architect's commit.
+
+The durable closure intents (`pending_work_closure`) and their execution barrier are retired with the
+steward's complete/abandon lists; the architect's ending is atomic with its revision.
 
 
 ### Architect duplicate validation (DF6)

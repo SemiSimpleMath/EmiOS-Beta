@@ -84,7 +84,6 @@ class ExecutionStoreMixin:
         node = wo.nodes.get(owner.main_node_id)
         row = self._conn.execute("SELECT revoked,state FROM work_execution_attempts WHERE work_id=? AND node_id=? AND epoch=?", _key(owner)).fetchone()
         if (wo.id != owner.work_id or wo.status in {'done','abandoned'} or node is None
-                or wo.constraints.get('pending_work_closure')
                 or node.status != 'dispatched'
                 or int(node.payload.get('dispatch_epoch') or 0) != owner.dispatch_epoch
                 or (row and (row['revoked'] or row['state'] not in {'reserved', 'running'}))):
@@ -99,11 +98,7 @@ class ExecutionStoreMixin:
         # Worker writes and tool admission separately require dispatched status.
         with self._lock:
             row = self._conn.execute("SELECT revoked,state FROM work_execution_attempts WHERE work_id=? AND node_id=? AND epoch=?", _key(owner)).fetchone()
-            pending = self._conn.execute(
-                "SELECT json_extract(constraints, '$.pending_work_closure') FROM work_objects WHERE id=?",
-                (owner.work_id,)).fetchone()
-            return bool((pending and pending[0])
-                        or (row and (row['revoked'] or row['state'] not in {'reserved','running'})))
+            return bool(row and (row['revoked'] or row['state'] not in {'reserved','running'}))
 
     def admit_execution_call(self, owner, call_id, name, external):
         with self._lock, self._conn:

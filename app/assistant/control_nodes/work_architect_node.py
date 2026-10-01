@@ -1,13 +1,19 @@
-"""Decompose freshly-created goals into their DAG, and re-plan flagged ones (Part 2 of the split planner).
+"""Decompose freshly-created goals into their DAG, and own each goal to its end (Part 2 of the split planner).
 
-Runs right after strategic_planner_wo_persist_node. Per tick, for ONE work object at a time:
+The architect owns a work object from creation to end (docs/design/dayflow_goal_ownership_2026-09-30.md):
+the steward decides what work exists; everything that happens to a work object after, including its
+end, is the architect's. Runs right after strategic_planner_wo_persist_node. Per tick, for ONE work
+object at a time:
 - CREATE: for each work object the evaluator created this tick, invoke dayflow_orchestrator::work_architect
   on its objective and lay the resulting DAG (subtask nodes, depends_on edges, wait-gates) into the graph
   via apply_architect_dag.
-- RE-PLAN: for each work object flagged in `replan_work_ids` (by the evaluator from intake, OR by the
-  work_finalizer's verdicts — each rides on its node as `payload.finalizer` with a route), re-invoke the
-  architect with the goal + the existing graph and apply the DELTA: ADD the missing steps and ABANDON the
-  nodes the situation made moot.
+- RE-PLAN, woken per work object by: a finalizer verdict that asks for something (on its node as
+  `payload.finalizer`); a steward instruction to end it (`constraints.architect_instructions`); the
+  steward's `replan_work_ids` (intake, a user directive); or the work object being STRANDED (nothing in
+  it can still run and no scheduled time lies ahead, `stranded_fingerprint`). It re-invokes the architect
+  with the goal + the existing graph and applies the DELTA: add the missing steps, abandon the moot ones,
+  revise the objective, or end the goal. An ended goal's concern and belief feedback is delivered after
+  the commit.
 
 The materializer → action_selector → switchboard → dispatch loop then runs the ready nodes. Never raises — a per-object failure leaves that object as-is
 and the pipeline continues.
@@ -73,6 +79,63 @@ def _pending_finalizer_instructions(store) -> dict[str, list[dict]]:
     return out
 
 
+_LIVE = {"proposed", "waiting", "actionable", "dispatched"}
+_DEAD = {"abandoned", "failed", "superseded"}
+_OUTSIDE_WAKES = {"event", "signal", "user_reply"}
+
+
+def stranded_fingerprint(wo) -> str | None:
+    """The task state of a work object in which nothing can move it any more, or None.
+
+    Stranded (owner, 2026-09-30: every scheduled time in it has passed with nothing settling it): active,
+    has tasks, no judgment pending (a result not yet judged, or a finalizer instruction not yet acted
+    on), and no task that can still run: none in flight, none waiting on a future time or on the
+    outside world, none runnable now. A task whose prerequisite is abandoned or failed can never run.
+    The fingerprint names that state; a state already reviewed (`constraints.stranded_review`) is not
+    stranded again until it changes.
+    """
+    if str(wo.status or "").lower() != "active" or wo.has_pending_revision():
+        return None
+    units = [n for n in wo.nodes.values() if wo.is_work_unit(n)]
+    if not units:
+        return None
+    goal = wo.nodes.get(wo.goal_node_id)
+    if goal is not None and wo.is_satisfied(goal):
+        return None
+    for n in units:
+        if n.status in {"done", "failed"} and not (n.payload or {}).get("finalizer"):
+            return None                                   # its result is not judged yet
+        if n.status not in _LIVE:
+            continue
+        if n.status == "dispatched" or n.wake_kind in _OUTSIDE_WAKES:
+            return None
+        if any(wo.nodes[d].status in _DEAD for d in wo.deps_of(n.id) if d in wo.nodes):
+            continue                                      # can never run
+        return None                                       # runnable now, or when its time comes
+    fingerprint = "|".join(sorted(f"{n.id}:{n.status}" for n in units))
+    if ((wo.constraints or {}).get("stranded_review") or {}).get("fingerprint") == fingerprint:
+        return None
+    return fingerprint
+
+
+def _goal_triggers(store) -> tuple[dict[str, list[dict]], dict[str, str]]:
+    """Per active work object: the steward's unconsumed end instructions, and the stranded state."""
+    instructions: dict[str, list[dict]] = {}
+    stranded: dict[str, str] = {}
+    for summary in store.list_work_objects():
+        if str(summary.get("status") or "").lower() != "active":
+            continue
+        wo = store.load(summary["id"])
+        pending = [e for e in (wo.constraints or {}).get("architect_instructions") or []
+                   if not e.get("consumed_at")]
+        if pending:
+            instructions[wo.id] = pending
+        fingerprint = stranded_fingerprint(wo)
+        if fingerprint:
+            stranded[wo.id] = fingerprint
+    return instructions, stranded
+
+
 def _finalizer_block(entries) -> tuple[str, str]:
     """Render instructions in Jinja and separately prepare the pruning licence data."""
     entries = [e for e in (entries or []) if str(e.get("next_step") or "").strip()]
@@ -129,6 +192,18 @@ def _situational_context(bb) -> str:
         completed=bb.get_state_value("recent_completed_work", "") or "")
 
 
+def _deliver_ending(store, work_id: str, status: str) -> None:
+    """After an ending commits: the concerns and beliefs the work served get its outcome. Both
+    deliveries are receipt-backed; a failure leaves the receipt for evaluator prep to retry."""
+    from app.assistant.subconscious.concern_feedback import propagate_work_outcome
+    from belief_engine.work_feedback import propagate_work_outcome_to_beliefs
+    propagate_work_outcome(store, work_id, status)
+    try:
+        propagate_work_outcome_to_beliefs(store, work_id, status)
+    except Exception:
+        logger.error("[architect] work %s ended %s; belief feedback failed", work_id, status, exc_info=True)
+
+
 class WorkArchitectNode(ControlNode):
     def action_handler(self, message):
         self.blackboard.update_state_value("next_agent", None)
@@ -150,7 +225,9 @@ class WorkArchitectNode(ControlNode):
             # steward also flagged it: the verdict is a deterministic signal and must not depend
             # on an agent happening to notice the node in the portfolio.
             pending = _pending_finalizer_instructions(store)
-            replan_ids = list(dict.fromkeys([*replan_ids, *pending]))
+            instructions, stranded = _goal_triggers(store)
+            # Judgments and the steward's instructions first, then the steward's flags, then stranded goals.
+            replan_ids = list(dict.fromkeys([*pending, *instructions, *replan_ids, *stranded]))
             # Steward-classed user directives: replans that carry out something the USER said. Together
             # with a finalizer verdict these LICENSE the replan to prune queued/held nodes; an unlicensed
             # replan (the steward's own read of progress) may add but not kill — the store's churn
@@ -210,9 +287,12 @@ class WorkArchitectNode(ControlNode):
                         goal = wo.nodes.get(wo.goal_node_id)
                         objective = (getattr(goal, "content", "") or getattr(goal, "title", "")) if goal else ""
                         finalizer_block, licence = _finalizer_block(pending.get(work_id))
-                        licensed = bool(licence) or (work_id in user_directed)
+                        # A stranded goal's prunes are licensed by its state: nothing in it can run.
+                        licensed = bool(licence) or (work_id in user_directed) or (work_id in stranded)
                         task = render_view("architect_task", mode="replan", objective=objective,
-                                           finalizer_block=finalizer_block, graph=_render_existing_graph(wo))
+                                           finalizer_block=finalizer_block, graph=_render_existing_graph(wo),
+                                           goal_instructions=instructions.get(work_id, []),
+                                           stranded=work_id in stranded)
                         result = agent.action_handler(Message(task=task, information=info, scope_context=scope))
                         data = getattr(result, "data", {}) or {}
                         res = apply_architect_dag(store, work_id, data.get("nodes", []) or [],
@@ -221,13 +301,21 @@ class WorkArchitectNode(ControlNode):
                                                   licensed=licensed,
                                                   duplicate_of=_duplicate_pairs(data),
                                                   finalizer_instructions=pending.get(work_id, []),
+                                                  goal_instructions=instructions.get(work_id, []),
+                                                  review_fingerprint=stranded.get(work_id),
+                                                  revise_objective=data.get("revise_objective"),
+                                                  end_goal=data.get("end_goal"),
                                                   expected_updated_at=wo.updated_at)
                         replanned.append({"work_id": work_id, "added": len(res.get("added", [])),
                                           "abandoned": len(res.get("abandoned", [])),
-                                          "deduplicated": len(res.get("deduplicated", []))})
-                        logger.info("[%s] re-planned %s: +%d node(s), -%d abandoned (%d duplicate)",
-                                    self.name, work_id, len(res.get("added", [])),
-                                    len(res.get("abandoned", [])), len(res.get("deduplicated", [])))
+                                          "deduplicated": len(res.get("deduplicated", [])),
+                                          "revised": res.get("revised"), "ended": res.get("ended")})
+                        logger.info("[%s] re-planned %s: +%d node(s), -%d abandoned (%d duplicate), "
+                                    "revised=%s ended=%s", self.name, work_id, len(res.get("added", [])),
+                                    len(res.get("abandoned", [])), len(res.get("deduplicated", [])),
+                                    bool(res.get("revised")), res.get("ended"))
+                        if res.get("ended"):
+                            _deliver_ending(store, work_id, res["ended"])
                     except Exception as e:
                         logger.error("[%s] re-plan failed for %s: %s", self.name, work_id, e)
                         logger.debug("[%s] re-plan exception", self.name, exc_info=True)

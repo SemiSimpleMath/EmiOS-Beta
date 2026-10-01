@@ -205,8 +205,6 @@ class StrategicPlannerWoPrepNode(ControlNode):
         from app.assistant.dayflow_orchestrator.work_portfolio import render_portfolio
 
         store = get_dayflow_work_store()
-        from app.assistant.dayflow_orchestrator.work_persist import recover_pending_work_closures
-        recover_pending_work_closures(store)
         from app.assistant.subconscious.concern_feedback import recover_pending_concern_feedback
         recover_pending_concern_feedback(store)
         from belief_engine.work_feedback import recover_pending_belief_feedback

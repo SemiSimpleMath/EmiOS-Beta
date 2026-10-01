@@ -1,8 +1,9 @@
 """Post-LLM persist node for strategic_planner_wo (the dayflow evaluator — formerly the steward).
 
 Applies the evaluator's output to the dayflow WorkObject store: mint new work objects from
-`new_or_changed`, close `complete_work_ids` / `abandon_work_ids` (via the set_work_status op).
-`replan_work_ids` is left on the blackboard for the architect (work_architect_node) to re-plan.
+`new_or_changed`, and record each `end_requests` entry on its work object for the architect, which
+owns the work object and decides its end. `replan_work_ids` is left on the blackboard for the
+architect (work_architect_node) to re-plan.
 
 It also CONSUMES intake: for each work object created or changed this pass, the intake items the evaluator cited
 in its `based_on` have their content folded into the work object's goal (so the worker sees the
@@ -23,15 +24,14 @@ class StrategicPlannerWoPersistNode(ControlNode):
         self.blackboard.update_state_value("next_agent", None)
         output = {
             "new_or_changed": self.blackboard.get_state_value("new_or_changed", []) or [],
-            "complete_work_ids": self.blackboard.get_state_value("complete_work_ids", []) or [],
-            "abandon_work_ids": self.blackboard.get_state_value("abandon_work_ids", []) or [],
+            "end_requests": self.blackboard.get_state_value("end_requests", []) or [],
         }
         from app.assistant.dayflow_orchestrator.intake_review import prepare_reviews
         from app.assistant.dayflow_orchestrator.dayflow_item_writer import write_intake_reviews
         admitted = self.blackboard.get_state_value("admitted_artifacts", []) or []
         reviews = prepare_reviews(admitted, output["new_or_changed"],
                                   self.blackboard.get_state_value("intake_reviews", []) or [])
-        result = {"created": [], "changed": [], "completed": [], "abandoned": []}
+        result = {"created": [], "changed": [], "end_requested": []}
         try:
             from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
             from app.assistant.dayflow_orchestrator.work_persist import persist_steward_output
@@ -61,9 +61,9 @@ class StrategicPlannerWoPersistNode(ControlNode):
         self.blackboard.update_state_value("replan_work_ids",
                                            self.blackboard.get_state_value("replan_work_ids", []) or [])
         self.blackboard.update_state_value("steward_persist_result", result)
-        logger.info("[%s] persisted: created=%d completed=%d abandoned=%d",
-                    self.name, len(result.get("created", [])), len(result.get("completed", [])),
-                    len(result.get("abandoned", [])))
+        logger.info("[%s] persisted: created=%d changed=%d end_requested=%d",
+                    self.name, len(result.get("created", [])), len(result.get("changed", [])),
+                    len(result.get("end_requested", [])))
         self.blackboard.update_state_value("last_agent", self.name)
 
     def _close_consumed_items(self, transferred):

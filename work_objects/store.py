@@ -388,53 +388,6 @@ class WorkStore(ConcernOutboxMixin, BeliefOutboxMixin, ExecutionStoreMixin):
         return WorkNode(**d)
 
     # ------------------------- validated writes ------------------------- #
-    def queue_work_closures(self, requests, *, goal_updates=None, actor="steward"):
-        """Commit all closure intents before attempting any terminal graph mutation.
-
-        Stored in existing graph metadata; no new schema. A failed terminal write
-        leaves its intent and execution barrier intact for the next planning pass.
-        """
-        if not requests:
-            return
-        from work_objects.runtime import peek_work_context
-        if peek_work_context() is not None:
-            raise ValueError("workers cannot queue portfolio closures")
-        now = utcnow().isoformat()
-        with self._lock, self._conn:
-            self._conn.execute("BEGIN IMMEDIATE")
-            seen = set()
-            for request in requests:
-                wid = str(request.get("work_id") or "").strip()
-                target = request.get("status")
-                reason = str(request.get("reason") or "").strip()
-                if not wid or wid in seen or target not in {"done", "abandoned"} or not reason:
-                    raise ValueError("Invalid or conflicting work closure request")
-                seen.add(wid)
-                wo = self._load(wid)
-                pending = wo.constraints.get("pending_work_closure")
-                if pending:
-                    if pending["status"] != target:
-                        raise ValueError(f"Conflicting pending closure for {wid}")
-                    continue
-                before = concern_snapshot(wo)
-                if wid in (goal_updates or {}):
-                    # Preserve same-pass source handoffs before making the goal terminal.
-                    self._op_revise_goal(wo, goal_updates[wid], now, actor)
-                intent = {"work_id": wid, "status": target, "reason": reason, "requested_at": now}
-                wo.constraints["pending_work_closure"] = intent
-                self._conn.execute("INSERT INTO events(work_id, ts, actor, op, data) VALUES(?,?,?,?,?)",
-                                   (wid, now, actor, "request_work_closure", json.dumps(intent)))
-                self._persist(wo, now)
-                self._queue_concern_feedback(wo, wo.status, now, before)
-
-    def pending_work_closures(self):
-        """Read durable requests without loading unrelated graphs."""
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT constraints FROM work_objects "
-                "WHERE json_extract(constraints, '$.pending_work_closure') IS NOT NULL ORDER BY id")
-            return [json.loads(row[0])["pending_work_closure"] for row in rows]
-
     def apply(self, op: str, data: dict, actor: Optional[str] = None,
               work_id: Optional[str] = None) -> WorkObject:
         handler = self._HANDLERS.get(op)
@@ -459,10 +412,6 @@ class WorkStore(ConcernOutboxMixin, BeliefOutboxMixin, ExecutionStoreMixin):
                 wo = self._load(wid)
                 previous_status = wo.status
                 before = concern_snapshot(wo)
-                if (wo.constraints.get("pending_work_closure")
-                        and op not in {"set_work_status", "record_result", "finalize_task"}):
-                    from work_objects.execution_store import ExecutionBlocked
-                    raise ExecutionBlocked("work closure is pending; execution and revision are blocked")
                 from work_objects.runtime import peek_work_context
                 ctx = peek_work_context()
                 if ctx is not None:
@@ -495,8 +444,12 @@ class WorkStore(ConcernOutboxMixin, BeliefOutboxMixin, ExecutionStoreMixin):
         expected = data.get("expected_updated_at")
         if expected is not None and wo.updated_at != datetime.fromisoformat(str(expected)):
             raise ValueError("graph changed while the revision was being prepared")
+        # The architect owns a work object from creation to end (2026-09-30): its revision may also
+        # change the objective (revise_goal, applied before the ops that write constraints) and end it
+        # (set_work_status, last).
         allowed = {"add_node", "add_edge", "set_status", "edit_node", "defer_node",
-                   "consume_finalizer_instruction", "redirect_dependencies"}
+                   "consume_finalizer_instruction", "redirect_dependencies", "revise_goal",
+                   "consume_goal_instructions", "record_goal_review", "set_work_status"}
         for change in data.get("operations", []):
             op = change.get("op")
             if op not in allowed or op not in self._HANDLERS:
@@ -880,6 +833,30 @@ class WorkStore(ConcernOutboxMixin, BeliefOutboxMixin, ExecutionStoreMixin):
         wo.title = goal.title
         wo.constraints = dict(data["constraints"])
 
+    def _op_instruct_goal(self, wo, data, now, actor=None) -> None:
+        """Ask the architect, which owns the work object, to end it: the steward's judgment that it is
+        a duplicate, superseded by intake, or declined by the owner, with the reason. Kept on the work
+        object until the architect acts on it (`consume_goal_instructions`)."""
+        reason = str(data.get("reason") or "").strip()
+        if data.get("kind") != "end" or not reason:
+            raise ValueError("instruct_goal: an instruction is kind 'end' with a non-empty reason")
+        if wo.status not in {"active", "blocked"}:
+            raise ValueError(f"instruct_goal: {wo.id} is already {wo.status}")
+        wo.constraints.setdefault("architect_instructions", []).append(
+            {"kind": "end", "reason": reason, "from": actor or "steward", "at": now})
+
+    def _op_consume_goal_instructions(self, wo, data, now, actor=None) -> None:
+        """The architect acted on these instructions (by their `at`)."""
+        wanted = set(data.get("at") or [])
+        for entry in wo.constraints.get("architect_instructions") or []:
+            if entry.get("at") in wanted and not entry.get("consumed_at"):
+                entry["consumed_at"] = now
+
+    def _op_record_goal_review(self, wo, data, now, actor=None) -> None:
+        """The architect reviewed this work object as stranded; `fingerprint` names the task state it
+        saw, so the same state is not reviewed again."""
+        wo.constraints["stranded_review"] = {"fingerprint": str(data["fingerprint"]), "at": now}
+
     def _op_edit_node(self, wo, data, now, actor=None) -> None:
         """Manual UI edit of a node's title and/or content — no status change, no transition check. For the
         /work editor; only mutates the fields explicitly provided (a missing key leaves that field alone)."""
@@ -980,15 +957,13 @@ class WorkStore(ConcernOutboxMixin, BeliefOutboxMixin, ExecutionStoreMixin):
         ))
 
     def _op_set_work_status(self, wo, data, now, actor=None) -> None:
-        """Force the WorkObject's overall status — the steward's authoritative complete/abandon, distinct
-        from the rollup's automatic 'all children done' completion. The forward-only rollup will not reset
-        it. Entering a terminal status is a transition with obligations, not a label write: the goal node
-        is mirrored terminal and every still-startable node is cascade-abandoned with its wake cleared,
-        so a closed object can never fire again (validate() enforces)."""
+        """Force the WorkObject's overall status — the architect's complete/abandon (in its revision
+        batch; dayflow_goal_ownership_2026-09-30) or an owner's action, distinct from the rollup's
+        automatic 'all children done' completion. The forward-only rollup will not reset it. Entering a
+        terminal status is a transition with obligations, not a label write: the goal node is mirrored
+        terminal and every still-startable node is cascade-abandoned with its wake cleared, so a closed
+        object can never fire again (validate() enforces)."""
         target = data["status"]
-        pending = wo.constraints.get("pending_work_closure")
-        if pending and target != pending["status"]:
-            raise ValueError("work status conflicts with pending closure")
         if target not in ("active", "done", "abandoned", "blocked"):
             raise ValueError(f"set_work_status: bad status {target!r}")
         if target in ("done", "abandoned"):
@@ -998,8 +973,6 @@ class WorkStore(ConcernOutboxMixin, BeliefOutboxMixin, ExecutionStoreMixin):
                     f"set_work_status: terminal status {target!r} for {wo.id!r} "
                     f"requires a non-empty 'reason'")
             wo.constraints["terminal"] = {"status": target, "reason": reason, "at": now}
-            # Removed in the same commit as closure; rollback preserves the request.
-            wo.constraints.pop("pending_work_closure", None)
         wo.status = target
         if target in ("done", "abandoned"):
             goal = wo.nodes.get(wo.goal_node_id or "")
@@ -1129,6 +1102,9 @@ WorkStore._HANDLERS = {
     "set_status": WorkStore._op_set_status,
     "edit_node": WorkStore._op_edit_node,
     "set_work_status": WorkStore._op_set_work_status,
+    "instruct_goal": WorkStore._op_instruct_goal,
+    "consume_goal_instructions": WorkStore._op_consume_goal_instructions,
+    "record_goal_review": WorkStore._op_record_goal_review,
     "attach_pod": WorkStore._op_attach_pod,
     "consume_finalizer_instruction": WorkStore._op_consume_finalizer_instruction,
     "defer_node": WorkStore._op_defer_node,

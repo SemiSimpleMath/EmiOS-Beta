@@ -1,9 +1,11 @@
 """Output contract for the dayflow EVALUATOR (formerly the work-object steward).
 
 The evaluator does NOT decompose and does NOT execute. Every tick it judges the PORTFOLIO of work
-objects + new intake and decides only WHAT needs to change: create a new work object (incl. a one-step
-one), change an existing objective, flag one for re-planning, or complete/abandon it. The architect
-(work_architect) decomposes/re-plans each flagged work object one at a time; work_emi_team executes.
+objects + new intake and decides only WHAT work exists: create a new work object (incl. a one-step
+one), fold intake into an existing objective, flag one for re-planning, or ask for one to end. The
+architect (work_architect) owns each work object from creation to end: it decomposes and re-plans it,
+and it completes or abandons it (docs/design/dayflow_goal_ownership_2026-09-30.md); work_emi_team
+executes.
 
 `advance` is gone — the materializer/dispatch loop runs every ready node deterministically, never gated on it.
 `replan_work_ids` is new — it asks the architect to re-plan an existing work object whose graph no
@@ -50,6 +52,14 @@ class WorkObjectSpec(BaseModel):
         "observation.")
 
 
+class EndRequest(BaseModel):
+    work_id: str = Field(description="The existing work object that should end.")
+    reason: str = Field(
+        min_length=1,
+        description="Why it should end, for the architect who decides: the duplicate it repeats, the "
+        "intake that supersedes it, or the user's own words declining it.")
+
+
 class IntakeReview(BaseModel):
     item_id: str
     outcome: Literal["no_action", "defer"]
@@ -77,9 +87,8 @@ class AgentForm(BaseModel):
         "actually said (a ticket reply, a chat comment, a dismissal with a note). List an id here ONLY "
         "when you are acting on the user's words — these re-plans are licensed to prune queued/held "
         "nodes, which your own read of progress is not.")
-    complete_work_ids: List[str] = Field(
+    end_requests: List[EndRequest] = Field(
         default_factory=list,
-        description="Work-object ids whose objective is fully met or obsolete — close them.")
-    abandon_work_ids: List[str] = Field(
-        default_factory=list,
-        description="Work-object ids that turned out wrong/unwanted, or that the user declined — drop them.")
+        description="Existing work objects you judge should end — a duplicate of another, superseded by "
+        "new intake, or declined by the user — each with its reason. The architect, which owns the work "
+        "object, decides and ends it.")

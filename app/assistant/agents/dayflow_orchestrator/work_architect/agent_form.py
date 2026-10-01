@@ -1,7 +1,9 @@
 """Output contract for the dayflow WORK ARCHITECT (Part 2 of the split planner).
 
-The steward (strategic_planner_wo) decides WHAT work exists (creates a goal). The architect decides how
-that goal is STRUCTURED: it decomposes the goal into a small DAG of work nodes, with dependencies AND —
+The steward (strategic_planner_wo) decides WHAT work exists (creates a goal). The architect owns that
+goal from then on, to its end (docs/design/dayflow_goal_ownership_2026-09-30.md): it may revise the
+objective when its premise changes, and it completes or abandons the goal. It decides how the goal is
+STRUCTURED: it decomposes the goal into a small DAG of work nodes, with dependencies AND —
 the part the orchestrator_architect lacks — WAIT-GATES for steps that must pause for a future time or an
 external event (a reply, a delivery, an approval). The worker (work_emi_team) executes each node; the
 state_mover judges the wait-gates. The architect authors TWO wake primitives — wake_at (a deterministic
@@ -9,7 +11,7 @@ time) | wake_ref (a prose condition the state_mover matches against reality); wo
 the substrate wake_kind. Whether a node is work / a notify / an ask is NOT the architect's call — it writes
 the node's GOAL, and the switchboard reads that goal and decides how to reach it.
 """
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -58,8 +60,33 @@ class DuplicatePair(BaseModel):
         "still-live node in this graph.")
 
 
+class GoalEnding(BaseModel):
+    status: Literal["done", "abandoned"] = Field(
+        description="done: the goal's outcome is reached. abandoned: nothing reachable remains, or it is "
+        "no longer wanted.")
+    reason: str = Field(
+        min_length=1,
+        description="Why the goal ends, kept on it as its epitaph for every later planning pass: what "
+        "was reached, or what blocks it and what the user was told.")
+
+
+class ObjectiveRevision(BaseModel):
+    objective: str = Field(min_length=1, description="The goal as it now stands, one sentence.")
+    success_criteria: str = Field(
+        default="", description="The outcome that now meets it (empty keeps the current criteria).")
+    reason: str = Field(min_length=1, description="What changed the goal: the premise that expired, the "
+                        "result or the user's answer that moved it.")
+
+
 class AgentForm(BaseModel):
     architect_summary: str = Field(description="One line on the graph you designed.")
+    end_goal: Optional[GoalEnding] = Field(
+        default=None,
+        description="RE-PLAN ONLY: end this goal now. Leave empty while any step can still move it.")
+    revise_objective: Optional[ObjectiveRevision] = Field(
+        default=None,
+        description="RE-PLAN ONLY: the goal itself changed — its premise expired or a result moved it — "
+        "and work continues toward the revised goal. Not together with end_goal.")
     nodes: List[WorkNode] = Field(
         default_factory=list,
         description="The DAG of work nodes for this goal. Keep it lean — 1-5 nodes for most goals.")
@@ -81,6 +108,15 @@ class AgentForm(BaseModel):
         "abandoned and keeps its record; the kept node runs. Keep the one that is furthest along, or — if "
         "neither has progressed — the older one. Never pair a node with itself, never list both halves of "
         "a pair. If the two nodes do DIFFERENT work, they are not duplicates: leave them alone.")
+
+    @model_validator(mode="after")
+    def _validate_goal_change(self):
+        if self.end_goal is not None and self.revise_objective is not None:
+            raise ValueError("end_goal and revise_objective together: a goal either ends or continues "
+                             "toward a revised objective")
+        if self.end_goal is not None and self.nodes:
+            raise ValueError("end_goal with new nodes: an ending goal adds no work")
+        return self
 
     @model_validator(mode="after")
     def _validate_duplicates(self):
