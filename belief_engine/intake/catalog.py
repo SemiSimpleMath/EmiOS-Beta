@@ -12,6 +12,8 @@ export had, so consumers keep their fields:
     observation_count      supporting evidence rows
     first_observed / last_confirmed   first / last day with supporting evidence
     refines                the parent belief's id, for a one-level refinement
+    cluster_id / cluster   the topic the belief belongs to and its label (belief_engine/clusters.py);
+                           None until the belief is placed
 
 There is no confidence band: an intake belief is a view of its evidence, and the evidence counts
 and dates above are what a consumer can weigh.
@@ -25,9 +27,13 @@ _P = "belief_intake_"
 
 def active_entries(*, conn=None) -> List[Dict[str, Any]]:
     """Every active intake belief as a consumer entry, in id order."""
+    from belief_engine import clusters
     if conn is not None:
+        for statement in clusters.SCHEMA:     # the topic tables, on the connection the caller holds
+            conn.execute(statement)
         return _entries(conn)
     from belief_engine.intake.store import app_db
+    clusters.ensure_schema()
     with app_db()(False) as c:
         return _entries(c)
 
@@ -37,6 +43,8 @@ def _entries(c) -> List[Dict[str, Any]]:
                      "WHERE status='active' ORDER BY CAST(SUBSTR(id, 2) AS INTEGER)").fetchall()
     support = {r[0]: (r[1], r[2], r[3]) for r in c.execute(
         f"SELECT belief_id, MIN(day), MAX(day), COUNT(*) FROM {_P}evidence WHERE relation='support' GROUP BY belief_id")}
+    topic = {r[0]: (r[1], r[2]) for r in c.execute(
+        "SELECT m.belief_id, k.id, k.label FROM belief_cluster_members m JOIN belief_clusters k ON k.id = m.cluster_id")}
     tags: Dict[str, List[str]] = {}
     for bid, tag in c.execute("SELECT belief_id, tag FROM belief_tags WHERE belief_id GLOB 'B[0-9]*' ORDER BY tag"):
         tags.setdefault(bid, []).append(tag)
@@ -50,5 +58,6 @@ def _entries(c) -> List[Dict[str, Any]]:
             "status": r[4], "tags": t, "domain": t[0] if t else "", "confidence": None,
             "observation_count": n, "first_observed": first, "last_confirmed": last,
             "refines": r[5],
+            "cluster_id": topic.get(bid, (None, None))[0], "cluster": topic.get(bid, (None, None))[1],
         })
     return out

@@ -1,0 +1,15 @@
+# Groups the owner's beliefs into named topics, so that every reader sees a belief together with the
+# beliefs that qualify it (owner, 2026-09-30: "Really relevant beliefs should cluster. If you read the
+# beliefs in that cluster we would not have picked it as relevant for today"). Code proposes groups
+# from the embeddings; this agent decides the clusters and names them (belief_engine/clusters.py).
+# It DECIDES only; code validates and writes.
+name: belief_engine::belief_clusterer
+class_name: Agent
+llm_params:
+  llm_provider: openai
+  engine: gpt-5.6-luna
+  model_tier: strong
+allowed_tools: []
+except_tools: []
+user_context_items: [existing_clusters, beliefs_to_place, correction]
+system_context_items: [resource_user_data]

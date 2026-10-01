@@ -211,8 +211,37 @@ def _render_belief_block(entries: list) -> str:
     return _jinja_env.get_template("dayflow_routine_writer/prompts/beliefs.j2").render(beliefs=beliefs)
 
 
-def _select_beliefs(entries: list[dict], daily_context: str, scope, *, weekly_insights: str = "") -> tuple[list[dict], str]:
-    """The agent selects request-local IDs; Python restores exact original records."""
+def _by_topic(entries: list[dict]) -> list[list[dict]]:
+    """Entries grouped by topic (belief_engine/clusters.py), topics in label order; a belief not yet
+    placed is a topic of its own."""
+    groups: dict[str, list[dict]] = {}
+    for e in entries:
+        groups.setdefault(e.get("cluster_id") or f"~{e['belief_key']}", []).append(e)
+    return [groups[k] for k in sorted(groups, key=lambda k: (groups[k][0].get("cluster") or "~", k))]
+
+
+def _topic_pages(entries: list[dict], max_chars: int) -> list[list[dict]]:
+    """Whole topics per page: a belief is always judged with the beliefs that qualify it."""
+    from belief_engine.matching.context import encode
+    pages, page, size = [], [], 0
+    for group in _by_topic(entries):
+        length = sum(len(encode(e)) for e in group)
+        if page and size + length > max_chars:
+            pages.append(page)
+            page, size = [], 0
+        page.extend(group)
+        size += length
+    if page:
+        pages.append(page)
+    return pages
+
+
+def _select_beliefs(entries: list[dict], daily_context: str, scope, *,
+                    weekly_insights: str = "") -> tuple[list[dict], str, list[dict]]:
+    """The agent selects request-local IDs; Python restores exact original records. The catalog goes
+    in pages of whole topics (owner, 2026-09-30: relevant beliefs cluster). Returns the beliefs that
+    change what the assistant does today, the reasoning, and the beliefs the selector named as
+    conditions on them (their day, limit, exception, reminder wish), for the writer."""
     from app.assistant.ServiceLocator.service_locator import DI
     from app.assistant.utils.pydantic_classes import Message
     from app.assistant.agents.dayflow_belief_selector.agent_form import AgentForm
@@ -220,7 +249,7 @@ def _select_beliefs(entries: list[dict], daily_context: str, scope, *, weekly_in
     if len(by_key) != len(entries):
         raise ValueError("Duplicate belief keys in export")
     if not entries:
-        return [], "Empty active belief catalog"
+        return [], "Empty active belief catalog", []
     from belief_engine.matching.selection import select_records
     def invoke(labeled, retry):
         agent = DI.agent_factory.create_agent("dayflow_belief_selector")
@@ -230,13 +259,15 @@ def _select_beliefs(entries: list[dict], daily_context: str, scope, *, weekly_in
             "daily_context": daily_context, "belief_catalog": labeled,
             "weekly_insights": weekly_insights, "selection_retry": retry}))
         return getattr(result, "data", None)
-    from belief_engine.matching.context import pages
-    selected, reasons = [], []
-    for page in pages(entries, max_chars=48000):
-        chosen, reason = select_records(page, invoke, AgentForm)
+    selected, reasons, qualifiers = [], [], []
+    for page in _topic_pages(entries, max_chars=48000):
+        chosen, reason, extra = select_records(page, invoke, AgentForm, extra=("qualifier_ids",))
         selected.extend(chosen)
+        qualifiers.extend(extra["qualifier_ids"])
         reasons.append(reason)
-    return selected, "\n".join(reasons)
+    chosen_keys = {e["belief_key"] for e in selected}
+    qualifiers = list({e["belief_key"]: e for e in qualifiers if e["belief_key"] not in chosen_keys}.values())
+    return selected, "\n".join(reasons), qualifiers
 
 
 def _format_weekly_insights() -> str:
@@ -369,8 +400,10 @@ class DayFlowRoutineStep(BaseStep):
             return StepResult(output={"status": "skipped_no_delta", "rewound": rewound})
 
         scope = load_scope_for_source(kind="pipeline", source_id="dayflow", actor_id="dayflow_belief_selector")
-        selected, selection_reason = _select_beliefs(belief_entries, daily_context_block, scope, weekly_insights=weekly_insights_block)
+        selected, selection_reason, qualifiers = _select_beliefs(belief_entries, daily_context_block, scope,
+                                                                 weekly_insights=weekly_insights_block)
         selected_block = _render_belief_block(selected)
+        related_block = _render_belief_block(qualifiers)
 
         md, change_summary = self._call_agent(
             boundary_date_local=boundary_date_local,
@@ -378,6 +411,7 @@ class DayFlowRoutineStep(BaseStep):
             daily_context_block=daily_context_block,
             tail_anchors_block=tail_anchors_block,
             beliefs_block=selected_block,
+            related_block=related_block,
             weekly_insights_block=weekly_insights_block,
             ctx=ctx,
         )
@@ -411,6 +445,7 @@ class DayFlowRoutineStep(BaseStep):
                 "archive_path": str(archive_path),
                 "inputs_fingerprint": fingerprint,
                 "selected_belief_keys": [e["belief_key"] for e in selected],
+                "qualifier_belief_keys": [e["belief_key"] for e in qualifiers],
                 "selection_reason": selection_reason,
             },
         )
@@ -438,6 +473,7 @@ class DayFlowRoutineStep(BaseStep):
         daily_context_block: str,
         tail_anchors_block: str,
         beliefs_block: str,
+        related_block: str,
         weekly_insights_block: str,
         ctx: StepContext,
     ) -> Tuple[Optional[str], str]:
@@ -460,6 +496,7 @@ class DayFlowRoutineStep(BaseStep):
                     "daily_context": daily_context_block,
                     "tail_anchors_block": tail_anchors_block,
                     "beliefs_block": beliefs_block,
+                    "related_beliefs_block": related_block,
                     "weekly_insights_block": weekly_insights_block,
                     "previous_routine_doc": "",
                 },

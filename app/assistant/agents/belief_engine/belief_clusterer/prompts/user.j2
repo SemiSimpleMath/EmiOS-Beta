@@ -1,0 +1,21 @@
+## Existing topics
+{% for c in existing_clusters -%}
+### {{ c.label }}
+{% for s in c.beliefs %}- {{ s }}
+{% endfor %}
+{% else -%}
+(none yet)
+{% endfor %}
+## Beliefs to place
+{% for g in beliefs_to_place -%}
+Proposed group {{ loop.index }}:
+{% for b in g %}- [{{ b.id }}] {{ b.statement }}
+{% endfor %}
+{% endfor %}
+{%- if correction %}
+## Correct your previous answer
+It did not satisfy the contract: {{ correction }}
+Answer again, placing every belief above exactly once, using only the ids given.
+{% endif %}
+---
+Place every belief to place into a topic.

@@ -24,9 +24,12 @@ def test_llm_selects_cross_domain_belief_without_python_matching(monkeypatch):
     seen=[]
     def call(msg):
         seen.append(msg.agent_input)
-        return SimpleNamespace(data={'belief_ids':['S0'],'reasoning':'Preparation before lesson'})
+        # The catalog is ordered by topic, not by input order: pick the lesson belief by its key.
+        lesson=next(r['selection_id'] for r in msg.agent_input['belief_catalog']
+                    if r['belief_key']=='lesson.glasses')
+        return SimpleNamespace(data={'belief_ids':[lesson],'reasoning':'Preparation before lesson'})
     monkeypatch.setattr(DI,'agent_factory',SimpleNamespace(create_agent=lambda _:SimpleNamespace(action_handler=call)))
-    selected,reason=drs._select_beliefs(entries(),'17:00 instrument lesson',None)
+    selected,reason,qualifiers=drs._select_beliefs(entries(),'17:00 instrument lesson',None)
     assert len(seen[0]['belief_catalog'])==2
     assert [e['belief_key'] for e in selected]==['lesson.glasses']
     assert selected[0]['conditions']=={'text':'Before lessons'}
@@ -70,7 +73,7 @@ def test_cache_skips_agents_and_milestone_change_regenerates(tmp_path,monkeypatc
     monkeypatch.setattr(drs,'_format_daily_context',lambda data,**kwargs:(json.dumps(data),''))
     monkeypatch.setattr(drs,'load_scope_for_source',lambda **kwargs:None)
     calls=[]
-    monkeypatch.setattr(drs,'_select_beliefs',lambda *args,**kwargs:(calls.append('select') or entries(),'relevant'))
+    monkeypatch.setattr(drs,'_select_beliefs',lambda *args,**kwargs:(calls.append('select') or entries(),'relevant',[]))
     step=drs.DayFlowRoutineStep()
     monkeypatch.setattr(step,'_call_agent',lambda **kwargs:(calls.append('write') or '### 16:00\nGlasses guidance','changed'))
     resources={'resource_daily_context_generator_output.json':{'expected_schedule':[],'milestones':[]}}
@@ -114,7 +117,7 @@ def test_empty_writer_is_failure_not_success(monkeypatch, tmp_path):
     monkeypatch.setattr(drs, '_format_weekly_insights', lambda: '')
     monkeypatch.setattr(drs, '_format_daily_context', lambda *a, **k: ('context',''))
     monkeypatch.setattr(drs, 'load_scope_for_source', lambda **k: None)
-    monkeypatch.setattr(drs, '_select_beliefs', lambda *a, **k: (entries(),'relevant'))
+    monkeypatch.setattr(drs, '_select_beliefs', lambda *a, **k: (entries(),'relevant',[]))
     step=drs.DayFlowRoutineStep()
     monkeypatch.setattr(step, '_read_daily_context', lambda ctx: {})
     monkeypatch.setattr(step, '_call_agent', lambda **k: (None,''))

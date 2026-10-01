@@ -1,5 +1,5 @@
 {% for belief in beliefs %}
-- [belief:{{ belief.belief_key }}]
+- [belief:{{ belief.belief_key }}]{% if belief.get('cluster') %} (topic: {{ belief.cluster }}){% endif %}
   {{ belief.statement }}
   kind={{ belief.kind | default('unspecified') }}{% if belief.tags %}; tags={{ belief.tags | join(', ') }}{% endif %}{% if belief.observation_count %}; observed {{ belief.observation_count }}x{% endif %}
   {% if belief.conditions %}conditions={{ belief.conditions | tojson }}{% endif %}

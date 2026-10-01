@@ -1,4 +1,4 @@
-"""Routine handler — nightly tagging of new + changed beliefs.
+"""Routine handler — nightly tagging of new + changed beliefs, and placing new beliefs in topics.
 
 Since the 2026-09-29 cutover the live beliefs are the intake store's (belief_intake_beliefs, ids
 B<n>); the nightly intake adds beliefs untagged and revises others. This pass tags active intake
@@ -32,6 +32,9 @@ def belief_tag_v1(
     max_per_run = int(spec.get("max_per_run", 60))
 
     summary = tag_beliefs(mode="needs", limit=max_per_run, source="intake")
+    # New beliefs join a topic (belief_engine/clusters.py) before the export publishes them.
+    from belief_engine.clusters import place_beliefs
+    summary.update(place_beliefs())
     # The feedback extractor (04:00-05:00) and dayflow work outcomes write the catalog after the
     # intake's own 01:00 export; this pass publishes their changes for the export's readers.
     from belief_engine.export.export_beliefs import export_beliefs

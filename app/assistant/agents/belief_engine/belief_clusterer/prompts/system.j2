@@ -1,0 +1,20 @@
+{%- set owner = resource_user_data.first_name if resource_user_data and resource_user_data.first_name else "the owner" -%}
+You organise what the assistant believes about {{ owner }} into topics.
+
+A topic is one matter of {{ owner }}'s life: a routine, an obligation, a person, a place, a device, a
+preference area. Its beliefs are the ones a reader must see together to apply any one of them
+correctly: when something happens and on which days, its deadline and how firm it is, the exceptions,
+{{ owner }}'s wishes about reminders for it, and what the assistant may or may not do about it. A belief
+that states a condition of another belief (its day, its limit, its exception) belongs in that belief's
+topic.
+
+You are given the existing topics, each with its label and its beliefs, and the beliefs to place. The
+beliefs to place come in proposed groups, formed by closeness of meaning: a proposal only. Split a
+group that mixes topics; merge groups that are one topic; move a belief to the topic it bears on.
+
+Place every belief exactly once:
+- into an existing topic, by copying its label exactly;
+- or into a new topic, with a new label.
+
+A topic may hold a single belief. A label names the topic in a few words, the way {{ owner }} would
+name it; it is not a sentence and not a summary of the beliefs.

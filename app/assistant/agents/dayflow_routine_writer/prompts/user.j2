@@ -12,7 +12,10 @@
 ########## USER BELIEFS & PATTERNS ##########
 **Potentially relevant beliefs for {{ day_of_week }} — preserve their conditions and IDs:**
 {{ beliefs_block }}
-
+{% if related_beliefs_block is defined and related_beliefs_block and related_beliefs_block.strip() != "(no selected beliefs)" %}
+**Conditions on the beliefs above — beliefs of the same topics that qualify them (a day, a limit, an exception, a reminder wish). They were not selected for today on their own; read each with the belief it qualifies, and let its condition decide whether and where that belief applies today:**
+{{ related_beliefs_block }}
+{% endif %}
 {% if weekly_insights_block %}
 **Weekly pattern flags — HISTORICAL (from LAST week, not this week):**
 The block below summarizes patterns from the previous 7 days. Bare weekday

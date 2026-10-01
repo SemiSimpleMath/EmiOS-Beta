@@ -198,6 +198,21 @@ The three additive side tables (DDL in `schema.py`; also `CREATE … IF NOT EXIS
 
 `tag_beliefs(mode=…)` drives `belief_engine::belief_tagger` (mini tier) over active beliefs in batches of 15. Each belief gets the **union of its `domain`** (itself a valid vocab tag, except `general` which is deliberately not a tag) **and the LLM's cross-cutting tags**. So a belief the LLM leaves empty is still tagged by its domain; the LLM only *adds* reach. `mode="needs"` selects untagged + stale beliefs (statement changed since `assigned_at`) for the nightly pass; `mode="all"` is the one-time backfill.
 
+### Topics (`belief_engine/clusters.py`, 2026-09-30)
+
+Every active belief belongs to one named topic: the beliefs a reader must see together to apply any one
+of them (a routine, its day, its deadline, its exceptions, the owner's reminder wishes). Owner,
+2026-09-30: "Really relevant beliefs should cluster. If you read the beliefs in that cluster we would
+not have picked it as relevant for today." Code proposes groups from the embeddings (average linkage,
+cosine 0.72); `belief_engine::belief_clusterer` places every belief exactly once, in an existing topic
+(label copied) or a new one, in pages of about 70; code keeps what was placed once and asks once more
+for the rest. `place_beliefs` places the beliefs without a topic: all of them the first time (539
+beliefs into 188 topics on 2026-09-30), then new ones nightly in `belief_tag_v1`. Tables
+`belief_clusters` (K<n>, label) and `belief_cluster_members`; the export carries `cluster_id` and
+`cluster` on each belief. The dayflow routine's selector reads its catalog in pages of whole topics
+and judges a topic as a whole; the writer gets each selected belief's topic-mates as the conditions
+that decide whether and where it applies today.
+
 **Consumer pull-sets** (`pull_sets` in the YAML): `meal_engine`, `health_status`, `entertainment`, `routine_stage`. Consumers using these sets pull beliefs carrying any tag in their set. Dayflow routine projection instead uses LLM selection across the active export, regardless of kind or tag. **Bridge tags** (`dietary`, `family`, `social`, `meal`) let a consumer reach beliefs filed under a different primary domain.
 
 ## 8. Identity layer
