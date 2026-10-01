@@ -81,7 +81,7 @@ def select_for_evidence(store, factory, scope, evidence):
             from app.assistant.agent_runtime.services.prompt_builder import _jinja_env
             prompt = [_jinja_env.loader.get_source(_jinja_env, f'belief_engine/evidence_match/prompts/{part}.j2')[0]
                       for part in ('system','user')]
-            key = digest(['evidence-selection-v2-local-ids', prompt, AgentForm.model_json_schema(), evidence_page, catalog_page])
+            key = digest(['evidence-selection-v3-belief-keys', prompt, AgentForm.model_json_schema(), evidence_page, catalog_page])
             with connection(belief_db_path(), initialize=True) as conn:
                 cached = conn.execute('SELECT result_json FROM belief_match_pages WHERE receipt_key=?', (key,)).fetchone()
             if cached:
@@ -89,12 +89,14 @@ def select_for_evidence(store, factory, scope, evidence):
             else:
                 from belief_engine.matching.selection import select_records
                 from app.assistant.utils.pydantic_classes import Message
-                def invoke(labeled, retry):
+                def invoke(records, retry):
                     agent = factory.create_agent('belief_engine::evidence_match')
                     if agent is None:
                         raise RuntimeError('Missing agent: belief_engine::evidence_match')
+                    # One id per record: the belief_key. The row id stays out of the model's view.
+                    shown = [{k: v for k, v in r.items() if k != 'id'} for r in records]
                     response = agent.action_handler(Message(scope_context=scope, agent_input={
-                        'evidence': evidence_page, 'catalog': labeled, 'selection_retry': retry}))
+                        'evidence': evidence_page, 'catalog': shown, 'selection_retry': retry}))
                     return getattr(response, 'data', None)
                 chosen, reasoning = select_records(catalog_page, invoke, AgentForm)
                 out = {'belief_keys': [r['belief_key'] for r in chosen], 'reasoning': reasoning}

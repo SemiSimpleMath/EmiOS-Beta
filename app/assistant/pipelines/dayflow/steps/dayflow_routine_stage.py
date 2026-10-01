@@ -238,8 +238,8 @@ def _topic_pages(entries: list[dict], max_chars: int) -> list[list[dict]]:
 
 def _select_beliefs(entries: list[dict], daily_context: str, scope, *,
                     weekly_insights: str = "") -> tuple[list[dict], str, list[dict]]:
-    """The agent selects request-local IDs; Python restores exact original records. The catalog goes
-    in pages of whole topics (owner, 2026-09-30: relevant beliefs cluster). Returns the beliefs that
+    """The agent selects by belief_key, the one id each record shows; Python restores exact original
+    records. The catalog goes in pages of whole topics (owner, 2026-09-30: relevant beliefs cluster). Returns the beliefs that
     change what the assistant does today, the reasoning, and the beliefs the selector named as
     conditions on them (their day, limit, exception, reminder wish), for the writer."""
     from app.assistant.ServiceLocator.service_locator import DI
@@ -251,19 +251,22 @@ def _select_beliefs(entries: list[dict], daily_context: str, scope, *,
     if not entries:
         return [], "Empty active belief catalog", []
     from belief_engine.matching.selection import select_records
-    def invoke(labeled, retry):
+    def invoke(records, retry):
         agent = DI.agent_factory.create_agent("dayflow_belief_selector")
         if agent is None:
             raise RuntimeError("dayflow_belief_selector agent unavailable")
+        # One id per record: short_id repeats the belief_key and cluster_id is a second id; the topic
+        # name (`cluster`) carries the grouping.
+        shown = [{k: v for k, v in r.items() if k not in ("short_id", "cluster_id")} for r in records]
         result = agent.action_handler(Message(scope_context=scope, agent_input={
-            "daily_context": daily_context, "belief_catalog": labeled,
+            "daily_context": daily_context, "belief_catalog": shown,
             "weekly_insights": weekly_insights, "selection_retry": retry}))
         return getattr(result, "data", None)
     selected, reasons, qualifiers = [], [], []
     for page in _topic_pages(entries, max_chars=48000):
-        chosen, reason, extra = select_records(page, invoke, AgentForm, extra=("qualifier_ids",))
+        chosen, reason, extra = select_records(page, invoke, AgentForm, extra=("qualifier_keys",))
         selected.extend(chosen)
-        qualifiers.extend(extra["qualifier_ids"])
+        qualifiers.extend(extra["qualifier_keys"])
         reasons.append(reason)
     chosen_keys = {e["belief_key"] for e in selected}
     qualifiers = list({e["belief_key"]: e for e in qualifiers if e["belief_key"] not in chosen_keys}.values())

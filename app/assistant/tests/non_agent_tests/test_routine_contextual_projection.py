@@ -24,10 +24,7 @@ def test_llm_selects_cross_domain_belief_without_python_matching(monkeypatch):
     seen=[]
     def call(msg):
         seen.append(msg.agent_input)
-        # The catalog is ordered by topic, not by input order: pick the lesson belief by its key.
-        lesson=next(r['selection_id'] for r in msg.agent_input['belief_catalog']
-                    if r['belief_key']=='lesson.glasses')
-        return SimpleNamespace(data={'belief_ids':[lesson],'reasoning':'Preparation before lesson'})
+        return SimpleNamespace(data={'belief_keys':['lesson.glasses'],'reasoning':'Preparation before lesson'})
     monkeypatch.setattr(DI,'agent_factory',SimpleNamespace(create_agent=lambda _:SimpleNamespace(action_handler=call)))
     selected,reason,qualifiers=drs._select_beliefs(entries(),'17:00 instrument lesson',None)
     assert len(seen[0]['belief_catalog'])==2
@@ -38,8 +35,8 @@ def test_llm_selects_cross_domain_belief_without_python_matching(monkeypatch):
 def test_unknown_selection_fails_without_guessing(monkeypatch):
     from app.assistant.ServiceLocator.service_locator import DI
     monkeypatch.setattr(DI,'agent_factory',SimpleNamespace(create_agent=lambda _:SimpleNamespace(
-        action_handler=lambda _:SimpleNamespace(data={'belief_ids':['invented'],'reasoning':'x'}))))
-    with pytest.raises(ValueError,match='Unknown selected'): drs._select_beliefs(entries(),'day',None)
+        action_handler=lambda _:SimpleNamespace(data={'belief_keys':['invented'],'reasoning':'x'}))))
+    with pytest.raises(ValueError,match='not in this catalog'): drs._select_beliefs(entries(),'day',None)
 
 
 @pytest.mark.parametrize('field,value',[

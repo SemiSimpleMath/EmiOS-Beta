@@ -111,11 +111,12 @@ def test_the_selector_reads_whole_topics_and_names_the_conditions_for_the_writer
     assert [[e["belief_key"] for e in p] for p in pages] == [["B2", "B4"], ["B1", "B3"], ["B5"]]
 
     def answer(msg):                      # on the Reports page: B1 for today, B3 its condition
-        ids = {r["belief_key"]: r["selection_id"] for r in msg.agent_input["belief_catalog"]}
-        if "B1" in ids:
-            return SimpleNamespace(data={"belief_ids": [ids["B1"]], "qualifier_ids": [ids["B3"], ids["B1"]],
+        shown = msg.agent_input["belief_catalog"]
+        assert all(set(r) & {"short_id", "cluster_id", "selection_id"} == set() for r in shown)  # one id
+        if "B1" in {r["belief_key"] for r in shown}:
+            return SimpleNamespace(data={"belief_keys": ["B1"], "qualifier_keys": ["B3", "B1"],
                                          "reasoning": "reports today"})
-        return SimpleNamespace(data={"belief_ids": [], "qualifier_ids": [], "reasoning": "nothing"})
+        return SimpleNamespace(data={"belief_keys": [], "qualifier_keys": [], "reasoning": "nothing"})
     monkeypatch.setattr(DI, "agent_factory", SimpleNamespace(
         create_agent=lambda _: SimpleNamespace(action_handler=answer)), raising=False)
     monkeypatch.setattr(stage, "_topic_pages", lambda e, max_chars: pages)

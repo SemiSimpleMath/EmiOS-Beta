@@ -60,7 +60,7 @@ def test_dayflow_pages_keep_whole_context_and_all_selected_records(monkeypatch):
     seen=[]
     def respond(msg):
         seen.append(msg.agent_input)
-        return SimpleNamespace(data={'belief_ids':['S0'],'reasoning':'relevant'})
+        return SimpleNamespace(data={'belief_keys':[msg.agent_input['belief_catalog'][0]['belief_key']],'reasoning':'relevant'})
     monkeypatch.setattr(ServiceLocator,'_services',{'agent_factory':SimpleNamespace(create_agent=lambda _:SimpleNamespace(action_handler=respond))})
     entries=[{'belief_key':str(i),'statement':'full text '*4000,'conditions':{'when':'before lesson'}} for i in range(3)]
     selected,_,_=D._select_beliefs(entries,'full day',None,weekly_insights='full week')

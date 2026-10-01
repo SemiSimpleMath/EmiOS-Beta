@@ -236,7 +236,7 @@ def test_evidence_selection_is_cached_and_returns_complete_current_claims(db,mon
         def create_agent(self,name):
             def call(msg):
                 calls.append(msg.agent_input)
-                return SimpleNamespace(data={'belief_ids':[next(r['selection_id'] for r in msg.agent_input['catalog'] if r['belief_key']=='a')],'reasoning':'Relevant source'})
+                return SimpleNamespace(data={'belief_keys':['a'],'reasoning':'Relevant source'})
             return SimpleNamespace(action_handler=call)
     store=SimpleNamespace(list_all=lambda **_:records)
     evidence=[{'raw_text':'z'*6000+' END','source_date':'2026-01-01'}]
