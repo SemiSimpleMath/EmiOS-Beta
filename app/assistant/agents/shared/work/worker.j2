@@ -6,7 +6,8 @@ task: {{ view.task.directive }}
 success when: {{ view.task.success_kind }}
 parent goal: {{ view.work.objective }}
 {% if view.work.success_criteria %}goal success criteria: {{ view.work.success_criteria }}{% endif %}
-## YOUR INTERNAL CHECKLIST â€” provenance, not orchestrator tasks
+{% if not view.owning_task %}{% with task = view.task, receipts = view.earlier_receipts %}{% include 'shared/work/prior_attempt.j2' %}{% endwith %}{% endif %}
+## YOUR INTERNAL CHECKLIST — provenance, not orchestrator tasks
 Echo [id:...] to update an item, omit the id to add one. Mark done only after a result is recorded.
 {% for item in view.checklist %}- [id:{{ item.id }}] [{{ item.status }}] {{ item.title }}
 {% else %}(no checklist recorded)
@@ -23,5 +24,6 @@ Echo [id:...] to update an item, omit the id to add one. Mark done only after a 
 id: {{ view.owning_task.task.id }} | status: {{ view.owning_task.task.status }}
 title: {{ view.owning_task.task.title }}
 task: {{ view.owning_task.task.directive }}
+{% with task = view.owning_task.task, receipts = view.earlier_receipts %}{% include 'shared/work/prior_attempt.j2' %}{% endwith %}
 {% set records = view.owning_task.records %}{% include 'shared/work/provenance.j2' %}
 {% endif %}

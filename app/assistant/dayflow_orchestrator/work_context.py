@@ -25,7 +25,10 @@ def record_data(record):
     return {"id": record.id, "parent_id": record.parent_id, "type": record.type,
             "title": record.title, "status": record.status, "content": content,
             "pod_ref": record.pod_ref, "terminal": record.payload.get("terminal"),
-            "epoch": record.payload.get("dispatch_epoch")}
+            # The main task's attempt that wrote this evidence: a result carries `dispatch_epoch`, a
+            # planner finding `finding_attempt`. Other nodes' dispatch_epoch is their own counter.
+            "attempt": (record.payload.get("finding_attempt") or record.payload.get("dispatch_epoch"))
+                       if record.type == "evidence" else None}
 
 def source_context(wo):
     sources = [dict(s) for s in wo.constraints.get("source_intake") or []]
@@ -112,7 +115,11 @@ def worker_data(wo, node_id):
         "calls": [row for row in execution.get("calls", [])
                   if not (own_current(row) and not cancelled and row.get("state") == "in_flight")],
     }
+    # What the main task's earlier attempts' calls returned (receipts are keyed to the main task).
+    earlier_receipts = [row for row in execution.get("recent_results", [])
+                        if row.get("node_id") == owner.id and int(row.get("epoch") or 0) < epoch]
     return {"owning_task": owning_task, "work": work, "task": task_data(wo, node),
+            "earlier_receipts": earlier_receipts,
             "records": [record_data(n) for n in records],
             "checklist": [record_data(n) for n in records if n.parent_id == node_id and n.type == "subtask"],
             "facts": [record_data(wo.nodes[e.src]) for e in wo.edges

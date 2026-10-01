@@ -66,6 +66,64 @@ def test_takeover_worker_and_finalizer_receive_full_provenance(graph, monkeypatc
         assert "Verified date: October 9" in text
         assert "Check both accounts before reporting" in text
 
+@pytest.fixture
+def retried():
+    """A main task judged `retry` after attempt 1 (result, finding, two receipts), now in attempt 2."""
+    store = WorkStore(":memory:")
+    wid = store.apply("create_work_object", {"title": "Set the thermostat"}).id
+    goal = store.load(wid).goal_node_id
+    store.apply("add_node", {"work_id": wid, "id": "main", "parent_id": goal, "type": "subtask",
+                             "title": "Set 75F", "content": "Set the thermostat to 75F", "status": "proposed"})
+    store.apply("record_result", {"work_id": wid, "node_id": "main", "evidence_id": "result1", "title": "tool result",
+                                  "answer": "Set to 75F", "status": "done"})
+    store.apply("add_node", {"work_id": wid, "id": "finding1", "parent_id": "main", "type": "evidence",
+                             "content": "Device reported 74F", "payload": {"finding_attempt": 1}})
+    for call_id, epoch, detail in [("c1", 1, "Nest: target 74F (cool)"), ("c2", 2, "this attempt's own call")]:
+        with store._lock, store._conn:
+            store._conn.execute("INSERT INTO work_execution_calls VALUES(?,?,?,?,?,?,?,?,?)",
+                            (call_id, wid, "main", epoch, "nest_home_control", 1, "settled", detail,
+                             f"2026-09-30T14:0{epoch}:00+00:00"))
+    store.apply("finalize_task", {"work_id": wid, "node_id": "main", "expected_dispatch_epoch": 1, "finalizer": {
+        "verdict": "retry", "outcome": "The device reads 74F, so access works but the target is wrong.",
+        "recommendation": "Set 75F explicitly and verify.", "next_step": "retry",
+        "question_for_user": "Should I keep trying?"}})
+    store.apply("set_status", {"work_id": wid, "node_id": "main", "status": "dispatched"})
+    yield store, wid
+    store.close()
+
+
+def test_a_retried_worker_sees_the_last_judgment_and_earlier_calls(retried):
+    from app.assistant.control_nodes.workobject_render_node import render_work_projection
+    store, wid = retried
+    text = render_work_projection(store.load(wid), "main")
+    assert "THIS IS ATTEMPT 2 — THE PREVIOUS ATTEMPT WAS JUDGED RETRY" in text
+    assert "Attempt 1 was judged" in text
+    assert "The device reads 74F, so access works" in text and "Set 75F explicitly and verify." in text
+    assert "Should I keep trying?" not in text          # the architect's instruction, not the worker's
+    assert "attempt 1 / nest_home_control [settled]" in text and "Nest: target 74F (cool)" in text
+    assert "this attempt's own call" not in text
+    assert "record:result1 | parent:main | evidence (attempt 1)" in text
+    assert "record:finding1 | parent:main | evidence (attempt 1)" in text
+    assert "â€" not in text
+
+
+def test_a_helper_under_a_retried_task_sees_its_judgment(retried):
+    from app.assistant.control_nodes.workobject_render_node import render_work_projection
+    store, wid = retried
+    store.apply("add_node", {"work_id": wid, "id": "helper", "parent_id": "main", "type": "subtask",
+                             "title": "Check device", "status": "dispatched"})
+    text = render_work_projection(store.load(wid), "helper")
+    owning = text[text.index("## OWNING MAIN TASK"):]
+    assert "THIS IS ATTEMPT 2" in owning and "Nest: target 74F (cool)" in owning
+
+
+def test_a_first_attempt_shows_no_earlier_attempt(graph):
+    from app.assistant.control_nodes.workobject_render_node import render_work_projection
+    store, wid = graph
+    text = render_work_projection(store.load(wid), "main")
+    assert "THIS IS ATTEMPT" not in text and "EARLIER ATTEMPTS" not in text
+
+
 def test_planners_receive_finalizer_summary_not_worker_history(graph):
     from app.assistant.dayflow_orchestrator.work_portfolio import render_work_portfolio
     from app.assistant.control_nodes.work_architect_node import _render_existing_graph

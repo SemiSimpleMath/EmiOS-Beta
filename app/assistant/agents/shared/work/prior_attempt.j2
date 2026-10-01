@@ -1,0 +1,9 @@
+{% set fin = task.finalizer %}{% if fin and (fin.get('dispatch_epoch') is none or fin.dispatch_epoch < task.epoch) %}
+## THIS IS ATTEMPT {{ task.epoch }} — THE PREVIOUS ATTEMPT WAS JUDGED {{ fin.get('verdict', '') | upper }}
+{% if fin.get('dispatch_epoch') is not none %}Attempt {{ fin.dispatch_epoch }}{% else %}The previous attempt{% endif %} was judged by the finalizer, which read its full result. Start from what it established.
+  OUTCOME: {{ fin.get('outcome', '') }}
+{% if fin.get('recommendation') %}  RECOMMENDATION: {{ fin.recommendation }}
+{% endif %}{% endif %}{% if receipts %}
+## WHAT EARLIER ATTEMPTS' CALLS RETURNED (the devices' and services' own replies)
+{% for call in receipts %}- attempt {{ call.epoch }} / {{ call.tool_name }} [{{ call.state }}] at {{ call.updated_at | local_time(seconds=true) }}: {{ call.detail }}
+{% endfor %}{% endif %}
