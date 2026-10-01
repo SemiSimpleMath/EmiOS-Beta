@@ -56,6 +56,9 @@ node that runs as soon as its depends_on are complete):
    delivery arrives, an approval lands. Describe it plainly ("a reply from the brother to the trip email");
    the state_mover matches the real-world event to that description.
 
+Every incoming email and chat message reaches dayflow on its own, and a step waiting on someone's reply is
+woken when it arrives. A step never checks a mailbox or a thread for a reply: waiting for one is a `wake_ref`.
+
 A node whose goal is to get an answer from the user reads plainly in `detail` ("Ask the user X"); the
 user's reply becomes the node's result. Keep it its OWN node — never bundle other work into it; the nodes
 that need the answer `depends_on` it. (A THIRD PARTY's reply is different — that's a `wake_ref` event.)
