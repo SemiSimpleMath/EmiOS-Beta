@@ -13,11 +13,18 @@ Verifies:
 from __future__ import annotations
 
 import os
-import sqlite3
 import unittest
 from unittest.mock import MagicMock, patch
 
-import app.assistant.tests.test_setup  # noqa: F401  bootstraps DI
+# Isolated test DB. Pinned again in setUp: other test modules rewrite these
+# env keys at collection time, and get_session() reads them on every call.
+_TEST_DB_NAME = "test_http_request"
+os.environ["USE_TEST_DB"] = "true"  # MUST precede project imports
+os.environ["TEST_DB_NAME"] = _TEST_DB_NAME
+
+import app.assistant.tests.test_setup  # noqa: F401,E402  bootstraps DI
+
+from sqlalchemy import text  # noqa: E402
 
 from app.assistant.lib.tools.http_request.http_request import HttpRequest
 from app.assistant.pod_store.pod_store import PodStore
@@ -42,13 +49,37 @@ def _user_scope() -> ScopeContext:
     )
 
 
+def _pin_test_db() -> None:
+    os.environ["USE_TEST_DB"] = "true"
+    os.environ["TEST_DB_NAME"] = _TEST_DB_NAME
+    os.environ.pop("TEST_DATABASE_URI_EMI", None)
+    # PodStore ensures its tables once per process, possibly on another test DB.
+    from app.models.base import Base, get_current_engine
+    from app.assistant.lib.tools.http_request.models import HttpAudit
+    from app.assistant.pod_store.models import PodAudit, PodProjection, PodRow
+    Base.metadata.create_all(get_current_engine(), tables=[
+        PodRow.__table__, PodProjection.__table__, PodAudit.__table__, HttpAudit.__table__,
+    ])
+
+
+def _fetchone(sql: str, params: dict):
+    from app.models.base import get_session
+    session = get_session()
+    try:
+        return session.execute(text(sql), params).fetchone()
+    finally:
+        session.close()
+
+
 def _clean_pod(pod_id: str) -> None:
-    conn = sqlite3.connect("emi.db")
-    conn.execute("DELETE FROM pod_projection WHERE pod_id=?", (pod_id,))
-    conn.execute("DELETE FROM pod_audit WHERE pod_id=?", (pod_id,))
-    conn.execute("DELETE FROM pod_store WHERE pod_id=?", (pod_id,))
-    conn.commit()
-    conn.close()
+    from app.models.base import get_session
+    session = get_session()
+    try:
+        for table in ("pod_projection", "pod_audit", "pod_store"):
+            session.execute(text(f"DELETE FROM {table} WHERE pod_id=:p"), {"p": pod_id})
+        session.commit()
+    finally:
+        session.close()
 
 
 class TestHttpRequest(unittest.TestCase):
@@ -58,6 +89,7 @@ class TestHttpRequest(unittest.TestCase):
         # Stage a real bearer-token pod (auth.bearer kind) backed by an env
         # var. Mirrors how a power user would create a WHOOP / Spotify /
         # GitHub PAT pod for the http_request tool to consume.
+        _pin_test_db()
         os.environ["EMI_POD_TEST_HTTP_TOKEN_FULL"] = "Bearer test-token-xyz-1234"
         self.store = PodStore()
         self.pod_id = self.store.put_secret_pod(
@@ -256,14 +288,10 @@ class TestHttpRequest(unittest.TestCase):
 
         # The actual response body lives in the new pod's body, fetchable
         # only at the declared authority.
-        conn = sqlite3.connect("emi.db")
-        c = conn.cursor()
-        c.execute(
-            "SELECT kind, min_authority, body FROM pod_store WHERE pod_id=?",
-            (response_pod_id,),
+        row = _fetchone(
+            "SELECT kind, min_authority, body FROM pod_store WHERE pod_id=:p",
+            {"p": response_pod_id},
         )
-        row = c.fetchone()
-        conn.close()
         self.assertIsNotNone(row)
         kind, min_auth, body = row
         self.assertEqual(kind, "health.private")
@@ -271,10 +299,7 @@ class TestHttpRequest(unittest.TestCase):
         self.assertEqual(body, secret_body)
 
         # Cleanup the test pod
-        conn = sqlite3.connect("emi.db")
-        conn.execute("DELETE FROM pod_store WHERE pod_id=?", (response_pod_id,))
-        conn.commit()
-        conn.close()
+        _clean_pod(response_pod_id)
 
     def test_response_pod_kind_authority_mapping(self):
         """Suffix-based authority mapping for response pod kinds."""
@@ -377,15 +402,11 @@ class TestHttpRequest(unittest.TestCase):
             tool.execute(tm)
 
         # Verify audit row
-        conn = sqlite3.connect("emi.db")
-        c = conn.cursor()
-        c.execute(
+        row = _fetchone(
             "SELECT method, url_host, url_path, status_code, error_code "
-            "FROM http_audit WHERE request_id=? ORDER BY id DESC LIMIT 1",
-            ("req-http-audit-1",),
+            "FROM http_audit WHERE request_id=:r ORDER BY id DESC LIMIT 1",
+            {"r": "req-http-audit-1"},
         )
-        row = c.fetchone()
-        conn.close()
         self.assertIsNotNone(row, "http_audit row should be written on success")
         method, host, path, status, error_code = row
         self.assertEqual(method, "GET")

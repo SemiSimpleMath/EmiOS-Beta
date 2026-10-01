@@ -49,11 +49,13 @@ def _seed_work():
     return wo.id
 
 
-def test_assemble_builds_dossier_and_harvests_ids(tmp_path):
+def test_assemble_builds_dossier_and_harvests_ids(tmp_path, monkeypatch):
     now = utc_now()
     room = "master_room"
     _seed_chat(room, now - timedelta(minutes=2), msg_id="ul_evidence_1")
     wid = _seed_work()
+    # The work store is the test DAYFLOW_WORK_DB, not the app DB the real lookup reads.
+    monkeypatch.setattr(cs, "_known_work_ids", lambda: {wid})
 
     cid = cs.open_case(trigger_kind="user_friction", room_id=room,
                        bound_ids={"message_ids": ["ul_evidence_1"], "work_ids": [wid]},

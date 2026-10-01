@@ -4,17 +4,24 @@ path WITHOUT leaking the value into the tool result.
 
 Does NOT actually launch a browser or hit the real Playwright MCP —
 the MCP call is mocked. The DB-side pod lookup is real (uses
-PodStore + a temporary identity.ssn pod) so we exercise the full
-authority gate.
+PodStore + a temporary identity.ssn pod in an isolated test DB) so we
+exercise the full authority gate.
 """
 from __future__ import annotations
 
 import os
-import sqlite3
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-import app.assistant.tests.test_setup  # noqa: F401
+# Isolated test DB. Pinned again in setUp: other test modules rewrite these
+# env keys at collection time, and get_session() reads them on every call.
+_TEST_DB_NAME = "test_web_type_secret"
+os.environ["USE_TEST_DB"] = "true"  # MUST precede project imports
+os.environ["TEST_DB_NAME"] = _TEST_DB_NAME
+
+import app.assistant.tests.test_setup  # noqa: F401,E402
+
+from sqlalchemy import text  # noqa: E402
 
 from app.assistant.lib.tools.web_type_secret.web_type_secret import WebTypeSecret
 from app.assistant.pod_store.pod_store import PodStore
@@ -38,17 +45,41 @@ def _user_scope() -> ScopeContext:
     )
 
 
+def _pin_test_db() -> None:
+    os.environ["USE_TEST_DB"] = "true"
+    os.environ["TEST_DB_NAME"] = _TEST_DB_NAME
+    os.environ.pop("TEST_DATABASE_URI_EMI", None)
+    # PodStore ensures its tables once per process, possibly on another test DB.
+    from app.models.base import Base, get_current_engine
+    from app.assistant.pod_store.models import PodAudit, PodProjection, PodRow
+    Base.metadata.create_all(get_current_engine(), tables=[
+        PodRow.__table__, PodProjection.__table__, PodAudit.__table__,
+    ])
+
+
+def _fetchone(sql: str, params: dict):
+    from app.models.base import get_session
+    session = get_session()
+    try:
+        return session.execute(text(sql), params).fetchone()
+    finally:
+        session.close()
+
+
 def _clean_pod(pod_id: str) -> None:
-    conn = sqlite3.connect("emi.db")
-    conn.execute("DELETE FROM pod_projection WHERE pod_id=?", (pod_id,))
-    conn.execute("DELETE FROM pod_audit WHERE pod_id=?", (pod_id,))
-    conn.execute("DELETE FROM pod_store WHERE pod_id=?", (pod_id,))
-    conn.commit()
-    conn.close()
+    from app.models.base import get_session
+    session = get_session()
+    try:
+        for table in ("pod_projection", "pod_audit", "pod_store"):
+            session.execute(text(f"DELETE FROM {table} WHERE pod_id=:p"), {"p": pod_id})
+        session.commit()
+    finally:
+        session.close()
 
 
 class TestWebTypeSecret(unittest.TestCase):
     def setUp(self):
+        _pin_test_db()
         # Stage a real identity.ssn pod in the live DB. The materializer
         # reads the env var and writes projections; cleanup tears it down.
         os.environ["EMI_POD_TEST_WEB_SSN_FULL"] = "987-65-4321"
@@ -163,16 +194,12 @@ class TestWebTypeSecret(unittest.TestCase):
             )
             tool.execute(tm)
 
-        # Verify audit recorded the fetch
-        conn = sqlite3.connect("emi.db")
-        c = conn.cursor()
-        c.execute(
+        # Verify audit recorded the fetch (same DB the PodStore wrote to)
+        row = _fetchone(
             "SELECT operation, outcome, projection_name, caller_scope_authority, detail "
-            "FROM pod_audit WHERE pod_id=? AND operation='fetch' ORDER BY created_at DESC LIMIT 1",
-            (self.pod_id,),
+            "FROM pod_audit WHERE pod_id=:p AND operation='fetch' ORDER BY created_at DESC LIMIT 1",
+            {"p": self.pod_id},
         )
-        row = c.fetchone()
-        conn.close()
         self.assertIsNotNone(row)
         op, outcome, proj, auth, detail = row
         self.assertEqual(outcome, "allowed")

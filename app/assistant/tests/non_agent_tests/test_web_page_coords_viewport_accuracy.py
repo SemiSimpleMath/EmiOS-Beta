@@ -24,224 +24,34 @@ The vision_mark_picker agent is stubbed so picks are deterministic and free.
 Stubs label-match against window.__emi_marks_map (live browser state) to
 simulate a correct vision decision — so the pipeline is:
   inject marks → screenshot → stub picks badge N by label → fetch coords → verify
+
+Runs against an isolated, headless test browser (see playwright_live.py).
+web_page_coords clears window.__emi_marks_map before returning, so the stub
+records the marks it saw while the tool ran; tests read them from the stub.
 """
 from __future__ import annotations
 
 import json
-import re
-import subprocess
-import sys
 from pathlib import Path
-from typing import Any
 
-_HERE = Path(__file__).resolve()
-for _parent in _HERE.parents:
-    if (_parent / "app").is_dir():
-        sys.path.insert(0, str(_parent))
-        break
-
-import app.assistant.tests.test_setup  # noqa: F401
 from app.assistant.ServiceLocator.service_locator import DI
-from app.assistant.lib.mcp.tool_runner import mcp_stdio_call_tool
+from app.assistant.tests.non_agent_tests.playwright_live import (
+    click_xy as _click_xy,
+    element_at as _element_at,
+    evaluate,
+    live_marks_map as _get_marks_map,
+    live_server_entry,  # noqa: F401 (pytest fixture)
+    load_page,
+    requires_live_playwright,
+    resize as _browser_resize,
+)
 from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
 
-
-# ---------------------------------------------------------------------------
-# Helpers — mirror the extraction pattern from test_web_page_coords_marks.py
-# ---------------------------------------------------------------------------
-
-def _parse_jsonish(text: str) -> Any:
-    if not isinstance(text, str):
-        return None
-    s = text.strip()
-    if not s:
-        return None
-    # Strip the ### Result / ### Ran Playwright code envelope that MCP adds.
-    if s.startswith("### Result"):
-        lines = s.split("\n", 1)
-        if len(lines) > 1:
-            rest = lines[1].strip()
-            # Content ends at the next ### block.
-            end = rest.find("\n###")
-            if end >= 0:
-                rest = rest[:end].strip()
-            s = rest
-    try:
-        return json.loads(s)
-    except Exception:
-        try:
-            obj, _ = json.JSONDecoder().raw_decode(s.lstrip())
-            return obj
-        except Exception:
-            pass
-    m = re.search(r"```json\s*([\s\S]*?)```", s, flags=re.IGNORECASE)
-    if not m:
-        m = re.search(r"```\s*([\s\S]*?)```", s)
-    if m:
-        payload = (m.group(1) or "").strip()
-        try:
-            return json.loads(payload)
-        except Exception:
-            try:
-                obj, _ = json.JSONDecoder().raw_decode(payload.lstrip())
-                return obj
-            except Exception:
-                pass
-    i1 = min([i for i in [s.find("["), s.find("{"), s.find('"')] if i >= 0] or [-1])
-    if i1 >= 0:
-        try:
-            obj, _ = json.JSONDecoder().raw_decode(s[i1:].lstrip())
-            return obj
-        except Exception:
-            pass
-    return None
-
-
-def _mcp_run(server_entry: dict, js: str, timeout_s: float = 20) -> Any:
-    """Run browser_run_code and parse the result JSON."""
-    resp = mcp_stdio_call_tool(
-        server_entry=server_entry,
-        tool_name="browser_run_code",
-        arguments={"code": js},
-        timeout_s=timeout_s,
-    )
-    text_items = ((resp or {}).get("result") or {}).get("content") or []
-    text = ""
-    for it in text_items:
-        if isinstance(it, dict) and it.get("type") == "text":
-            text = it.get("text") or ""
-            break
-    return _parse_jsonish(text)
-
-
-def _refresh_playwright_mcp_tool_cache(repo_root: Path) -> None:
-    proc = subprocess.run(
-        [sys.executable, str(repo_root / "mcp" / "refresh_tool_cache.py"),
-         "--server-id", "npm/playwright-mcp", "--launch-id", "cmd_npx", "--timeout", "60"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(
-            "Failed to refresh Playwright MCP tool cache.\n"
-            + f"exit={proc.returncode}\n"
-            + (f"[stdout]\n{proc.stdout}" if proc.stdout else "")
-            + (f"[stderr]\n{proc.stderr}" if proc.stderr else "")
-        )
-
-
-def _ensure_playwright_mcp_tools() -> None:
-    required = [
-        "mcp::npm/playwright-mcp::browser_run_code",
-        "mcp::npm/playwright-mcp::browser_take_screenshot",
-        "mcp::npm/playwright-mcp::browser_mouse_click_xy",
-        "mcp::npm/playwright-mcp::browser_resize",
-    ]
-    missing = [t for t in required if not DI.tool_registry.get_tool(t)]
-    if not missing:
-        return
-    repo_root = Path(__file__).resolve().parents[3]
-    _refresh_playwright_mcp_tool_cache(repo_root)
-    DI.tool_registry.load_mcp_tool_cache(enabled_only=True)
-    still_missing = [t for t in required if not DI.tool_registry.get_tool(t)]
-    if still_missing:
-        raise RuntimeError(
-            "Missing Playwright MCP tools after refresh:\n"
-            + "\n".join(f"  {t}" for t in still_missing)
-        )
-
-
-def _browser_resize(server_entry: dict, width: int, height: int) -> None:
-    """Call browser_resize MCP tool — exactly what playwright_page_overview does."""
-    mcp_stdio_call_tool(
-        server_entry=server_entry,
-        tool_name="browser_resize",
-        arguments={"width": width, "height": height},
-        timeout_s=15,
-    )
+pytestmark = requires_live_playwright
 
 
 def _get_viewport(server_entry: dict) -> dict:
-    js = """
-async (page) => {
-  return await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
-}
-"""
-    return _mcp_run(server_entry, js, timeout_s=10) or {}
-
-
-def _get_marks_map(server_entry: dict) -> list[dict]:
-    """Fetch window.__emi_marks_map from the current page."""
-    js = """
-async (page) => {
-  return await page.evaluate(() => {
-    return (window.__emi_marks_map && Array.isArray(window.__emi_marks_map))
-      ? window.__emi_marks_map : [];
-  });
-}
-"""
-    result = _mcp_run(server_entry, js) or []
-    return result if isinstance(result, list) else []
-
-
-def _element_at(server_entry: dict, x: float, y: float) -> dict:
-    """Return DOM info for the element at (x, y) via elementFromPoint."""
-    js = f"""
-async (page) => {{
-  const x = {x};
-  const y = {y};
-  return await page.evaluate(({{x, y}}) => {{
-    const el = document.elementFromPoint(x, y);
-    if (!el) return null;
-    return {{
-      found: true,
-      tag: (el.tagName || "").toLowerCase(),
-      id: el.id || null,
-      aria: el.getAttribute('aria-label') || null,
-      testid: el.getAttribute('data-testid') || null,
-      text: (el.innerText || el.textContent || '').trim().slice(0, 60),
-    }};
-  }}, {{x, y}});
-}}
-"""
-    resp = mcp_stdio_call_tool(
-        server_entry=server_entry,
-        tool_name="browser_run_code",
-        arguments={"code": js},
-        timeout_s=20,
-    )
-    text_items = ((resp or {}).get("result") or {}).get("content") or []
-    text = ""
-    for it in text_items:
-        if isinstance(it, dict) and it.get("type") == "text":
-            text = it.get("text") or ""
-            break
-    result = _parse_jsonish(text)
-    return result if isinstance(result, dict) else {}
-
-
-def _remove_marks_overlay(server_entry: dict) -> None:
-    """Remove the numbered overlay badges injected by web_page_coords so they don't intercept clicks."""
-    js = """
-async (page) => {
-  await page.evaluate(() => {
-    const container = document.getElementById('__emi_marks_container');
-    if (container) container.remove();
-  });
-  return { ok: true };
-}
-"""
-    _mcp_run(server_entry, js, timeout_s=10)
-
-
-def _click_xy(server_entry: dict, x: float, y: float) -> None:
-    """Click at CSS pixel coords (x, y) via page.mouse.click() — same coordinate space as DOM."""
-    js = f"""
-async (page) => {{
-  await page.mouse.click({x}, {y});
-  return {{ ok: true }};
-}}
-"""
-    _mcp_run(server_entry, js, timeout_s=15)
+    return evaluate(server_entry, "() => ({ width: window.innerWidth, height: window.innerHeight })") or {}
 
 
 def _get_png_dimensions(path: str) -> tuple[int, int]:
@@ -265,7 +75,7 @@ class _StubPickMarkByLabel:
     """
     Simulates vision_mark_picker deterministically:
     reads the live marks map, finds the mark whose label contains target_substr,
-    returns that mark id.  Falls back to mark id 1.
+    returns that mark id.  Falls back to mark id 1.  Records the marks it saw.
 
     This exercises the full pipeline (inject→screenshot→pick→fetch→return coords)
     without an OpenAI call.
@@ -273,11 +83,12 @@ class _StubPickMarkByLabel:
     def __init__(self, server_entry: dict, target_substr: str):
         self._server_entry = server_entry
         self._target = target_substr.lower()
+        self.marks: list[dict] = []
 
     def action_handler(self, _msg):
-        marks = _get_marks_map(self._server_entry)
+        self.marks = _get_marks_map(self._server_entry)
         chosen_id = 1
-        for m in marks:
+        for m in self.marks:
             if self._target in str(m.get("label") or "").lower():
                 chosen_id = int(m["id"])
                 break
@@ -288,25 +99,30 @@ class _StubPickMarkByLabel:
         )
 
 
-def _patch_vision(orig, server_entry: dict, target_substr: str):
+def _run_web_page_coords(server_entry: dict, question: str, target_substr: str) -> tuple[ToolResult, _StubPickMarkByLabel]:
+    """Call the real web_page_coords tool end-to-end with the label-matching vision stub."""
+    stub = _StubPickMarkByLabel(server_entry, target_substr)
+    orig = DI.agent_factory.create_agent
+
     def _create_agent(name, blackboard=None):  # noqa: ARG001
         if name == "shared::vision_mark_picker":
-            return _StubPickMarkByLabel(server_entry, target_substr)
+            return stub
         return orig(name, blackboard=blackboard)
-    return _create_agent
 
-
-def _run_web_page_coords(question: str) -> ToolResult:
-    """Call the real web_page_coords tool end-to-end."""
-    tool_cfg = DI.tool_registry.get_tool("web_page_coords")
-    assert tool_cfg and tool_cfg.get("tool_class"), "web_page_coords not registered"
-    return tool_cfg["tool_class"]().execute(
-        ToolMessage(
-            tool_name="web_page_coords",
-            tool_data={"tool_name": "web_page_coords",
-                       "arguments": {"question": question, "strict": True}},
+    DI.agent_factory.create_agent = _create_agent
+    try:
+        tool_cfg = DI.tool_registry.get_tool("web_page_coords")
+        assert tool_cfg and tool_cfg.get("tool_class"), "web_page_coords not registered"
+        res = tool_cfg["tool_class"]().execute(
+            ToolMessage(
+                tool_name="web_page_coords",
+                tool_data={"tool_name": "web_page_coords",
+                           "arguments": {"question": question, "strict": True}},
+            )
         )
-    )
+    finally:
+        DI.agent_factory.create_agent = orig
+    return res, stub
 
 
 # ---------------------------------------------------------------------------
@@ -357,26 +173,12 @@ _TALL_PAGE_HTML = """
 
 
 def _load_tall_page(server_entry: dict, vw: int, vh: int) -> None:
-    js = f"""
-async (page) => {{
-  await page.setViewportSize({{ width: {vw}, height: {vh} }});
-  await page.setContent({json.dumps(_TALL_PAGE_HTML)}, {{ waitUntil: 'domcontentloaded' }});
-  return {{ ok: true }};
-}}
-"""
-    _mcp_run(server_entry, js, timeout_s=30)
+    load_page(server_entry, _TALL_PAGE_HTML, vw, vh)
 
 
 def _get_clicked_result(server_entry: dict) -> str:
-    js = """
-async (page) => {
-  return await page.evaluate(() => {
-    const el = document.getElementById('clicked-result');
-    return el ? (el.textContent || '') : '';
-  });
-}
-"""
-    return str(_mcp_run(server_entry, js) or "")
+    js = "() => { const el = document.getElementById('clicked-result'); return el ? (el.textContent || '') : ''; }"
+    return str(evaluate(server_entry, js) or "")
 
 
 # ---------------------------------------------------------------------------
@@ -384,7 +186,7 @@ async (page) => {
 #     Does enlarging the viewport reveal more buttons?
 # ---------------------------------------------------------------------------
 
-def test_q1_browser_resize_reveals_below_fold_button():
+def test_q1_browser_resize_reveals_below_fold_button(live_server_entry):  # noqa: F811
     """
     Q1: Is browser_resize helpful?
 
@@ -398,20 +200,13 @@ def test_q1_browser_resize_reveals_below_fold_button():
     This directly answers whether enlarging the viewport gives the agent access
     to more of the page without scrolling.
     """
-    _ensure_playwright_mcp_tools()
-    server_entry = DI.tool_registry.get_mcp_server_entry("npm/playwright-mcp")
-    assert isinstance(server_entry, dict)
+    server_entry = live_server_entry
 
     # --- Small viewport: below-fold button is off screen ---
     _load_tall_page(server_entry, vw=1280, vh=800)
-    orig = DI.agent_factory.create_agent
-    DI.agent_factory.create_agent = _patch_vision(orig, server_entry, "above fold")
-    try:
-        res_small = _run_web_page_coords("Find buttons on the page")
-    finally:
-        DI.agent_factory.create_agent = orig
+    res_small, stub_res_small = _run_web_page_coords(server_entry, "Find buttons on the page", "above fold")
 
-    marks_small = _get_marks_map(server_entry)
+    marks_small = stub_res_small.marks
     labels_small = [str(m.get("label") or "").lower() for m in marks_small]
     above_found_small = any("above fold" in l for l in labels_small)
     below_found_small = any("below fold" in l for l in labels_small)
@@ -430,14 +225,9 @@ def test_q1_browser_resize_reveals_below_fold_button():
     vp = _get_viewport(server_entry)
     assert int(vp.get("height") or 0) >= 1500, f"browser_resize did not enlarge. got={vp}"
 
-    orig = DI.agent_factory.create_agent
-    DI.agent_factory.create_agent = _patch_vision(orig, server_entry, "below fold")
-    try:
-        res_large = _run_web_page_coords("Find buttons on the page")
-    finally:
-        DI.agent_factory.create_agent = orig
+    res_large, stub_res_large = _run_web_page_coords(server_entry, "Find buttons on the page", "below fold")
 
-    marks_large = _get_marks_map(server_entry)
+    marks_large = stub_res_large.marks
     labels_large = [str(m.get("label") or "").lower() for m in marks_large]
     below_found_large = any("below fold" in l for l in labels_large)
 
@@ -497,46 +287,25 @@ _CORNER_BUTTONS_HTML = """
 
 
 def _load_corner_page(server_entry: dict, vw: int, vh: int) -> None:
-    js = f"""
-async (page) => {{
-  await page.setViewportSize({{ width: {vw}, height: {vh} }});
-  await page.setContent({json.dumps(_CORNER_BUTTONS_HTML)}, {{ waitUntil: 'domcontentloaded' }});
-  return {{ ok: true }};
-}}
-"""
-    _mcp_run(server_entry, js, timeout_s=30)
+    load_page(server_entry, _CORNER_BUTTONS_HTML, vw, vh)
 
 
 def _get_click_result(server_entry: dict) -> str:
-    js = """
-async (page) => {
-  return await page.evaluate(() => {
-    const el = document.getElementById('clicked-result');
-    return el ? (el.textContent || '') : 'ELEMENT_NOT_FOUND';
-  });
-}
-"""
-    return str(_mcp_run(server_entry, js) or "")
+    js = "() => { const el = document.getElementById('clicked-result'); return el ? (el.textContent || '') : 'ELEMENT_NOT_FOUND'; }"
+    return str(evaluate(server_entry, js) or "")
 
 
-def test_q2_web_page_coords_click_accuracy_before_browser_resize():
+def test_q2_web_page_coords_click_accuracy_before_browser_resize(live_server_entry):  # noqa: F811
     """
     Q2 baseline: web_page_coords returns accurate coords at default viewport.
     We call web_page_coords for the Bottom Right button, then actually click
     the returned coords and verify the click registered on the correct button.
     """
-    _ensure_playwright_mcp_tools()
-    server_entry = DI.tool_registry.get_mcp_server_entry("npm/playwright-mcp")
-    assert isinstance(server_entry, dict)
+    server_entry = live_server_entry
 
     _load_corner_page(server_entry, 1280, 800)
 
-    orig = DI.agent_factory.create_agent
-    DI.agent_factory.create_agent = _patch_vision(orig, server_entry, "bottom right")
-    try:
-        res = _run_web_page_coords("Find the Bottom Right Button")
-    finally:
-        DI.agent_factory.create_agent = orig
+    res, _stub = _run_web_page_coords(server_entry, "Find the Bottom Right Button", "bottom right")
 
     assert res.data.get("marked") is True
     targets = res.data.get("targets") or []
@@ -552,7 +321,6 @@ def test_q2_web_page_coords_click_accuracy_before_browser_resize():
     ), f"Baseline: web_page_coords aimed at wrong element at ({x},{y}): {info!r}"
 
     # Actually click and verify the DOM click event fired.
-    _remove_marks_overlay(server_entry)
     _click_xy(server_entry, x, y)
     result = _get_click_result(server_entry)
     assert result == "clicked:btn-br", (
@@ -561,7 +329,7 @@ def test_q2_web_page_coords_click_accuracy_before_browser_resize():
     )
 
 
-def test_q2_web_page_coords_click_accuracy_after_browser_resize():
+def test_q2_web_page_coords_click_accuracy_after_browser_resize(live_server_entry):  # noqa: F811
     """
     Q2 core: does browser_resize break click accuracy?
 
@@ -577,9 +345,7 @@ def test_q2_web_page_coords_click_accuracy_after_browser_resize():
     If web_page_coords recomputes coords correctly for the resized viewport,
     the click lands on btn-br. If it uses stale or wrong coords, it misses.
     """
-    _ensure_playwright_mcp_tools()
-    server_entry = DI.tool_registry.get_mcp_server_entry("npm/playwright-mcp")
-    assert isinstance(server_entry, dict)
+    server_entry = live_server_entry
 
     _load_corner_page(server_entry, 1280, 800)
     _browser_resize(server_entry, width=2048, height=1200)
@@ -589,12 +355,7 @@ def test_q2_web_page_coords_click_accuracy_after_browser_resize():
     resized_h = int(vp.get("height") or 0)
     assert resized_w >= 1400, f"browser_resize did not take effect. viewport={vp}"
 
-    orig = DI.agent_factory.create_agent
-    DI.agent_factory.create_agent = _patch_vision(orig, server_entry, "bottom right")
-    try:
-        res = _run_web_page_coords("Find the Bottom Right Button")
-    finally:
-        DI.agent_factory.create_agent = orig
+    res, _stub = _run_web_page_coords(server_entry, "Find the Bottom Right Button", "bottom right")
 
     assert res.data.get("marked") is True, "No marks found after browser_resize"
     targets = res.data.get("targets") or []
@@ -614,7 +375,6 @@ def test_q2_web_page_coords_click_accuracy_after_browser_resize():
     )
 
     # Click and verify — this is the real test: does the click land correctly?
-    _remove_marks_overlay(server_entry)
     _click_xy(server_entry, x, y)
     result = _get_click_result(server_entry)
     assert result == "clicked:btn-br", (
@@ -628,14 +388,12 @@ def test_q2_web_page_coords_click_accuracy_after_browser_resize():
     )
 
 
-def test_q2_top_left_button_click_accurate_before_and_after_browser_resize():
+def test_q2_top_left_button_click_accurate_before_and_after_browser_resize(live_server_entry):  # noqa: F811
     """
     Q2 near-origin: the Top Left button (top:10px left:10px) should always
     be near (70, 32). Verify it still clicks correctly after browser_resize.
     """
-    _ensure_playwright_mcp_tools()
-    server_entry = DI.tool_registry.get_mcp_server_entry("npm/playwright-mcp")
-    assert isinstance(server_entry, dict)
+    server_entry = live_server_entry
 
     for label, setup in [
         ("before resize", lambda: _load_corner_page(server_entry, 1280, 800)),
@@ -646,12 +404,7 @@ def test_q2_top_left_button_click_accurate_before_and_after_browser_resize():
     ]:
         setup()
 
-        orig = DI.agent_factory.create_agent
-        DI.agent_factory.create_agent = _patch_vision(orig, server_entry, "top left")
-        try:
-            res = _run_web_page_coords("Find the Top Left Button")
-        finally:
-            DI.agent_factory.create_agent = orig
+        res, _stub = _run_web_page_coords(server_entry, "Find the Top Left Button", "top left")
 
         targets = res.data.get("targets") or []
         assert targets, f"No targets for Top Left button {label}"
@@ -660,7 +413,6 @@ def test_q2_top_left_button_click_accurate_before_and_after_browser_resize():
         assert abs(x - 70) <= 25, f"TL x={x} not near 70 ({label})"
         assert abs(y - 32) <= 25, f"TL y={y} not near 32 ({label})"
 
-        _remove_marks_overlay(server_entry)
         _click_xy(server_entry, x, y)
         result = _get_click_result(server_entry)
         assert result == "clicked:btn-tl", (
@@ -674,7 +426,7 @@ def test_q2_top_left_button_click_accurate_before_and_after_browser_resize():
 #     PNG dimensions must match viewport — mismatch = wrong coordinates.
 # ---------------------------------------------------------------------------
 
-def test_q3_screenshot_dimensions_match_viewport_at_default_size():
+def test_q3_screenshot_dimensions_match_viewport_at_default_size(live_server_entry):  # noqa: F811
     """
     Q3 baseline: PNG dimensions = viewport dimensions at default 1280x800.
 
@@ -684,21 +436,14 @@ def test_q3_screenshot_dimensions_match_viewport_at_default_size():
     the image, but the DOM coords in window.__emi_marks_map were computed in
     CSS pixels — the two coordinate systems are misaligned.
     """
-    _ensure_playwright_mcp_tools()
-    server_entry = DI.tool_registry.get_mcp_server_entry("npm/playwright-mcp")
-    assert isinstance(server_entry, dict)
+    server_entry = live_server_entry
 
     _load_corner_page(server_entry, 1280, 800)
     vp = _get_viewport(server_entry)
     vp_w = int(vp.get("width") or 0)
     vp_h = int(vp.get("height") or 0)
 
-    orig = DI.agent_factory.create_agent
-    DI.agent_factory.create_agent = _patch_vision(orig, server_entry, "top left")
-    try:
-        res = _run_web_page_coords("Find the Top Left Button")
-    finally:
-        DI.agent_factory.create_agent = orig
+    res, _stub = _run_web_page_coords(server_entry, "Find the Top Left Button", "top left")
 
     image_path = res.data.get("image_path")
     assert image_path and Path(image_path).exists(), f"No screenshot saved. data={res.data!r}"
@@ -714,7 +459,7 @@ def test_q3_screenshot_dimensions_match_viewport_at_default_size():
     print(f"\n[Q3 baseline] PNG={png_w}x{png_h}, viewport={vp_w}x{vp_h} — MATCH")
 
 
-def test_q3_screenshot_dimensions_match_viewport_after_browser_resize():
+def test_q3_screenshot_dimensions_match_viewport_after_browser_resize(live_server_entry):  # noqa: F811
     """
     Q3 core: after browser_resize, does the screenshot still match the viewport?
 
@@ -727,9 +472,7 @@ def test_q3_screenshot_dimensions_match_viewport_after_browser_resize():
     can see more, but this messed up our ability to pick accurate coords,
     particularly near edges."
     """
-    _ensure_playwright_mcp_tools()
-    server_entry = DI.tool_registry.get_mcp_server_entry("npm/playwright-mcp")
-    assert isinstance(server_entry, dict)
+    server_entry = live_server_entry
 
     _load_corner_page(server_entry, 1280, 800)
     _browser_resize(server_entry, width=2048, height=1200)
@@ -739,12 +482,7 @@ def test_q3_screenshot_dimensions_match_viewport_after_browser_resize():
     vp_h = int(vp.get("height") or 0)
     assert vp_w >= 1400, f"browser_resize did not take effect. viewport={vp}"
 
-    orig = DI.agent_factory.create_agent
-    DI.agent_factory.create_agent = _patch_vision(orig, server_entry, "bottom right")
-    try:
-        res = _run_web_page_coords("Find the Bottom Right Button")
-    finally:
-        DI.agent_factory.create_agent = orig
+    res, _stub = _run_web_page_coords(server_entry, "Find the Bottom Right Button", "bottom right")
 
     image_path = res.data.get("image_path")
     assert image_path and Path(image_path).exists(), f"No screenshot saved. data={res.data!r}"
@@ -772,15 +510,13 @@ def test_q3_screenshot_dimensions_match_viewport_after_browser_resize():
     )
 
 
-def test_q3_screenshot_dimensions_at_multiple_viewport_sizes():
+def test_q3_screenshot_dimensions_at_multiple_viewport_sizes(live_server_entry):  # noqa: F811
     """
     Q3 parametric: verify PNG dimensions == viewport dimensions at several sizes.
     Also captures the screenshot path so you can visually inspect what the
     vision model actually sees at each resolution.
     """
-    _ensure_playwright_mcp_tools()
-    server_entry = DI.tool_registry.get_mcp_server_entry("npm/playwright-mcp")
-    assert isinstance(server_entry, dict)
+    server_entry = live_server_entry
 
     sizes = [
         (1280, 800,  "small baseline"),
@@ -795,12 +531,7 @@ def test_q3_screenshot_dimensions_at_multiple_viewport_sizes():
         actual_vw = int(vp.get("width") or 0)
         actual_vh = int(vp.get("height") or 0)
 
-        orig = DI.agent_factory.create_agent
-        DI.agent_factory.create_agent = _patch_vision(orig, server_entry, "top left")
-        try:
-            res = _run_web_page_coords("Find the Top Left Button")
-        finally:
-            DI.agent_factory.create_agent = orig
+        res, _stub = _run_web_page_coords(server_entry, "Find the Top Left Button", "top left")
 
         image_path = res.data.get("image_path") or ""
         if not image_path or not Path(image_path).exists():
@@ -829,7 +560,7 @@ def test_q3_screenshot_dimensions_at_multiple_viewport_sizes():
 # Regression: stale marks when viewport changes between inject and screenshot
 # ---------------------------------------------------------------------------
 
-def test_stale_marks_produce_wrong_coords_resize_between_inject_and_click():
+def test_stale_marks_produce_wrong_coords_resize_between_inject_and_click(live_server_entry):  # noqa: F811
     """
     Demonstrates the failure mode when marks are injected BEFORE a resize,
     then web_page_coords is called AFTER. This is the scenario that produces
@@ -844,9 +575,7 @@ def test_stale_marks_produce_wrong_coords_resize_between_inject_and_click():
     We verify that calling web_page_coords fresh AFTER resize gives correct
     results, and that the old stale coords would have been wrong.
     """
-    _ensure_playwright_mcp_tools()
-    server_entry = DI.tool_registry.get_mcp_server_entry("npm/playwright-mcp")
-    assert isinstance(server_entry, dict)
+    server_entry = live_server_entry
 
     small_w, small_h = 900, 600
     large_w, large_h = 2560, 1400
@@ -866,13 +595,7 @@ def test_stale_marks_produce_wrong_coords_resize_between_inject_and_click():
     assert stale_x < small_w and stale_y < small_h, "Stale coords not from small viewport"
 
     # Step 2: resize to large viewport — stale marks are now wrong.
-    js_resize = f"""
-async (page) => {{
-  await page.setViewportSize({{ width: {large_w}, height: {large_h} }});
-  return {{ ok: true }};
-}}
-"""
-    _mcp_run(server_entry, js_resize, timeout_s=10)
+    _browser_resize(server_entry, large_w, large_h)
 
     # The stale coords should land far from the real BR button position at the new size.
     expected_br_x_large = large_w - 70
@@ -882,12 +605,7 @@ async (page) => {{
     )
 
     # Step 3: call web_page_coords fresh — it should reinject marks at the new size.
-    orig = DI.agent_factory.create_agent
-    DI.agent_factory.create_agent = _patch_vision(orig, server_entry, "bottom right")
-    try:
-        res = _run_web_page_coords("Find the Bottom Right Button")
-    finally:
-        DI.agent_factory.create_agent = orig
+    res, _stub = _run_web_page_coords(server_entry, "Find the Bottom Right Button", "bottom right")
 
     targets = res.data.get("targets") or []
     assert targets, "No targets from fresh web_page_coords after resize"
@@ -902,7 +620,6 @@ async (page) => {{
     )
 
     # Click and verify.
-    _remove_marks_overlay(server_entry)
     _click_xy(server_entry, fresh_x, fresh_y)
     result = _get_click_result(server_entry)
     assert result == "clicked:btn-br", (
@@ -920,7 +637,7 @@ async (page) => {{
 # Q4: Returned coords are element centers, not badge positions.
 # ---------------------------------------------------------------------------
 
-def test_returned_coords_are_element_center_not_badge_position():
+def test_returned_coords_are_element_center_not_badge_position(live_server_entry):  # noqa: F811
     """
     Contract test: web_page_coords must return the CENTER of the target element,
     not the position of the numbered badge (which is drawn at the element's
@@ -936,18 +653,11 @@ def test_returned_coords_are_element_center_not_badge_position():
     This is important because the badge sits outside the element — clicking the
     badge position would miss the button entirely.
     """
-    _ensure_playwright_mcp_tools()
-    server_entry = DI.tool_registry.get_mcp_server_entry("npm/playwright-mcp")
-    assert isinstance(server_entry, dict)
+    server_entry = live_server_entry
 
     _load_corner_page(server_entry, 1280, 800)
 
-    orig = DI.agent_factory.create_agent
-    DI.agent_factory.create_agent = _patch_vision(orig, server_entry, "bottom right")
-    try:
-        res = _run_web_page_coords("Find the Bottom Right Button")
-    finally:
-        DI.agent_factory.create_agent = orig
+    res, _stub = _run_web_page_coords(server_entry, "Find the Bottom Right Button", "bottom right")
 
     assert res.data.get("marked") is True, "No marks produced"
     targets = res.data.get("targets") or []
@@ -955,14 +665,12 @@ def test_returned_coords_are_element_center_not_badge_position():
     x, y = float(targets[0]["x"]), float(targets[0]["y"])
 
     # Fetch the actual DOM bounding rect of btn-br.
-    rect_raw = _mcp_run(server_entry, """
-async (page) => {
-  return await page.evaluate(() => {
-    const el = document.getElementById('btn-br');
-    if (!el) return null;
-    const r = el.getBoundingClientRect();
-    return { left: r.left, top: r.top, width: r.width, height: r.height };
-  });
+    rect_raw = evaluate(server_entry, """
+() => {
+  const el = document.getElementById('btn-br');
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  return { left: r.left, top: r.top, width: r.width, height: r.height };
 }
 """)
     assert isinstance(rect_raw, dict), f"Could not get bounding rect: {rect_raw!r}"
@@ -1016,7 +724,7 @@ async (page) => {
     )
 
 
-def test_returned_coords_are_element_center_after_browser_resize():
+def test_returned_coords_are_element_center_after_browser_resize(live_server_entry):  # noqa: F811
     """
     Same center-vs-badge contract after browser_resize.
 
@@ -1025,9 +733,7 @@ def test_returned_coords_are_element_center_after_browser_resize():
     center, not the badge position, for both a near-edge (BR) and near-origin (TL)
     button.
     """
-    _ensure_playwright_mcp_tools()
-    server_entry = DI.tool_registry.get_mcp_server_entry("npm/playwright-mcp")
-    assert isinstance(server_entry, dict)
+    server_entry = live_server_entry
 
     _load_corner_page(server_entry, 1280, 800)
     _browser_resize(server_entry, width=2048, height=1200)
@@ -1038,28 +744,21 @@ def test_returned_coords_are_element_center_after_browser_resize():
     assert vp_w >= 1400, f"browser_resize did not take effect: {vp}"
 
     for btn_id, target_substr in [("btn-br", "bottom right"), ("btn-tl", "top left")]:
-        orig = DI.agent_factory.create_agent
-        DI.agent_factory.create_agent = _patch_vision(orig, server_entry, target_substr)
-        try:
-            res = _run_web_page_coords(f"Find the {target_substr.title()} Button")
-        finally:
-            DI.agent_factory.create_agent = orig
+        res, _stub = _run_web_page_coords(server_entry, f"Find the {target_substr.title()} Button", target_substr)
 
         targets = res.data.get("targets") or []
         assert targets, f"No targets for {btn_id} after browser_resize"
         x, y = float(targets[0]["x"]), float(targets[0]["y"])
 
         rect_js = f"""
-async (page) => {{
-  return await page.evaluate(() => {{
-    const el = document.getElementById({json.dumps(btn_id)});
-    if (!el) return null;
-    const r = el.getBoundingClientRect();
-    return {{ left: r.left, top: r.top, width: r.width, height: r.height }};
-  }});
+() => {{
+  const el = document.getElementById({json.dumps(btn_id)});
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  return {{ left: r.left, top: r.top, width: r.width, height: r.height }};
 }}
 """
-        rect_raw = _mcp_run(server_entry, rect_js)
+        rect_raw = evaluate(server_entry, rect_js)
         assert isinstance(rect_raw, dict), f"No rect for {btn_id}: {rect_raw!r}"
         left = float(rect_raw["left"])
         top_ = float(rect_raw["top"])
@@ -1133,7 +832,7 @@ _DENSE_GRID_HTML = (
 )
 
 
-def _badge_legibility_stats(server_entry: dict, image_path: str, css_vw: int, png_w: int) -> dict:
+def _badge_legibility_stats(marks: list[dict], css_vw: int, png_w: int) -> dict:
     """
     Compute badge legibility statistics for a screenshot.
 
@@ -1147,7 +846,6 @@ def _badge_legibility_stats(server_entry: dict, image_path: str, css_vw: int, pn
       overlap_count    : number of badge pairs whose PNG bboxes overlap
                          (assuming each badge is ~badge_png_px * 2 wide, * 1.5 tall)
     """
-    marks = _get_marks_map(server_entry)
     scale = png_w / css_vw if css_vw else 1.0
     badge_css = 14.0
     badge_png = badge_css * scale
@@ -1202,17 +900,10 @@ def _badge_legibility_stats(server_entry: dict, image_path: str, css_vw: int, pn
 
 
 def _load_dense_page(server_entry: dict, vw: int, vh: int) -> None:
-    js = f"""
-async (page) => {{
-  await page.setViewportSize({{ width: {vw}, height: {vh} }});
-  await page.setContent({json.dumps(_DENSE_GRID_HTML)}, {{ waitUntil: 'domcontentloaded' }});
-  return {{ ok: true }};
-}}
-"""
-    _mcp_run(server_entry, js, timeout_s=30)
+    load_page(server_entry, _DENSE_GRID_HTML, vw, vh)
 
 
-def test_q5_badge_legibility_across_zoom_levels():
+def test_q5_badge_legibility_across_zoom_levels(live_server_entry):  # noqa: F811
     """
     Q5: Can the vision model still read badges when browser_resize zooms out?
 
@@ -1232,9 +923,7 @@ def test_q5_badge_legibility_across_zoom_levels():
     The test prints a full report so you can see exactly where the threshold is
     on this machine's display configuration.
     """
-    _ensure_playwright_mcp_tools()
-    server_entry = DI.tool_registry.get_mcp_server_entry("npm/playwright-mcp")
-    assert isinstance(server_entry, dict)
+    server_entry = live_server_entry
 
     # MINIMUM_BADGE_PX: below this, a 14px bold digit becomes unreadable in the PNG.
     # GPT-4o vision can typically read down to ~7-8px rendered font height.
@@ -1254,12 +943,7 @@ def test_q5_badge_legibility_across_zoom_levels():
     for css_vw, css_vh, label in sizes:
         _load_dense_page(server_entry, css_vw, css_vh)
 
-        orig = DI.agent_factory.create_agent
-        DI.agent_factory.create_agent = _patch_vision(orig, server_entry, "item 1")
-        try:
-            res = _run_web_page_coords("Find Item 1")
-        finally:
-            DI.agent_factory.create_agent = orig
+        res, stub_res = _run_web_page_coords(server_entry, "Find Item 1", "item 1")
 
         image_path = res.data.get("image_path") or ""
         if not image_path or not Path(image_path).exists():
@@ -1267,7 +951,7 @@ def test_q5_badge_legibility_across_zoom_levels():
             continue
 
         png_w, png_h = _get_png_dimensions(image_path)
-        stats = _badge_legibility_stats(server_entry, image_path, css_vw, png_w)
+        stats = _badge_legibility_stats(stub_res.marks, css_vw, png_w)
 
         scale = stats["scale_factor"]
         badge_px = stats["badge_png_px"]
@@ -1316,37 +1000,3 @@ def test_q5_badge_legibility_across_zoom_levels():
         "produces screenshots where badge numbers are too small or overlapping "
         "for reliable vision model interpretation."
     )
-
-
-# ---------------------------------------------------------------------------
-# main()
-# ---------------------------------------------------------------------------
-
-def main() -> int:
-    tests = [
-        test_q1_browser_resize_reveals_below_fold_button,
-        test_q2_web_page_coords_click_accuracy_before_browser_resize,
-        test_q2_web_page_coords_click_accuracy_after_browser_resize,
-        test_q2_top_left_button_click_accurate_before_and_after_browser_resize,
-        test_q3_screenshot_dimensions_match_viewport_at_default_size,
-        test_q3_screenshot_dimensions_match_viewport_after_browser_resize,
-        test_q3_screenshot_dimensions_at_multiple_viewport_sizes,
-        test_stale_marks_produce_wrong_coords_resize_between_inject_and_click,
-        test_returned_coords_are_element_center_not_badge_position,
-        test_returned_coords_are_element_center_after_browser_resize,
-        test_q5_badge_legibility_across_zoom_levels,
-    ]
-    failed = 0
-    for t in tests:
-        try:
-            t()
-            print(f"✅ {t.__name__}")
-        except Exception as e:
-            print(f"❌ {t.__name__}: {e}")
-            failed += 1
-    print(f"\n{'All passed' if not failed else f'{failed} failed'} ({len(tests)} total)")
-    return failed
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

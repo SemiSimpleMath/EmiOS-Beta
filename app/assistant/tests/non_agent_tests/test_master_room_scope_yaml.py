@@ -75,15 +75,19 @@ def test_full_tool_surface(built):
     allow = per_mgr["emi_team_manager"]["allow"]
     # the 7 delegate managers + ask_kg + emi_team operational tools (incl. the
     # pod read/write trio pod_search/pod_fetch/mint_pod and the work-object
-    # read pair search_work_objects/read_work_object, 829ca1ec) = 18 total.
+    # read pair search_work_objects/read_work_object, 829ca1ec) plus the four
+    # progressive work-graph read tools (4487db48; bug list "September 22
+    # hydration repair": manager grants include them) = 22 total.
     assert "web_manager" in allow and "http_manager" in allow
     assert "personal_admin_manager" in allow and "ask_kg" in allow
     assert "pod_search" in allow and "ask_user" in allow
     assert "mint_pod" in allow  # emi_team can persist a content pod directly
     assert "search_work_objects" in allow and "read_work_object" in allow
+    assert {"work_graph_summary", "work_graph_search", "work_graph_peek",
+            "work_artifact_fetch"} <= set(allow)
     assert "kg_query_manager" not in allow  # retired (superseded by ask_kg)
     assert "create_dayflow_ticket" not in allow  # switchboard-only, not emi_team's
-    assert len(allow) == 18
+    assert len(allow) == 22
 
 
 def test_all_pods_visible(built):

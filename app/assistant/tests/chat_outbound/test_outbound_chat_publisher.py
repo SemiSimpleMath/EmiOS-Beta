@@ -24,8 +24,15 @@ class TestEmptyInputs:
     def test_whitespace_text_returns_false(self, publisher):
         assert publisher.publish(sender="X", text="   ", reply_to={"type": "socketio"}) is False
 
-    def test_no_reply_to_returns_false(self, publisher):
-        assert publisher.publish(sender="X", text="hi", reply_to=None) is False
+    def test_no_reply_to_defaults_to_master_room(self, publisher):
+        # d1af1216: a destination-less owner message is delivered to master_room, not dropped.
+        with patch("app.assistant.chat_outbound.outbound_chat_publisher.DI") as mock_di:
+            mock_di.event_hub.publish = MagicMock()
+            ok = publisher.publish(sender="X", text="hi", reply_to=None)
+        assert ok is True
+        published = mock_di.event_hub.publish.call_args.args[0]
+        assert published.event_topic == "socket_emit"
+        assert published.metadata["reply_to"] == {"type": "socketio", "room_id": "master_room"}
 
 
 # ── Surface routing ───────────────────────────────────────────────

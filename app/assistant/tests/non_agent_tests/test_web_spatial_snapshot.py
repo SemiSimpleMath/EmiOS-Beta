@@ -1,60 +1,16 @@
-import json
-import subprocess
-import sys
-from pathlib import Path
-
-# Ensure repo root is on sys.path so `import app...` works when running by file path.
-_HERE = Path(__file__).resolve()
-for parent in _HERE.parents:
-    if (parent / "app").is_dir():
-        sys.path.insert(0, str(parent))
-        break
-
-import app.assistant.tests.test_setup  # noqa: F401 (side-effect: initializes DI)
+"""Live test: web_spatial_snapshot against a real (isolated, headless) browser."""
 from app.assistant.ServiceLocator.service_locator import DI
-from app.assistant.lib.mcp.tool_runner import mcp_stdio_call_tool
+from app.assistant.tests.non_agent_tests.playwright_live import (
+    live_server_entry,  # noqa: F401 (pytest fixture)
+    load_page,
+    requires_live_playwright,
+)
 from app.assistant.utils.pydantic_classes import ToolMessage
 
-
-def _refresh_playwright_mcp_tool_cache(repo_root: Path) -> None:
-    script = repo_root / "mcp" / "refresh_tool_cache.py"
-    cmd = [
-        sys.executable,
-        str(script),
-        "--server-id",
-        "npm/playwright-mcp",
-        "--launch-id",
-        "cmd_npx",
-        "--timeout",
-        "60",
-    ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
-    if proc.returncode != 0:
-        raise RuntimeError(
-            "Failed to refresh Playwright MCP tool cache.\n"
-            + f"exit_code={proc.returncode}\n"
-            + (f"\n[stdout]\n{proc.stdout}" if proc.stdout else "")
-            + (f"\n[stderr]\n{proc.stderr}" if proc.stderr else "")
-        )
+pytestmark = requires_live_playwright
 
 
-def _ensure_playwright_mcp_tools() -> None:
-    required = [
-        "mcp::npm/playwright-mcp::browser_run_code",
-    ]
-    missing = [t for t in required if not DI.tool_registry.get_tool(t)]
-    if not missing:
-        return
-    repo_root = Path(__file__).resolve().parents[3]
-    _refresh_playwright_mcp_tool_cache(repo_root)
-    DI.tool_registry.load_mcp_tool_cache(enabled_only=True)
-    missing2 = [t for t in required if not DI.tool_registry.get_tool(t)]
-    if missing2:
-        raise RuntimeError("Missing Playwright MCP tools even after refresh:\n" + "\n".join(f"- {t}" for t in missing2))
-
-
-def _set_busy_test_page(server_entry: dict) -> None:
-    html = r"""
+_BUSY_PAGE_HTML = r"""
 <!doctype html>
 <html>
 <head>
@@ -98,21 +54,9 @@ def _set_busy_test_page(server_entry: dict) -> None:
 </html>
 """
 
-    js = f"""
-async (page) => {{
-  await page.setViewportSize({{ width: 900, height: 650 }});
-  await page.setContent({json.dumps(html)}, {{ waitUntil: 'domcontentloaded' }});
-  return {{ ok: true }};
-}}
-"""
-    _ = mcp_stdio_call_tool(server_entry=server_entry, tool_name="browser_run_code", arguments={"code": js}, timeout_s=30)
 
-
-def test_web_spatial_snapshot_returns_anchors_and_nearby_text():
-    _ensure_playwright_mcp_tools()
-    server_entry = DI.tool_registry.get_mcp_server_entry("npm/playwright-mcp")
-    assert isinstance(server_entry, dict), "Missing MCP server entry npm/playwright-mcp"
-    _set_busy_test_page(server_entry)
+def test_web_spatial_snapshot_returns_anchors_and_nearby_text(live_server_entry):  # noqa: F811
+    load_page(live_server_entry, _BUSY_PAGE_HTML, 900, 650)
 
     tool_cfg = DI.tool_registry.get_tool("web_spatial_snapshot")
     assert tool_cfg and tool_cfg.get("tool_class"), "web_spatial_snapshot tool not registered"
@@ -127,32 +71,15 @@ def test_web_spatial_snapshot_returns_anchors_and_nearby_text():
             },
         )
     )
-    assert res.result_type == "web_spatial_snapshot"
+    assert res.result_type == "web_spatial_snapshot", f"Unexpected result: {res.content!r}"
     assert isinstance(res.data, dict)
     anchors = res.data.get("anchors")
     assert isinstance(anchors, list) and anchors, "Expected anchors list"
 
-    # Expect to find our close button via aria-label.
-    found_close = False
-    for a in anchors:
-        if not isinstance(a, dict):
-            continue
-        label = (a.get("label") or "")
-        if isinstance(label, str) and "close addresses" in label.lower():
-            found_close = True
-            nearby = a.get("nearby_text")
-            assert isinstance(nearby, list)
-            # Should have some nearby context.
-            assert any(isinstance(t, str) and "addresses" in t.lower() for t in nearby) or len(nearby) >= 0
-            break
-    assert found_close, "Did not find Close Addresses modal anchor"
-
-
-def main():
-    test_web_spatial_snapshot_returns_anchors_and_nearby_text()
-    print("✅ web_spatial_snapshot test passed")
-
-
-if __name__ == "__main__":
-    main()
-
+    # Expect to find our close button via aria-label, with nearby text context.
+    close = next(
+        (a for a in anchors if isinstance(a, dict) and "close addresses" in str(a.get("label") or "").lower()),
+        None,
+    )
+    assert close is not None, "Did not find Close Addresses modal anchor"
+    assert isinstance(close.get("nearby_text"), list)

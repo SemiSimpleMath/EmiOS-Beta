@@ -78,10 +78,12 @@ def test_spread_keys_still_render_for_individually_declared_items():
     assert "Quux Plugh" in prompt
 
 
-def test_message_task_information_fields_reach_template():
-    """The third convention: Message(task=..., information=...) on a direct
-    Agent invocation. chat_scan judged 'User message: ' (blank) since it
-    shipped because nothing moved these fields into the template context."""
+def test_message_task_field_and_agent_input_reach_template():
+    """The third convention: Message(task=...) on a direct Agent invocation,
+    alongside agent_input keys. chat_scan judged 'User message: ' (blank) since
+    it shipped because nothing moved these fields into the template context.
+    Since 7aacd502 chat_scan takes primary_user via agent_input, not
+    Message.information (see context_engine/chat_scan.py)."""
     captured = {}
 
     def spy(self, *, agent, messages, response_format=None, use_json=False):
@@ -93,7 +95,7 @@ def test_message_task_information_fields_reach_template():
     with patch.object(LLMClient, "call_structured_output", spy):
         agent.action_handler(Message(
             task="did I remember to feed the wombat?",
-            information="Primary user: Sam",
+            agent_input={"primary_user": "Sam", "recent_chat_context": ""},
         ))
 
     prompt = "\n".join(

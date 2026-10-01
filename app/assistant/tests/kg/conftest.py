@@ -44,10 +44,21 @@ from app.models.base import Base, get_session
 
 
 @pytest.fixture(autouse=True)
-def kg_clean_db():
+def kg_clean_db(monkeypatch):
     """Recreate every Base.metadata table before each test, then truncate
     the ones we touch. Idempotent — re-running tests doesn't accumulate.
+
+    The module-level env assignment above only holds until another test
+    module is collected: modules that assign TEST_DB_NAME at import time
+    (e.g. non_agent_tests/test_prompt_guards.py) overwrite it, and
+    get_database_uri() reads the env on every get_session(). Pin it per
+    test so kg tests always hit their own DB, not a neighbour's file whose
+    older tables create_all() cannot add columns to.
     """
+    monkeypatch.setenv("USE_TEST_DB", "true")
+    monkeypatch.setenv("TEST_DB_NAME", "test_kg_promoter")
+    monkeypatch.delenv("TEST_DATABASE_URI_EMI", raising=False)
+
     session = get_session()
     engine = session.bind
     Base.metadata.create_all(engine)

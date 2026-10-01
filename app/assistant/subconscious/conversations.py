@@ -212,10 +212,6 @@ def build(events: List[Dict[str, Any]], *, now_utc: Optional[datetime] = None) -
 
 def render(rooms: List[Dict[str, Any]]) -> str:
     """The rooms as text, through the same macro the agent templates import."""
-    from jinja2 import Environment, FileSystemLoader, StrictUndefined
-    from pathlib import Path
-    agents_dir = Path(__file__).resolve().parents[1] / "agents"
-    env = Environment(loader=FileSystemLoader(str(agents_dir)), undefined=StrictUndefined,
-                      keep_trailing_newline=True)
+    from app.assistant.agent_runtime.services.prompt_builder import _strict_jinja_env as env
     return env.from_string('{% from "shared/macros/conversations.j2" import conversations %}'
                            '{{ conversations(rooms) }}').render(rooms=rooms)

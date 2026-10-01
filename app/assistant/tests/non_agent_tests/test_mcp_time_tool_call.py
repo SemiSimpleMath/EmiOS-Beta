@@ -2,16 +2,16 @@ import sys
 from pathlib import Path
 
 # Ensure repo root is on sys.path (when running directly).
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+import app.assistant.tests.test_setup  # noqa: F401,E402 (side-effect: initializes DI)
 from app.assistant.agent_classes.ToolArguments import ToolArguments
 from app.assistant.control_nodes.tool_caller import ToolCaller
 from app.assistant.lib.blackboard.Blackboard import Blackboard
 from app.assistant.lib.tool_registry.tool_registry import ToolRegistry
 from app.assistant.utils.pydantic_classes import Message
-from app.assistant.utils.pipeline_state import set_pending_tool, get_pending_tool
 
 
 class _StubLLMInterface:
@@ -39,7 +39,7 @@ class _AgentRegistryStub:
                     "user": "{{ tool_description }}\n\n{{ tool_args }}",
                 },
                 "system_context_items": [],
-                "user_context_items": [],
+                "user_context_items": ["tool_description", "tool_args"],
                 "llm_params": {"llm_provider": "openai", "engine": "gpt-5-mini", "temperature": 1},
             }
         return {}
@@ -62,7 +62,11 @@ class _ToolResultHandlerStub:
         return
 
 
-def test_mcp_time_tool_appears_in_tool_descriptions_and_executes():
+def test_mcp_time_tool_appears_in_tool_descriptions_and_executes(monkeypatch, tmp_path):
+    # Keep the fake tool cache out of the live mcp/tool_cache/.
+    from app.assistant.lib.tool_registry import mcp_tool_cache
+    monkeypatch.setattr(mcp_tool_cache, "get_mcp_tool_cache_dir", lambda: tmp_path)
+
     bb = Blackboard()
 
     tool_registry = ToolRegistry()
@@ -73,7 +77,7 @@ def test_mcp_time_tool_appears_in_tool_descriptions_and_executes():
     entry = tool_registry.get_mcp_server_entry(server_id)
     assert entry is not None
 
-    fake_server = Path(__file__).resolve().parent / "fake_mcp_servers" / "fake_time_server.py"
+    fake_server = Path(__file__).resolve().parents[1] / "fake_mcp_servers" / "fake_time_server.py"
     assert fake_server.exists()
 
     # Prefer fake server for this test.
@@ -128,8 +132,8 @@ def test_mcp_time_tool_appears_in_tool_descriptions_and_executes():
     assert "current time" in (descs[namespaced] or "").lower()
 
     # --- ToolArguments agent generates correct arguments (stubbed LLM) ---
-    set_pending_tool(bb, name=namespaced, calling_agent="test_agent", action_input=None, arguments=None, kind="tool")
-
+    # Contract: agent_input {target_name, arguments} in; ToolResult.data
+    # {target_name, arguments} out (Planner._generate_tool_args consumes it).
     handler_stub = _ToolResultHandlerStub()
     agent_registry = _AgentRegistryStub(tool_result_handler=handler_stub)
     tool_args_agent = ToolArguments(
@@ -141,13 +145,18 @@ def test_mcp_time_tool_appears_in_tool_descriptions_and_executes():
     tool_args_agent.llm_interface = _StubLLMInterface(
         {"tool_name": namespaced, "arguments": {"timezone": "UTC"}}
     )
-    tool_args_agent.action_handler(Message(data_type="agent_activation"))
+    args_result = tool_args_agent.action_handler(Message(agent_input={"target_name": namespaced, "arguments": None}))
 
-    tool_args = get_pending_tool(bb)
-    assert isinstance(tool_args, dict)
+    tool_args = args_result.data
+    assert isinstance(tool_args, dict), args_result
+    assert tool_args.get("target_name") == namespaced
     assert tool_args.get("arguments", {}).get("timezone") == "UTC"
 
     # --- ToolCaller executes MCP tool ---
+    # Stage the blackboard the way Planner does before routing to ToolCaller.
+    bb.update_state_value("action", namespaced)
+    bb.update_state_value("tool_arguments", tool_args)
+    bb.update_state_value("calling_agent", "test_agent")
     tool_caller = ToolCaller(
         name="tool_caller",
         blackboard=bb,
