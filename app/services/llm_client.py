@@ -252,34 +252,37 @@ def _parse_first_json_object(text: str) -> Any:
     return obj
 
 
-def _extract_response_text(response: Any) -> str:
+def _extract_final_answer_text(response: Any) -> str:
+    """The text of the response's final-answer message.
+
+    Reasoning models can send a preamble as a separate message (`phase="commentary"`) before the
+    answer (`phase="final_answer"`); `response.output_text` joins every message, preamble included.
+    The answer is the one `final_answer` message, or, for a model that labels no phase, the one
+    message. Anything else raises.
     """
-    Robustly extract text from OpenAI Responses API objects.
+    messages = [item for item in (getattr(response, "output", None) or []) if getattr(item, "type", None) == "message"]
+    final = [m for m in messages if getattr(m, "phase", None) == "final_answer"]
+    if not final and len(messages) == 1 and getattr(messages[0], "phase", None) is None:
+        final = messages
+    if len(final) != 1:
+        raise ValueError(f"OpenAI response has {len(final)} final-answer messages among phases "
+                         f"{[getattr(m, 'phase', None) for m in messages]}")
+    for part in final[0].content or []:
+        if getattr(part, "type", None) == "refusal":
+            raise ValueError(f"OpenAI model refused: {part.refusal}")
+    text = "".join(part.text for part in final[0].content or [] if getattr(part, "type", None) == "output_text")
+    if not text.strip():
+        raise ValueError("OpenAI final-answer message contains no text")
+    return text
 
-    Why:
-    - `response.output[0]` is not always the assistant message (it can be a
-      reasoning item with `content=None`).
-    - Different SDK versions expose `output_text` and/or structured output items.
-    """
-    # Prefer SDK convenience field when present.
-    out_text = getattr(response, "output_text", None)
-    if isinstance(out_text, str) and out_text.strip():
-        return out_text
 
-    output_items = getattr(response, "output", None)
-    if not isinstance(output_items, list):
-        raise ValueError("OpenAI response has no output items")
-
-    for item in output_items:
-        content = getattr(item, "content", None)
-        if not isinstance(content, list):
-            continue
-        for part in content:
-            text = getattr(part, "text", None)
-            if isinstance(text, str) and text.strip():
-                return text
-
-    raise ValueError("OpenAI response contained no text content in output items")
+def _parse_final_answer_json(response: Any) -> dict:
+    """The final answer parsed as one JSON object; the API enforced the schema, so the text is the JSON."""
+    import json as _json
+    obj = _json.loads(_extract_final_answer_text(response))
+    if not isinstance(obj, dict):
+        raise ValueError("Structured output must be a JSON object")
+    return obj
 
 
 class OpenAIModelCapabilityNormalizer:
@@ -293,8 +296,8 @@ class OpenAIModelCapabilityNormalizer:
         self.model_name = model_name.strip()
 
     @property
-    def is_gpt5_family(self) -> bool:
-        return self.model_name.startswith("gpt-5")
+    def is_reasoning_model(self) -> bool:
+        return self.model_name.startswith(("gpt-5", "gpt-6"))
 
     def build_base_kwargs(self, *, messages: List[Dict[str, Any]], timeout: int, temperature: Any) -> Dict[str, Any]:
         kwargs: Dict[str, Any] = {
@@ -302,12 +305,11 @@ class OpenAIModelCapabilityNormalizer:
             "input": messages,
             "timeout": timeout,
         }
-        # gpt-5 rejects temperature.
-        if not self.is_gpt5_family and temperature is not None:
+        # Reasoning models reject temperature (gpt-6-luna: 400 "Unsupported parameter", 2026-10-01).
+        if not self.is_reasoning_model and temperature is not None:
             kwargs["temperature"] = temperature
-        if self.is_gpt5_family:
+        if self.is_reasoning_model:
             kwargs["reasoning"] = {"effort": "medium"}
-            kwargs.pop("temperature", None)
         return kwargs
 
 
@@ -348,13 +350,7 @@ class OpenAIPromptJsonValidateStrategy(OpenAIStructuredOutputStrategy):
         # Capture usage for the call logger before parsing. Persists even
         # if the parse below fails — failed parses still bill real tokens.
         self.last_usage = getattr(response, "usage", None)
-        raw_text = _extract_response_text(response)
-        if not isinstance(raw_text, str) or not raw_text.strip():
-            raise ValueError("OpenAI response contained no parsable text output")
-        obj = _parse_first_json_object(raw_text)
-        if not isinstance(obj, dict):
-            raise ValueError("Structured output must be a JSON object")
-        validated = response_format.model_validate(obj)
+        validated = response_format.model_validate(_parse_final_answer_json(response))
         return validated.model_dump()
 
 
@@ -439,13 +435,7 @@ class OpenAIJsonSchemaStrategy(OpenAIStructuredOutputStrategy):
         kwargs["text"] = text_cfg
         response = client.responses.create(**kwargs)
         self.last_usage = getattr(response, "usage", None)
-        raw_text = _extract_response_text(response)
-        if not isinstance(raw_text, str) or not raw_text.strip():
-            raise ValueError("OpenAI response contained no parsable text output")
-        result = _parse_first_json_object(raw_text)
-        if not isinstance(result, dict):
-            raise ValueError("Structured output must be a JSON object")
-        return result
+        return _parse_final_answer_json(response)
 
 
 # ---------------------------------------------------------------------------
