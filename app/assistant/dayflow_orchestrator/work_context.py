@@ -8,14 +8,14 @@ _TEMPLATE_ROOT = get_repo_root() / "app" / "assistant" / "agents"
 _ENV = Environment(loader=FileSystemLoader(str(_TEMPLATE_ROOT)), undefined=StrictUndefined,
                    keep_trailing_newline=True, finalize=lambda value: "" if value is None else value)
 
+from app.assistant.utils.time_utils import local_time_text
+_ENV.filters["local_time"] = local_time_text
+
 def render_view(template, **data):
     return _ENV.get_template("shared/work/" + template + ".j2").render(**data)
 
 def local_stamp(value):
-    if value is None:
-        return ""
-    from app.assistant.utils.time_utils import utc_to_local
-    return utc_to_local(value).strftime("%a %m-%d %I:%M %p")
+    return local_time_text(value)
 
 def record_data(record):
     content = record.content

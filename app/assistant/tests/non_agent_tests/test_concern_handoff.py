@@ -145,6 +145,8 @@ def test_the_steward_sees_every_earlier_attempt_with_the_owners_replies(tmp_path
     _, [item], _ = _run(reg)
     text = item["brief_text"]
     assert "work on this concern so far:" in text
-    assert "Check in on the bake sale plan (work_a; done; attached 2026-03-10T10:00:00+00:00; ended done" in text
+    from app.assistant.utils.time_utils import local_time_text
+    assert (f"Check in on the bake sale plan (work_a; done; attached {local_time_text('2026-03-10T10:00:00+00:00')}; "
+            "ended done") in text
     assert 'task "Ask" judged achieved' in text and "The owner will bake on Sunday." in text
     assert 'said: "I will, Sunday"' in text

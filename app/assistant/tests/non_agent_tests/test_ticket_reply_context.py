@@ -120,7 +120,7 @@ def test_abandoned_line_without_loaded_wo_is_bare_but_valid():
 
 
 def _render_evaluator_template(**ctx):
-    from jinja2 import Environment
+    from app.assistant.agent_runtime.services.prompt_builder import _jinja_env
     src = (
         get_repo_root() / "app" / "assistant" / "agents" / "dayflow_orchestrator"
         / "strategic_planner_wo" / "prompts" / "user.j2"
@@ -132,7 +132,7 @@ def _render_evaluator_template(**ctx):
         "work_portfolio": "",
     }
     defaults.update(ctx)
-    return Environment().from_string(src).render(**defaults)
+    return _jinja_env.from_string(src).render(**defaults)
 
 
 def test_evaluator_prompt_shows_acknowledged_correction_first():

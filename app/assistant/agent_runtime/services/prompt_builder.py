@@ -8,6 +8,7 @@ from jinja2 import ChainableUndefined, Environment, FileSystemLoader, StrictUnde
 from app.assistant.agent_runtime.exceptions import PromptRenderError
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_app_root
+from app.assistant.utils.time_utils import local_time_text
 
 logger = get_logger(__name__)
 
@@ -41,6 +42,10 @@ _strict_jinja_env = Environment(
     undefined=StrictUndefined,
     finalize=_finalize_none_blank,
 )
+
+
+_jinja_env.filters["local_time"] = local_time_text
+_strict_jinja_env.filters["local_time"] = local_time_text
 
 
 def get_jinja_env_for_agent(agent) -> Environment:
@@ -84,6 +89,7 @@ _skeleton_env = Environment(
     keep_trailing_newline=True,
     undefined=_BlankUndefined,
 )
+_skeleton_env.filters["local_time"] = local_time_text
 
 _SKELETON_UNRENDERABLE = object()
 

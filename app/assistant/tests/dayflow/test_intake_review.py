@@ -4,7 +4,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
-from jinja2 import Environment, FileSystemLoader
 
 from app.assistant.tests.dayflow.conftest import FakeBlackboard, make_dayflow_message, seed_items, load_item_by_id, get_meta
 from app.assistant.dayflow_orchestrator.state_store import load_admitted_intake
@@ -138,18 +137,16 @@ def test_malformed_deferral_stays_visible_and_old_unreviewed_is_not_dropped():
 
 
 def test_prompt_shows_full_camera_source_and_previous_deferral():
-    # A LOADER, because the template {% include %}s shared partials from agents/shared/work/.
-    # A bare Environment() has none and raises once an include executes. Root = the agents
-    # dir, the same FileSystemLoader root prompt_builder uses, so includes resolve as they do
-    # live rather than under a root invented for the test.
+    # prompt_builder's own environment: shared includes and the local_time filter, as live.
+    from app.assistant.agent_runtime.services.prompt_builder import _jinja_env as env
+    from app.assistant.utils.time_utils import local_time_text
     agents_dir = Path(__file__).resolve().parents[2] / "agents"
     path = agents_dir / "dayflow_orchestrator/strategic_planner_wo/prompts/user.j2"
-    env = Environment(loader=FileSystemLoader(str(agents_dir)))
     rendered = env.from_string(path.read_text(encoding="utf-8")).render(admitted_artifacts=[{
         "metadata": {"source_type": "pod", "pod_id": "datapod:camera", "summary": "Motion",
             "evaluator_review": {"outcome": "defer", "reason": "Expected status update", "reconsider_at": "2026-09-20T22:00:00Z"}}}])
     assert "datapod:camera" in rendered and "Expected status update" in rendered
-    assert "reconsideration due: 2026-09-20T22:00:00Z" in rendered
+    assert f"reconsideration due: {local_time_text('2026-09-20T22:00:00Z')}" in rendered
 
 
 def test_state_mover_excludes_retired_and_held_sources_but_keeps_transfers():

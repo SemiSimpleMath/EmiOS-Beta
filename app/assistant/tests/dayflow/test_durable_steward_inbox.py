@@ -123,20 +123,16 @@ def test_legacy_admission_is_not_pending_but_old_explicit_handoff_survives():
 
 def test_pending_intake_render_exposes_original_date_and_historical_deadlines():
     from pathlib import Path
-    from jinja2 import Environment, FileSystemLoader
-    # A LOADER, because the template {% include %}s shared partials from agents/shared/work/.
-    # A bare Environment() has no loader and raises "no loader for this environment specified"
-    # the moment an include executes. This passed until 2026-09-19 only because the template's
-    # one include sat inside a ticket-reply loop these fixtures never populate; a second
-    # include then landed at top level, where it always runs. Root = the agents dir, matching
-    # prompt_builder's own FileSystemLoader so the include resolves exactly as it does live.
+    # prompt_builder's own environment: its loader resolves the shared includes and it carries
+    # the local_time filter, exactly as the live render does.
+    from app.assistant.agent_runtime.services.prompt_builder import _jinja_env as env
+    from app.assistant.utils.time_utils import local_time_text
     agents_dir = Path("app/assistant/agents").resolve()
-    env = Environment(loader=FileSystemLoader(str(agents_dir)))
     template = (agents_dir / "dayflow_orchestrator/strategic_planner_wo/prompts/user.j2").read_text(encoding="utf-8")
     rendered = env.from_string(template).render(admitted_artifacts=[{
         "metadata": {"source_type": "email", "created_at": "2026-04-09T22:03:26+00:00",
                      "email_subject": "Request", "email_summary": "Please answer today"}}])
-    assert "source date: 2026-04-09T22:03:26+00:00" in rendered
+    assert f"source date: {local_time_text('2026-04-09T22:03:26+00:00')}" in rendered
     assert "## PENDING INTAKE" in rendered
     assert "## NEW INTAKE" not in rendered
     assert "against the source date" in rendered

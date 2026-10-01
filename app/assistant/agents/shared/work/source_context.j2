@@ -1,6 +1,6 @@
 {% for source in sources %}
 - source item: {{ source.get('item_id', '') }} | type: {{ source.get('source_type', '') }}
-  source timestamp: {{ source.get('created_at', '') or 'unknown' }}
+  source timestamp: {{ source.get('created_at', '') | local_time or 'unknown' }}
 {% if source.get('sender') %}  sender: {{ source.sender }}
 {% endif %}{% if source.get('subject') %}  subject: {{ source.subject }}
 {% endif %}{% if source.get('message_id') %}  message: {{ source.message_id }}

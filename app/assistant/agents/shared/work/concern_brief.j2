@@ -18,7 +18,7 @@
 {% endfor %}{% endif %}  recommendation: {{ c.brief.recommendation }}
 {% else %}  (no brief written yet)
 {% endif %}{% for w in c.get('attempts') or [] %}{% if loop.first %}  work on this concern so far:
-{% endif %}    - {{ w.objective }} ({{ w.work_id }}; {{ w.status }}; attached {{ w.attached_at }}{% if w.ended %}; ended {{ w.ended.outcome }} {{ w.ended.at }}{% endif %}){% if w.ended and w.ended.reason %}: {{ w.ended.reason }}{% endif %}
-{% for j in w.judgments %}      - task "{{ j.title }}" judged {{ j.verdict }} ({{ j.at }}): {{ j.outcome }}
+{% endif %}    - {{ w.objective }} ({{ w.work_id }}; {{ w.status }}; attached {{ w.attached_at | local_time }}{% if w.ended %}; ended {{ w.ended.outcome }} {{ w.ended.at | local_time }}{% endif %}){% if w.ended and w.ended.reason %}: {{ w.ended.reason }}{% endif %}
+{% for j in w.judgments %}      - task "{{ j.title }}" judged {{ j.verdict }} ({{ j.at | local_time }}): {{ j.outcome }}
 {% for r in j.replies %}        - {{ r }}
 {% endfor %}{% endfor %}{% endfor %}{% endif %}{% endfor %}

@@ -4,7 +4,6 @@ from unittest.mock import Mock
 
 import pytest
 import yaml
-from jinja2 import Environment, FileSystemLoader
 
 from app.assistant.database.db_handler import UnifiedLog2026
 from app.assistant.dayflow_orchestrator import communication_context as context
@@ -73,8 +72,8 @@ def test_all_three_agent_views_render_the_same_full_record():
     seed("source-proof")
     history = context.scheduled_reminder_history(NOW)
     from app.assistant.utils.path_utils import get_repo_root
+    from app.assistant.agent_runtime.services.prompt_builder import _jinja_env as env
     root = get_repo_root() / "app/assistant/agents"
-    env = Environment(loader=FileSystemLoader(str(root)))
     for agent in ("state_mover", "strategic_planner_wo"):
         base = "dayflow_orchestrator/" + agent
         config = yaml.safe_load((root / base / "config.yaml").read_text(encoding="utf-8"))

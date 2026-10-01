@@ -12,6 +12,11 @@ wording and formatting. No global Message/blackboard precedence change was made.
 | Worker | Its assigned main task, full owned provenance and reusable dependency outputs. A resumed turn refreshes this view before deciding. |
 | Finalizer | Full task directive, current attempt's result, owned provenance and strategic portfolio. |
 
+Every time shown to an agent is local time: templates pipe stored UTC values through the
+`local_time` filter (`time_utils.local_time_text`), registered on every prompt environment. The
+finalizer's execution receipts carry each tool call's local time to the second, newest first, so a
+read taken before a change is not mistaken for the change's result (2026-09-30).
+
 Architect and steward never receive raw worker checklist/evidence records as main
 assignments. Worker descendants remain provenance; finalizer summaries communicate
 their significance to strategic agents.

@@ -3,7 +3,7 @@
 {{ finalizer_block }}
 {%- if goal_instructions is defined and goal_instructions %}
 THE STEWARD ASKS YOU TO END THIS GOAL. It sees the whole portfolio and new intake; you hold this goal's plan, so the decision is yours. End it (end_goal) when its reason stands against what the graph shows; otherwise keep the goal and say in architect_summary why it continues.
-{% for entry in goal_instructions %}- {{ entry.at }}: {{ entry.reason }}
+{% for entry in goal_instructions %}- {{ entry.at | local_time }}: {{ entry.reason }}
 {% endfor %}
 {%- endif %}
 {%- if stranded is defined and stranded %}

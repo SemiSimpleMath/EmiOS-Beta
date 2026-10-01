@@ -1,11 +1,11 @@
 ## FIXED SCHEDULER REMINDER HISTORY
 {% if scheduled_reminder_history is defined and scheduled_reminder_history %}
-Window (UTC): {{ scheduled_reminder_history.since }} through {{ scheduled_reminder_history.through }}.
+Window: {{ scheduled_reminder_history.since | local_time }} through {{ scheduled_reminder_history.through | local_time }}.
 {% if scheduled_reminder_history.status == 'available' %}
 These are outbound records saved BEFORE delivery by the independent fixed reminder scheduler.
 They do not establish delivery, reading, acknowledgement, or completion of the activity.
 {% for record in scheduled_reminder_history.records %}
-- Record: {{ record.id }} | source: {{ record.source }} | UTC: {{ record.timestamp }}
+- Record: {{ record.id }} | source: {{ record.source }} | at: {{ record.timestamp | local_time }}
   Room: {{ record.room_id }} | surface: {{ record.surface }}
   Delivery: {{ record.delivery_status }} | read: {{ record.read_status }}
   Full recorded message:

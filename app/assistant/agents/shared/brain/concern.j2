@@ -10,14 +10,14 @@
 - evidence ({{ e.kind }} {{ e.ref }}){% if e.snippet %}: {{ e.snippet }}{% endif %}
 {% endfor -%}
 {% for w in c.attached_work -%}
-- work attached {{ w.attached_at }}: {{ w.work_id }} ({{ w.status }}): {{ w.objective }}
+- work attached {{ w.attached_at | local_time }}: {{ w.work_id }} ({{ w.status }}): {{ w.objective }}
 {% for j in w.judgments -%}
-{{ "  " }}- task "{{ j.title }}" judged {{ j.verdict }} ({{ j.at }}), next step {{ j.next_step or "none" }}: {{ j.outcome }}
+{{ "  " }}- task "{{ j.title }}" judged {{ j.verdict }} ({{ j.at | local_time }}), next step {{ j.next_step or "none" }}: {{ j.outcome }}
 {% for r in j.replies -%}
 {{ "    " }}- {{ r }}
 {% endfor -%}
 {% endfor -%}
-{% if w.ended %}{{ "  " }}- ended {{ w.ended.outcome }} ({{ w.ended.at }}){% if w.ended.reason %}: {{ w.ended.reason }}{% endif %}
+{% if w.ended %}{{ "  " }}- ended {{ w.ended.outcome }} ({{ w.ended.at | local_time }}){% if w.ended.reason %}: {{ w.ended.reason }}{% endif %}
 {% endif -%}
 {% endfor -%}
 {% if c.journal %}- journal:{{ c.journal }}

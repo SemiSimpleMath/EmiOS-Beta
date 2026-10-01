@@ -9,6 +9,7 @@ from app.assistant.dayflow_orchestrator.work_context import worker_data, render_
 from app.assistant.dayflow_orchestrator.work_persist import persist_steward_output
 from app.assistant.dayflow_orchestrator.work_portfolio import node_result
 from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+from app.assistant.utils.time_utils import local_time_text
 
 
 def email(item_id, text):
@@ -67,7 +68,7 @@ def test_source_visible_through_wake_takeover_replan_and_finalizer():
         for text in (render_view("worker", view=view),
                      render_view("finalizer_input", view=view, result_text="Recorded worker result", repeat_failure_limit=2)):
             for value in ("datapod:email:request", "datapod:email:approval", "Yes, choose option B.",
-                          "approver@example.test", "2026-09-20T15:00:00+00:00", "thread-selection",
+                          "approver@example.test", local_time_text("2026-09-20T15:00:00+00:00"), "thread-selection",
                           "matched waiting condition", "wake interpretation (agent judgment)"):
                 assert value in text
             assert "forged-model-reference" not in text
@@ -100,6 +101,7 @@ def test_state_mover_render_keeps_candidate_beyond_thirty_and_full_directive():
     store.apply("set_status", {"work_id": wid, "node_id": "relay", "status": "proposed", "content": long_directive})
     bb = prepare(wid, [email(str(i), "Unrelated message") for i in range(35)] + [email("approval", "Yes, choose option B.")])
     env = Environment(loader=FileSystemLoader(str(Path("app/assistant/agents"))), undefined=ChainableUndefined)
+    env.filters["local_time"] = local_time_text
     text = env.get_template("dayflow_orchestrator/state_mover/prompts/user.j2").render(
         waiting_work_nodes=bb.get_state_value("waiting_work_nodes"), work_wait_intake=bb.get_state_value("work_wait_intake"))
     assert long_directive in text

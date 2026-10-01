@@ -237,7 +237,7 @@ class TestPassesRunOneAtATime:
 
 def test_tick_and_wake_render_full_task_context_for_timing():
     from app.assistant.control_nodes.state_mover_prep_node import StateMoverPrepNode
-    from jinja2 import Environment, FileSystemLoader
+    from app.assistant.agent_runtime.services.prompt_builder import _jinja_env as env
     store = _store()
     ref = _ready_node(store, title="Research options")
     wid, nid = ref.split("::")
@@ -251,7 +251,6 @@ def test_tick_and_wake_render_full_task_context_for_timing():
     _prep(wake).action_handler(_activation())
     assert wake.get_state_value("ready_work_nodes") == [tick_candidate]
     assert tick_candidate["task"]["directive"] == directive
-    env = Environment(loader=FileSystemLoader(str(Path(__file__).resolve().parents[2] / "agents")))
     rendered = env.get_template("dayflow_orchestrator/state_mover/prompts/user.j2").render(ready_work_nodes=[tick_candidate])
     assert directive in rendered
     assert "Previous research found a useful source; reuse it." in rendered

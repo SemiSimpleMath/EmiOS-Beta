@@ -129,6 +129,14 @@ def utc_to_local(utc_time: Union[str, datetime]) -> datetime:
     return dt.astimezone(local_tz)
 
 
+def local_time_text(value: Any, seconds: bool = False) -> str:
+    """A stored UTC time as agent prompts show it, in local time ("Wed 09-30 07:00 AM"). Blank stays
+    blank. Registered as the `local_time` Jinja filter on every prompt environment."""
+    if value is None or str(value) == "":
+        return ""
+    return utc_to_local(value).strftime("%a %m-%d %I:%M:%S %p" if seconds else "%a %m-%d %I:%M %p")
+
+
 def update_local_timezone(new_timezone: str) -> None:
     """
     Updates the local timezone used by helpers.

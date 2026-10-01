@@ -299,7 +299,8 @@ def test_work_reports_render_under_their_work_and_attached_work_under_its_concer
                                   "replies": [{"question": "How is work?", "user_text": "less stress now"}]}]}}}
     c = brain_step._concern_view("C1", concern)
     rendered = work_context._ENV.from_string("{% include 'shared/brain/concern.j2' %}").render(c=c)
-    assert "work attached 2026-03-10T10:00:00+00:00: work_a (done): Check in on stress" in rendered
+    from app.assistant.utils.time_utils import local_time_text
+    assert f"work attached {local_time_text('2026-03-10T10:00:00+00:00')}: work_a (done): Check in on stress" in rendered
     assert 'task "Ask" judged achieved' in rendered and "He is less stressed." in rendered
     assert 'said: "less stress now"' in rendered and "ended done" in rendered
 

@@ -63,7 +63,7 @@ def test_dayflow_pages_keep_whole_context_and_all_selected_records(monkeypatch):
         return SimpleNamespace(data={'belief_ids':['S0'],'reasoning':'relevant'})
     monkeypatch.setattr(ServiceLocator,'_services',{'agent_factory':SimpleNamespace(create_agent=lambda _:SimpleNamespace(action_handler=respond))})
     entries=[{'belief_key':str(i),'statement':'full text '*4000,'conditions':{'when':'before lesson'}} for i in range(3)]
-    selected,_=D._select_beliefs(entries,'full day',None,weekly_insights='full week')
+    selected,_,_=D._select_beliefs(entries,'full day',None,weekly_insights='full week')
     assert selected==entries and len(seen)==3
     assert all(x['daily_context']=='full day' and x['weekly_insights']=='full week' for x in seen)
     assert seen[2]['belief_catalog'][0]['statement']==entries[2]['statement']

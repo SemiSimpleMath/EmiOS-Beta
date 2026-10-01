@@ -16,5 +16,5 @@ ITS FULL RESULT:
 
 {% set execution = view.work.execution | default({}) %}
 {% if execution.get('recent_results') %}RECENT EXECUTION RECEIPTS (observations, not finalizer verdicts)
-{% for call in execution.recent_results %}- {{ call.node_id }} attempt {{ call.epoch }} / {{ call.tool_name }} [{{ call.state }}]: {{ call.detail }}
+{% for call in execution.recent_results %}- {{ call.node_id }} attempt {{ call.epoch }} / {{ call.tool_name }} [{{ call.state }}] at {{ call.updated_at | local_time(seconds=true) }}: {{ call.detail }}
 {% endfor %}{% endif %}

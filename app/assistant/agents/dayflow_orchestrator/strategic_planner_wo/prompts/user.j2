@@ -69,13 +69,13 @@ Source dates below are the original dates, not the time this item entered this p
   why now: {{ meta.get("why_now","") }}
   the concern and everything known about it:
     {{ meta.get("brief_text","") | replace("\n", "\n    ") }}{% elif meta.get("source_type","") == "email" %}Email from {{ meta.get("email_sender","Unknown") }}: "{{ meta.get("email_subject", meta.get("summary","")) }}"{% if meta.get("email_summary") %} — {{ meta.get("email_summary") }}{% endif %}{% else %}{{ meta.get("summary","(no summary)") }} ({{ meta.get("source_type","") }}){% endif %}
-  source date: {{ meta.get("created_at") or m.get("timestamp") or "unknown; do not assume current" }}
+  source date: {{ (meta.get("created_at") or m.get("timestamp")) | local_time or "unknown; do not assume current" }}
 {%- if meta.get("pod_id") %}
   full source: {{ meta.get("pod_id") }}
 {%- endif %}
 {%- if meta.get("evaluator_review", {}).get("outcome") == "defer" %}
   prior deferral: {{ meta.evaluator_review.reason }}
-  reconsideration due: {{ meta.evaluator_review.reconsider_at }}
+  reconsideration due: {{ meta.evaluator_review.reconsider_at | local_time }}
 {%- endif %}
 {%- if meta.get("source_type","") == "email" and meta.get("email_body_excerpt") %}
   body:
