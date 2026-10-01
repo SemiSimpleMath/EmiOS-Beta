@@ -98,6 +98,16 @@ def test_dayflow_agents_and_calls_inside_work_are_recorded_and_capped(connect, m
     assert len(brain_trace.list_calls(agent="subconscious::gate", connect=connect)) == 5   # the brain keeps all
 
 
+def test_replay_agents_are_recorded_capped_and_kept_off_the_brain_list(connect, monkeypatch):
+    monkeypatch.setattr(brain_trace, "KEEP_PER_AGENT", 2)
+    for _ in range(4):
+        _record(connect, agent="label", result={"label": "x"})
+    _record(connect, result={"decisions": []})
+    assert len(brain_trace.list_calls(agent="label", connect=connect)) == 2
+    assert [c["agent"] for c in brain_trace.list_calls(agents=brain_trace.TRACED_AGENTS, connect=connect)] == [
+        "subconscious::gate"]
+
+
 def test_the_dayflow_diagram_follows_the_managers_configs():
     from app.routes import dayflow_flow
     planning, wake, dispatch = (dayflow_flow._stages(m) for m, _, _ in dayflow_flow.MANAGERS)

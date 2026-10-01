@@ -11,6 +11,10 @@ For the /dayflow/flow page (routes/dayflow_flow.py, 2026-09-30) it also records 
 agents, the ticket builder), tagged with the attempt's work_id and main node. Those are kept to the
 newest KEEP_PER_AGENT calls per agent; the brain's agents keep their whole history.
 
+It also records REPLAY_AGENTS (2026-10-01), likewise keeping the newest KEEP_PER_AGENT: the belief and
+knowledge-graph agents and the highest-volume agents, so a model or reasoning-effort change can be
+replayed on their real prompts before it ships (scratch/replay/).
+
 Callers tag what a call was about with `trace(...)`, a context manager over a contextvar: the gate
 per page (`stage=gate`, `event_ids`), the brain per matter (`stage=brain`, `event_ids`; the concern
 door's calls inside it inherit this), the brief writer per concern (`stage=brief`, `concern_id`),
@@ -39,7 +43,19 @@ TRACED_AGENTS = frozenset({
     "subconscious::noticer", "dayflow_orchestrator::strategic_planner_wo",
 })
 
-KEEP_PER_AGENT = 50          # calls kept per agent recorded for the dayflow page
+REPLAY_AGENTS = frozenset({
+    "belief_engine::belief_dedup", "belief_engine::evidence_page", "belief_engine::match_review",
+    "belief_engine::evidence_match", "belief_engine::belief_extractor", "belief_engine::merge_verifier",
+    "belief_engine::merge_check", "belief_engine::match_discover", "belief_engine::belief_atomizer",
+    "dayflow_belief_selector", "dayflow_routine_writer", "dayflow_cron_tickets", "daily_context_tracker",
+    "health_status_inference", "label", "email_parser", "subconscious::answer_matcher",
+    "knowledge_graph_add::fact_extractor", "knowledge_graph_add::entity_resolver", "knowledge_graph_add::node_merger",
+    "kg_maintenance::succession_judge", "kg_maintenance::identity_sentence_writer",
+    "kg_maintenance::duplicate_cluster_resolver", "kg_maintenance::duplicate_detector",
+    "kg_finding_cluster_resolver", "wiki_consistency_critic",
+})
+
+KEEP_PER_AGENT = 50          # calls kept per agent recorded for the dayflow page and replay
 
 SCHEMA = """CREATE TABLE IF NOT EXISTS brain_calls (
     id TEXT PRIMARY KEY,
@@ -102,12 +118,12 @@ def _work_tags() -> Dict[str, Any]:
 def record_call(*, agent_name: str, messages: List[Dict[str, Any]], engine: Optional[str],
                 started: datetime, result: Any = None, error: Optional[BaseException] = None,
                 connect=None) -> None:
-    """Store one call of a traced agent: a brain agent, a dayflow agent, or any agent called inside
-    a dayflow work attempt. Other agents are ignored."""
+    """Store one call of a traced agent: a brain agent, a dayflow agent, an agent called inside a
+    dayflow work attempt, or a replay agent. Other agents are ignored."""
     try:
         work = _work_tags()
         brain = agent_name in TRACED_AGENTS
-        if not (brain or agent_name.startswith("dayflow_orchestrator::") or work):
+        if not (brain or agent_name.startswith("dayflow_orchestrator::") or work or agent_name in REPLAY_AGENTS):
             return
         connect = connect or _connect
         ensure_schema(connect)
@@ -130,11 +146,17 @@ def record_call(*, agent_name: str, messages: List[Dict[str, Any]], engine: Opti
 
 # ── reading, for the page ────────────────────────────────────────────────────
 
-def list_calls(*, agent: Optional[str] = None, limit: int = 200, connect=None) -> List[Dict[str, Any]]:
-    """Newest first, without the prompt texts (sizes only)."""
+def list_calls(*, agent: Optional[str] = None, agents: Optional[frozenset] = None, limit: int = 200,
+               connect=None) -> List[Dict[str, Any]]:
+    """Newest first, without the prompt texts (sizes only): one agent's calls, those of `agents`, or all."""
     connect = connect or _connect
     ensure_schema(connect)
-    where, params = ("WHERE agent = ?", [agent]) if agent else ("", [])
+    if agent:
+        where, params = "WHERE agent = ?", [agent]
+    elif agents:
+        where, params = f"WHERE agent IN ({','.join('?' * len(agents))})", sorted(agents)
+    else:
+        where, params = "", []
     with connect(False) as c:
         rows = c.execute(f"SELECT id, at, agent, engine, duration_ms, length(system), length(user), "
                          f"length(result), error, trace FROM brain_calls {where} ORDER BY at DESC LIMIT ?",

@@ -146,7 +146,7 @@ def brain_calls_api():
     from app.assistant.subconscious import brain_trace
     agent = (request.args.get("agent") or "").strip() or None
     limit = min(int(request.args.get("limit") or 200), 2000)
-    return jsonify({"calls": brain_trace.list_calls(agent=agent, limit=limit),
+    return jsonify({"calls": brain_trace.list_calls(agent=agent, agents=brain_trace.TRACED_AGENTS, limit=limit),
                     "agents": sorted(brain_trace.TRACED_AGENTS)})
 
 
