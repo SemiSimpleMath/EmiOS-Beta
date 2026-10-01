@@ -1,7 +1,7 @@
 import re
 from pathlib import Path
 import yaml
-from jinja2 import Environment, meta as jinja_meta, nodes as jinja_nodes
+from jinja2 import meta as jinja_meta, nodes as jinja_nodes
 from app.assistant.agent_registry.agent_registry import AgentRegistry
 from app.assistant.utils.logging_config import get_logger
 
@@ -184,7 +184,8 @@ def _check_undeclared_template_vars(registry: AgentRegistry):
     for child, parent in SUB_COMPONENT_MAP.items():
         parent_to_children.setdefault(parent, set()).add(child)
 
-    env = Environment()
+    # The live prompt environment, so templates parse with the filters they use.
+    from app.assistant.agent_runtime.services.prompt_builder import _jinja_env as env
 
     for agent_name, config in registry.configs.items():
         if config.get("type") == "control_node":

@@ -52,3 +52,11 @@ def test_architect_instructions_and_concern_history_are_local():
     assert "attached Wed 09-30 12:39 AM" in text
     assert "ended abandoned Wed 09-30 07:20 AM" in text
     assert "judged retry (Wed 09-30 07:01 AM)" in text
+
+
+def test_boot_validator_parses_templates_that_use_the_filter():
+    from types import SimpleNamespace
+    from app.assistant.validation import agent_validator
+    registry = SimpleNamespace(configs={"probe": {"prompts": {"user": "{{ at | local_time }}"},
+                                                  "user_context_items": ["at"]}})
+    agent_validator._check_undeclared_template_vars(registry)
