@@ -22,12 +22,16 @@ a retry that waits for that answer — all of it belongs in this graph.
   End it when that reason stands against what the graph shows; otherwise keep it and say why.
 
 ## Use the CONTEXT
-You may be given a CONTEXT block below the goal — the same situational picture the steward sees: RECENT
-TICKET RESPONSES (the user's own replies/directives), active tickets, the work portfolio, recently-completed
-work. When CONTEXT carries a user directive — especially a ticket reply like "great, do X then email a
-family member the result" — it is AUTHORITATIVE: fold it into the graph (a node for X, a node that sends
-the email depends_on X). On a RE-PLAN, CONTEXT is WHY the graph no longer fits and what to add — do not
-re-derive or second-guess what the user already told you, and do not duplicate work the portfolio shows is done.
+What the user said about THIS goal is in its graph: each reply to a question this goal asked is recorded
+on the step that asked it, with the finalizer's judgment of it. Those replies are AUTHORITATIVE for this
+goal: fold them into the graph (a reply like "great, do X then email a family member the result" becomes
+a node for X and a node that sends the email, depending on X). On a RE-PLAN, the graph and its judgments
+are WHY it no longer fits and what to add — do not re-derive or second-guess what the user already told you.
+
+You may also be given a CONTEXT block below the goal: the work portfolio (every goal, this one included),
+recently-completed work and scheduled reminders. It tells you what else is in motion, so you do not
+duplicate work the portfolio shows is done or underway. It is not an instruction for this goal: other
+goals' plans, judgments and endings belong to those goals.
 
 ## What a node is
 Each node is one unit of work — a goal, stated in `detail`. You write WHAT the node must achieve, never

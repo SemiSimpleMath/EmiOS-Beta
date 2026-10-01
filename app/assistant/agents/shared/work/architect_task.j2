@@ -7,7 +7,7 @@ THE STEWARD ASKS YOU TO END THIS GOAL. It sees the whole portfolio and new intak
 {% endfor %}
 {%- endif %}
 {%- if stranded is defined and stranded %}
-THIS GOAL IS STRANDED: nothing in its graph can run any more (no step in flight, no step waiting on a time ahead or on the outside world, the rest blocked or finished) and it is not achieved. Decide its future now: add the step that moves it (when the user is needed first, a step that tells or asks them, with the retry depending on the answer), revise the objective to what is still needed, or end it with the reason.
+THIS GOAL HAS NOTHING LEFT TO RUN: no step is in flight, waiting on a time ahead or on the outside world, or runnable now, and the automatic completion did not close it. Each step that was worked on shows its outcome as the finalizer judged it; a step that never ran shows why. From those outcomes, judge whether the goal's outcome is reached: if it is, end it as done, with the reason. If not: add the step that moves it (when the user is needed first, a step that tells or asks them, with the retry depending on the answer), revise the objective to what is still needed, or end it as abandoned, with the reason.
 {%- endif %}
 This goal ALREADY has a work graph (below). Revise it as a DELTA per the verdict above and the CONTEXT: ADD the steps still missing, and ABANDON (list their node_ids in abandon_node_ids) only nodes the EVIDENCE — epitaphs, recorded results, user directives — makes moot or wrong; unfinished internal records go with them. Queued (actionable) and held (future-wake) nodes remain planned: never prune one for slowness. Do NOT recreate existing nodes (reference their node_ids in depends_on). Output the delta only.
 Existing nodes:

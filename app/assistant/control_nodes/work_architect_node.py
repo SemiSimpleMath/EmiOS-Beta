@@ -180,14 +180,15 @@ def _render_existing_graph(wo) -> str:
 
 
 def _situational_context(bb) -> str:
-    """Prepare the tick's situational data for the architect's Jinja context block."""
-    responses = bb.get_state_value("recent_responded_tickets", {}) or {}
+    """Prepare the tick's situational data for the architect's Jinja context block.
+
+    No tickets: the architect owns one goal, and the user's replies about it are recorded on the
+    step that asked (evidence the finalizer judges). The tick's list of every answered ticket once
+    reached every architect call as "directives"; on 2026-10-01 a reply to a test goal's question
+    ("this task should be aborted") ended the goal that had just emailed a family member.
+    """
     return render_view("situation",
         scheduled_reminder_history=bb.get_state_value("scheduled_reminder_history"),
-        responses=[{"category": category, "ticket": ticket}
-                   for category in ("accepted", "acknowledged", "declined", "snoozed")
-                   for ticket in (responses.get(category) or [])],
-        active=bb.get_state_value("active_tickets", []) or [],
         portfolio=bb.get_state_value("work_portfolio", "") or "",
         completed=bb.get_state_value("recent_completed_work", "") or "")
 

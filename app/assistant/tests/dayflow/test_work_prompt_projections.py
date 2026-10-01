@@ -129,8 +129,11 @@ def test_render_actual_architect_and_steward_templates(monkeypatch, tmp_path):
     monkeypatch.setattr(node, "_scope", lambda msg: None)
     node.action_handler(SimpleNamespace())
     assert len(captured) == 1
-    assert "ACKNOWLEDGED" in captured[0].information
-    assert "Wait for my approval before publishing." in captured[0].information
+    # The tick's answered tickets belong to other goals (2026-10-01: a test goal's "abort" reply ended
+    # the goal that had emailed a family member); this goal's replies reach the architect through its graph.
+    assert "ACKNOWLEDGED" not in captured[0].information
+    assert "Wait for my approval before publishing." not in captured[0].information
+    assert "WORK PORTFOLIO" in captured[0].information
     root = Path(__file__).resolve().parents[2] / "agents" / "dayflow_orchestrator"
     artifact = ["# Complex work object: architect and steward prompt example",
         "Synthetic data only. Generated from the current agent Jinja templates using the production Jinja environment.",
@@ -217,3 +220,14 @@ def test_worker_keeps_cancellation_visible():
     text = render_view('worker', view=worker_data(wo, 'repair'))
     assert 'cancellation requested: user stopped' in text
     assert 'pending_call' in text
+
+
+def test_a_stranded_goal_asks_for_the_architects_judgment():
+    """Stranded means nothing is left to run, not that the goal failed: the architect judges the goal
+    from each worked step's finalized outcome (owner, 2026-10-01)."""
+    from app.assistant.dayflow_orchestrator.work_context import render_view
+    text = render_view("architect_task", mode="replan", objective="o", finalizer_block="", graph="",
+                       goal_instructions=[], stranded=True)
+    assert "THIS GOAL HAS NOTHING LEFT TO RUN" in text
+    assert "judge whether the goal's outcome is reached: if it is, end it as done" in text
+    assert "not achieved" not in text

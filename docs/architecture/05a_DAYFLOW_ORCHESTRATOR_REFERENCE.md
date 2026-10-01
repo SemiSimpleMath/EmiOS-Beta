@@ -433,6 +433,13 @@ Never raises — a per-object failure leaves that object as-is and the pipeline 
 > everything it could see: a picture-day goal acquired an AC setpoint, a whole-house lights ramp and
 > an evening dog walk, two of which failed there and blocked that goal permanently. Anything the
 > architect needs must arrive through its Message (see `_situational_context`) or as a resource.
+>
+> **No tickets in that context (2026-10-01).** The architect owns one goal; the user's replies about
+> it are recorded on the step that asked them, as evidence the finalizer judges. The tick's list of
+> every answered ticket used to reach every architect call as "user directives — incorporate these
+> into the graph", and a reply to a test goal's question ("this task should be aborted") ended the
+> goal that had just emailed a family member. The context keeps the portfolio, recently completed work and
+> scheduled reminders, described to the agent as other goals' state, not instructions.
 
 Four more mechanics worth knowing:
 
