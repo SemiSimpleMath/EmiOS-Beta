@@ -14,7 +14,6 @@ Verifies:
 from __future__ import annotations
 
 import os
-import sqlite3
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
@@ -41,12 +40,16 @@ def _user_scope() -> ScopeContext:
 
 
 def _clean(pod_id: str) -> None:
-    conn = sqlite3.connect("emi.db")
-    conn.execute("DELETE FROM pod_projection WHERE pod_id=?", (pod_id,))
-    conn.execute("DELETE FROM pod_audit WHERE pod_id=?", (pod_id,))
-    conn.execute("DELETE FROM pod_store WHERE pod_id=?", (pod_id,))
-    conn.commit()
-    conn.close()
+    """Remove the test pod from the database PodStore wrote it to (the test database)."""
+    from sqlalchemy import text
+    from app.models.base import get_session
+    s = get_session()
+    try:
+        for table in ("pod_projection", "pod_audit", "pod_store"):
+            s.execute(text(f"DELETE FROM {table} WHERE pod_id=:pod_id"), {"pod_id": pod_id})
+        s.commit()
+    finally:
+        s.close()
 
 
 class TestOauthTokenRefresh(unittest.TestCase):

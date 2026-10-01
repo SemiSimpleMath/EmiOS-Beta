@@ -5,14 +5,13 @@ LLM tokens on every CI run. They verify:
   - the sandbox creates a tempfile DB and tears it down
   - the real ROOM.md loader, scope_builder, and manager_factory chain works
   - per_manager rules from ROOM.md land in scope.tools.per_manager
-  - real emi.db is untouched
+  - the sandbox session points at its tempfile (the root conftest refuses any open of the live emi.db)
 
 A separate live test (test_live_real_llm.py) covers the actual invocation
 end-to-end with real LLMs — gated behind an env var so it's not run by default.
 """
 from __future__ import annotations
 
-import sqlite3
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,17 +25,14 @@ def test_sandbox_isolates_writes_from_real_db():
     """Writes inside sandboxed_di land in the tempfile, not in real emi.db."""
     from app.assistant.tests.room_test_harness.sandbox_setup import sandboxed_di
 
-    real_db = REPO_ROOT / "emi.db"
-    real_existed = real_db.exists()
-    # Snapshot whether the agent name we're about to insert already exists
-    # in the real DB (it shouldn't — uses a tagged-unique sentinel).
     sentinel = f"e2e_sentinel_{datetime.now(timezone.utc).timestamp()}"
 
     with sandboxed_di() as sandbox:
         assert sandbox.db_path.exists(), "sandbox DB file should exist during run"
 
-        from app.models.base import get_session
+        from app.models.base import get_database_uri, get_session
         from app.models.llm_call_log import LLMCallLog
+        assert get_database_uri().endswith(sandbox.db_path.as_posix()), "session must use the sandbox DB"
         s = get_session()
         try:
             s.add(LLMCallLog(
@@ -53,21 +49,6 @@ def test_sandbox_isolates_writes_from_real_db():
 
     # After exit: tempfile cleaned up
     assert not sandbox.db_path.exists(), "sandbox DB should be deleted after context exit"
-
-    # Real DB must NOT contain the sentinel row (if real DB exists at all).
-    if real_existed:
-        con = sqlite3.connect(str(real_db))
-        try:
-            cur = con.cursor()
-            # llm_call_log might not exist in a fresh repo; treat absence as a pass.
-            try:
-                cur.execute("SELECT count(*) FROM llm_call_log WHERE agent_name=?", (sentinel,))
-                count = cur.fetchone()[0]
-                assert count == 0, "sentinel must NOT be in real emi.db"
-            except sqlite3.OperationalError:
-                pass
-        finally:
-            con.close()
 
 
 def test_per_manager_rules_load_from_test_room_md():
