@@ -279,6 +279,8 @@ def create_app(config_class="config.DevelopmentConfig"):
     app.register_blueprint(brain_debug_bp)
     from app.routes.ticket_reading import ticket_reading_bp
     app.register_blueprint(ticket_reading_bp)
+    from app.routes.dayflow_flow import dayflow_flow_bp
+    app.register_blueprint(dayflow_flow_bp)
     from app.routes.task_graph_route import task_graph_bp
     app.register_blueprint(task_graph_bp)
     from app.routes.doc_route import doc_bp

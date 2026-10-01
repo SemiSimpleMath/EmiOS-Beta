@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dayflow</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/dayflow_flow.css') }}">
+  <script>window.SCRIPT_NAME = {{ request.script_root | tojson }};</script>
+</head>
+<body>
+  <header class="df-header">
+    <h1>Dayflow</h1>
+    <div class="df-sub">the three passes as they are configured, and what each agent was last sent and answered &middot;
+      click a stage &middot; <a href="{{ url_for('brain_debug.brain_page') }}">brain</a></div>
+  </header>
+
+  <main class="df-main">
+    <div id="df-diagram" class="df-diagram">
+      <div class="df-status">loading…</div>
+    </div>
+    <aside id="df-detail" class="df-detail hidden" aria-live="polite"></aside>
+  </main>
+
+  <script src="{{ url_for('static', filename='js/dayflow_flow.js') }}"></script>
+</body>
+</html>

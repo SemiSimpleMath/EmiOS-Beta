@@ -295,6 +295,18 @@ the steward call found by the item id in its prompt, linked work, journal), and 
 agent). Handoff items are found by the concern id in their record (`concern_handoff._existing_items`),
 which also finds the first two, named `concern:…` before the rename.
 
+## Seeing dayflow: the /dayflow/flow page (2026-09-30)
+
+Owner: a diagram of the whole of dayflow; click into a module to see its last system prompt, user
+prompt and output. `routes/dayflow_flow.py` draws the three passes (planning, wake, dispatch room)
+from the managers' own `state_map`s, so the diagram is what runs: agents as cards, control nodes as
+steps, each control node with the agents its file creates (architect, finalizer, result formatter).
+What the configs do not say (what starts each pass, how they hand over, what comes in and goes out)
+is written in the route and the page. brain_trace now also records every `dayflow_orchestrator::`
+agent and every agent called inside a work attempt (the worker's, the ticket builder), tagged with
+the work id; those keep their newest 50 calls per agent (`KEEP_PER_AGENT`), the brain's agents keep
+all. A stage opens its agents' recent calls; the tool-call stage opens the calls made inside work.
+
 ## Reading a ticket: /read/<ticket_id> (2026-09-30)
 
 Owner: a long notification or question shows only its first lines in the popup, with a link to a page

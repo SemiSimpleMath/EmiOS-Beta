@@ -73,3 +73,41 @@ def test_a_failed_write_is_logged_not_raised(monkeypatch):
         raise OSError("disk full")
     _record(broken, result={})
     assert logged == ["[brain_trace] could not record a subconscious::gate call"]
+
+
+class _Store:
+    def execution_revoked(self, owner):
+        return False
+
+
+def test_dayflow_agents_and_calls_inside_work_are_recorded_and_capped(connect, monkeypatch):
+    from app.assistant.manager_runtime.execution import REGISTRY, Owner
+    monkeypatch.setattr(brain_trace, "KEEP_PER_AGENT", 3)
+    _record(connect, agent="emi_team::planner", result={})                    # chat: not dayflow's
+    _record(connect, agent="dayflow_orchestrator::switchboard", result={})
+    with REGISTRY.span("tool", "work_emi_team_manager", owner=Owner(_Store(), "work_a", "task_1", 1)):
+        _record(connect, agent="emi_team::planner", result={})
+    calls = brain_trace.list_calls(connect=connect)
+    assert sorted(c["agent"] for c in calls) == ["dayflow_orchestrator::switchboard", "emi_team::planner"]
+    [inside] = brain_trace.work_attempt_calls(connect=connect)
+    assert inside["trace"] == {"work_id": "work_a", "work_node": "task_1"}
+    for _ in range(5):
+        _record(connect, agent="dayflow_orchestrator::switchboard", result={})
+        _record(connect, agent="subconscious::gate", result={})
+    assert len(brain_trace.list_calls(agent="dayflow_orchestrator::switchboard", connect=connect)) == 3
+    assert len(brain_trace.list_calls(agent="subconscious::gate", connect=connect)) == 5   # the brain keeps all
+
+
+def test_the_dayflow_diagram_follows_the_managers_configs():
+    from app.routes import dayflow_flow
+    planning, wake, dispatch = (dayflow_flow._stages(m) for m, _, _ in dayflow_flow.MANAGERS)
+    names = [s["name"] for s in planning]
+    assert names[0] == "intake_triage_prep_node" and names[-1] == "post_room_finalize_node"
+    assert names.index("dayflow_orchestrator::strategic_planner_wo") < names.index("work_architect_node") \
+        < names.index("dayflow_orchestrator::switchboard") < names.index("work_node_dispatch_node")
+    architect = next(s for s in planning if s["name"] == "work_architect_node")
+    assert [a["name"] for a in architect["agents"]] == ["dayflow_orchestrator::work_architect"]
+    assert [s["name"] for s in dispatch] == ["dayflow_switchboard_arguments_node", "dayflow_tool_caller",
+                                             "work_finalizer_node"]
+    assert next(s for s in dispatch if s["name"] == "dayflow_tool_caller")["work_calls"]
+    assert "dayflow_orchestrator::state_mover" in [s["name"] for s in wake]

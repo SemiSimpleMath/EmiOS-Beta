@@ -1,0 +1,80 @@
+/* /dayflow/flow: the three dayflow passes as a diagram, and each agent's recent calls. Tokens as /brain. */
+:root{
+  --bg:#0f1220; --panel:#171b2e; --panel2:#1e2440; --line:#2a3157;
+  --ink:#e8ebf6; --mut:#9aa3c7; --acc:#6ea8fe; --warn:#ffb454; --bad:#ff6b6b; --ok:#56d364;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+a{color:var(--acc)}
+.hidden{display:none}
+.df-header{padding:18px 22px 10px;border-bottom:1px solid var(--line)}
+.df-header h1{margin:0;font-size:22px}
+.df-sub{color:var(--mut);font-size:12.5px}
+.df-status{color:var(--mut);padding:20px}
+
+.df-main{display:flex;gap:0;align-items:flex-start}
+.df-diagram{flex:1;min-width:0;padding:16px 22px 40px;display:flex;flex-direction:column;gap:14px}
+
+/* what comes in and goes out */
+.df-edge{display:flex;gap:10px;flex-wrap:wrap;align-items:stretch}
+.df-edge-label{color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.5px;align-self:center;
+  min-width:110px}
+.df-io{background:var(--panel2);border:1px dashed var(--line);border-radius:10px;padding:8px 12px;font-size:12.5px;
+  flex:1 1 220px}
+.df-io b{display:block;font-size:13px;color:var(--ink)}
+.df-io span{color:var(--mut)}
+
+/* the three passes */
+.df-lanes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:start}
+.df-lane{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px}
+.df-lane h2{margin:0 0 2px;font-size:16px}
+.df-lane-about{color:var(--mut);font-size:12px;margin-bottom:10px}
+.df-lane-name{color:var(--mut);font:11px ui-monospace,Consolas,monospace;margin-bottom:8px}
+.df-stages{display:flex;flex-direction:column;align-items:stretch}
+.df-arrow{align-self:center;color:var(--line);font-size:14px;line-height:1;padding:3px 0}
+
+.df-stage{cursor:pointer;border-radius:10px;border:1px solid var(--line);text-align:left;color:var(--ink);
+  font:inherit;width:100%}
+.df-stage:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.df-stage.agent{background:#1b2a4a;border-color:#2f4f86;padding:9px 11px}
+.df-stage.agent .df-stage-name{font-weight:650;font-size:13.5px}
+.df-stage.control{background:var(--panel2);padding:5px 10px}
+.df-stage.control .df-stage-name{font:12px ui-monospace,Consolas,monospace;color:var(--mut)}
+.df-stage.control.calls{border-color:#2f4f86}
+.df-stage.control.calls .df-stage-name{color:var(--ink)}
+.df-stage.is-open{box-shadow:0 0 0 2px var(--acc)}
+.df-stage-desc{font-size:12px;color:var(--mut);margin-top:3px}
+.df-stage-link{font-size:11.5px;color:var(--warn);margin-top:3px}
+.df-chips{display:flex;gap:5px;flex-wrap:wrap;margin-top:4px}
+.df-chip{font-size:11px;padding:0 7px;border-radius:999px;border:1px solid #2f4f86;color:var(--acc)}
+.df-chip.engine{border-color:var(--line);color:var(--mut)}
+
+/* the detail panel */
+.df-detail{position:sticky;top:0;width:min(46vw,760px);height:100vh;overflow:auto;border-left:1px solid var(--line);
+  background:var(--bg);padding:14px 18px 40px}
+.df-detail h3{margin:0;font-size:17px;word-break:break-word}
+.df-close{float:right;background:none;border:1px solid var(--line);color:var(--mut);border-radius:8px;
+  padding:3px 10px;cursor:pointer}
+.df-kind{color:var(--mut);font-size:12px;margin:2px 0 8px}
+.df-para{font-size:13px;white-space:pre-wrap;margin:6px 0}
+.df-h{font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px;margin:16px 0 6px}
+.df-empty{color:var(--mut);font-size:12.5px}
+.df-call{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:6px}
+.df-call > summary{cursor:pointer;padding:7px 11px;display:flex;gap:9px;flex-wrap:wrap;font-size:12.5px}
+.df-call-body{padding:4px 10px 10px;display:flex;flex-direction:column;gap:6px}
+.df-section{background:var(--panel2);border:1px solid var(--line);border-radius:8px}
+.df-section > summary{cursor:pointer;padding:6px 10px;display:flex;justify-content:space-between;gap:10px;font-size:12.5px}
+.df-size{color:var(--mut);font-size:12px;white-space:nowrap}
+.df-pre{margin:0;padding:10px 12px;border-top:1px solid var(--line);white-space:pre-wrap;word-break:break-word;
+  font:12.5px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;max-height:70vh;overflow:auto}
+.df-err{color:var(--bad)}
+
+@media (max-width:1100px){
+  .df-main{flex-direction:column}
+  .df-detail{position:static;width:100%;height:auto;border-left:0;border-top:1px solid var(--line)}
+}
+@media (max-width:760px){
+  .df-lanes{grid-template-columns:1fr}
+  .df-diagram{padding:12px 16px 30px}
+}
