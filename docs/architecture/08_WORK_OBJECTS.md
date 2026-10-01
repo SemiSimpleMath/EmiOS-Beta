@@ -364,7 +364,11 @@ scenarios their declared scope; a missing scope raises):
 3. **Harvest — one choke point.** `result_recorder.record_tool_result` turns the result
    into graph state, passing `my_epoch` to its atomic result transaction: the
    manager's final answer lands as an **evidence child** titled "manager result" (the
-   node's `content` is its directive and is never overwritten). What the result MEANS is
+   node's `content` is its directive and is never overwritten). For `work_emi_team_manager`
+   that answer is not written by an agent: `WorkResultNode` joins the findings the planner
+   recorded during this attempt (`payload.finding_attempt` = the dispatch epoch). A return
+   with no finding for the attempt goes back to the planner once; a second empty return is
+   recorded as a failed result, "no result recorded" (2026-09-30). What the result MEANS is
    the finalizer's job, not this layer's. Recording used to be inlined here and was
    skipped entirely whenever the worker had already set its own status — so the caller
    recorded nothing at all, not even the evidence.

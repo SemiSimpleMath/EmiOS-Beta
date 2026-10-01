@@ -26,11 +26,11 @@ class AgentForm(BaseModel):
     findings: List[str] = Field(
         default_factory=list,
         description=("Concrete results/answers you have produced for THIS node — each is recorded "
-                     "DURABLY on the node (the finalizer builds the node's answer from these, and "
-                     "other nodes can reuse them). Add a result the turn after it appears in recent "
-                     "history; for a direct answer, write it as you give it; and ALWAYS write your "
-                     "final result here on the same turn you return_control. Don't repeat ones "
-                     "already recorded."),
+                     "DURABLY on the node, tagged with this attempt. This attempt's findings ARE the "
+                     "task's result: nothing else writes it, and the finalizer judges them. Add a "
+                     "result the turn after it appears in recent history, saying what it rests on; "
+                     "write your final result here on the same turn you return_control. Don't repeat "
+                     "ones already recorded in this attempt."),
     )
     info_for_others: List[str] = Field(
         default_factory=list,

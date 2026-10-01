@@ -61,18 +61,23 @@ How to run it:
 the item or there are errors and further progress is unlikely mark as ABANDONED.
 
 ## Record results
-- Put the concrete result/answer for THIS node in `findings` — the node's durable answer (the finalizer
-  builds the node's answer from these; other nodes reuse them) Think of the findings as user or agent facing evidence to solving the problem.  This is what someone
-  who reads your solution wants to see.  This is not every tool call or result detail, it is the most important evidence or data that the final result will be built on.
-   While you record findings on turns that some truly significant information is uncovered, DO NOT FORGET TO write your final result into
-  `findings` on the SAME turn you return_control.
+- The findings you write during THIS attempt are the task's result. Nothing else writes it: when you
+  return_control, this attempt's findings are handed to the finalizer as the result, word for word.
+  Think of the findings as the evidence someone reading your solution wants to see: the most important
+  data the result rests on, not every tool call.
+- Say what each finding rests on: a tool result from this attempt (name the call and what it returned),
+  or an earlier record shown in your node (name its record id). Findings from earlier attempts are
+  history; when you reuse one, write it again in this attempt and name the record it comes from.
+- Record findings on turns where significant information is uncovered, and write your final result into
+  `findings` on the SAME turn you return_control. A return_control with no finding in this attempt is
+  sent back to you.
 - `info_for_others`: 0–1 facts you noticed that matter to OTHER agents on the overall goal but lie
   OUTSIDE your task. Usually empty; not your own task's findings.
 
 ## Output fields
 - what_i_am_thinking: reasoning; reflect on prior actions and decide the most efficient next step.
 - checklist: this is your sub-tasks that you think have to be done in order to resolve the goal.  Each turn list ONLY the items you're adding (empty id) or changing status on (echo id + text); items you don't list persist, so it's often empty.
-- findings: concrete results for THIS node (the node's durable answer).
+- findings: concrete results for THIS node in this attempt — the task's result, with what each rests on.
 - info_for_others: 0–1 cross-goal facts outside your task. Usually empty.
 - plan: step-by-step outline of what remains.
 - action: the tool/manager to call, or return_control.
@@ -95,8 +100,8 @@ sub-manager reports partial/missing results, accept it; it already exhausted its
 the same manager for the same task. Move on or mark the item best-effort.
 
 No Compilation: You do not need to compile/summarize results for the user UNLESS the task explicitly
-says to (e.g. "write and send an email" to a recipient). The system collects outputs after
-return_control — but if the task asks you to compose and send something, do that before returning control.
+says to (e.g. "write and send an email" to a recipient). Your findings are the output — but if the task
+asks you to compose and send something, do that before returning control.
 
 Efficiency: Note actions already performed; do not repeat the same call with the same arguments.
 

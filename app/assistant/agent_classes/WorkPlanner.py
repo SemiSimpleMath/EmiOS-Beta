@@ -8,7 +8,7 @@ The ONLY behavioral diff is `_reconcile_to_graph`: after each decision it mirror
 declared `checklist` -> child subtask nodes (stable id, immutable name, status, and a
 closing `evidence` note on the node), declaratively (NO tool calls). `findings_to_pod`
 is still minted to durable pods by the inherited `Planner._mint_research_findings`; the
-final-answer agent surfaces that pod and the dispatch layer attaches it to the task node.
+manager's result step (a final-answer agent, or WorkResultNode in work_emi_team_manager) carries that pod through and the dispatch layer attaches it to the task node.
 So the `checklist` round-trips through the durable graph instead of the blackboard, and
 the single `action` channel stays free for real work.
 
@@ -112,14 +112,18 @@ class WorkPlanner(Planner):
                     self._transition_subtask(store, work_id, fresh, "proposed", target, actor, "")
 
         # The node this turn's work attributes to: the single in-progress checklist item (set above),
-        # else the owned node (a single-step node with no checklist). findings -> evidence UNDER it (the
-        # node's durable result). Deduped by content. process_llm_result runs EVERY turn, including the
-        # return_control turn, so the planner's final write is always captured.
+        # else the owned node (a single-step node with no checklist). findings -> evidence UNDER it,
+        # tagged with the main task's attempt: this attempt's findings ARE the task's result
+        # (WorkResultNode). Deduped by content within the attempt only, so a retry that reaches the
+        # same conclusion as an earlier attempt still records it. process_llm_result runs EVERY turn,
+        # including the return_control turn, so the planner's final write is always captured.
         target_node = active_attribution_node(store, work_id, node_id)
+        attempt = ctx.owner.dispatch_epoch
         from work_objects.model import new_id as _new_finding_id
         wo = store.load(work_id)
         recorded = {(n.content or "").strip() for n in wo.nodes.values()
-                    if n.parent_id == target_node and n.type == "evidence"}
+                    if n.parent_id == target_node and n.type == "evidence"
+                    and n.payload.get("finding_attempt") == attempt}
         for finding in (result_dict.get("findings") or []):
             finding = str(finding or "").strip()
             if finding and finding not in recorded:
@@ -127,7 +131,7 @@ class WorkPlanner(Planner):
                 store.apply("add_node",
                             {"work_id": work_id, "id": _new_finding_id("finding"), "type": "evidence",
                              "parent_id": target_node, "content": finding, "status": "assumed",
-                             "created_by": actor},
+                             "created_by": actor, "payload": {"finding_attempt": attempt}},
                             actor=actor)
 
         # info_for_others -> shared fact nodes (root evidence) that `informs` the GOAL, so each
@@ -139,7 +143,7 @@ class WorkPlanner(Planner):
                 self._attach_shared_fact(store, work_id, note, actor)
 
         # findings_to_pod is handled by the base Planner._mint_research_findings (it mints the durable
-        # research pod + research_notebook); the final-answer agent surfaces it as pod_references and
+        # research pod + research_notebook); the manager's result step carries it as pod_references and
         # the dispatch layer (run_node) attaches that pod to the task node. We do NOT mirror findings
         # as graph nodes, and `progress` mints nothing.
 

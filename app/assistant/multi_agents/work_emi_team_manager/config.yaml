@@ -10,6 +10,8 @@
 #                        generalist; its prompts are DERIVED from emi_team/planner's (delegation, NOT
 #                        decompose), and WorkPlanner mirrors the checklist/findings into the graph.
 #                        Lives in agents/work_emi_team/planner/.
+#   work_result_node replaces emi_team::final_answer (2026-09-30): the manager's result is the findings
+#                        the planner recorded on its node during this attempt, not an agent's retelling.
 # Like emi_team_manager, this carries NO scope_contract / tool_visibility: the work "room"
 # (orchestrator_scope's per_manager.work_emi_team_manager.allow in work_objects/scope.py) narrows this
 # coordinator to its delegate roster — work_web_manager (the node web worker) + the production
@@ -35,12 +37,13 @@ agents:
     class: PlaywrightAgent
   - name: work_emi_team::summary
     class: Agent
-  - name: emi_team::final_answer
-    class: Agent
 
 control_nodes:
   - name: workobject_render_node
     class: WorkObjectRenderNode
+  # The result is this attempt's findings on the node, not a final-answer agent's retelling.
+  - name: work_result_node
+    class: WorkResultNode
   - name: tool_return_router
     class: ToolReturnRouter
   - name: critic_pre_node
@@ -108,7 +111,7 @@ flow_config:
     "summary_pre_node": "workobject_render_node"
     "work_emi_team::summary": "summary_post_node"
     "summary_post_node": "workobject_render_node"
-    "work_emi_team::planner_return_control": "emi_team::final_answer"
-    "emi_team::final_answer": "manager_exit_node"
+    "work_emi_team::planner_return_control": "work_result_node"
+    "work_result_node": "manager_exit_node"
     "graceful_exit": "graceful_exit_control_node"
-    "graceful_exit_control_node": "emi_team::final_answer"
+    "graceful_exit_control_node": "manager_exit_node"
