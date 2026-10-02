@@ -49,25 +49,15 @@ class WorkNodeWakeRouterNode(ControlNode):
             return
 
         # THE SWITCHBOARD READS `task` + `information` (its user_context_items) and routes on them.
-        # On a normal tick the materializer -> action_selector -> action_selector_router_node chain
-        # fills those; this pass skips all three, so it must fill them itself. It did not, and the
-        # switchboard was handed an EMPTY task: with nothing but the clock in its prompt it routed
-        # on the clock — "UI notification showing the current time" -> create_dayflow_ticket.
-        # Every time-waked node went that way, which is nearly every scheduled reminder and device
-        # action: on 2026-09-16 the 21:00 "set the AC to 70F" and the 22:00 "turn off the
-        # whole-house lights" were both ticketed back to the user instead of being done.
-        goal = (node.content or "").strip()
-        title = (node.title or "").strip()
-        if not goal and not title:
-            # Routing on an empty goal is how this broke. Refuse rather than guess.
-            raise ValueError(
-                f"[{self.name}] {ref} has neither title nor content — the switchboard cannot route "
-                f"a node with no goal")
-        self.blackboard.update_state_value("task", title or goal)
-        self.blackboard.update_state_value("information", goal)
-        self.blackboard.update_state_value("acted_on_item_ids", [ref])
+        # This pass has no materializer or selector, so it stages them itself, from the node's
+        # record, with the same helper the planning tick's router uses. Before that helper this
+        # pass handed the switchboard an EMPTY task, and with nothing but the clock in its prompt
+        # it routed every time-waked node to a ticket: on 2026-09-16 the 21:00 "set the AC to 70F"
+        # and the 22:00 "turn off the whole-house lights" were ticketed back to the user.
+        from app.assistant.dayflow_orchestrator.node_dispatch import stage_for_switchboard
+        stage_for_switchboard(self.blackboard, ref, node)
         self.blackboard.update_state_value("actionable_items", [{"item_id": ref}])
         self.blackboard.update_state_value("next_agent", "dayflow_orchestrator::switchboard")
         logger.info("[%s] %s cleared the moment check — dispatching: %s",
-                    self.name, ref, title or goal)
+                    self.name, ref, node.title or node.content)
         self.blackboard.update_state_value("last_agent", self.name)

@@ -15,10 +15,11 @@ Route based on blackboard state:
 
 - **`chat_task_router_node.py`** — Routes chat responses: if `handoff_tf=true` -> switchboard, else -> final answer
 - **`master_room_chat_task_router_node.py`** — Master room variant: adds the "track this" acknowledgement (the brain keeps the request; no dayflow request is written since 2026-09-30)
-- **`action_selector_router_node.py`** — Dayflow: routes **everything** to the switchboard, one path for
-  all dispatches. A `ChatTaskRouterNode` subclass whose only override is `_cfg()`, reading
-  `flow_config.action_selector` instead of `flow_config.chat_gate`. (It branched on ticket vs handoff
-  before the work-object cutover; there is no ticket branch here now — the switchboard decides.)
+- **`action_selector_router_node.py`** — Dayflow: the selector picks one item id (or no-op); this loads
+  that node and stages its own title and goal for the switchboard (`node_dispatch.stage_for_switchboard`,
+  shared with the wake router), so the switchboard routes on the node as the architect wrote it. Until
+  2026-10-02 it was a `ChatTaskRouterNode` subclass that routed on the selector's restatement and posted
+  "On it." to the owner's chat on every dispatch.
 - **`work_node_wake_prep_node.py`** — Head of `dayflow_wake_manager`: stages the one due node for the state_mover, or ends the pass if it is no longer ready
 - **`work_node_wake_router_node.py`** — After the state_mover in the wake pass: dispatch the node if left `actionable`, end the pass if held
 - **`tool_return_router.py`** — Validates the result-handler source, saves the calling agent as `resume_target`, and leaves routing to `state_map`

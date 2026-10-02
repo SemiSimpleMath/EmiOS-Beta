@@ -91,13 +91,6 @@ flow_config:
   flow:
     normal:
       source_agent: "work_node_wake_prep_node"
-  action_selector:
-    switchboard_agent: "dayflow_orchestrator::switchboard"
-    final_node: "final_answer_node"
-    exit_flag_key: "handoff_tf"
-    no_chat_path: true
-    switchboard_task_key: "switchboard_task"
-    switchboard_information_key: "switchboard_information"
   state_map:
     "room::delegator": "work_node_wake_prep_node"
     # The prep stages the ONE due node (task, information, ready_work_nodes=[it]) or, if it is

@@ -40,6 +40,41 @@ def dispatch_node(store, work_id: str, node_id: str, delegate_to: str) -> None:
     open_session(store, work_id, node_id, delegate_to)
 
 
+def canonical_pick(ref: str, offered: list) -> str:
+    """The selector ECHOES an id from its rendered list, and echoes arrive decorated — the
+    prompt's "- task: " label glued on ("task:work_x::node_y"), stray whitespace. Join the echo
+    back to the offered item_ids (the ones the runtime itself put on the blackboard) and return
+    the CANONICAL id. No unique match -> the echo unchanged, so the caller's own check fails loud."""
+    ref = (ref or "").strip()
+    if not ref or "::" not in ref:
+        return ref
+    ids = [str(i.get("item_id") or "") for i in offered
+           if isinstance(i, dict) and "::" in str(i.get("item_id") or "")]
+    if ref in ids:
+        return ref
+    matches = [o for o in ids if o in ref or ref in o]
+    if len(matches) == 1:
+        logger.warning("[node_dispatch] canonicalized selector ref %r -> %r", ref, matches[0])
+        return matches[0]
+    return ref
+
+
+def stage_for_switchboard(blackboard, ref: str, node) -> None:
+    """Hand ONE node to the switchboard exactly as the architect wrote it: its title as `task`,
+    its goal as `information` (the switchboard's user_context_items), and its ref as the pick
+    the dispatch gate claims. Both doors to the switchboard use this — the planning tick's
+    action_selector_router_node and the wake pass's work_node_wake_router_node — so a node is
+    routed on its own record whichever way it arrives. A node with no goal raises: routing on an
+    empty goal sent every time-waked node to a ticket on 2026-09-16."""
+    goal = (node.content or "").strip()
+    title = (node.title or "").strip()
+    if not goal and not title:
+        raise ValueError(f"{ref} has neither title nor content — the switchboard cannot route a node with no goal")
+    blackboard.update_state_value("task", title or goal)
+    blackboard.update_state_value("information", goal)
+    blackboard.update_state_value("acted_on_item_ids", [ref])
+
+
 def signal_work_progress(ref: str) -> None:
     """A node just reached a result (done/failed) or a reply landed — nudge the scheduler for a prompt
     follow-up tick so the finalizer/repair judge it and dependents advance within minutes, instead of at

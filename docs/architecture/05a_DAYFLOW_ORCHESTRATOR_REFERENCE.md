@@ -507,10 +507,11 @@ its resume context. Appending, not overwriting — the directive itself is prese
 ### Dispatch & execution (the live engine)
 
 **action_selector** (nano, no tools, `action_required: false`) — handed the actionable list, it picks **exactly one**
-node to act on this tick (or `no_op_tf`), never bundling two. Driven by `action_selector_router_node`
-(a thin `ChatTaskRouterNode` subclass) which routes **everything to the switchboard** — it copies
-`switchboard_task`→`task`/`switchboard_information`→`information`, sends an "On it." ack, and hands off.
-The chosen `acted_on_item_ids` (a single `work_id::node_id`) comes from the agent's form.
+node to act on this tick (or `no_op_tf`), never bundling two. It returns the id and writes nothing else.
+`action_selector_router_node` loads that node and stages its own title as `task` and its goal as
+`information` (`node_dispatch.stage_for_switchboard`, the same staging the wake pass uses), so the
+switchboard routes on the node as the architect wrote it. Until 2026-10-02 the selector wrote its own
+`switchboard_task`, and the switchboard routed on that restatement (the Seija send became a ticket).
 
 **switchboard** (nano, all tools except `ask_user`) — a **pure LLM router** (no work, no dialog).
 It reads the one picked node and emits `delegate_to` = exactly **`create_dayflow_ticket`** (communicate

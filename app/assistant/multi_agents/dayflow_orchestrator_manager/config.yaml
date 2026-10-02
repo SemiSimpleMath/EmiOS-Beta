@@ -95,14 +95,6 @@ flow_config:
   flow:
     normal:
       source_agent: "intake_triage_prep_node"
-  action_selector:
-    source_agent: "dayflow_orchestrator::action_selector"
-    switchboard_agent: "dayflow_orchestrator::switchboard"
-    final_node: "final_answer_node"
-    exit_flag_key: "handoff_tf"
-    no_chat_path: true
-    switchboard_task_key: "switchboard_task"
-    switchboard_information_key: "switchboard_information"
   state_map:
     # THE PLANNING TICK, and only that. A work node's time-wake used to enter here too, as a
     # routing hint (tick_router_node jumping to the state_mover) — a hint the router never saw,
