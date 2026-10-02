@@ -308,15 +308,9 @@ class ConversationStarterStep(BaseStep):
                 logger.debug("Could not build weather_summary", exc_info=True)
                 weather_summary = ""
 
-        # Routine markdown (compact)
-        routine_md = ""
-        try:
-            p = Path(ctx.resources_dir) / "resource_dayflow_routine.md"
-            if p.exists():
-                routine_md = p.read_text(encoding="utf-8")
-        except Exception:
-            logger.debug("Could not load routine_md", exc_info=True)
-            routine_md = ""
+        # Today's plan, rendered from its rows (subconscious/day_plan.py)
+        from app.assistant.subconscious.day_plan import render_day
+        routine_md = render_day(ctx.now_utc)
 
         # Daily context + health
         daily_context = ctx.read_resource("resource_daily_context_generator_output.json") or {}

@@ -253,6 +253,10 @@ def initialize_services(app):
         "resource_email_accounts",
         lambda scope: DI.env_registry.render_accounts_for_scope(scope, categories={"email"}),
     )
+    # Today's plan, rendered from its rows on every read (subconscious/day_plan.py); the brain's day
+    # pass writes it.
+    from app.assistant.subconscious import day_plan
+    resource_manager.register_provider("resource_dayflow_routine", day_plan.resource_provider)
     # The user's email identity is user-mode only — lock it to acting_as=user so it
     # does not leak into self/assistant mode (where email-as-self governs instead).
     # acting_as defaults to "user", so this is safe; only /actas self withholds it.

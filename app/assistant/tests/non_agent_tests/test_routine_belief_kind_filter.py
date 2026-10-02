@@ -1,7 +1,7 @@
 """Relevance is selected by an LLM; kind/tag metadata must not hide context."""
 from __future__ import annotations
 
-import app.assistant.pipelines.dayflow.steps.dayflow_routine_stage as drs
+import app.assistant.subconscious.day_pass as drs
 
 
 def test_routine_block_preserves_all_active_kinds_for_selection():

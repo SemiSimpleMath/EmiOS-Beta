@@ -27,7 +27,8 @@ if str(REPO_ROOT) not in sys.path:
 import app.assistant.tests.test_setup  # noqa: F401
 
 from app.assistant.ServiceLocator.service_locator import DI
-from app.assistant.pipelines.dayflow.steps.dayflow_routine_stage import _format_daily_context
+from app.assistant.pipelines.dayflow.utils.expected_calendar_utils import build_hour_grid, end_of_local_day_utc
+from app.assistant.subconscious import day_pass, day_plan
 from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.utils.pydantic_classes import Message
 
@@ -138,14 +139,14 @@ def _checks(md: str) -> None:
 
 def main() -> None:
     dry = "--dry" in sys.argv
-    daily_context_block, tail_anchors_block = _format_daily_context(CTX_DATA, now_utc=NOW_UTC)
+    specific, backdrops = day_pass._day_items(CTX_DATA, NOW_UTC)
+    slots = build_hour_grid(specific, NOW_UTC, end_of_local_day_utc(NOW_UTC))
+    daily_context_block = day_pass._format_daily_context(CTX_DATA, slots, backdrops)
 
     print("=" * 70)
     print("INPUT: daily_context_block (the windowed schedule the writer receives)")
     print("=" * 70)
     print(daily_context_block)
-    print("\n--- tail_anchors_block ---")
-    print(tail_anchors_block or "(none)")
     print("\n--- beliefs_block ---")
     print(BELIEFS_BLOCK)
 
@@ -177,7 +178,6 @@ def main() -> None:
             "day_of_week": DAY_OF_WEEK,
             "boundary_date_local": BOUNDARY,
             "daily_context": daily_context_block,
-            "tail_anchors_block": tail_anchors_block,
             "beliefs_block": BELIEFS_BLOCK,
             "weekly_insights_block": "",
         },
@@ -190,8 +190,11 @@ def main() -> None:
     print("\n" + "=" * 70)
     print("OUTPUT: generated routine overlay")
     print("=" * 70)
-    print(data.get("markdown", ""))
-    _checks(data.get("markdown", "") or "")
+    plan_slots, flags = day_pass._validated(data, slots, set())   # the fixed beliefs carry no keys
+    md = day_plan.render_plan({"day": BOUNDARY, "backdrops": backdrops, "flags": flags,
+                               "slots": plan_slots}, NOW_UTC)
+    print(md)
+    _checks(md)
 
 
 if __name__ == "__main__":

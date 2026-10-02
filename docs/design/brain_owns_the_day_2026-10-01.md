@@ -144,6 +144,12 @@ Each step works on its own and keeps the system running.
 1. **Move the producer.** The routine stage becomes the brain's day pass with the same inputs and the same
    output file, plus the open concerns in view. Verify: the file's readers are unchanged; a replay of a
    recorded day gives an equivalent routine.
+   **1a DONE 2026-10-01** (owner: "the day with its beliefs lives in a database, you render it with a
+   standard function"): `subconscious/day_pass.py` runs as the last stage of every brain run, with a
+   10-minute heartbeat on the wake; the plan is stored per slot (`subconscious/day_plan.py`) and
+   `resource_dayflow_routine` is rendered from it on every read; the writer returns guidance per slot by
+   the slot's own key. The markdown file, the window re-trim and its regex are gone. 1b (concerns in
+   view) is next.
 2. **Owners for every item.** Day items pass through the concern door; standing concerns are introduced;
    the routine file shows each item's owner. Verify: the Oct 1 flea case yields one owner, and the date
    conflict reaches the owner as a question.

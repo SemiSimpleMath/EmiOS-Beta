@@ -56,7 +56,7 @@ def test_budget_refuses_oversized_input_without_clipping(monkeypatch):
 
 def test_dayflow_pages_keep_whole_context_and_all_selected_records(monkeypatch):
     from app.assistant.ServiceLocator.service_locator import ServiceLocator
-    from app.assistant.pipelines.dayflow.steps import dayflow_routine_stage as D
+    from app.assistant.subconscious import day_pass as D
     seen=[]
     def respond(msg):
         seen.append(msg.agent_input)

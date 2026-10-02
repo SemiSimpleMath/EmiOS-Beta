@@ -335,17 +335,11 @@ def _build_ticket_responses(now_utc: datetime) -> str:
 
 
 def _build_routine() -> str:
-    try:
-        from pathlib import Path
-        from app.assistant.utils.path_utils import get_resources_dir
-        routine_path = Path(get_resources_dir()) / "resource_dayflow_routine.md"
-        if routine_path.exists():
-            content = routine_path.read_text(encoding="utf-8").strip()
-            if content:
-                return f"### Today's Routine\n{content}"
-    except Exception:
-        pass
-    return ""
+    """Today's plan, rendered from its rows (subconscious/day_plan.py). It read
+    resources/resource_dayflow_routine.md until 2026-10-01, a path the routine was never written to,
+    so this section was always empty."""
+    from app.assistant.subconscious.day_plan import render_day
+    return f"### Today's Routine\n{render_day().strip()}"
 
 
 def _build_user_directives() -> str:

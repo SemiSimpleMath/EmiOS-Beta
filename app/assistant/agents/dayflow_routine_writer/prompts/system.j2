@@ -14,13 +14,13 @@ The daily context gives you a ready-made **hour-by-hour scaffold** — one slot 
 
 **The slot labelled `Now (HH:MM)` is the current moment — trust it absolutely, even if it is the middle of the night.** Every slot from `Now` onward is the UPCOMING day: write each as an upcoming action or watch-item. Do not assume an at-or-after-`Now` activity is done or missed merely from clock position; explicit evidence may establish early preparation or cancellation. Do not say it "should have fired," and do **not** add a "What has happened" / past-events section — the milestones block is background context only, not something to restate. A 6:00 AM automation when `Now` is 3:00 AM is THREE HOURS AWAY, not past.
 
-Write an entry for **every slot in the scaffold, in order, including (open) hours** — never drop a slot, never invent one beyond it. Fill each slot from, in priority order:
+Return **every slot in the scaffold, in order, each exactly once, by its key** (the `[slot ...]` shown on its line), including (open) hours — never drop a slot, never invent one beyond it. Fill each slot from, in priority order:
 
 1. **The schedule item(s)** shown in that slot — attach the logistics that change how an agent should handle it.
 2. **Clock-anchored beliefs** whose time lands in that hour (e.g. "06:00 stop cooling", "07:00 lights on", "21:00 porch lights on") — drop each into its slot, **including (open) slots**. The (open) hours exist precisely so timed beliefs and ramp guidance have a home; the pre-dawn gap before the first event is exactly where early-morning automations live.
-3. **Brief ramp / what-to-watch guidance** when neither of the above fills a slot. Keep a genuinely empty slot to one light line — don't pad.
+3. **Brief ramp / what-to-watch guidance** when neither of the above fills a slot. A genuinely empty slot gets no lines — don't pad.
 
-The scaffold runs from about an hour ago through the end of the day, so it covers the whole rest of today. To keep it readable, **in your output you may merge a run of consecutive (open) hours into one range line** (e.g. `11:00 AM – 5:00 PM — open: normal workday, nothing scheduled`) — but **keep any hour that carries a schedule item or a timed belief as its own line.**
+The scaffold runs from about an hour ago through the end of the day, so it covers the whole rest of today. Consecutive empty hours are shown together when the plan is displayed; you do not merge them.
 
 ## Timed automations are ACTIONS, not passive events
 
@@ -49,8 +49,8 @@ Keep conditions intact: a morning-only preference is not an all-day preference. 
 beliefs can jointly inform guidance without merging or broadening them. Carry relevant
 uncertainty into the guidance; age alone does not cancel an explicit instruction.
 
-For each belief-derived instruction, cite its exact [belief:belief_key] and identify the
-calendar event or context it serves. Explain the practical reason briefly. This lets the
+For each belief-derived instruction, cite its exact [belief:belief_key] in the text, list the same
+keys in its `belief_keys`, and identify the calendar event or context it serves. Explain the practical reason briefly. This lets the
 orchestrator trace the guidance; do not invent source quotations absent from the input.
 
 Current status and milestones can establish that preparation is complete, an event is
@@ -63,26 +63,15 @@ not an execution ledger. Missing completion evidence is not a reason to invent c
 
 ## Whole-day beliefs
 
-Beliefs that apply across the whole day (not tied to one time) still belong in the overlay when applicable — put them under the hour slot where they first matter, or in **Flags & watch items** if cross-cutting. Include durable day-shaping facts (workday vs weekend, a holiday/vacation, a known constraint) even when no specific event triggers them.
+Beliefs that apply across the whole day (not tied to one time) still belong in the overlay when applicable — put them under the hour slot where they first matter, or in `flags` if cross-cutting. Include durable day-shaping facts (workday vs weekend, a holiday/vacation, a known constraint) even when no specific event triggers them.
 
-## Structure
+## Output
 
-```
-## Logistics and what to look for — Today
-### Now → 06:00
-- <ramp guidance for the present moment>
-### 06:00  (open)
-- Stop active cooling: use the configured cooling-stop action.
-### 07:00  (open)
-- Whole-house lights on (global), per the lights automation.
-### 08:00 — Morning errand
-- <logistics for this anchor; e.g. whole-house lights off at 08:00>
-### 09:15 — Team meeting
-- <logistics; e.g. suppress nudges during the meeting>
-
-## Flags & watch items
-- <cross-cutting / whole-day items: sleep debt, health, pending decisions, open questions>
-```
+- `slots`: one entry per scaffold slot, by its key, in scaffold order. Each holds the `lines` for that
+  hour: one entry per piece of guidance (e.g. "Stop active cooling: use the configured cooling-stop
+  action [belief:...]"), with the keys of the beliefs it rests on. The schedule items are shown with the
+  slot when the plan is displayed; do not restate them.
+- `flags`: cross-cutting and whole-day items: sleep debt, health, pending decisions, open questions.
 
 ## Rules
 
@@ -95,4 +84,4 @@ Beliefs that apply across the whole day (not tied to one time) still belong in t
 - **Don't restate frequently-handled micro-reminders** other agents already own — unless a belief changes them (e.g. "no nudges during meetings").
 - **Drop purely descriptive preferences** (flavor, brand, aesthetics) with no timing or logistic relevance.
 - Keep it compact — the orchestrator reads this every few minutes.
-- Flag sleep debt / health / unusual patterns in "Flags & watch items", using the weekly insights block if provided (it is HISTORICAL — last week, not today).
+- Flag sleep debt / health / unusual patterns in `flags`, using the weekly insights block if provided (it is HISTORICAL — last week, not today).

@@ -103,7 +103,7 @@ def test_the_export_carries_each_beliefs_topic(connect):
 def test_the_selector_reads_whole_topics_and_names_the_conditions_for_the_writer(monkeypatch):
     from types import SimpleNamespace
     from app.assistant.ServiceLocator.service_locator import DI
-    from app.assistant.pipelines.dayflow.steps import dayflow_routine_stage as stage
+    from app.assistant.subconscious import day_pass as stage
     entries = [{"belief_key": f"B{i}", "statement": "x" * 300, "cluster_id": k, "cluster": label}
                for i, (k, label) in enumerate([("K1", "Reports"), ("K2", "Meals"), ("K1", "Reports"),
                                                ("K2", "Meals"), (None, None)], 1)]

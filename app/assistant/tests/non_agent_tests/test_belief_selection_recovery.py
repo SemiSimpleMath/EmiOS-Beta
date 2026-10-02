@@ -43,7 +43,7 @@ def test_malformed_output_repaired_but_provider_errors_not_retried():
 
 def test_dayflow_retry_receives_weekly_context(monkeypatch):
     from app.assistant.ServiceLocator.service_locator import DI
-    from app.assistant.pipelines.dayflow.steps.dayflow_routine_stage import _select_beliefs
+    from app.assistant.subconscious.day_pass import _select_beliefs
     calls=[]
     def run(msg):
         calls.append(msg.agent_input)

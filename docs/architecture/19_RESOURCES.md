@@ -71,7 +71,6 @@ resources/
     resource_expected_calendar.json  — canonical schedule for today
     resource_user_health_status.md   — current health snapshot
     resource_user_calendar.json
-    resource_dayflow_routine.md      — generated daily routine
     resource_sleep_summary.json
     resource_diet_log_today.json
     resource_activity_tracker_output.json
@@ -191,6 +190,7 @@ Both ride the standard scope-gated `get_resource` path (allow/deny still apply f
 | `resource_accounts` | `DI.env_registry.render_accounts_for_scope(scope)` — principal- and per-account-authority-filtered account text (NOT file-backed) | — |
 | `resource_email_accounts` | same provider, `categories={"email"}` — the email/calendar/todos domain view, so social accounts never enter that prompt (relevance, not permission) | — |
 | `resource_user_email` | file-backed | `{"acting_as": "user"}` — withheld in `/actas self` mode, where email-as-self governs instead |
+| `resource_dayflow_routine` | `subconscious/day_plan.resource_provider` — today's plan rendered from its rows (`day_plans` / `day_plan_slots`) on every read, from an hour before now to the end of the day; the brain's day pass writes it | — |
 
 These replace the old auto-injected `available_accounts`; see `docs/architecture/SECRETS_ACCOUNTS.md` for the account/secret model.
 

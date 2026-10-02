@@ -1,8 +1,10 @@
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 import pytest
-import app.assistant.pipelines.dayflow.steps.dayflow_routine_stage as drs
+import app.assistant.subconscious.day_pass as drs
+from app.assistant.subconscious import day_plan
+from belief_engine.intake.store import sqlite_file
 
 
 def entries():
@@ -11,6 +13,18 @@ def entries():
              'last_confirmed':'2026-01-02','status':'active'},
             {'belief_key':'coffee.morning','kind':'episodic_context','tags':[],
              'statement':'Likes creamer in morning coffee.', 'status':'active'}]
+
+
+@pytest.fixture
+def connect(tmp_path):
+    return sqlite_file(tmp_path / 'plan.db')
+
+
+@pytest.fixture(autouse=True)
+def isolated_selection_services(monkeypatch):
+    from app.assistant.ServiceLocator.service_locator import ServiceLocator
+    monkeypatch.setattr(ServiceLocator, '_services', {'agent_factory': SimpleNamespace(), 'global_blackboard': SimpleNamespace()})
+    monkeypatch.setattr(drs, '_last_attempt_utc', None)
 
 
 def test_projection_preserves_conditions_and_identity():
@@ -56,33 +70,12 @@ def test_weekly_changes_invalidate_but_generation_timestamp_does_not():
     assert make({},'a')!=make({},'b')
 
 
-def test_empty_authoritative_calendar_clears_stale_daily_schedule():
-    resources={'resource_daily_context_generator_output.json':{'expected_schedule':[{'title':'Cancelled lesson'}]},
-               'resource_expected_calendar.json':{'expected_schedule':[]}}
-    assert drs.DayFlowRoutineStep()._read_daily_context(SimpleNamespace(read_resource=resources.get))['expected_schedule']==[]
-
-
-def test_cache_skips_agents_and_milestone_change_regenerates(tmp_path,monkeypatch):
-    from app.assistant.ServiceLocator.service_locator import DI
-    monkeypatch.setattr(DI,'global_blackboard',None)
-    monkeypatch.setattr(drs,'_read_belief_entries',entries)
-    monkeypatch.setattr(drs,'_format_weekly_insights',lambda:'')
-    monkeypatch.setattr(drs,'_format_daily_context',lambda data,**kwargs:(json.dumps(data),''))
-    monkeypatch.setattr(drs,'load_scope_for_source',lambda **kwargs:None)
-    calls=[]
-    monkeypatch.setattr(drs,'_select_beliefs',lambda *args,**kwargs:(calls.append('select') or entries(),'relevant',[]))
-    step=drs.DayFlowRoutineStep()
-    monkeypatch.setattr(step,'_call_agent',lambda **kwargs:(calls.append('write') or '### 16:00\nGlasses guidance','changed'))
-    resources={'resource_daily_context_generator_output.json':{'expected_schedule':[],'milestones':[]}}
-    now=datetime(2026,1,1,15,tzinfo=timezone.utc)
-    ctx=SimpleNamespace(now_utc=now,now_local=now,state={},resources_dir=tmp_path,
-        read_resource=resources.get,write_resource=lambda k,v:resources.__setitem__(k,v),
-        day_archive_dir=lambda _:tmp_path/'archive')
-    step.run(ctx); step.run(ctx)
-    assert calls==['select','write']
-    resources['resource_daily_context_generator_output.json']['milestones']=[{'description':'Glasses packed'}]
-    step.run(ctx)
-    assert calls==['select','write','select','write']
+def test_empty_authoritative_calendar_clears_stale_daily_schedule(tmp_path, monkeypatch):
+    (tmp_path/'resource_daily_context_generator_output.json').write_text(
+        json.dumps({'expected_schedule':[{'title':'Cancelled lesson'}]}), encoding='utf-8')
+    (tmp_path/'resource_expected_calendar.json').write_text(json.dumps({'expected_schedule':[]}), encoding='utf-8')
+    monkeypatch.setattr(drs, '_INPUTS_DIR', tmp_path)
+    assert drs._read_daily_context()['expected_schedule']==[]
 
 
 def test_catalog_metadata_change_invalidates_selection():
@@ -103,24 +96,107 @@ def test_weekly_candidates_do_not_bypass_belief_reconciliation(tmp_path, monkeyp
     assert 'Coffee preference' not in text
     assert 'reconciled through the belief engine' in text
 
-@pytest.fixture(autouse=True)
-def isolated_selection_services(monkeypatch):
-    from app.assistant.ServiceLocator.service_locator import ServiceLocator
-    monkeypatch.setattr(ServiceLocator, '_services', {'agent_factory': SimpleNamespace(), 'global_blackboard': SimpleNamespace()})
 
-def test_empty_writer_is_failure_not_success(monkeypatch, tmp_path):
-    from app.assistant.ServiceLocator.service_locator import DI
+# ── the day pass: generation, caching, validation ─────────────────────────────────────────────────────
+
+def _writer_for(calls):
+    """A writer that fills every slot it is shown: guidance for the lesson's hour, nothing elsewhere."""
+    def write(agent_input):
+        calls.append('write')
+        slots = [line.split(']')[0].split('[slot ')[1] for line in agent_input['daily_context'].splitlines()
+                 if '[slot ' in line]
+        return {'slots': [{'slot': s, 'lines': ([{'text': 'Pack the reading glasses [belief:lesson.glasses]',
+                                                  'belief_keys': ['lesson.glasses']}] if 'Lesson' in agent_input['daily_context']
+                                                and s == slots[-1] else [])} for s in slots],
+                'flags': [{'text': 'Sleep debt this week', 'belief_keys': []}], 'change_summary': 'changed'}
+    return write
+
+
+@pytest.fixture
+def day_inputs(monkeypatch):
+    """A day with one lesson; returns the daily context the day pass reads, and the call log."""
+    import app.assistant.scope.loader as loader
+    calls, context = [], {'expected_schedule': [], 'milestones': []}
+    monkeypatch.setattr(drs, '_read_daily_context', lambda: json.loads(json.dumps(context)))
     monkeypatch.setattr(drs, '_read_belief_entries', entries)
     monkeypatch.setattr(drs, '_format_weekly_insights', lambda: '')
-    monkeypatch.setattr(drs, '_format_daily_context', lambda *a, **k: ('context',''))
-    monkeypatch.setattr(drs, 'load_scope_for_source', lambda **k: None)
-    monkeypatch.setattr(drs, '_select_beliefs', lambda *a, **k: (entries(),'relevant',[]))
-    step=drs.DayFlowRoutineStep()
-    monkeypatch.setattr(step, '_read_daily_context', lambda ctx: {})
-    monkeypatch.setattr(step, '_call_agent', lambda **k: (None,''))
-    now=datetime(2026,1,1,15,tzinfo=timezone.utc)
-    ctx=SimpleNamespace(now_utc=now,now_local=now,state={},resources_dir=tmp_path,
-                        read_resource=lambda key: None)
-    with pytest.raises(RuntimeError, match='guidance was not refreshed'):
-        step.run(ctx)
-    assert ctx.state == {}
+    monkeypatch.setattr(loader, 'load_scope_for_source', lambda **k: None)
+    monkeypatch.setattr(drs, '_select_beliefs', lambda *a, **k: (calls.append('select') or entries(), 'relevant', []))
+    monkeypatch.setattr(drs, '_write', _writer_for(calls))
+    return context, calls
+
+
+def test_the_plan_is_written_once_and_regenerated_hourly_on_change(connect, day_inputs):
+    context, calls = day_inputs
+    now = datetime(2026, 1, 1, 18, tzinfo=timezone.utc)
+    assert drs.run_day_pass(now, connect=connect)['day_pass'] == 'written'
+    assert drs.run_day_pass(now, connect=connect) == {'day_pass': 'unchanged'}
+    assert calls == ['select', 'write']
+    context['milestones'] = [{'description': 'Glasses packed'}]
+    assert drs.run_day_pass(now + timedelta(minutes=20), connect=connect) == {'day_pass': 'changed_too_soon'}
+    assert drs.run_day_pass(now + timedelta(hours=1), connect=connect)['day_pass'] == 'written'
+    assert calls == ['select', 'write', 'select', 'write']
+
+
+def test_the_plan_is_stored_as_data_and_rendered_fresh(connect, day_inputs, monkeypatch):
+    from app.assistant.utils.time_utils import get_local_timezone
+    context, _ = day_inputs
+    tz = get_local_timezone()
+    start = datetime(2026, 1, 1, 17, 0, tzinfo=tz)      # a 5 PM lesson, local
+    context['expected_schedule'] = [{'title': 'Lesson', 'start_local': '5:00 PM', 'end_local': '6:00 PM',
+                                     'start_utc': start.astimezone(timezone.utc).isoformat(),
+                                     'end_utc': (start + timedelta(hours=1)).astimezone(timezone.utc).isoformat()}]
+    monkeypatch.setattr(drs, '_write', lambda agent_input: {
+        'slots': [{'slot': s, 'lines': [{'text': 'Pack the reading glasses [belief:lesson.glasses]',
+                                         'belief_keys': ['lesson.glasses']}] if s.endswith('T16:00') else []}
+                  for s in [l.split(']')[0].split('[slot ')[1] for l in agent_input['daily_context'].splitlines()
+                            if '[slot ' in l]],
+        'flags': [{'text': 'Sleep debt this week', 'belief_keys': []}], 'change_summary': 'Initial generation'})
+    now = datetime(2026, 1, 1, 13, 30, tzinfo=tz).astimezone(timezone.utc)
+    drs.run_day_pass(now, connect=connect)
+    plan = day_plan.load_plan('2026-01-01', connect=connect)
+    by_slot = {s['slot']: s for s in plan['slots']}
+    assert by_slot['2026-01-01T16:00']['lines'][0]['belief_keys'] == ['lesson.glasses']
+    assert by_slot['2026-01-01T17:00']['items'][0]['title'] == 'Lesson'
+
+    text = day_plan.render_day(now, connect=connect)
+    assert '### Now (1:30 PM)' in text
+    assert '### 2:00 PM – 4:00 PM — open' in text            # empty hours merged at render time
+    assert '### 4:00 PM\n- Pack the reading glasses [belief:lesson.glasses]' in text
+    assert '### 5:00 PM — Lesson (5:00 PM–6:00 PM)' in text
+    assert text.rstrip().endswith('## Flags & watch items\n- Sleep debt this week')
+    later = day_plan.render_day(now + timedelta(hours=3), connect=connect)   # 4:30 PM: the past is not shown
+    assert '1:30 PM' not in later and '2:00 PM' not in later and '### Now (4:30 PM)' in later
+
+
+def test_no_plan_for_today_says_so(connect):
+    assert 'No plan of the day has been written' in day_plan.render_day(
+        datetime(2026, 1, 2, 18, tzinfo=timezone.utc), connect=connect)
+
+
+@pytest.mark.parametrize('change,error', [
+    (lambda d: d['slots'].pop(), 'are not the grid'),
+    (lambda d: d['slots'].append({'slot': '2099-01-01T00:00', 'lines': []}), 'are not the grid'),
+    (lambda d: d['flags'].append({'text': 'x', 'belief_keys': ['invented.key']}), 'was not given'),
+])
+def test_a_writer_answer_outside_the_grid_or_the_beliefs_is_refused(connect, day_inputs, monkeypatch, change, error):
+    write = _writer_for([])
+    def broken(agent_input):
+        data = write(agent_input)
+        change(data)
+        return data
+    monkeypatch.setattr(drs, '_write', broken)
+    with pytest.raises(ValueError, match=error):
+        drs.run_day_pass(datetime(2026, 1, 1, 18, tzinfo=timezone.utc), connect=connect)
+    assert day_plan.load_plan('2026-01-01', connect=connect) is None
+
+
+def test_slot_keys_stay_unique_across_midnight():
+    from app.assistant.pipelines.dayflow.utils.expected_calendar_utils import build_hour_grid
+    from app.assistant.utils.time_utils import get_local_timezone
+    tz = get_local_timezone()
+    now = datetime(2026, 1, 2, 0, 30, tzinfo=tz).astimezone(timezone.utc)
+    slots = build_hour_grid([], now, (datetime(2026, 1, 3, 0, 0, tzinfo=tz)).astimezone(timezone.utc))
+    labels = [s['label'] for s in slots]
+    keys = [s['slot'] for s in slots]
+    assert labels.count('11:00 PM') == 2 and len(set(keys)) == len(keys)

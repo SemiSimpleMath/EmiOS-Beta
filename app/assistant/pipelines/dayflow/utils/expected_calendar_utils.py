@@ -202,6 +202,9 @@ def build_hour_grid(
         is_now = cur <= now_local < cur + timedelta(hours=1)
         items_in = sorted(by_hour.get(cur, []), key=lambda it: str(it.get("start_utc") or ""))
         slots.append({
+            # The slot's own identity: its local hour. A clock label repeats when the grid spans
+            # midnight; this does not. The writer returns its guidance keyed by it.
+            "slot": cur.strftime("%Y-%m-%dT%H:00"),
             "label": f"Now ({_fmt_clock(now_local)})" if is_now else _fmt_clock(cur),
             "hour_local_iso": cur.isoformat(),
             "is_now": is_now,
@@ -230,5 +233,5 @@ def render_hour_grid(slots: List[Dict[str, Any]]) -> str:
         else:
             body = "(open)"
         arrow = " →" if slot.get("is_now") else ""
-        lines.append(f"  {slot['label']}{arrow}   {body}")
+        lines.append(f"  [slot {slot['slot']}] {slot['label']}{arrow}   {body}")
     return "\n".join(lines)

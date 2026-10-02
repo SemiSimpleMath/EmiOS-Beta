@@ -17,7 +17,9 @@ What wakes it:
 - a room still talking: the wake sleeps until that room goes quiet, then runs;
 - a brief holding until a time: the wake sleeps until the earliest hold, when the brief is written
   again (concern_brief.next_hold_at);
-- boot: one run at start picks up whatever arrived while the app was down.
+- boot: one run at start picks up whatever arrived while the app was down;
+- the heartbeat (2026-10-01): a run at least every HEARTBEAT_SECONDS, for what changes without an
+  event, such as the inputs of the day pass (subconscious/day_pass.py) and the start of a new day.
 Nothing else runs it. The wake's own register writes do not wake it again. A run that fails is
 logged and not retried; the next thing that happens wakes it.
 """
@@ -31,6 +33,8 @@ from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+HEARTBEAT_SECONDS = 600
+
 _poked = threading.Event()
 _inside = threading.local()        # set on the wake's own thread: its register writes do not poke
 _thread: Optional[threading.Thread] = None
@@ -38,10 +42,11 @@ _start_lock = threading.Lock()
 
 
 def run_brain() -> Dict[str, Any]:
-    """One pass: gate, brain step, briefs, handoffs."""
+    """One pass: gate, brain step, briefs, handoffs, the day pass."""
     from app.assistant.subconscious.brain_step import run_brain_step
     from app.assistant.subconscious.concern_brief import run_briefs
     from app.assistant.subconscious.concern_handoff import run_handoffs
+    from app.assistant.subconscious.day_pass import run_day_pass
     from app.assistant.subconscious.gate import run_gate
     from app.assistant.subconscious.concern_brief import next_hold_at
     from app.assistant.subconscious.concern_store import load_register
@@ -51,7 +56,9 @@ def run_brain() -> Dict[str, Any]:
     handoffs = run_handoffs()
     due = [t for t in (gate["next_ready_at"], next_hold_at(load_register(), datetime.now(timezone.utc)))
            if t is not None]
-    return {**gate, **{f"brain_{k}": v for k, v in brain.items()}, **briefs, **handoffs,
+    # Last: a day pass that fails does not hold up the concerns' briefs and handoffs.
+    day = run_day_pass()
+    return {**gate, **{f"brain_{k}": v for k, v in brain.items()}, **briefs, **handoffs, **day,
             "next_wake_at": min(due) if due else None}
 
 
@@ -71,16 +78,16 @@ def _loop() -> None:
     _inside.run = True
     while True:
         _poked.clear()
-        wait: Optional[float] = None
+        wait: float = HEARTBEAT_SECONDS
         try:
             summary = run_brain()
             logger.info("[brain_wake] ran: %s", summary)
             due = summary.get("next_wake_at")
             if due is not None:
-                wait = max(0.0, (due - datetime.now(timezone.utc)).total_seconds())
+                wait = min(wait, max(0.0, (due - datetime.now(timezone.utc)).total_seconds()))
         except Exception as exc:
-            logger.error("[brain_wake] the brain run failed; it runs again on the next event: %s", exc,
-                         exc_info=True)
+            logger.error("[brain_wake] the brain run failed; it runs again on the next event or heartbeat: %s",
+                         exc, exc_info=True)
         _poked.wait(timeout=wait)
 
 

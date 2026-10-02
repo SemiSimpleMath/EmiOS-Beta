@@ -52,14 +52,6 @@
       "afk_guard": { "skip_when_afk": true, "skip_when_potentially_afk": true }
     },
     {
-      "id": "dayflow_routine",
-      "enabled": true,
-      "step_class": "app.assistant.pipelines.dayflow.steps.dayflow_routine_stage:DayFlowRoutineStep",
-      "run_policy": { "type": "always", "min_interval_seconds": 3600 },
-      "afk_guard": { "skip_when_afk": true, "skip_when_potentially_afk": false },
-      "description": "Hourly belief-enriched routine doc. Writes resource_dayflow_routine.md (injected into all agents)."
-    },
-    {
       "id": "health_status",
       "enabled": true,
       "step_class": "app.assistant.pipelines.dayflow.steps.health_status_stage:HealthStatusStep",
