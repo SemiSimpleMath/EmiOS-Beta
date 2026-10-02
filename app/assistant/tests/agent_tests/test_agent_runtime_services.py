@@ -79,7 +79,7 @@ def test_llm_client_raises_on_structured_output_failure():
     class _Agent:
         name = "test::agent"
         config = {}  # client reads agent.config for prompt-debug flags
-        llm_params = {"llm_provider": "openai", "engine": "gpt-5-mini"}
+        llm_params = {"llm_provider": "openai", "model_tier": "mini"}
         blackboard = _Blackboard()
 
     class _Fmt(BaseModel):

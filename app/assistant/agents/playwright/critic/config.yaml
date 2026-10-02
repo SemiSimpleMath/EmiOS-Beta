@@ -2,8 +2,7 @@ name: playwright::critic
 class_name: PlaywrightCritic
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-4.1"
-  model_tier: "smart"
+  model_tier: "mini"
   temperature: 0
 
 allowed_tools: []

@@ -2,8 +2,7 @@ name: shared::tool_arguments
 class_name: ToolArguments
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-4.1"
-  model_tier: "nano"
+  model_tier: "mini"
   temperature: 0.1
 
 user_context_items:

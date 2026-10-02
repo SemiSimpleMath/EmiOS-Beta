@@ -2,8 +2,7 @@ name: fast_tool::delegator
 class_name: Delegator
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5-nano"
-  model_tier: "nano"
+  model_tier: "mini"
 
 # No tools required for Delegator
 allowed_tools: []

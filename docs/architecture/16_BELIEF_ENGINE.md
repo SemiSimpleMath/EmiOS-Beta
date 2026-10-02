@@ -268,7 +268,7 @@ final removal. Two legacy pairs remain on disk — edit only the live one:
 
 ## 12. Scheduling
 
-Routines now live in **`configs/routines/public/*.json`** (one file per routine), not the old monolithic `configs/routines.json`. Agents reference a `model_tier` (`strong`/`mini`), not a literal model id.
+Routines now live in **`configs/routines/public/*.json`** (one file per routine), not the old monolithic `configs/routines.json`. Agents reference a `model_tier` (`smart`/`mini`), not a literal model id.
 
 | Routine file | Time | Runner | What it does |
 | --- | --- | --- | --- |
@@ -281,13 +281,13 @@ Routine functions are registered as `@routine_handler`-decorated handlers in `ap
 
 ## 13. Agents
 
-| Agent | Tier / engine | Role |
+| Agent | Tier | Role |
 | --- | --- | --- |
-| `belief_engine::belief_updater` | strong (`gpt-5.6-luna`) | Step 2 — `create/update/deprecate/no_change` per belief |
-| `belief_engine::belief_reevaluator` | strong (`gpt-5.6-luna`) | Step 4 — authoritative rewrite of contested beliefs from full trail |
+| `belief_engine::belief_updater` | mini | Step 2 — `create/update/deprecate/no_change` per belief |
+| `belief_engine::belief_reevaluator` | mini | Step 4 — authoritative rewrite of contested beliefs from full trail |
 | `belief_engine::evidence_match`, `belief_engine::match_discover` | mini | Updater context selection and incremental pair discovery |
-| `belief_engine::match_review` | strong | Complete source-based pair judgment and canonical belief |
-| `belief_engine::belief_tagger` | mini (`gpt-5.6-luna`) | §7 — cross-cutting tags from the standardized vocab |
+| `belief_engine::match_review` | mini | Complete source-based pair judgment and canonical belief |
+| `belief_engine::belief_tagger` | mini | §7 — cross-cutting tags from the standardized vocab |
 | `belief_engine::belief_canonicalizer` | mini | **DEAD** (§11 trap 3) — old chunk-based canonicalizer |
 
 ## 14. Why the beliefs DB is "fragile / handle with extreme care"

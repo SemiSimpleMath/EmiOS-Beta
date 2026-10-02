@@ -6,7 +6,6 @@ name: ticket_builder::planner
 class_name: Planner
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5.6-luna"
   model_tier: "mini"
 
 # Read-only, never world-facing: a messenger, not a researcher. pod_fetch is

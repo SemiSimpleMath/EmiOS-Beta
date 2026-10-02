@@ -1,126 +1,40 @@
-# Model Tier Mapping
+# Model Tiers
 # ============================================================================
-# Maps abstract capability tiers to the concrete model each provider should use.
+# A tier is the model each provider runs plus the reasoning effort. It is the
+# ONLY place a model is chosen: every agent config names a tier, never a model.
 #
-# YOU maintain this file. Update it when better models ship -- every agent that
-# uses a tier gets the new model automatically, no per-agent changes needed.
-#
-# Usage in agent config.yaml:
 #   llm_params:
 #     llm_provider: "openai"
-#     model_tier: "mini"       # governs which model is used
-#     engine: "gpt-5-mini"     # kept as documentation / direct override fallback
+#     model_tier: "mini"
 #
+# Switching models, or effort, for every agent on a tier is one line here.
+# `effort` is OpenAI reasoning effort (none | low | medium | high); providers
+# without it ignore it. An agent naming a tier not defined here fails boot
+# validation.
 # ============================================================================
 
 tiers:
 
   nano:
-    description: "Trivial tasks - routing, yes/no decisions, token classification"
-    openai: "gpt-5-nano"
+    description: "Routing and picking from a list: no reasoning"
+    effort: "none"
+    openai: "gpt-6-luna"
     gemini: "gemini-2.5-flash-lite"
     anthropic: "claude-3-5-haiku-20241022"
     opencode: "kimi-k2.5"
 
   mini:
-    description: "Standard agent work - most delegation, extraction, summarisation"
-    openai: "gpt-5.6-luna"
+    description: "Most agents"
+    effort: "low"
+    openai: "gpt-6-luna"
     gemini: "gemini-3-flash-preview"
     anthropic: "claude-3-5-haiku-20241022"
     opencode: "kimi-k2.7-code"
 
   smart:
-    description: "Planning, KG operations, structured analysis"
-    openai: "gpt-5.6-luna"
+    description: "Decisions that are written down and believed by everything after them: KG writes and merges, belief merges, dayflow judgments"
+    effort: "medium"
+    openai: "gpt-6-luna"
     gemini: "gemini-3-flash-preview"
     anthropic: "claude-3-5-haiku-20241022"
     opencode: "glm-5.2"
-
-  strong:
-    description: "Complex multi-step reasoning, long-form writing, belief updates"
-    openai: "gpt-5.6-luna"
-    gemini: "gemini-3.1-pro-preview"
-    anthropic: "claude-3-5-sonnet-20241022"
-    opencode: "deepseek-v4-pro"
-
-  powerful:
-    description: "Vision tasks, highest quality output, complex orchestration"
-    openai: "gpt-5.6-luna"
-    gemini: "gemini-3.1-pro-preview"
-    anthropic: "claude-3-5-sonnet-20241022"
-    opencode: "grok-4.5"
-
-  flash:
-    description: "Fast, cheap coding tasks"
-    openai: "gpt-4.1-mini"
-    gemini: "gemini-2.5-flash"
-    anthropic: "claude-3-5-haiku-20241022"
-    opencode: "deepseek-v4-flash"
-
-
-# Engine-name -> tier inference table.
-# Used to resolve the right tier when an agent config only has `engine:` and
-# no `model_tier:`, and also by the stamp_model_tiers.py migration script.
-# Add new models here as they become available.
-engine_to_tier:
-  # OpenCode Zen (Go plan) models. This list was checked against the live
-  # GET /zen/go/v1/models catalog on 2026-08-05 — every id below was present.
-  # Re-check when adding more; an id that is not in the catalog is accepted
-  # here silently and only fails later, at call time.
-  kimi-k2.5: nano
-  kimi-k2.6: mini
-  kimi-k2.7-code: mini
-  kimi-k3: smart
-  deepseek-v4-flash: flash
-  deepseek-v4-pro: strong
-  glm-5: smart
-  glm-5.1: smart
-  glm-5.2: smart
-  grok-4.5: powerful
-  qwen3.5-plus: smart
-  qwen3.6-plus: smart
-  qwen3.7-plus: strong
-  qwen3.7-max: powerful
-  mimo-v2-pro: smart
-  mimo-v2-omni: smart
-  mimo-v2.5: smart
-  mimo-v2.5-pro: strong
-  minimax-m2.5: mini
-  minimax-m2.7: mini
-  minimax-m3: smart
-  hy3-preview: smart
-  hy3: smart
-  qwen3.8-max: powerful
-  # NOTE gpt-5.6-luna is served by BOTH OpenCode Zen and OpenAI, so it is not
-  # listed here: upstream already maps it under "# OpenAI" below. This block
-  # once carried its own `gpt-5.6-luna: smart` guess, which made the key a
-  # duplicate — YAML keeps the last, so the guess was silently dead and the
-  # OpenAI value won anyway. engine_to_tier is keyed by engine name alone,
-  # with no provider dimension, so one entry is all there can be.
-
-  # OpenAI
-  gpt-5-nano: nano
-  gpt-4.1-nano: nano
-  gpt-4o-mini: nano
-  gpt-5.6-luna: mini
-  gpt-5.4-mini: mini
-  gpt-5-mini: mini
-  gpt-4.1-mini: mini
-  gpt-5.1: smart
-  gpt-4.1: smart
-  gpt-5.2: strong
-  gpt-5.4: powerful
-  gpt-4o: powerful
-
-  # Gemini
-  gemini-2.5-flash-lite: nano
-  gemini-3.1-flash-lite-preview: nano
-  gemini-2.5-flash: mini
-  gemini-3-flash-preview: mini
-  gemini-3.1-pro-preview: strong
-  gemini-1.5-pro: strong
-
-  # Anthropic
-  claude-3-5-haiku-20241022: mini
-  claude-3-5-sonnet-20241022: strong
-  claude-3-opus-20240229: powerful

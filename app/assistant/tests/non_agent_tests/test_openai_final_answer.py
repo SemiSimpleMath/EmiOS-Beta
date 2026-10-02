@@ -63,10 +63,15 @@ def test_text_around_the_json_is_not_skipped():
 
 
 @pytest.mark.parametrize("model", ["gpt-5.6-luna", "gpt-6-luna", "gpt-6.1-sol"])
-def test_reasoning_models_get_effort_and_no_temperature(model):
-    kwargs = OpenAIModelCapabilityNormalizer(model).build_base_kwargs(messages=[], timeout=10, temperature=0.2)
-    assert kwargs["reasoning"] == {"effort": "medium"}
+def test_reasoning_models_get_the_tier_effort_and_no_temperature(model):
+    kwargs = OpenAIModelCapabilityNormalizer(model, effort="low").build_base_kwargs(messages=[], timeout=10, temperature=0.2)
+    assert kwargs["reasoning"] == {"effort": "low"}
     assert "temperature" not in kwargs
+
+
+def test_reasoning_model_without_an_effort_raises():
+    with pytest.raises(ValueError, match="without a reasoning effort"):
+        OpenAIModelCapabilityNormalizer("gpt-6-luna").build_base_kwargs(messages=[], timeout=10, temperature=None)
 
 
 def test_other_models_keep_temperature():

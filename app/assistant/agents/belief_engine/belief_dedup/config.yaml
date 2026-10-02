@@ -9,8 +9,7 @@ name: belief_engine::belief_dedup
 class_name: Agent
 llm_params:
   llm_provider: openai
-  engine: gpt-5.6-luna
-  model_tier: strong
+  model_tier: "smart"
 allowed_tools: []
 except_tools: []
 user_context_items: [new_belief, existing_beliefs]

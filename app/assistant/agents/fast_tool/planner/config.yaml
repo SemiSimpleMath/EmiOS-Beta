@@ -2,8 +2,7 @@ name: fast_tool::planner
 class_name: Planner
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5-nano"
-  model_tier: "nano"
+  model_tier: "mini"
 
 allowed_tools:
   # Calendar

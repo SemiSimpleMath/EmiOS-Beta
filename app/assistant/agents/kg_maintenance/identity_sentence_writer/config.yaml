@@ -3,8 +3,7 @@ class_name: Agent
 action_required: false
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5.6-luna"
-  model_tier: "fast"
+  model_tier: "smart"
 
 # Pure writing: graph-derived facts in, one definite description out.
 # No tools.

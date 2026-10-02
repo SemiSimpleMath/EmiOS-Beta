@@ -2,8 +2,7 @@ name: dayflow_orchestrator::switchboard
 class_name: Agent
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5-mini"
-  model_tier: "mini"
+  model_tier: "nano"
 
 allowed_tools: all
 # Switchboard routes; it doesn't ask the user mid-decision. ask_user is a

@@ -125,11 +125,9 @@ through those managers).
 | Dayflow delegation  | No                        | Yes                                 |
 | LLM (tier)          | openai / `powerful`       | gemini / `mini` (`gemini-3-flash-preview`, faster) |
 
-(`config.yaml` declares a provider + `model_tier`; the tier→model map is
-`configs/model_tiers.yaml` (`resolve_engine` in `app/services/llm_factory.py`).
-Note: in the primary call path the config's explicit `engine` is what
-reaches the API — the tier map governs interface selection and
-provider-fallback equivalence.)
+(`config.yaml` declares a provider + `model_tier`; the tier names the model and
+reasoning effort per provider in `configs/model_tiers.yaml` (`resolve_tier` in
+`app/services/llm_factory.py`), and is the only place a model is chosen.)
 
 ## Room Session Manager
 

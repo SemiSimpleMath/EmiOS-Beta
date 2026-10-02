@@ -2,8 +2,7 @@ name: scene_analyzer
 class_name: OneShotAgent
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-4o"
-  model_tier: "powerful"
+  model_tier: "mini"
   temperature: 0.2
 
 allowed_tools: []

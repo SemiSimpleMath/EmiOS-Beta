@@ -1,7 +1,6 @@
 name: entity_cards::card_critic
 class_name: Agent
 llm_params:
-  engine: gpt-5-mini
   model_tier: "mini"
   llm_provider: "openai"
 allowed_tools: []

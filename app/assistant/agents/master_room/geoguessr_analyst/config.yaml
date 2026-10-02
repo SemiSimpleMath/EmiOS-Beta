@@ -2,8 +2,7 @@ name: master_room::geoguessr_analyst
 class_name: Agent
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-4o"
-  model_tier: "powerful"
+  model_tier: "mini"
   temperature: 0.3
 
 allowed_tools: []

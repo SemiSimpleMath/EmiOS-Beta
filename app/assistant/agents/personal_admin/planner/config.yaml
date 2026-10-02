@@ -2,7 +2,6 @@ name: personal_admin::planner
 class_name: Planner
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5-mini"
   model_tier: "mini"
 
 # Curated list — was `all` (149 tools) which bloated prompt + leaked

@@ -53,7 +53,7 @@ def test_llm_client_multimodal_routes_openai_and_cleans_up(monkeypatch):
 
     class _Agent:
         name = "emi_agent"
-        llm_params = {"llm_provider": "gemini", "engine": "gemini-3-flash-preview", "temperature": 0.8}
+        llm_params = {"llm_provider": "gemini", "model_tier": "mini", "temperature": 0.8}
         blackboard = _Blackboard()
         config = {}
 
@@ -83,6 +83,8 @@ def test_llm_client_multimodal_routes_openai_and_cleans_up(monkeypatch):
 
     assert result == {"ok": True}
     assert calls and calls[0].get("llm_provider") == "openai"
+    # The image call runs the agent's tier on OpenAI.
+    assert (calls[0]["engine"], calls[0]["reasoning_effort"]) == ("gpt-6-luna", "low")
     assert not os.path.exists(path)
 
 

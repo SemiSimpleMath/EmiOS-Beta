@@ -51,9 +51,8 @@ class_name: Agent                     # or Delegator if a router
 action_required: false                # true if must produce a tool call
 llm_params:
   llm_provider: "openai"              # openai | gemini | anthropic
-  engine: "gpt-5-mini"                # provider-specific model id
-  model_tier: "mini"                  # nano | mini | powerful
-  temperature: 0.3                    # omit for GPT-5 (advisory)
+  model_tier: "mini"                  # nano | mini | smart: model + effort, configs/model_tiers.yaml
+  temperature: 0.3                    # ignored by reasoning models (gpt-5, gpt-6)
 
 allowed_tools: []                     # tool names, or [] for none
 except_tools: []

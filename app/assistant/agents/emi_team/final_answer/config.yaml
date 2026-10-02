@@ -3,7 +3,6 @@ class_name: Agent
 action_required: false
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5-mini"
   model_tier: "mini"
 
 allowed_tools: []  # No tools needed for this agent

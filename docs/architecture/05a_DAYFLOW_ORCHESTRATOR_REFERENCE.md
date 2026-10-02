@@ -276,30 +276,29 @@ so item state and the work portfolio are one transactional store.
 Each entry is the **LLM agent** plus the **control node(s)** that prep its context, invoke it, and persist
 its output.
 
-**Models, read off `llm_params.engine` in each `config.yaml` (verified 2026-09-18).** Model names in
-prose drift silently — the 2026-08-07 switch moved 37 Gemini agents to `gpt-5.6-luna` and this
-document still carried a pre-switch name for `action_selector` until today. Check here, not in the
-paragraphs:
+**Models.** Each `config.yaml` names a `model_tier`; `configs/model_tiers.yaml` maps the tier to a model
+and reasoning effort (2026-10-02: every tier is `gpt-6-luna`; `nano` no reasoning, `mini` low, `smart`
+medium). Check the tier here, not model names in the paragraphs, which drift:
 
-| agent (`dayflow_orchestrator::`) | engine | tools | wiring |
+| agent (`dayflow_orchestrator::`) | tier | tools | wiring |
 |---|---|---|---|
-| `intake_triage` | `gpt-5-mini` | none | live |
-| `strategic_planner_wo` | `gpt-5.6-luna` | none | live |
-| `work_architect` | `gpt-5.6-luna` | none | live |
-| `state_mover` | `gpt-5-mini` | none | live |
-| `action_selector` | `gpt-5.6-luna` | none | live |
-| `switchboard` | `gpt-5-mini` | `all` except `ask_user` | live |
-| `work_finalizer` | `gpt-5.6-luna` | none | live (dispatch room) |
-| `result_formatter` | `gpt-5.6-luna` | none | live (called by master_room) |
-| `strategic_planner` | `gpt-5.6-luna` | none | retired, unwired |
-| `relevance_cleaner` | `gpt-5-mini` | none | retired, unwired |
-| `work_repair` | `gpt-5.6-luna` | none | retired, unwired |
+| `intake_triage` | mini | none | live |
+| `strategic_planner_wo` | smart | none | live |
+| `work_architect` | smart | none | live |
+| `state_mover` | mini | none | live |
+| `action_selector` | nano | none | live |
+| `switchboard` | nano | `all` except `ask_user` | live |
+| `work_finalizer` | smart | none | live (dispatch room) |
+| `result_formatter` | mini | none | live (called by master_room) |
+| `strategic_planner` | mini | none | retired, unwired |
+| `relevance_cleaner` | mini | none | retired, unwired |
+| `work_repair` | mini | none | retired, unwired |
 
 The ticket composer is a separate namespace and a separate manager — see **ticket_builder** below.
 
 ### Intake & evaluation
 
-**intake_triage** (`gpt-5-mini`) — the intake gate; first agent in the tick. Driven by
+**intake_triage** (mini) — the intake gate; first agent in the tick. Driven by
 `intake_triage_prep_node`, which loads all items and buckets them: brand-new (not cooldown-blocked) →
 `eligible_items_now`, plan synopses, recently-resolved (< 6 h), everything else → `active_dayflow_items`.
 Four source types never reach triage: `plan_synopsis` (context only), `chat` (context, and kept out of
@@ -327,7 +326,7 @@ hint which part is new, and would either redo the covered part or drop the uncov
    evaluator reads authoritative state instead of stale state. Admissions go through
    `write_dayflow_items_batch`, which is the path that performs no transition validation (§2).
 
-**strategic_planner_wo** (the work-object **EVALUATOR** / "steward", `gpt-5.6-luna`) — the **sole path from
+**strategic_planner_wo** (the work-object **EVALUATOR** / "steward", smart) — the **sole path from
 intake to action**. Driven by `strategic_planner_wo_prep_node` (builds `work_portfolio` from non-terminal
 work objects, plus two separate 18 h done-logs: `recent_completed_work` = DONE/don't-recreate vs
 `recent_abandoned_work` = dropped/may-recreate, and the situational context — tickets, dispatch results,
@@ -391,14 +390,14 @@ work. So a schedule entry whose `source` carries a verbatim ticket id is chased 
 work object → status by deterministic lookup. The evaluator judges what to do; it is never asked
 whether two phrasings are the same task.
 
-**strategic_planner** (LEGACY items-lane planner, `gpt-5.6-luna`) — the older evaluator that emitted
+**strategic_planner** (LEGACY items-lane planner) — the older evaluator that emitted
 **plans (DAGs of task nodes) + standalone tasks** instead of work objects, with per-task
 wait/dependency/reactivate fields and plan-synopsis bookkeeping it managed itself. **Retired:** its driving
 control nodes (`StrategicPlannerPrepNode`, `PlannerPersistNode`) were deleted and it was removed from the
 manager's agents list + state_map; `triage_persist_node` routes to the live `strategic_planner_wo` (the context enricher between them was retired 2026-09-30).
 The agent dir is KEPT but unwired — the prompts are preserved as reference (see its `KEEP.md`).
 
-**relevance_cleaner** (`gpt-5-mini`) — the items-lane **janitor** that `close`s finished tasks (mark done,
+**relevance_cleaner** — the items-lane **janitor** that `close`s finished tasks (mark done,
 keep history) and `suppress`es items safe to forget (irreversible). Driven by a 30-minute gate
 (`relevance_cleaner_gate_node`) → prep → agent → persist (which stamps the last-run time, resolves
 `short_id`s, applies `write_dayflow_item`, and **refuses to close/suppress any `pending_directive` item**
@@ -409,7 +408,7 @@ legacy lane's cleaner; the files remain on disk.
 
 ### Planning structure
 
-**work_architect** (`gpt-5.6-luna`, no tools) — the structure designer ("Part 2" of the split planner).
+**work_architect** (smart, no tools) — the structure designer ("Part 2" of the split planner).
 Driven by `work_architect_node`, which fires only when the evaluator created objects this tick or flagged
 some for re-plan — `replan_work_ids`, set by the evaluator from intake OR by any **work_finalizer verdict
 carrying a route** (read off the graph by `_pending_finalizer_instructions`), ≤ 3/tick. It is handed one
@@ -469,7 +468,7 @@ because a `failed` node has no `terminal` payload, its epitaph is taken from the
 without which a BLOCKED step arrives as a bare `status=failed` line, and blocked is precisely the case
 where the architect must plan the node that asks the user.
 
-**state_mover** (`gpt-5-mini`, no tools, `action_required: false`) — the deterministic
+**state_mover** (mini, no tools, `action_required: false`) — the deterministic
 "mechanics-only" lifecycle mover, now a **two**-node sequence: `state_mover_prep_node` (context) → agent →
 `state_mover_persist_node` (effects). (`state_transition_guard_node` persisted the ITEM mutations and was
 deleted with the item lane on 2026-09-16, along with the `state_mutations_persisted_tf` handshake; the
@@ -507,13 +506,13 @@ its resume context. Appending, not overwriting — the directive itself is prese
 
 ### Dispatch & execution (the live engine)
 
-**action_selector** (`gpt-5.6-luna`, no tools, `action_required: false`) — handed the actionable list, it picks **exactly one**
+**action_selector** (nano, no tools, `action_required: false`) — handed the actionable list, it picks **exactly one**
 node to act on this tick (or `no_op_tf`), never bundling two. Driven by `action_selector_router_node`
 (a thin `ChatTaskRouterNode` subclass) which routes **everything to the switchboard** — it copies
 `switchboard_task`→`task`/`switchboard_information`→`information`, sends an "On it." ack, and hands off.
 The chosen `acted_on_item_ids` (a single `work_id::node_id`) comes from the agent's form.
 
-**switchboard** (`gpt-5-mini`, all tools except `ask_user`) — a **pure LLM router** (no work, no dialog).
+**switchboard** (nano, all tools except `ask_user`) — a **pure LLM router** (no work, no dialog).
 It reads the one picked node and emits `delegate_to` = exactly **`create_dayflow_ticket`** (communicate
 with the user: tell/ask/nudge) or **`work_emi_team_manager`** (do something, *including* compose+send an email/text
 — "email me the report" is work). The decisive axis is "communicating with the user vs doing something."
@@ -597,7 +596,7 @@ dispositions moved to agents that can see more than one failed step — *retry* 
 the steward's, which sees every work object each run. Its `_MAX_ASK_TIMEOUTS` ceiling went with it, so
 the 3-strike bound on unanswered asks no longer fires.
 
-**work_finalizer** (`gpt-5.6-luna`, no tools) — judges the outcome of ONE tool call. Driven by
+**work_finalizer** (smart, no tools) — judges the outcome of ONE tool call. Driven by
 `work_finalizer_node`, which runs **in the dispatch room** (`dayflow_dispatch_manager`), in the same
 pass that made the call — not in the planning tick. It judges exactly the node that pass dispatched
 (keyed on `work_node_ref`), always a TOP-LEVEL node (a direct child of the goal — the worker's nested
@@ -649,10 +648,10 @@ reported on when the steward ends it, not when the finalizer closes its last nod
 ### Surface, comms & finalization
 
 **ticket_builder** — **a MANAGER, not an agent.** `ticket_builder_manager` (`max_cycles: 14`) with
-three agents under the `ticket_builder::` namespace: a read-only **`planner`** (`Planner` class,
-`gpt-5.6-luna`) that pulls the SUBSTANCE the communicate-goal promises — the work graph via
-`read_work_object`, pods by id via `pod_fetch` — an optional **`summary`** (`gpt-5-mini`) on the tool
--return loop, and a **`composer`** (`gpt-5.6-luna`, no tools) that writes the final
+three agents under the `ticket_builder::` namespace: a read-only **`planner`** (`Planner` class)
+that pulls the SUBSTANCE the communicate-goal promises — the work graph via
+`read_work_object`, pods by id via `pod_fetch` — an optional **`summary`** on the tool
+-return loop, and a **`composer`** (no tools) that writes the final
 `{title, message}`. **The message IS the delivery.** A self-contained brief costs one planner step
 plus the compose: the planner simply returns control at action 0, which routes
 `ticket_builder::planner_return_control → ticket_builder::composer`.

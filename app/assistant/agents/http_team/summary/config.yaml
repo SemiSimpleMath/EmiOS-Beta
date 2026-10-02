@@ -2,7 +2,6 @@ name: http_team::summary
 class_name: Agent
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5-mini"
   model_tier: "mini"
 
 prompt_debug:

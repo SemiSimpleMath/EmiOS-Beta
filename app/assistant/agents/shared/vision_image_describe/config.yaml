@@ -3,8 +3,7 @@ class_name: Agent
 llm_params:
   llm_provider: "openai"
   # Vision-capable model for screenshots
-  engine: "gpt-4o"
-  model_tier: "powerful"
+  model_tier: "mini"
   temperature: 0.2
 
 allowed_tools: []

@@ -1,8 +1,7 @@
 name: kg_maintenance::duplicate_detector
 class_name: Agent
 llm_params:
-  engine: gpt-5-mini
-  model_tier: "mini"
+  model_tier: "smart"
   llm_provider: "openai"
 allowed_tools: []
 except_tools: []

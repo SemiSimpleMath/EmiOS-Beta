@@ -2,8 +2,7 @@ name: weekly_synthesizer
 class_name: Agent
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-4.1"
-  model_tier: "smart"
+  model_tier: "mini"
 
 allowed_tools: []
 except_tools: []

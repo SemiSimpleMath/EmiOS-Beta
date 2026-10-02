@@ -2,7 +2,6 @@ name: sandbox_team::critic
 class_name: Agent
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5-mini"
   model_tier: "mini"
 
 allowed_tools: []

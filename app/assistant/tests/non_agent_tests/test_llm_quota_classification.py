@@ -455,7 +455,7 @@ def test_agent_output_discussing_quota_passes_through(monkeypatch):
 
     agent = SimpleNamespace(
         name="tester",
-        llm_params={"llm_provider": "openai", "engine": "gpt-5-mini"},
+        llm_params={"llm_provider": "openai", "model_tier": "mini"},
         blackboard=_BB(),
         config={},
     )

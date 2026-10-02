@@ -22,6 +22,7 @@ import yaml
 from flask import Blueprint, jsonify, render_template, request
 
 from app.routes._security import reject_if_not_local
+from app.services.llm_factory import resolve_tier
 
 dayflow_flow_bp = Blueprint("dayflow_flow", __name__)
 dayflow_flow_bp.before_request(reject_if_not_local)
@@ -87,7 +88,8 @@ def _engine(agent_name: str) -> Optional[str]:
     path = _ASSISTANT / "agents" / namespace / name / "config.yaml"
     if not path.exists():
         return None
-    return ((yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("llm_params") or {}).get("engine")
+    params = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("llm_params") or {}
+    return resolve_tier(params["llm_provider"], params["model_tier"])[0] if params else None
 
 
 def _stages(manager: str) -> List[Dict[str, Any]]:

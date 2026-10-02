@@ -2,7 +2,6 @@ name: kg_explorer::planner_relationship
 class_name: Planner
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5-mini"
   model_tier: "mini"
   
 

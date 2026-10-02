@@ -2,7 +2,6 @@ name: shared::mathematician
 class_name: Agent
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5-mini"
   model_tier: "mini"
 
 allowed_nodes: [return_control]

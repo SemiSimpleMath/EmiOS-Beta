@@ -7,8 +7,7 @@ name: belief_engine::belief_clusterer
 class_name: Agent
 llm_params:
   llm_provider: openai
-  engine: gpt-5.6-luna
-  model_tier: strong
+  model_tier: "mini"
 allowed_tools: []
 except_tools: []
 user_context_items: [existing_clusters, beliefs_to_place, correction]

@@ -92,8 +92,7 @@ class_name: Agent                   # Class file in agent_classes/ (see Variants
 
 llm_params:
   llm_provider: openai              # openai | gemini | anthropic
-  engine: gpt-5.4-nano              # Model name
-  model_tier: nano                  # Tier hint
+  model_tier: mini                  # nano | mini | smart: model + reasoning effort, configs/model_tiers.yaml
   temperature: 0.1
 
 # --- Tool / node policy (permission CEILING, not a grant) ---

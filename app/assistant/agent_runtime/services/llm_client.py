@@ -2,32 +2,11 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from app.services.llm_factory import LLMFactory
+from app.services.llm_factory import LLMFactory, resolve_tier
 from app.configs.llm_classes_dict import _key_is_present, _PROVIDER_KEY_ENV
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
-
-# Provider availability check + tier-based fallback from configs/model_tiers.yaml.
-_model_tiers_cache: dict | None = None
-
-def _load_model_tiers() -> dict:
-    """Load tier → provider → engine mapping from configs/model_tiers.yaml."""
-    global _model_tiers_cache
-    if _model_tiers_cache is not None:
-        return _model_tiers_cache
-    try:
-        import yaml
-        from app.assistant.utils.path_utils import get_repo_root
-        path = get_repo_root() / "configs" / "model_tiers.yaml"
-        if path.exists():
-            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-            _model_tiers_cache = data.get("tiers") or {}
-            return _model_tiers_cache
-    except Exception as e:
-        logger.warning("Failed to load model_tiers.yaml: %s", e)
-    _model_tiers_cache = {}
-    return _model_tiers_cache
 
 
 def _is_provider_available(provider: str) -> bool:
@@ -46,10 +25,10 @@ def _is_provider_available(provider: str) -> bool:
 # Warn once per (requested provider, fallback provider, tier). Without this
 # the fallback emits a WARNING on literally every agent call, which is what
 # buried the real errors in the log.
-_fallback_warned: set[tuple[str, str, str]] = set()
+_reroute_warned: set[tuple[str, str, str]] = set()
 
 
-def _fallback_provider_order(provider: str) -> tuple[str, ...]:
+def _provider_preference_order(provider: str) -> tuple[str, ...]:
     """Providers to try, most-preferred first, excluding *provider* itself.
 
     DEFAULT_LLM_PROVIDER is tried first so this agrees with the rerouting
@@ -72,49 +51,34 @@ def _fallback_provider_order(provider: str) -> tuple[str, ...]:
     return tuple(p for p in order if p != provider)
 
 
-def _resolve_provider_fallback(
-    *, params: dict, provider: str, engine: str, model_tier: str, agent_name: str,
-) -> tuple[dict, str, str]:
-    """If the preferred provider isn't available, fall back to one that is."""
+def _available_provider(*, provider: str, model_tier: str, agent_name: str) -> str:
+    """The provider to call: *provider*, or when it has no key, the first available one in
+    preference order; the tier names its model there. Returns *provider* when none is available,
+    so the call fails with a clear error."""
     if _is_provider_available(provider):
-        return params, provider, engine
+        return provider
 
-    tiers = _load_model_tiers()
-
-    # Find a fallback provider.
-    for fallback_provider in _fallback_provider_order(provider):
-        if not _is_provider_available(fallback_provider):
+    for other in _provider_preference_order(provider):
+        if not _is_provider_available(other):
             continue
+        other_engine, _ = resolve_tier(other, model_tier)
 
-        # Resolve the equivalent engine from model_tiers.yaml.
-        tier = model_tier.strip().lower() if model_tier else "mini"
-        tier_cfg = tiers.get(tier) or tiers.get("mini") or {}
-        fallback_engine = str(tier_cfg.get(fallback_provider) or "").strip()
-        if not fallback_engine:
-            # Last resort hardcoded defaults.
-            _defaults = {"openai": "gpt-5.6-luna", "gemini": "gemini-3-flash-preview", "anthropic": "claude-3-5-haiku-20241022", "opencode": "kimi-k2.7-code"}
-            fallback_engine = _defaults.get(fallback_provider, "gpt-5-mini")
-
-        _warn_key = (provider, fallback_provider, tier)
-        if _warn_key not in _fallback_warned:
-            _fallback_warned.add(_warn_key)
+        _warn_key = (provider, other, model_tier)
+        if _warn_key not in _reroute_warned:
+            _reroute_warned.add(_warn_key)
             logger.warning(
-                "[%s] Provider '%s' not available, falling back to '%s' engine='%s' (tier=%s). "
+                "[%s] Provider '%s' not available, rerouting to '%s' engine='%s' (tier=%s). "
                 "Repeats of this pairing log at debug level.",
-                agent_name, provider, fallback_provider, fallback_engine, tier,
+                agent_name, provider, other, other_engine, model_tier,
             )
         else:
             logger.debug(
-                "[%s] Provider '%s' not available, falling back to '%s' engine='%s' (tier=%s).",
-                agent_name, provider, fallback_provider, fallback_engine, tier,
+                "[%s] Provider '%s' not available, rerouting to '%s' engine='%s' (tier=%s).",
+                agent_name, provider, other, other_engine, model_tier,
             )
-        params = dict(params)
-        params["llm_provider"] = fallback_provider
-        params["engine"] = fallback_engine
-        return params, fallback_provider, fallback_engine
+        return other
 
-    # No fallback available — return original and let it fail with a clear error.
-    return params, provider, engine
+    return provider
 
 
 class LLMClient:
@@ -125,19 +89,16 @@ class LLMClient:
         return str(value or "")
 
     @staticmethod
-    def _normalize_gpt5_params(*, agent_name: str, params: Dict[str, Any], source: str) -> Dict[str, Any]:
-        normalized = dict(params or {})
-        engine = normalized.get("engine")
-        if isinstance(engine, str) and engine.strip().lower().startswith("gpt-5"):
-            if "temperature" in normalized:
-                logger.info(
-                    "[%s] Omitting temperature for GPT-5 model (%s) from %s.",
-                    agent_name,
-                    engine,
-                    source,
-                )
-                normalized.pop("temperature", None)
-        return normalized
+    def resolved_params(agent) -> dict:
+        """The agent's llm_params with the provider it will call (a provider without a key is
+        rerouted) and its tier's model (`engine`) and `reasoning_effort` there."""
+        params = dict(agent.llm_params) if isinstance(agent.llm_params, dict) else {}
+        provider = params.get("llm_provider")
+        model_tier = params.get("model_tier")
+        if not provider or not model_tier:
+            raise ValueError(f"[{agent.name}] llm_params needs llm_provider and model_tier, got {agent.llm_params!r}")
+        params["llm_provider"] = _available_provider(provider=provider, model_tier=model_tier, agent_name=agent.name)
+        return LLMFactory.resolve_effective_params(**params)
 
     def get_llm_interface(self, *, agent) -> Any:
         aid = id(agent)
@@ -145,31 +106,7 @@ class LLMClient:
         if cached is not None:
             return cached
 
-        raw_params = agent.llm_params if isinstance(agent.llm_params, dict) else {}
-        params = self._normalize_gpt5_params(agent_name=agent.name, params=raw_params, source="agent llm_params")
-        provider = params.get("llm_provider")
-        engine = params.get("engine")
-        if not provider or not engine:
-            logger.error(
-                "[%s] Missing required llm_params. Expected keys: llm_provider, engine. Got: %r",
-                agent.name,
-                agent.llm_params,
-            )
-            raise ValueError(f"[{agent.name}] Missing required llm_params (llm_provider, engine).")
-
-        # Provider fallback: if the preferred provider isn't available (no API key),
-        # fall back to an available provider using the model_tier for equivalence.
-        params, provider, engine = _resolve_provider_fallback(
-            params=params, provider=provider, engine=engine,
-            model_tier=raw_params.get("model_tier", ""),
-            agent_name=agent.name,
-        )
-        # Update the agent's llm_params so downstream calls also use the fallback.
-        if isinstance(agent.llm_params, dict):
-            agent.llm_params["llm_provider"] = provider
-            agent.llm_params["engine"] = engine
-
-        interface = LLMFactory.get_llm_interface(**params)
+        interface = LLMFactory.get_llm_interface(**self.resolved_params(agent))
         self._interfaces_by_agent_id[aid] = interface
         logger.info("Initialized LLM interface for agent: %s", agent.name)
         return interface
@@ -286,42 +223,32 @@ class LLMClient:
                 logger.error("[%s] Error reading task_llm_params: %s", agent.name, e)
                 logger.debug("[%s] task_llm_params read exception details", agent.name, exc_info=True)
                 task_llm = None
-            provider_overridden = False
+            overridden = False
             if isinstance(task_llm, dict):
-                for key in ("llm_provider", "engine", "temperature", "timeout"):
+                for key in ("llm_provider", "model_tier", "temperature", "timeout"):
                     if key in task_llm and task_llm.get(key) is not None:
                         params[key] = task_llm.get(key)
-                if "llm_provider" in task_llm and task_llm.get("llm_provider") is not None:
-                    provider_overridden = True
-
-            params = self._normalize_gpt5_params(agent_name=agent.name, params=params, source="merged llm params")
+                overridden = any(task_llm.get(k) is not None for k in ("llm_provider", "model_tier"))
 
             if response_format is not None:
                 params["response_format"] = response_format
 
-            if image_paths:
-                params["llm_provider"] = "openai"
-                params["engine"] = "gpt-5.6-luna"
-                llm_interface = LLMFactory.get_llm_interface(llm_provider="openai")
-            elif provider_overridden:
-                # Provider changed at runtime — build a fresh interface, do not use the cached one.
-                # resolve_effective_params handles rerouting if the override provider has no key.
+            if image_paths or overridden:
+                # Images go to OpenAI; a task-level provider or tier is resolved afresh, never from
+                # the agent's cached interface. resolve_effective_params reroutes a provider without a key.
+                if image_paths:
+                    params["llm_provider"] = "openai"
                 resolved = LLMFactory.resolve_effective_params(**{
-                    k: v for k, v in params.items()
-                    if k in ("llm_provider", "engine", "temperature", "api_key", "model_tier")
+                    k: v for k, v in params.items() if k in ("llm_provider", "temperature", "model_tier")
                 })
-                params["llm_provider"] = resolved["llm_provider"]
-                params["engine"] = resolved["engine"]
+                params.update(llm_provider=resolved["llm_provider"], engine=resolved["engine"],
+                              reasoning_effort=resolved["reasoning_effort"])
                 llm_interface = LLMFactory.get_llm_interface(**resolved)
             else:
+                resolved = self.resolved_params(agent)
+                params.update(llm_provider=resolved["llm_provider"], engine=resolved["engine"],
+                              reasoning_effort=resolved["reasoning_effort"])
                 llm_interface = self.get_llm_interface(agent=agent)
-                # get_llm_interface may have changed agent.llm_params via provider
-                # fallback.  Sync the local params copy so the correct engine name
-                # reaches the actual API call (e.g. "gpt-5-mini" instead of
-                # "gemini-3-flash-preview" when Gemini key is missing).
-                if isinstance(agent.llm_params, dict):
-                    params["llm_provider"] = agent.llm_params.get("llm_provider", params.get("llm_provider"))
-                    params["engine"] = agent.llm_params.get("engine", params.get("engine"))
 
             print_system, print_user = self.resolve_prompt_debug_flags(agent=agent)
             if print_system or print_user:

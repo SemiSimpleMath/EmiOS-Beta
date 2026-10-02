@@ -40,7 +40,7 @@ class _AgentRegistryStub:
                 },
                 "system_context_items": [],
                 "user_context_items": ["tool_description", "tool_args"],
-                "llm_params": {"llm_provider": "openai", "engine": "gpt-5-mini", "temperature": 1},
+                "llm_params": {"llm_provider": "openai", "model_tier": "mini", "temperature": 1},
             }
         return {}
 

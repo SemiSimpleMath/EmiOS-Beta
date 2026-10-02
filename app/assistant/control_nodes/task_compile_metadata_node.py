@@ -78,11 +78,11 @@ class TaskCompileMetadataNode(ControlNode):
         if not isinstance(raw, dict):
             raise TypeError(f"task_llm_params must be an object when provided, got {type(raw).__name__}.")
         out: dict[str, object] = {}
-        engine = raw.get("engine")
-        if engine is not None:
-            if not isinstance(engine, str) or not engine.strip():
-                raise ValueError("task_llm_params.engine must be a non-empty string when provided.")
-            out["engine"] = engine.strip()
+        model_tier = raw.get("model_tier")
+        if model_tier is not None:
+            if not isinstance(model_tier, str) or not model_tier.strip():
+                raise ValueError("task_llm_params.model_tier must be a non-empty string when provided.")
+            out["model_tier"] = model_tier.strip()
         temperature = raw.get("temperature")
         if temperature is not None:
             if not isinstance(temperature, (int, float)):

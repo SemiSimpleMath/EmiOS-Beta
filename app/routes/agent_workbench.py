@@ -25,6 +25,7 @@ agent_workbench_bp = Blueprint("agent_workbench", __name__)
 
 # The workbench can RUN agents — local-developer-only (reject non-loopback / tunneled requests).
 from app.routes._security import reject_if_not_local
+from app.services.llm_factory import resolve_tier
 agent_workbench_bp.before_request(reject_if_not_local)
 
 
@@ -49,7 +50,7 @@ def _list_agents() -> List[Dict[str, Any]]:
         agents.append({
             "name": name,
             "class_name": cfg.get("class_name", "Agent"),
-            "engine": llm_params.get("engine", "") if isinstance(llm_params, dict) else "",
+            "engine": resolve_tier(llm_params["llm_provider"], llm_params["model_tier"])[0] if llm_params else "",
             "provider": llm_params.get("llm_provider", "") if isinstance(llm_params, dict) else "",
             "user_context_items": user_ctx if isinstance(user_ctx, list) else [],
             "system_context_items": system_ctx if isinstance(system_ctx, list) else [],

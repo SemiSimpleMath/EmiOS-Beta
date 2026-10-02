@@ -3,6 +3,7 @@ from pathlib import Path
 import yaml
 from jinja2 import meta as jinja_meta, nodes as jinja_nodes
 from app.assistant.agent_registry.agent_registry import AgentRegistry
+from app.services.llm_factory import resolve_tier
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -319,12 +320,13 @@ def _check_llm_params_contract(registry: AgentRegistry):
     Rules:
     - Legacy top-level keys (`model`, `engine`, `temperature`, `timeout`) are forbidden.
     - If `llm_params` exists, it must be a dict.
-    - `llm_params.model` is forbidden (use `llm_params.engine`).
-    - If either `llm_provider` or `engine` is present in llm_params, both are required.
+    - `llm_params.model` and `llm_params.engine` are forbidden: the model comes from the tier.
+    - A non-empty `llm_params` names `llm_provider` and a `model_tier` defined in
+      configs/model_tiers.yaml with a model for that provider. An empty one (`{}`) is for agents
+      that make no model call (the Delegator).
     """
     legacy_top_level_keys = {"model", "engine", "temperature", "timeout", "llm_provider"}
     violations: list[str] = []
-    advisories: list[str] = []
 
     for agent_name, config in (registry.configs or {}).items():
         if not isinstance(config, dict):
@@ -350,29 +352,26 @@ def _check_llm_params_contract(registry: AgentRegistry):
                 f"{agent_name}: 'llm_params' must be a dict, got {type(llm_params).__name__}"
             )
             continue
+        if not llm_params:
+            continue
 
-        if "model" in llm_params:
-            violations.append(
-                f"{agent_name}: 'llm_params.model' is not supported; use 'llm_params.engine'"
-            )
-
-        has_provider = bool(llm_params.get("llm_provider"))
-        has_engine = bool(llm_params.get("engine"))
-        if has_provider != has_engine:
-            violations.append(
-                f"{agent_name}: llm_params must define both 'llm_provider' and 'engine' together"
-            )
-
-        engine = llm_params.get("engine")
-        if isinstance(engine, str) and engine.strip().lower().startswith("gpt-5"):
-            if "temperature" in llm_params:
-                advisories.append(
-                    f"{agent_name}: GPT-5 model '{engine}' should omit llm_params.temperature"
+        for key in ("model", "engine"):
+            if key in llm_params:
+                violations.append(
+                    f"{agent_name}: 'llm_params.{key}' is not supported; the model comes from "
+                    f"'llm_params.model_tier' (configs/model_tiers.yaml)"
                 )
+
+        provider = llm_params.get("llm_provider")
+        model_tier = llm_params.get("model_tier")
+        if not provider or not model_tier:
+            violations.append(f"{agent_name}: llm_params must define both 'llm_provider' and 'model_tier'")
+            continue
+        try:
+            resolve_tier(str(provider).lower(), model_tier)
+        except ValueError as e:
+            violations.append(f"{agent_name}: {e}")
 
     if violations:
         joined = "\n - ".join(violations)
         raise RuntimeError(f"❌ LLM params contract violations:\n - {joined}")
-    if advisories:
-        for item in advisories:
-            logger.warning(item)

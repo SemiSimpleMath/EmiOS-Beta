@@ -290,10 +290,11 @@ class OpenAIModelCapabilityNormalizer:
     Normalize model-family behavior in one place.
     """
 
-    def __init__(self, model_name: str):
+    def __init__(self, model_name: str, effort: Optional[str] = None):
         if not isinstance(model_name, str) or not model_name.strip():
             raise ValueError("model_name must be a non-empty string")
         self.model_name = model_name.strip()
+        self.effort = effort
 
     @property
     def is_reasoning_model(self) -> bool:
@@ -309,7 +310,10 @@ class OpenAIModelCapabilityNormalizer:
         if not self.is_reasoning_model and temperature is not None:
             kwargs["temperature"] = temperature
         if self.is_reasoning_model:
-            kwargs["reasoning"] = {"effort": "medium"}
+            # The effort is the tier's (configs/model_tiers.yaml); there is no default.
+            if not self.effort:
+                raise ValueError(f"reasoning model {self.model_name} called without a reasoning effort")
+            kwargs["reasoning"] = {"effort": self.effort}
         return kwargs
 
 
@@ -761,7 +765,7 @@ class OpenAILLM(BaseLLMProvider):
             from pydantic import BaseModel as _BaseModel  # local import for clarity
             if not isinstance(model, str) or not model.strip():
                 raise ValueError("model must be a non-empty string")
-            caps = OpenAIModelCapabilityNormalizer(model_name=model)
+            caps = OpenAIModelCapabilityNormalizer(model_name=model, effort=send_params.get("reasoning_effort"))
 
             if isinstance(response_format, type) and issubclass(response_format, _BaseModel):
                 if pydantic_mode == "prompt_json_validate":

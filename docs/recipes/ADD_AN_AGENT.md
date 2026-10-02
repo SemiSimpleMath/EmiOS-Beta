@@ -39,10 +39,10 @@ action_required: true                # if true, output MUST carry a valid action
 
 llm_params:
   llm_provider: openai               # openai | gemini | anthropic
-  engine: gpt-5.1                    # exact model id (NOT a top-level `model:` key)
-  model_tier: smart                  # tier hint (nano | mini | smart | strong) — informational
+  model_tier: mini                   # nano | mini | smart — the model AND reasoning effort, from
+                                     # configs/model_tiers.yaml. There is no engine/model key.
   # temperature: 0.1                 # OPTIONAL and lives ONLY here, never top-level.
-  #                                  # GPT-5 family ignores temperature — omit it for those models.
+  #                                  # Reasoning models (gpt-5, gpt-6) ignore temperature.
 
 # --- Tool / node policy (a permission CEILING, not a grant) ---
 allowed_tools: []                    # list of tool names, or "all"
@@ -64,7 +64,7 @@ skills: []                           # static skills always loaded (each gated b
 accept_auto_skills: true             # allow the SkillInjector to auto-inject skills by trigger
 ```
 
-There is **no** top-level `model:` or `temperature:` — model selection lives entirely under `llm_params` (`llm_provider` + `engine` + `model_tier`). There is also no `allowed_resources` field; resource access is governed by scope policy plus the `resource_*` context keys.
+There is **no** top-level `model:` or `temperature:` — model selection lives entirely under `llm_params` (`llm_provider` + `model_tier`). Use `mini` unless the agent's mistakes are written down and believed by everything after it (KG writes and merges, belief merges, dayflow judgments: `smart`), or it only routes or picks from a list (`nano`, no reasoning). There is also no `allowed_resources` field; resource access is governed by scope policy plus the `resource_*` context keys.
 
 For more options (entity-card injection, keyword-resource injection, `append_fields`, `global_output_keys`, `events`, `prompt_debug`, …) see [01_AGENTS.md](../architecture/01_AGENTS.md#configyaml) and the rich configs in `app/assistant/agents/master_room/chat_gate/config.yaml` (a `gemini` chat agent, `action_required: false`) and `app/assistant/agents/emi_team/planner/config.yaml` (an `openai` `Planner` with `skills:` + `accept_auto_skills: false`).
 

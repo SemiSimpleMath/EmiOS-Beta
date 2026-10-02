@@ -111,10 +111,6 @@ def run_reasoning_agent(
             scope_context=scope,
             data={
                 "visible_tools": ["ask_kg"],
-                "task_llm_params": {
-                    "llm_provider": "openai",
-                    "engine": "gpt-5.6-luna",
-                },
             },
         )
     )

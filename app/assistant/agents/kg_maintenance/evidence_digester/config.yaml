@@ -3,8 +3,7 @@ class_name: Agent
 action_required: false
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5.6-luna"
-  model_tier: "fast"
+  model_tier: "mini"
 
 # Pure writing: dated evidence rows in, one consolidated chronicle out.
 # No tools.

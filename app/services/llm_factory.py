@@ -20,57 +20,22 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 @lru_cache(maxsize=1)
-def _load_tier_config() -> dict:
+def load_tiers() -> dict:
+    """configs/model_tiers.yaml `tiers`, from the code tree. The only place a model is chosen."""
     config_path = Path(__file__).resolve().parents[2] / "configs" / "model_tiers.yaml"
-    if not config_path.exists():
-        logger.warning("model_tiers.yaml not found at %s — tier resolution disabled", config_path)
-        return {}
     with open(config_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+        return (yaml.safe_load(f) or {})["tiers"]
 
 
-def resolve_engine(provider: str, engine: str, model_tier: str | None) -> str:
-    """Return the concrete model name to use.
-
-    Priority:
-    1. model_tier present → look up model for (tier, provider) in model_tiers.yaml
-    2. engine present     → infer tier from engine_to_tier table, then resolve
-                            to provider's equivalent (handles cross-provider remap)
-    3. fallback           → return engine as-is
-    """
-    cfg = _load_tier_config()
-    if not cfg:
-        return engine
-
-    tiers = cfg.get("tiers", {})
-    engine_to_tier = cfg.get("engine_to_tier", {})
-
-    tier = model_tier
-    if not tier and engine:
-        tier = engine_to_tier.get(engine)
-
-    if not tier:
-        return engine
-
-    tier_cfg = tiers.get(tier)
-    if not tier_cfg:
-        logger.warning("resolve_engine: unknown tier '%s', using engine '%s' as-is", tier, engine)
-        return engine
-
-    resolved = tier_cfg.get(provider)
-    if not resolved:
-        logger.warning(
-            "resolve_engine: no model for tier='%s' provider='%s', using engine '%s' as-is",
-            tier, provider, engine,
-        )
-        return engine
-
-    if resolved != engine:
-        logger.debug(
-            "resolve_engine: tier='%s' provider='%s' -> %s (was %s)",
-            tier, provider, resolved, engine or "<none>",
-        )
-    return resolved
+def resolve_tier(provider: str, model_tier: str) -> tuple[str, str]:
+    """The (model, reasoning effort) a tier runs on *provider*. Raises on an unknown tier or provider."""
+    tier = load_tiers().get(model_tier)
+    if tier is None:
+        raise ValueError(f"unknown model_tier {model_tier!r}; defined: {sorted(load_tiers())}")
+    model = tier.get(provider)
+    if not model:
+        raise ValueError(f"model_tier {model_tier!r} names no model for provider {provider!r}")
+    return model, tier["effort"]
 
 
 class LLMFactory:
@@ -79,11 +44,10 @@ class LLMFactory:
 
     @staticmethod
     def resolve_effective_params(**kwargs) -> dict:
-        """Resolve the effective provider and engine after rerouting and tier mapping.
+        """Resolve the effective provider after rerouting, and the tier's model and effort on it.
 
-        Returns a copy of kwargs with llm_provider and engine set to what the
-        actual API call will use.  Callers can use this to sync their params dict
-        before calling structured_output().
+        Returns a copy of kwargs with llm_provider, engine and reasoning_effort set to what the
+        actual API call will use. Requires model_tier.
         """
         kwargs = dict(kwargs)
         requested_provider = kwargs.get('llm_provider', os.environ.get("DEFAULT_LLM_PROVIDER", "openai")).lower()
@@ -98,20 +62,8 @@ class LLMFactory:
             and _key_is_present(default_provider)
         ):
             effective_provider = default_provider
-            kwargs['llm_provider'] = effective_provider
-
-        # Model tier resolution
-        model_tier = kwargs.pop('model_tier', None)
-        raw_engine = kwargs.get('engine', '')
-
-        if effective_provider != requested_provider:
-            env_model = os.environ.get("DEFAULT_LLM_MODEL", "").strip()
-            if env_model:
-                kwargs['engine'] = env_model
-                raw_engine = env_model
-
-        resolved = resolve_engine(effective_provider, raw_engine, model_tier)
-        kwargs['engine'] = resolved
+        kwargs['llm_provider'] = effective_provider
+        kwargs['engine'], kwargs['reasoning_effort'] = resolve_tier(effective_provider, kwargs['model_tier'])
         return kwargs
 
     @staticmethod

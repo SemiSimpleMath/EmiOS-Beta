@@ -160,7 +160,7 @@ name: my_domain::planner
 class_name: Planner
 
 # Copy llm_params from the current source agent, then select the intended
-# provider/engine pair. Keep model names out of this recipe.
+# provider and model_tier. Keep model names out of this recipe.
 
 allowed_tools:
   - my_typed_tool

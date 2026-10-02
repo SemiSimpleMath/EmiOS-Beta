@@ -2,7 +2,6 @@ name: emi_reminder_handler
 class_name: EmiReminderHandler
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5-mini"
   model_tier: "mini"
 entity_scan_keys: [incoming_message, task, information, reminder_data]
 

@@ -2,7 +2,6 @@ name: bash_team::delegator
 class_name: Delegator
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5-mini"
   model_tier: "mini"
 
 # No tools required for Delegator
