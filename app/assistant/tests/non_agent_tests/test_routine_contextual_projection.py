@@ -106,10 +106,15 @@ def _writer_for(calls):
         slots = [line.split(']')[0].split('[slot ')[1] for line in agent_input['daily_context'].splitlines()
                  if '[slot ' in line]
         return {'slots': [{'slot': s, 'lines': ([{'text': 'Pack the reading glasses [belief:lesson.glasses]',
-                                                  'belief_keys': ['lesson.glasses']}] if 'Lesson' in agent_input['daily_context']
+                                                  'belief_keys': ['lesson.glasses'], 'concern_ids': []}] if 'Lesson' in agent_input['daily_context']
                                                 and s == slots[-1] else [])} for s in slots],
-                'flags': [{'text': 'Sleep debt this week', 'belief_keys': []}], 'change_summary': 'changed'}
+                'flags': [{'text': 'Sleep debt this week', 'belief_keys': [], 'concern_ids': []}], 'change_summary': 'changed'}
     return write
+
+
+CONCERNS = [{'concern_id': 'c-glasses', 'title': 'Reading glasses keep getting forgotten', 'status': 'active',
+             'done_when': '', 'what': 'Glasses are left behind before lessons.', 'readiness': 'hold',
+             'hold_until': '2026-01-05 09:00', 'work_in_progress': ['Order a spare pair']}]
 
 
 @pytest.fixture
@@ -120,6 +125,7 @@ def day_inputs(monkeypatch):
     monkeypatch.setattr(drs, '_read_daily_context', lambda: json.loads(json.dumps(context)))
     monkeypatch.setattr(drs, '_read_belief_entries', entries)
     monkeypatch.setattr(drs, '_format_weekly_insights', lambda: '')
+    monkeypatch.setattr(drs, '_open_concerns', lambda: CONCERNS)
     monkeypatch.setattr(loader, 'load_scope_for_source', lambda **k: None)
     monkeypatch.setattr(drs, '_select_beliefs', lambda *a, **k: (calls.append('select') or entries(), 'relevant', []))
     monkeypatch.setattr(drs, '_write', _writer_for(calls))
@@ -148,10 +154,10 @@ def test_the_plan_is_stored_as_data_and_rendered_fresh(connect, day_inputs, monk
                                      'end_utc': (start + timedelta(hours=1)).astimezone(timezone.utc).isoformat()}]
     monkeypatch.setattr(drs, '_write', lambda agent_input: {
         'slots': [{'slot': s, 'lines': [{'text': 'Pack the reading glasses [belief:lesson.glasses]',
-                                         'belief_keys': ['lesson.glasses']}] if s.endswith('T16:00') else []}
+                                         'belief_keys': ['lesson.glasses'], 'concern_ids': []}] if s.endswith('T16:00') else []}
                   for s in [l.split(']')[0].split('[slot ')[1] for l in agent_input['daily_context'].splitlines()
                             if '[slot ' in l]],
-        'flags': [{'text': 'Sleep debt this week', 'belief_keys': []}], 'change_summary': 'Initial generation'})
+        'flags': [{'text': 'Sleep debt this week', 'belief_keys': [], 'concern_ids': []}], 'change_summary': 'Initial generation'})
     now = datetime(2026, 1, 1, 13, 30, tzinfo=tz).astimezone(timezone.utc)
     drs.run_day_pass(now, connect=connect)
     plan = day_plan.load_plan('2026-01-01', connect=connect)
@@ -177,7 +183,8 @@ def test_no_plan_for_today_says_so(connect):
 @pytest.mark.parametrize('change,error', [
     (lambda d: d['slots'].pop(), 'are not the grid'),
     (lambda d: d['slots'].append({'slot': '2099-01-01T00:00', 'lines': []}), 'are not the grid'),
-    (lambda d: d['flags'].append({'text': 'x', 'belief_keys': ['invented.key']}), 'was not given'),
+    (lambda d: d['flags'].append({'text': 'x', 'belief_keys': ['invented.key'], 'concern_ids': []}), 'was not given'),
+    (lambda d: d['flags'].append({'text': 'x', 'belief_keys': [], 'concern_ids': ['c-invented']}), 'concerns it was not given'),
 ])
 def test_a_writer_answer_outside_the_grid_or_the_beliefs_is_refused(connect, day_inputs, monkeypatch, change, error):
     write = _writer_for([])
@@ -200,3 +207,26 @@ def test_slot_keys_stay_unique_across_midnight():
     labels = [s['label'] for s in slots]
     keys = [s['slot'] for s in slots]
     assert labels.count('11:00 PM') == 2 and len(set(keys)) == len(keys)
+
+
+def test_the_writer_sees_the_open_concerns_and_points_to_them(connect, day_inputs, monkeypatch):
+    seen = []
+    write = _writer_for([])
+    def pointing(agent_input):
+        seen.append(agent_input['concerns_block'])
+        data = write(agent_input)
+        data['slots'][0]['lines'] = [{'text': 'Glasses: held by its concern [concern:c-glasses]',
+                                      'belief_keys': [], 'concern_ids': ['c-glasses']}]
+        return data
+    monkeypatch.setattr(drs, '_write', pointing)
+    now = datetime(2026, 1, 1, 18, tzinfo=timezone.utc)
+    drs.run_day_pass(now, connect=connect)
+    assert '[concern:c-glasses] Reading glasses keep getting forgotten (active)' in seen[0]
+    assert 'hold until 2026-01-05 09:00' in seen[0] and 'Order a spare pair' in seen[0]
+    first = day_plan.load_plan('2026-01-01', connect=connect)['slots'][0]
+    assert first['lines'][0]['concern_ids'] == ['c-glasses']
+
+
+def test_a_concern_change_invalidates_the_plan():
+    make = lambda concerns: drs._routine_inputs_fingerprint('day', [], 'beliefs', concerns=concerns)
+    assert make(CONCERNS) != make([{**CONCERNS[0], 'readiness': 'act_now'}])

@@ -5,6 +5,8 @@ class Line(BaseModel):
     text: str = Field(description="One guidance entry, citing each belief it rests on as [belief:belief_key].")
     belief_keys: list[str] = Field(
         description="The belief_key of every belief this entry rests on, exactly as supplied; empty when none.")
+    concern_ids: list[str] = Field(
+        description="The concern_id of each open concern this entry points to, exactly as supplied; empty when none.")
 
 
 class Slot(BaseModel):

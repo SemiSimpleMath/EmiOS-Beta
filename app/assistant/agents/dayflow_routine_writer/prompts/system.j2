@@ -61,6 +61,17 @@ Do not ask again solely because preparation is unconfirmed. The orchestrator mus
 its latest task/finalizer/reply history before acting; this cached projection is guidance,
 not an execution ledger. Missing completion evidence is not a reason to invent completion.
 
+## Open concerns own their matters
+
+The open concerns are the matters the brain is tracking, each with its own state: what it is, what
+settles it, the brain's decision (act now, hold until a date, no action) and any work of its own in
+progress. When a slot's schedule item or a piece of guidance is about a matter an open concern covers,
+that concern owns it: write one line that points to the concern and says what its state means for this
+hour (its own work handles it, it is held until a date, nothing is due today), cite it as
+[concern:concern_id] and list it in `concern_ids`. The concern's own work is where its matter is acted on,
+so the plan carries the pointer, not a reminder or action of its own. When a schedule item disagrees with
+its concern (a different day or time), say so in that line, for the brain to resolve.
+
 ## Whole-day beliefs
 
 Beliefs that apply across the whole day (not tied to one time) still belong in the overlay when applicable — put them under the hour slot where they first matter, or in `flags` if cross-cutting. Include durable day-shaping facts (workday vs weekend, a holiday/vacation, a known constraint) even when no specific event triggers them.
@@ -69,7 +80,7 @@ Beliefs that apply across the whole day (not tied to one time) still belong in t
 
 - `slots`: one entry per scaffold slot, by its key, in scaffold order. Each holds the `lines` for that
   hour: one entry per piece of guidance (e.g. "Stop active cooling: use the configured cooling-stop
-  action [belief:...]"), with the keys of the beliefs it rests on. The schedule items are shown with the
+  action [belief:...]"), with the keys of the beliefs it rests on and the ids of the concerns it points to. The schedule items are shown with the
   slot when the plan is displayed; do not restate them.
 - `flags`: cross-cutting and whole-day items: sleep debt, health, pending decisions, open questions.
 

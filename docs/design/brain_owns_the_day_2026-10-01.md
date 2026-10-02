@@ -148,8 +148,11 @@ Each step works on its own and keeps the system running.
    standard function"): `subconscious/day_pass.py` runs as the last stage of every brain run, with a
    10-minute heartbeat on the wake; the plan is stored per slot (`subconscious/day_plan.py`) and
    `resource_dayflow_routine` is rendered from it on every read; the writer returns guidance per slot by
-   the slot's own key. The markdown file, the window re-trim and its regex are gone. 1b (concerns in
-   view) is next.
+   the slot's own key. The markdown file, the window re-trim and its regex are gone.
+   **1b DONE 2026-10-02**: the writer reads the open concerns (what each is, what settles it, the
+   brain's decision, its own work in progress); a matter a concern owns appears as a pointer to it
+   (`[concern:<id>]`, `concern_ids` on the line), never as a reminder or action of its own. Live replay:
+   the briefing no longer carries its own "schedule the annual physical" prompt while that concern holds.
 2. **Owners for every item.** Day items pass through the concern door; standing concerns are introduced;
    the routine file shows each item's owner. Verify: the Oct 1 flea case yields one owner, and the date
    conflict reaches the owner as a question.

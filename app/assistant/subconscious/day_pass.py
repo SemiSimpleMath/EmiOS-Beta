@@ -13,7 +13,8 @@ weekly insights) and the last attempt is at least an hour old.
 
 Inputs: resources/dayflow_pipeline_outputs/resource_daily_context_generator_output.json and
 resource_expected_calendar.json (the dayflow pipeline still produces them),
-resources/kg_derived/resource_user_beliefs.json, the weekly insights.
+resources/kg_derived/resource_user_beliefs.json, the weekly insights, and the open concerns (step 1b): a
+matter an open concern owns appears in the plan as a pointer to that concern, never as its own reminder.
 """
 from __future__ import annotations
 
@@ -182,6 +183,30 @@ def _select_beliefs(entries: list[dict], daily_context: str, scope, *,
     return selected, "\n".join(reasons), qualifiers
 
 
+def _open_concerns() -> List[Dict[str, Any]]:
+    """The concerns the brain is tracking (active and addressing), as the writer reads them: what each
+    is, what settles it, the brief's readiness, and the work attached to it that is still in progress."""
+    from app.assistant.subconscious.concern_store import load_register
+    register = load_register()
+    out = []
+    for bucket in ("active", "addressing"):
+        for c in register.get(bucket) or []:
+            brief = c.get("brief") or {}
+            readiness = brief.get("readiness") or {}
+            out.append({"concern_id": c["concern_id"], "title": c.get("title") or "", "status": bucket,
+                        "done_when": c.get("done_when") or "", "what": brief.get("what") or "",
+                        "readiness": readiness.get("decision") or "", "hold_until": readiness.get("hold_until") or "",
+                        "work_in_progress": [w.get("objective") or w.get("title") or w_id
+                                             for w_id, w in (c.get("attached_work") or {}).items()
+                                             if w.get("status") == "active"]})
+    return out
+
+
+def _render_concern_block(concerns: List[Dict[str, Any]]) -> str:
+    from app.assistant.agent_runtime.services.prompt_builder import _jinja_env
+    return _jinja_env.get_template("dayflow_routine_writer/prompts/concerns.j2").render(concerns=concerns)
+
+
 def _format_weekly_insights() -> str:
     data = _read_json(_WEEKLY_INSIGHTS_PATH)
     if data is None:
@@ -192,13 +217,14 @@ def _format_weekly_insights() -> str:
 
 def _routine_inputs_fingerprint(boundary_date_local: str, expected_schedule: list, beliefs_block: str,
                                 *, daily_context: Optional[dict] = None, weekly_insights: str = "",
-                                belief_catalog: Optional[list] = None) -> str:
+                                belief_catalog: Optional[list] = None, concerns: Optional[list] = None) -> str:
     """The exact decision inputs, excluding wall-clock/scaffold rendering and generated timestamps."""
     context = daily_context or {}
-    payload = {"projection_version": 2, "day": boundary_date_local,
+    payload = {"projection_version": 3, "day": boundary_date_local,
                "schedule": expected_schedule, "beliefs": beliefs_block, "belief_catalog": belief_catalog,
                "day_theme": context.get("day_theme"), "current_status": context.get("current_status"),
-               "milestones": context.get("milestones"), "weekly_insights": weekly_insights}
+               "milestones": context.get("milestones"), "weekly_insights": weekly_insights,
+               "concerns": concerns}
     return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
@@ -216,9 +242,10 @@ def _write(agent_input: Dict[str, Any]) -> Dict[str, Any]:
     return data
 
 
-def _validated(data: Dict[str, Any], slots: List[dict], belief_keys: set) -> Tuple[List[dict], List[dict]]:
+def _validated(data: Dict[str, Any], slots: List[dict], belief_keys: set,
+               concern_ids: set = frozenset()) -> Tuple[List[dict], List[dict]]:
     """The writer's slots in grid order with their calendar items, and its flags. Every grid slot exactly
-    once and only grid slots; every cited belief key one the writer was given."""
+    once and only grid slots; every cited belief key and concern id one the writer was given."""
     returned = [s["slot"] for s in data.get("slots") or []]
     grid = [s["slot"] for s in slots]
     if sorted(returned) != sorted(grid):
@@ -229,6 +256,10 @@ def _validated(data: Dict[str, Any], slots: List[dict], belief_keys: set) -> Tup
     unknown = sorted(cited - belief_keys)
     if unknown:
         raise ValueError(f"routine writer cited belief keys it was not given: {unknown}")
+    pointed = {c for lines in [*lines_by_slot.values(), flags] for line in lines for c in line["concern_ids"]}
+    unknown = sorted(pointed - set(concern_ids))
+    if unknown:
+        raise ValueError(f"routine writer pointed to concerns it was not given: {unknown}")
     return ([{"slot": s["slot"], "hour_local_iso": s["hour_local_iso"], "items": s["items"],
               "lines": lines_by_slot[s["slot"]]} for s in slots], flags)
 
@@ -249,8 +280,10 @@ def run_day_pass(now_utc: Optional[datetime] = None, *, connect=None) -> Dict[st
     entries = _read_belief_entries()
     beliefs_block = _render_belief_block(entries)
     weekly = _format_weekly_insights()
+    concerns = _open_concerns()
     fingerprint = _routine_inputs_fingerprint(day, ctx_data.get("expected_schedule") or [], beliefs_block,
-                                              daily_context=ctx_data, weekly_insights=weekly, belief_catalog=entries)
+                                              daily_context=ctx_data, weekly_insights=weekly, belief_catalog=entries,
+                                              concerns=concerns)
     plan = day_plan.load_plan(day, connect=connect)
     if plan is not None:
         if plan["inputs_fingerprint"] == fingerprint:
@@ -270,8 +303,9 @@ def run_day_pass(now_utc: Optional[datetime] = None, *, connect=None) -> Dict[st
         "date_time": now_local.strftime("%Y-%m-%d %H:%M"), "day_of_week": now_local.strftime("%A"),
         "boundary_date_local": day, "daily_context": daily_context_block,
         "beliefs_block": _render_belief_block(selected), "related_beliefs_block": _render_belief_block(qualifiers),
-        "weekly_insights_block": weekly})
-    plan_slots, flags = _validated(data, slots, {e["belief_key"] for e in [*selected, *qualifiers]})
+        "weekly_insights_block": weekly, "concerns_block": _render_concern_block(concerns)})
+    plan_slots, flags = _validated(data, slots, {e["belief_key"] for e in [*selected, *qualifiers]},
+                                   {c["concern_id"] for c in concerns})
     day_plan.save_plan({
         "day": day, "generated_at_utc": now_utc.isoformat(), "inputs_fingerprint": fingerprint,
         "selected_belief_keys": [e["belief_key"] for e in selected],
