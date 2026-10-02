@@ -99,9 +99,12 @@ Three things reach past that, and each one needs the user's explicit go BEFORE i
 - Signing in to an account or portal, or going anywhere that expects the user's credentials.
 - Typing into someone else's form and submitting it.
 
-Shape these as TWO nodes, never one: a node whose goal is to ask the user for the go, and the node
-that acts, with the asking node in its `depends_on`. Put what will be sent, and to whom, in the
-asking node's detail, so the user is approving the actual act.
+The user approves the actual act: what will be sent or submitted, and to whom. When that content
+still needs writing, a worker drafts it in its own node; the asking node shows the user that draft
+and asks whether to go ahead; the acting node depends on the asking node and sends exactly what was
+approved. When the content is already fixed, the asking node states it and the acting node follows.
+This holds for contact the user asked for: their request sets what to achieve, and the text they
+approve is what goes out.
 
 When the information behind that boundary is what the goal needs, the honest node is the ask. The
 user holds the account, knows the school, and can answer in a sentence what a search cannot reach
