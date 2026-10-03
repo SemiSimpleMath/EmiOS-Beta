@@ -863,24 +863,3 @@ def get_responded_tickets_categorized(since_utc: datetime, ticket_type: Optional
         logger.debug("Could not get responded tickets exception details", exc_info=True)
         return {"accepted": [], "acknowledged": [], "declined": [], "snoozed": []}
 
-
-def flatten_responded_tickets(categorized: Dict[str, List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
-    """Newest-first flat list across all response categories.
-
-    The category survives only as a per-row ``action_label`` — the user's
-    verbatim comment is the primary signal for consumers. Bucketing responses
-    by button hid supersession: the user's 12:19 "monthlies are done on the
-    1st, always" (an acknowledge) never outranked — or even reached — agents
-    that keyed on the 11:01 accept (the 2026-07-27 timesheet double-reminder).
-    """
-    rows: List[Dict[str, Any]] = []
-    for category, items in (categorized or {}).items():
-        for t in items or []:
-            if not isinstance(t, dict):
-                continue
-            row = dict(t)
-            row["action_label"] = str(category).upper()
-            rows.append(row)
-    rows.sort(key=lambda r: str(r.get("responded_at_iso") or ""), reverse=True)
-    return rows
-

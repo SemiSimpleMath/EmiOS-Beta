@@ -6,11 +6,13 @@ accepted/declined/snoozed replies (the user's acknowledge-with-correction
 never reached it), and the RECENTLY DROPPED section showed a bare title with
 no reason. These tests pin the fixes:
 
-- flatten_responded_tickets: every category present, newest first;
 - _abandoned_line: dropped entries carry when + the user's last word + the
   goal's final note;
-- the evaluator template renders the flat list (acknowledged included) and
-  the annotated drop reason;
+- the evaluator template renders the annotated drop reason;
+- the evaluator gets no ticket-reply list (2026-10-02): a reply is its work
+  node's result, read in that work object's record. A 12-hour list labelled
+  "user directives" made it re-create finished work every pass (one handled
+  "please send it" became five more Seija email work objects);
 - the editorializing rubrics ("supplementary", "can nudge again") are gone
   from every consumer.
 """
@@ -26,7 +28,6 @@ from types import SimpleNamespace
 import app.assistant.tests.test_setup  # noqa: F401
 
 from app.assistant.control_nodes.strategic_planner_wo_prep_node import _abandoned_line
-from app.assistant.pipelines.dayflow.utils.context_sources import flatten_responded_tickets
 from app.assistant.utils.path_utils import get_repo_root
 
 
@@ -58,20 +59,6 @@ CATEGORIZED = {
     "declined": [],
     "snoozed": [],
 }
-
-
-def test_flatten_includes_acknowledged_newest_first():
-    flat = flatten_responded_tickets(CATEGORIZED)
-    assert len(flat) == 2
-    # The 12:19 correction outranks the 11:01 acceptance.
-    assert flat[0]["user_comment"] == "Those are done first of next month always."
-    assert flat[0]["action_label"] == "ACKNOWLEDGED"
-    assert flat[1]["action_label"] == "ACCEPTED"
-
-
-def test_flatten_handles_empty_and_malformed():
-    assert flatten_responded_tickets({}) == []
-    assert flatten_responded_tickets({"accepted": [None, "junk"]}) == []
 
 
 # ---------------------------------------------------------------------------
@@ -135,15 +122,10 @@ def _render_evaluator_template(**ctx):
     return _jinja_env.from_string(src).render(**defaults)
 
 
-def test_evaluator_prompt_shows_acknowledged_correction_first():
-    out = _render_evaluator_template(
-        recent_ticket_replies=flatten_responded_tickets(CATEGORIZED),
-    )
-    assert "Those are done first of next month always." in out
-    assert "ACKNOWLEDGED" in out
-    # Newest first: the correction renders before the stale acceptance.
-    assert out.index("Those are done first of next month") < out.index("by noon")
-    assert "supersedes" in out
+def test_evaluator_gets_no_ticket_reply_list():
+    root = get_repo_root() / "app" / "assistant" / "agents" / "dayflow_orchestrator" / "strategic_planner_wo"
+    assert "recent_ticket_replies" not in (root / "config.yaml").read_text(encoding="utf-8")
+    assert "TICKET REPLIES" not in (root / "prompts" / "user.j2").read_text(encoding="utf-8")
 
 
 def test_evaluator_prompt_shows_drop_reason():

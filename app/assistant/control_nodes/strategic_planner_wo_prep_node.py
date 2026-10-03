@@ -46,31 +46,12 @@ def _load_active_tickets():
     return result
 
 
-def _load_responded_tickets(since_utc):
-    """Recent dayflow ticket responses, categorized by action."""
-    from app.assistant.pipelines.dayflow.utils.context_sources import get_responded_tickets_categorized
-    return get_responded_tickets_categorized(since_utc=since_utc, ticket_type="dayflow_orchestrator")
-
-
 def _work_status_by_id() -> dict:
     """WorkObject id -> status, one summaries fetch. The id-chain resolvers below join
     against this instead of asking the evaluator to reconstruct links from wording."""
     from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
     return {s["id"]: str(s.get("status") or "unknown")
             for s in get_dayflow_work_store().list_work_objects()}
-
-
-def _annotate_work_refs(rows, status_by_id) -> None:
-    """Resolve each ticket-reply row's recorded work edge (ticket.trigger_context.work_node,
-    written at ticket creation) to its work object and current status. Rows without the
-    edge stay unannotated; an id that no longer resolves renders as unresolved — sink,
-    not drop."""
-    for row in rows:
-        ref = str(row.get("work_node") or "")
-        if "::" not in ref:
-            continue
-        work_id = ref.split("::", 1)[0]
-        row["work_ref"] = f"{work_id} — {status_by_id.get(work_id, 'unresolved')}"
 
 
 def _resolve_ticket_provenance(ticket_id: str, ticket_manager, status_by_id) -> str:
@@ -321,16 +302,12 @@ class StrategicPlannerWoPrepNode(ControlNode):
                 })
 
         self.blackboard.update_state_value("active_tickets", _load_active_tickets())
-        responded = _load_responded_tickets(now_utc - timedelta(hours=12))
-        # Categorized dict stays for the architect's context builder; the
-        # evaluator prompt renders the FLAT newest-first list so every reply —
-        # acknowledged ones included — is visible with the user's words primary.
-        from app.assistant.pipelines.dayflow.utils.context_sources import flatten_responded_tickets
-        self.blackboard.update_state_value("recent_responded_tickets", responded)
+        # No ticket replies here. A ticket is a work node's question and the reply is that node's
+        # result: the finalizer judges it, the owning work object's architect acts on it, and the
+        # steward reads it in that work object's record. A 12-hour list of replies labelled "user
+        # directives" made the steward re-create finished work every pass (2026-10-02: one handled
+        # "please send it" became five more Seija email work objects).
         status_by_id = _work_status_by_id()
-        reply_rows = flatten_responded_tickets(responded)
-        _annotate_work_refs(reply_rows, status_by_id)
-        self.blackboard.update_state_value("recent_ticket_replies", reply_rows)
         self.blackboard.update_state_value("recent_dispatch_results",
                                            _build_recent_dispatch_results(all_items, now_utc))
         self.blackboard.update_state_value("recent_action_selector_actions", action_log)

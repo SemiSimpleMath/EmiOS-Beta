@@ -4,8 +4,9 @@ before the prompt, never reconstructed from wording by the model.
 Edges recorded at write time: ticket.trigger_context.work_node (node_dispatch),
 schedule-entry source `ticket:<ticket_id>` (daily_context_tracker, verbatim copy).
 The prep node chases them — ticket -> work node -> work object -> status — and
-renders the resolved facts on the evaluator's TICKET REPLIES and TODAY'S SCHEDULE
-lines. Unresolvable ids render visibly unresolved (sink, not drop). The 2026-07-29
+renders the resolved facts on the evaluator's TODAY'S SCHEDULE lines (its ticket-reply
+list was removed 2026-10-02: replies are read in their work object's record).
+Unresolvable ids render visibly unresolved (sink, not drop). The 2026-07-29
 trash re-mint is the motivating incident: the tracker's echo of an accepted ticket
 read as a bare unowned ongoing activity and was re-minted as new work.
 """
@@ -15,10 +16,7 @@ from types import SimpleNamespace
 
 import app.assistant.tests.test_setup  # noqa: F401
 
-from app.assistant.control_nodes.strategic_planner_wo_prep_node import (
-    _annotate_work_refs,
-    _resolve_ticket_provenance,
-)
+from app.assistant.control_nodes.strategic_planner_wo_prep_node import _resolve_ticket_provenance
 from app.assistant.pipelines.dayflow.utils.context_sources import (
     _format_ticket_for_context,
 )
@@ -48,24 +46,6 @@ def _ticket(ticket_id="t1", work_node="work_a860eab761d8::trash_bins_reminder--a
         trigger_context={"work_node": work_node} if work_node else {},
         execution_result="",
     )
-
-
-class TestWorkRefAnnotation:
-
-    def test_reply_row_resolves_to_work_object_and_status(self):
-        rows = [{"work_node": "work_a860eab761d8::trash_bins_reminder--a860ea"}]
-        _annotate_work_refs(rows, _STATUS)
-        assert rows[0]["work_ref"] == "work_a860eab761d8 — done"
-
-    def test_unknown_work_id_renders_unresolved(self):
-        rows = [{"work_node": "work_gone::node--x"}]
-        _annotate_work_refs(rows, _STATUS)
-        assert rows[0]["work_ref"] == "work_gone — unresolved"
-
-    def test_row_without_edge_stays_unannotated(self):
-        rows = [{"work_node": ""}, {"title": "no field at all"}]
-        _annotate_work_refs(rows, _STATUS)
-        assert "work_ref" not in rows[0] and "work_ref" not in rows[1]
 
 
 class TestTicketProvenance:

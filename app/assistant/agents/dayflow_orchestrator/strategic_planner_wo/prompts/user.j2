@@ -36,15 +36,6 @@ Health: {{ health_status_summary }}
 ## ROUTINE (today's cadence — judge timing and appropriateness against this)
 {{ resource_dayflow_routine }}
 {%- endif %}
-{%- if recent_ticket_replies %}
-
-## TICKET REPLIES (user directives — newest first; a later reply supersedes an earlier one about the same topic)
-*The user's written words are the authoritative signal wherever present. The label is just the button they clicked: ACCEPTED = response recorded, not necessarily approval; ACKNOWLEDGED = received it — the written line carries the actual verdict (it may confirm, correct, defer, or decline); DECLINED = ABANDON the related work object; SNOOZED = revisit at the stated time.*
-{%- for t in recent_ticket_replies %}
-{% set response_details = t.get('response_details', {}) %}{% include 'shared/work/response_details.j2' %}
-- [{{ t.get("responded_at_local","") }}] {{ t.get("action_label","") }}: {{ t.get("title","") }}{% if t.get("work_ref") %} [{{ t.get("work_ref") }}]{% endif %}{% if t.get("user_comment") %} — user: "{{ t.get("user_comment") }}"{% endif %}{% if t.get("snooze_until_local") %} (eligible again {{ t.get("snooze_until_local") }}){% endif %}
-{%- endfor %}
-{%- endif %}
 {%- if active_tickets %}
 
 ## ACTIVE TICKETS (awaiting the user's response — don't duplicate)
