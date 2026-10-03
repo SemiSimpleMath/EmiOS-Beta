@@ -169,8 +169,8 @@ def build_hour_grid(
     now through ``end_utc`` (default: end of the local day). One slot per LOCAL
     hour, INCLUDING hours with no scheduled item ('open' slots); each item is
     anchored to the local hour it starts in; the slot holding ``now`` is flagged
-    ``is_now``. The writer FILLS slots — it never builds the grid or does clock
-    math. The ~1h look-back lets a just-missed automation still be caught up.
+    ``is_now``. The day pass files each placed belief into the slot of its hour.
+    The ~1h look-back lets a just-missed automation still be caught up.
     """
     if local_tz is None:
         local_tz = get_local_timezone()
@@ -203,7 +203,7 @@ def build_hour_grid(
         items_in = sorted(by_hour.get(cur, []), key=lambda it: str(it.get("start_utc") or ""))
         slots.append({
             # The slot's own identity: its local hour. A clock label repeats when the grid spans
-            # midnight; this does not. The writer returns its guidance keyed by it.
+            # midnight; this does not.
             "slot": cur.strftime("%Y-%m-%dT%H:00"),
             "label": f"Now ({_fmt_clock(now_local)})" if is_now else _fmt_clock(cur),
             "hour_local_iso": cur.isoformat(),
@@ -212,26 +212,3 @@ def build_hour_grid(
         })
         cur += timedelta(hours=1)
     return slots
-
-
-def render_hour_grid(slots: List[Dict[str, Any]]) -> str:
-    """Render build_hour_grid() output as the scaffold the writer fills."""
-    lines = ["Hour-by-hour scaffold:"]
-    for slot in slots:
-        items = slot.get("items") or []
-        if items:
-            rendered = []
-            for it in items:
-                title = str(it.get("title") or "Untitled").strip()
-                sl = str(it.get("start_local") or "").strip()
-                el = str(it.get("end_local") or "").strip()
-                status = str(it.get("status") or "").strip().lower()
-                span = f" ({sl}–{el})" if sl and el else (f" ({sl})" if sl else "")
-                suffix = f" [{status}]" if status and status != "upcoming" else ""
-                rendered.append(f"{title}{span}{suffix}")
-            body = "; ".join(rendered)
-        else:
-            body = "(open)"
-        arrow = " →" if slot.get("is_now") else ""
-        lines.append(f"  [slot {slot['slot']}] {slot['label']}{arrow}   {body}")
-    return "\n".join(lines)

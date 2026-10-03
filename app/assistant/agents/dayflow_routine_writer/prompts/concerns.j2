@@ -1,7 +1,0 @@
-{% for c in concerns %}- [concern:{{ c.concern_id }}] {{ c.title }} ({{ c.status }})
-{% if c.what %}  {{ c.what }}
-{% endif %}{% if c.done_when %}  Settled when: {{ c.done_when }}
-{% endif %}{% if c.readiness %}  The brain's decision: {{ c.readiness }}{% if c.hold_until %} until {{ c.hold_until }}{% endif %}
-{% endif %}{% if c.work_in_progress %}  Its own work in progress: {{ c.work_in_progress | join("; ") }}
-{% endif %}{% else %}(no open concerns)
-{% endfor %}

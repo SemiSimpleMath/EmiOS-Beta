@@ -1,0 +1,85 @@
+name: concern_planner_manager
+class_name: MultiAgentManager
+description: "Works out what one matter concern needs now (docs/design/day_items_have_owners_2026-10-02.md, the reasoning layer). A read-only planner looks things up: the concern's own record, the email threads and calendar entries it names, reminders and to-dos, the work done for it, pods, the knowledge graph. The decider then writes the decision (act now, hold until a date, no action) and the things that should be done, as bullet points under the concern. It changes nothing; consumers read the bullets and decide how."
+max_cycles: 16
+
+role_bindings:
+  delegator: emi_team::delegator
+
+agents:
+  - name: emi_team::delegator
+    class: Delegator
+  - name: subconscious::concern_planner
+    class: Planner
+  - name: subconscious::concern_decider
+    class: Agent
+
+control_nodes:
+  - name: tool_return_router
+    class: ToolReturnRouter
+  - name: tool_caller
+    class: ToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: return_control
+    class: ReturnControlNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+# Read-only. It reasons about a concern; consumers act on what it writes.
+tools:
+  allowed_tools:
+    - read_work_object
+    - search_work_objects
+    - pod_fetch
+    - get_email
+    - get_email_thread
+    - get_email_messages
+    - get_calendar_events
+    - find_calendar_event_by_name
+    - get_scheduler_events
+    - get_todo_tasks
+    - ask_kg
+  except_tools: []
+
+scope_contract:
+  tools:
+    allowed_tools:
+      - read_work_object
+      - search_work_objects
+      - pod_fetch
+      - get_email
+      - get_email_thread
+      - get_email_messages
+      - get_calendar_events
+      - find_calendar_event_by_name
+      - get_scheduler_events
+      - get_todo_tasks
+      - ask_kg
+    blocked_tools:
+      - install_tool
+      - ask_user
+      - send_email
+      - execute_code
+      - playwright_browse
+    requires_approval_tools: []
+    allow_external_side_effects: false
+  writes:
+    write_kg: false
+    allow_fact_extraction: false
+
+flow_config:
+  strict_routing: true
+  tool_return:
+    tool_call_result_handler_node: "tool_result_handler"
+  state_map:
+    "emi_team::delegator": "subconscious::concern_planner"
+    "subconscious::concern_planner": "tool_caller"
+    "tool_result_handler": "tool_return_router"
+    "tool_return_router": "subconscious::concern_planner"
+    "subconscious::concern_planner_return_control": "subconscious::concern_decider"
+    "subconscious::concern_decider": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "subconscious::concern_decider"

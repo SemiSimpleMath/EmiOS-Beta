@@ -56,6 +56,24 @@ Scope comes from `app/assistant/subconscious/scope.yaml`, loaded as `load_scope_
 
 A concern carries: `concern_id`, `title`, `subject`, `kind`, `domain_tags`, `severity` (low/medium/high), `horizon` (today/this_week/this_month/long_horizon), `evidence[]`, `addressable_by[]` (e.g. `["dayflow_orchestrator", "wellness_proposer"]`), `notes`, `first_observed`, plus lifecycle bookkeeping (`reinforcement_count`, `reinforcement_notes` journal, `last_reinforced_utc`, `addressing_since_utc`, `last_disposition_at_count`, `escalation`). `ConcernKind` ∈ `{pattern_drift, anticipated_need, opportunity_external, opportunity_internal, schedule_collision, gift_opportunity}`.
 
+### Standing concerns (2026-10-02)
+
+`kind = "standing"`: a recurring part of the owner's day, built from the owner's beliefs
+(`docs/design/day_items_have_owners_2026-10-02.md`). The brain's day pass (`subconscious/day_pass.py`)
+places today's beliefs at their times; every placed belief has an owner. A belief an open concern holds in
+its `belief_refs` is owned by it, found by code; the rest go through the concern door together as standing
+candidates, merged by habit (the AC beliefs become one concern) or into an existing concern, or admitted.
+Today's times are recorded on the owner as `occurrences` (`persist.record_day_beliefs`).
+
+- Never closed: the brain step may not resolve one (`brain_step._problems`), and the noticer's resolution or
+  `accept_chronic` is refused and journalled (`persist._refuse_owner_close`).
+- Its brief's readiness is a rule for every occurrence: `act_now` hands each occurrence to dayflow with its
+  time (`concern_handoff._standing_handoffs`, item `concern_handoff:<id>:<day>:<time>`, once each, not when
+  an hour past); `no_action` keeps it as context. The brief is rewritten only when an occurrence went wrong
+  or its beliefs changed (`concern_brief.basis` leaves daily churn out); a failed brief is retried once a day.
+- The steward no longer makes work from routine text: the routine's work reaches it as these handoffs, and
+  work made from one is tagged to the concern by code (`work_intake.concern_refs_of`).
+
 ### Lifecycle pressure
 
 `persist.compute_pressure(register)` is a **pure deterministic read** that forces the noticer to make a decision on long-running concerns. It returns `{needs_disposition, addressing_stale}`:

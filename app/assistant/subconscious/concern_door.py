@@ -27,6 +27,11 @@ model's schema, because every closing path measures against it.
 A candidate the owner asked for carries `owner_request` ({words, at, ref}: the owner's words verbatim
 and the event they came from). The owner asking for something makes it live, so such a candidate is
 never judged the same as a closed matter; folded into an open concern, it carries the request there.
+
+A candidate made from the owner's beliefs (the day pass, subconscious/day_pass.py) carries `belief_refs`
+and is of kind `standing`: a recurring part of the day. Wherever it lands (a new concern, an open one it
+is folded into, or a closed one that settled it) the concern keeps those belief keys, so the next day's
+placement of the same belief finds its owner by code without asking again.
 """
 from __future__ import annotations
 
@@ -211,6 +216,12 @@ def _find(register: Dict[str, Any], concern_id: str) -> Dict[str, Any]:
     raise KeyError(f"concern {concern_id} is no longer in the register")
 
 
+def _add_belief_refs(target: Dict[str, Any], candidate: Dict[str, Any]) -> None:
+    for key in candidate.get("belief_refs") or []:
+        if key not in target.setdefault("belief_refs", []):
+            target["belief_refs"].append(key)
+
+
 def apply_admission(steps: List[Dict[str, Any]], register: Dict[str, Any], *, source: str,
                     now_iso: str) -> Dict[str, Optional[str]]:
     """Apply a plan to the register (the caller holds the register lock and saves).
@@ -241,6 +252,7 @@ def apply_admission(steps: List[Dict[str, Any]], register: Dict[str, Any], *, so
             target.setdefault("evidence", []).extend(c.get("evidence") or [])
             if c.get("owner_request") and not target.get("owner_request"):
                 target["owner_request"] = c["owner_request"]
+            _add_belief_refs(target, c)
             persist._bump_reinforcement_count(target)
             target["last_reinforced_utc"] = now_iso
             persist._journal_on(target, now_iso, f"MERGED a re-raise from {source}: {title} ({step['reason']})")
@@ -248,6 +260,7 @@ def apply_admission(steps: List[Dict[str, Any]], register: Dict[str, Any], *, so
             landed[i] = target_id
         elif action == "suppress_closed":
             prior = _find(register, step["target"])
+            _add_belief_refs(prior, c)
             persist._journal_on(prior, now_iso, f"SUPPRESSED a re-mint of this ({step['reason']}): {title}")
             prior["suppressed_remint_count"] = int(prior.get("suppressed_remint_count") or 0) + 1
             prior["suppressed_remint_at_utc"] = now_iso

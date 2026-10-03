@@ -1,11 +1,11 @@
 """The plan of the day, as data (2026-10-01).
 
 The brain's day pass (subconscious/day_pass.py) places the owner's beliefs against today's calendar:
-one hour slot per local hour, the calendar items that start in it, and the guidance lines written for
-it, each with the belief keys it cites. Whole-day items are the day's flags. It is stored here, one
-row per slot, and every reader renders it fresh from the rows with `render_day`: from an hour before
-now to the end of the day, "Now" labelled at render time, runs of empty hours merged. Nothing is
-rendered and then read back.
+one hour slot per local hour, the calendar items that start in it, and the beliefs placed in it, each
+as data: its time, its belief key, its statement. Beliefs placed "all day" are the day's flags. It is
+stored here, one row per slot, and every reader renders it fresh from the rows with `render_day`: from
+an hour before now to the end of the day, "Now" labelled at render time, runs of empty hours merged.
+Nothing is rendered and then read back.
 
 Until 2026-10-01 the routine stage wrote one markdown document and, as the day went on, parsed the
 hour headings back out of it to drop the past ones.
@@ -14,7 +14,8 @@ Tables in emi.db (subconscious/db.py):
     day_plans       one row per day: the inputs fingerprint, the beliefs selected and why, the
                     writer's change summary, the day's backdrops and flags.
     day_plan_slots  one row per hour slot: its key (`YYYY-MM-DDTHH:00`, local), the calendar items
-                    that start in it, the guidance lines.
+                    that start in it, the beliefs placed in it ({time, belief_key, statement,
+                    concern_id: the concern that owns it}).
 Past days stay: the table is the day archive.
 """
 from __future__ import annotations
@@ -99,6 +100,14 @@ def _clock(dt: datetime) -> str:
     return dt.strftime("%I:%M %p").lstrip("0")
 
 
+def _owner(line: Dict[str, Any]) -> str:
+    return f" [concern:{line['concern_id']}]" if line.get("concern_id") else ""
+
+
+def _placement_text(line: Dict[str, Any]) -> str:
+    return f"{line['time']} — {line['statement']} [belief:{line['belief_key']}]{_owner(line)}"
+
+
 def _item_text(item: Dict[str, Any]) -> str:
     title = str(item.get("title") or "Untitled").strip()
     start, end = str(item.get("start_local") or "").strip(), str(item.get("end_local") or "").strip()
@@ -151,11 +160,11 @@ def render_plan(plan: Dict[str, Any], now_utc: datetime) -> str:
         label = f"Now ({_clock(now_local)})" if is_now(hour) else _clock(hour)
         items = "; ".join(_item_text(it) for it in slot["items"])
         out.append(f"### {label} — {items}" if items else f"### {label}" + ("" if slot["lines"] else " — open"))
-        out.extend(f"- {line['text']}" for line in slot["lines"])
+        out.extend(f"- {_placement_text(line)}" for line in slot["lines"])
     close_run()
     if plan["flags"]:
-        out.append("## Flags & watch items")
-        out.extend(f"- {flag['text']}" for flag in plan["flags"])
+        out.append("## All day")
+        out.extend(f"- {flag['statement']} [belief:{flag['belief_key']}]{_owner(flag)}" for flag in plan["flags"])
     return "\n".join(out) + "\n"
 
 

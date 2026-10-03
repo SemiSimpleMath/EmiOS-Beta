@@ -1,0 +1,37 @@
+# subconscious::concern_planner — the reading half of concern_planner_manager: looks up what one matter
+# concern needs to be judged by (its email threads, calendar, reminders, to-dos, work, pods, the knowledge
+# graph). Read-only. See multi_agents/concern_planner_manager/config.yaml.
+name: subconscious::concern_planner
+class_name: Planner
+llm_params:
+  llm_provider: "openai"
+  model_tier: "mini"
+
+allowed_tools:
+  - read_work_object
+  - search_work_objects
+  - pod_fetch
+  - get_email
+  - get_email_thread
+  - get_email_messages
+  - get_calendar_events
+  - find_calendar_event_by_name
+  - get_scheduler_events
+  - get_todo_tasks
+  - ask_kg
+except_tools: []
+allowed_nodes: [return_control]
+entity_scan_keys: []
+entity_card_level: 0
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - recent_history
+  - checklist
+  - progress_report
+
+# The system prompt is static per manager (its tools); all dynamic context rides the user prompt.
+system_context_items:
+  - tool_descriptions

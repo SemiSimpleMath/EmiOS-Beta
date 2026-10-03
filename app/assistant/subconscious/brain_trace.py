@@ -41,6 +41,7 @@ logger = get_logger(__name__)
 TRACED_AGENTS = frozenset({
     "subconscious::gate", "subconscious::brain", "subconscious::concern_door", "subconscious::brief",
     "subconscious::noticer", "dayflow_orchestrator::strategic_planner_wo",
+    "subconscious::concern_planner", "subconscious::concern_decider",
 })
 
 REPLAY_AGENTS = frozenset({

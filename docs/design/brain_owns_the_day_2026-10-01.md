@@ -153,6 +153,10 @@ Each step works on its own and keeps the system running.
    brain's decision, its own work in progress); a matter a concern owns appears as a pointer to it
    (`[concern:<id>]`, `concern_ids` on the line), never as a reminder or action of its own. Live replay:
    the briefing no longer carries its own "schedule the annual physical" prompt while that concern holds.
+   **Replaced 2026-10-02**: the per-slot writer filed 9 PM items under 9 AM in about one call in ten
+   (`bug_list_2026-09-18.md`). The writer now only places beliefs, `(belief_key, time)`; code builds the
+   day and renders each belief's statement. The concern pointers go with it: concerns become the owners
+   of the day's items in step 2 (`day_items_have_owners_2026-10-02.md`).
 2. **Owners for every item.** Day items pass through the concern door; standing concerns are introduced;
    the routine file shows each item's owner. Verify: the Oct 1 flea case yields one owner, and the date
    conflict reaches the owner as a question.

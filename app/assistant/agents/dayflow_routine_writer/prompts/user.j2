@@ -1,26 +1,17 @@
-########## CURRENT STATE ##########
+########## TODAY ##########
 **Current Time:** {{ date_time }} ({{ day_of_week }}, {{ boundary_date_local }})
 
-########## DAILY CONTEXT ##########
 {{ daily_context }}
 
-########## OPEN CONCERNS ##########
-The matters the brain is tracking. A concern owns its matter; see the rules on concerns.
-{{ concerns_block }}
-########## USER BELIEFS & PATTERNS ##########
-**Potentially relevant beliefs for {{ day_of_week }} — preserve their conditions and IDs:**
+########## BELIEFS ##########
+**Beliefs selected as possibly bearing on {{ day_of_week }}:**
 {{ beliefs_block }}
 {% if related_beliefs_block is defined and related_beliefs_block and related_beliefs_block.strip() != "(no selected beliefs)" %}
-**Conditions on the beliefs above — beliefs of the same topics that qualify them (a day, a limit, an exception, a reminder wish). They were not selected for today on their own; read each with the belief it qualifies, and let its condition decide whether and where that belief applies today:**
+**Conditions on the beliefs above — beliefs of the same topics that qualify them (a day, a limit, an exception, a reminder wish). Read each with the belief it qualifies; one that applies today on its own gets its own entry:**
 {{ related_beliefs_block }}
 {% endif %}
-{% if weekly_insights_block %}
-**Weekly pattern flags — HISTORICAL (from LAST week, not this week):**
-The block below summarizes patterns from the previous 7 days. Bare weekday
-references inside it (e.g. "Saturday") are for LAST week's dates, NOT the
-current day. Do not assume any "Saturday GI bug" or similar historical event
-is happening today unless explicitly dated.
-
-{{ weekly_insights_block }}
+{% if correction %}
+########## CORRECTION ##########
+Your previous answer had these problems: {{ correction }}
+Answer again, with every entry correct.
 {% endif %}
-

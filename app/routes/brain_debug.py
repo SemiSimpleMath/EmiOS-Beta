@@ -205,6 +205,7 @@ def brain_concerns_api():
                 "notes": c.get("notes"), "journal": c.get("reinforcement_notes") or "",
                 "brief": c.get("brief"), "brief_current": (c.get("brief") or {}).get("basis") == basis(c, bucket),
                 "brief_error": c.get("brief_error"), "brief_calls": brain_trace.calls_for_concern(cid),
+                "plan": c.get("plan"), "plan_error": c.get("plan_error"), "kind": c.get("kind"),
                 "handoffs": handoffs,
                 "work": [{"work_id": r["id"], "status": r["status"], "title": r["title"]} for r in rows
                          if work_links._cites(r["constraints"].get("concern_refs") or [], cid)],

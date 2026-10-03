@@ -194,7 +194,13 @@ def _settled_anchors(register: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
 def _refuse_owner_close(concern: Dict[str, Any], now_iso: str, what: str) -> bool:
     """A concern the owner asked for closes only when its done_when is met (work achieved it) or
     the owner says it is over (the brain step reads the owner's words). The noticer infers; it does
-    not get to close one. Refused attempts are journalled on the concern."""
+    not get to close one. A standing concern (a recurring part of the day, from the owner's beliefs)
+    is never closed: each day's outcome is recorded on it, and it changes when its beliefs do.
+    Refused attempts are journalled on the concern."""
+    if concern.get("kind") == "standing":
+        _journal_on(concern, now_iso, f"REFUSED a noticer {what}: a standing concern is never closed")
+        logger.warning("[noticer.persist] refused to close standing concern %s: %s", concern.get("concern_id"), what)
+        return True
     if not concern.get("owner_request"):
         return False
     _journal_on(concern, now_iso, f"REFUSED a noticer {what}: the owner asked for this; it closes when "
@@ -243,6 +249,45 @@ def apply_brain_matter(updates: List[Dict[str, Any]], plan: List[Dict[str, Any]]
     return admitted
 
 
+def record_day_beliefs(plan: List[Dict[str, Any]], occurrences: Dict[str, List[Dict[str, Any]]], day: str, *,
+                       connect=None) -> Dict[str, Optional[str]]:
+    """The day's placed beliefs get their owners (subconscious/day_pass.py), under the register lock:
+    new owners through the concern door (`plan` was made before the lock), then today's occurrences on
+    every open owner, `occurrences[belief_key] = [{"time", ...}]`, recorded as
+    `concern["occurrences"] = {day: [{"time", "belief_keys"}]}` (other days dropped). Saves only when
+    something changed, since a save wakes the brain. Returns belief_key -> the open concern that owns it,
+    or None when a closed concern settled it."""
+    from app.assistant.subconscious import concern_door
+    with _REGISTER_LOCK:
+        register = _load_register(connect)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        before = json.dumps(register, sort_keys=True, default=str)
+        if plan:
+            concern_door.apply_admission(plan, register, source="day_pass", now_iso=now_iso)
+        owners: Dict[str, Optional[str]] = {}
+        open_ids = {c["concern_id"] for b in ("active", "addressing") for c in register.get(b) or []}
+        for bucket in ("resolved", "dormant", "active", "addressing"):
+            for c in register.get(bucket) or []:
+                for key in c.get("belief_refs") or []:
+                    if key in occurrences:
+                        owners[key] = c["concern_id"] if c["concern_id"] in open_ids else None
+        for bucket in ("active", "addressing"):
+            for c in register.get(bucket) or []:
+                times: Dict[str, List[str]] = {}
+                for key in c.get("belief_refs") or []:
+                    for occurrence in occurrences.get(key) or []:
+                        times.setdefault(occurrence["time"], []).append(key)
+                today = [{"time": t, "belief_keys": keys} for t, keys in times.items()]
+                if today:
+                    c["occurrences"] = {day: today}
+                else:
+                    c.pop("occurrences", None)
+        if json.dumps(register, sort_keys=True, default=str) != before:
+            register["last_updated_utc"] = now_iso
+            _save_register(connect, register)
+    return owners
+
+
 def journal_concern(concern_id: str, line: str, *, connect=None) -> None:
     """Append one dated line to a concern's journal, whatever bucket it is in. Raises when the
     concern is not in the register."""
@@ -276,6 +321,30 @@ def set_concern_brief(concern_id: str, written_from: str, *, brief: Optional[Dic
                     concern.pop("brief_error", None)
                 else:
                     concern["brief_error"] = {"basis": written_from, "error": error, "at": now_iso}
+                _save_register(connect, register)
+                return True
+    raise KeyError(f"concern {concern_id} is not in the register")
+
+
+def set_concern_plan(concern_id: str, from_brief: str, *, plan: Optional[Dict[str, Any]] = None,
+                     error: Optional[str] = None, connect=None) -> bool:
+    """Store a matter concern's plan (subconscious/concern_planner.py), or the error that stopped it, against
+    the brief it was made from. Returns False, writing nothing, when the brief changed meanwhile: the next
+    run plans again."""
+    with _REGISTER_LOCK:
+        register = _load_register(connect)
+        for bucket in ("active", "addressing", "resolved", "dormant"):
+            for concern in register.get(bucket) or []:
+                if concern.get("concern_id") != concern_id:
+                    continue
+                if (concern.get("brief") or {}).get("basis") != from_brief:
+                    return False
+                now_iso = datetime.now(timezone.utc).isoformat()
+                if error is None:
+                    concern["plan"] = {**plan, "basis": from_brief, "written_at": now_iso}
+                    concern.pop("plan_error", None)
+                else:
+                    concern["plan_error"] = {"basis": from_brief, "error": error, "at": now_iso}
                 _save_register(connect, register)
                 return True
     raise KeyError(f"concern {concern_id} is not in the register")

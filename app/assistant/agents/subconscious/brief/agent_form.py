@@ -44,4 +44,6 @@ class AgentForm(BaseModel):
     open_questions: List[str] = Field(description="What is not known and would change what to do. Empty when none.")
     recommendation: str = Field(description="The broad next step and why, or no action and why (already handled, "
                                             "the owner already knows, nothing to do until a date). Not a plan of steps.")
-    readiness: Readiness = Field(description="Whether to act on it today, hold it until a date, or take no action.")
+    readiness: Optional[Readiness] = Field(
+        default=None, description="Only for a standing concern: the rule for its occurrences. Empty for any other "
+                                  "concern; the concern planner decides what it needs.")

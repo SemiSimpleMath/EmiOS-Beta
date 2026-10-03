@@ -1,0 +1,26 @@
+The concern:
+{{ task }}
+
+{% if information %}
+{{ information }}
+{% endif %}
+
+{% if checklist %}
+Checklist:
+{{ checklist }}
+{% endif %}
+
+{% if progress_report %}
+Progress so far:
+{{ progress_report }}
+{% endif %}
+
+{% if recent_history %}
+Gathered so far:
+{{ recent_history }}
+{% endif %}
+
+Today is {{ date_time }}.
+
+You are at action {{ action_count }} (cap 6). What is your next action? When what the decision depends on is
+in view, set action to `return_control`.

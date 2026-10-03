@@ -7,7 +7,8 @@ every five minutes and read chat in five-minute slices while the conversation wa
 
 A wake runs `run_brain` once: new chat and email into the inbox, the gate routes what is ready (an
 email at once, a room's messages once the room has been quiet for brain_inbox.QUIET), the brain
-decides each matter, the briefs of changed concerns are rewritten, and concerns ready to act on are
+decides each matter, the briefs of changed concerns are rewritten, the concern planner works out what
+each changed matter concern needs (subconscious/concern_planner.py), and concerns ready to act on are
 handed to dayflow. Each stage is free when it has nothing to do.
 
 What wakes it:
@@ -42,10 +43,11 @@ _start_lock = threading.Lock()
 
 
 def run_brain() -> Dict[str, Any]:
-    """One pass: gate, brain step, briefs, handoffs, the day pass."""
+    """One pass: gate, brain step, briefs, the concern planner, handoffs, the day pass."""
     from app.assistant.subconscious.brain_step import run_brain_step
     from app.assistant.subconscious.concern_brief import run_briefs
     from app.assistant.subconscious.concern_handoff import run_handoffs
+    from app.assistant.subconscious import concern_planner
     from app.assistant.subconscious.day_pass import run_day_pass
     from app.assistant.subconscious.gate import run_gate
     from app.assistant.subconscious.concern_brief import next_hold_at
@@ -53,12 +55,14 @@ def run_brain() -> Dict[str, Any]:
     gate = run_gate()
     brain = run_brain_step()
     briefs = run_briefs()
+    plans = concern_planner.run_planners()
     handoffs = run_handoffs()
-    due = [t for t in (gate["next_ready_at"], next_hold_at(load_register(), datetime.now(timezone.utc)))
+    register, now = load_register(), datetime.now(timezone.utc)
+    due = [t for t in (gate["next_ready_at"], next_hold_at(register, now), concern_planner.next_hold_at(register, now))
            if t is not None]
     # Last: a day pass that fails does not hold up the concerns' briefs and handoffs.
     day = run_day_pass()
-    return {**gate, **{f"brain_{k}": v for k, v in brain.items()}, **briefs, **handoffs, **day,
+    return {**gate, **{f"brain_{k}": v for k, v in brain.items()}, **briefs, **plans, **handoffs, **day,
             "next_wake_at": min(due) if due else None}
 
 

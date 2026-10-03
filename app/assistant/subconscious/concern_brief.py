@@ -19,10 +19,10 @@ concern (architect, worker, finalizer) gets that concern's brief whole, and the 
 it so far (`attempts`) (dayflow_orchestrator/work_context.work_data). The steward gets the same view
 in a handoff (concern_handoff._brief_text), so it can judge whether another attempt is productive.
 
-The brief ends in a readiness decision: act_now (with a broad task; subconscious/concern_handoff.py
-hands it to the planner), hold (with a local date and time, stored as `hold_until_utc`; when it
-passes the concern is briefed again, so the decision is remade on what is known then; the brain's
-wake sleeps until the earliest hold, `next_hold_at`), or no_action.
+For a standing concern the brief ends in a readiness rule for its occurrences: act_now (each occurrence
+is handed to the planner, subconscious/concern_handoff.py) or no_action. For a matter concern the brief
+decides nothing: the concern planner (subconscious/concern_planner.py) reads it and decides what the
+concern needs now (until 2026-10-02 the brief's readiness decided that too).
 """
 from __future__ import annotations
 
@@ -40,15 +40,35 @@ _AGENT = "subconscious::brief"
 # Part of every brief's basis: raising it rewrites every brief, and retries every brief the older
 # writer failed on. 2: sources are checked against the refs shown, reminders carry refs, KG entities.
 WRITER_VERSION = 3   # 3: readiness (act_now / hold / no_action)
-_OWN_KEYS = ("brief", "brief_error")
+_OWN_KEYS = ("brief", "brief_error", "plan", "plan_error")   # what is written from the record
 _FIELDS = ("what", "why_it_matters", "tried", "owner_wishes", "recommendation")
 # A fact from the concern's own journal or notes, or from a knowledge-graph description, has no ref.
 _NAMED_SOURCES = ("journal", "notes", "knowledge graph")
 
 
+# A standing concern's record changes every day without anything to decide: work attaches and ends,
+# journal lines and receipts accumulate, it moves between active and addressing. Its brief is written
+# again only when an occurrence went wrong or what defines it (its beliefs) changed (owner, 2026-10-02).
+_STANDING_CHURN = ("reinforcement_notes", "work_receipts", "last_reinforced_utc", "addressing_since_utc",
+                   "addressing_reviewed_at_utc", "reinforcement_count")
+
+
+def _went_wrong(work: Dict[str, Any]) -> bool:
+    return work.get("status") == "abandoned" or any(
+        j.get("verdict") not in ("achieved", "achieved_plan_changes") for j in work.get("judgments") or [])
+
+
 def basis(concern: Dict[str, Any], bucket: str) -> str:
-    """Fingerprint of the concern's record, excluding the brief itself."""
-    record = {k: v for k, v in concern.items() if k not in _OWN_KEYS}
+    """Fingerprint of the concern's record, excluding the brief itself and today's occurrences (the
+    day pass rewrites those; they are not a change to decide on). For a standing concern, the daily
+    churn and work that went as intended are left out too."""
+    record = {k: v for k, v in concern.items() if k not in _OWN_KEYS and k != "occurrences"}
+    if concern.get("kind") == "standing":
+        for key in _STANDING_CHURN:
+            record.pop(key, None)
+        record["attached_work"] = {w: rec for w, rec in (concern.get("attached_work") or {}).items()
+                                   if _went_wrong(rec)}
+        bucket = "standing"
     return hashlib.sha256(json.dumps([WRITER_VERSION, bucket, record], sort_keys=True, ensure_ascii=False,
                                      default=str).encode("utf-8")).hexdigest()
 
@@ -88,6 +108,18 @@ def attempts(concern: Dict[str, Any]) -> List[Dict[str, Any]]:
             for w in works]
 
 
+def _failed_on_this_record(concern: Dict[str, Any], b: str, now: datetime) -> bool:
+    """The brief already failed on this record. A standing concern's record rarely changes, so its failed
+    brief is tried again once a day rather than never."""
+    error = concern.get("brief_error") or {}
+    if error.get("basis") != b:
+        return False
+    if concern.get("kind") != "standing":
+        return True
+    from app.assistant.utils.time_utils import utc_to_local
+    return utc_to_local(str(error.get("at"))).date() == utc_to_local(now.isoformat()).date()
+
+
 def stale(register: Dict[str, Any], now_utc: Optional[datetime] = None) -> List[Tuple[str, Dict[str, Any]]]:
     """Open concerns whose brief is missing, was written from an older record, or holds until a time
     that has passed; minus those whose brief already failed on the current record. (bucket, concern)."""
@@ -97,7 +129,7 @@ def stale(register: Dict[str, Any], now_utc: Optional[datetime] = None) -> List[
         for c in register.get(bucket) or []:
             b = basis(c, bucket)
             brief = c.get("brief") or {}
-            if (c.get("brief_error") or {}).get("basis") == b:
+            if _failed_on_this_record(c, b, now):
                 continue
             if brief.get("basis") == b and not _held_until_passed(brief, now):
                 continue
@@ -169,11 +201,14 @@ def _readiness_problems(readiness: Any, now_utc: datetime) -> List[str]:
     return out
 
 
-def _problems(data: Any, refs: List[str], now_utc: Optional[datetime] = None) -> List[str]:
+def _problems(data: Any, refs: List[str], now_utc: Optional[datetime] = None, *, standing: bool = True) -> List[str]:
+    """What is wrong with a brief. Readiness is the brief's to decide only for a standing concern; for a
+    matter concern the concern planner decides (subconscious/concern_planner.py)."""
     if not isinstance(data, dict):
         return ["no brief"]
     out = [f"{f} is empty" for f in _FIELDS if not str(data.get(f) or "").strip()]
-    out += _readiness_problems(data.get("readiness"), now_utc or datetime.now(timezone.utc))
+    if standing:
+        out += _readiness_problems(data.get("readiness"), now_utc or datetime.now(timezone.utc))
     for fact in data.get("known") or []:
         source = str(fact.get("source") or "").strip()
         parts = [p.strip() for p in re.split(r";", source) if p.strip()]
@@ -197,20 +232,23 @@ def write_brief(concern: Dict[str, Any], bucket: str, *, calendar: str,
     payload = build_payload(concern, bucket, calendar=calendar, now_utc=now)
     refs = allowed_refs(payload)
     call = call or _agent_call
+    standing = concern.get("kind") == "standing"
     data = call(payload)
-    problems = _problems(data, refs, now)
+    problems = _problems(data, refs, now, standing=standing)
     if problems:
         logger.warning("[brief] invalid brief for %s, one correction: %s", concern["concern_id"], problems)
         data = call({**payload, "correction": "; ".join(problems)})
-        problems = _problems(data, refs, now)
+        problems = _problems(data, refs, now, standing=standing)
         if problems:
             raise ValueError(f"brief still invalid after one correction: {problems}")
+    brief = {k: data.get(k) for k in ("what", "why_it_matters", "known", "tried", "owner_wishes",
+                                       "depends_on_it", "open_questions", "recommendation")}
+    if not standing:
+        return brief
     readiness = {k: data["readiness"].get(k) for k in ("decision", "hold_until", "task", "why")}
     if readiness["decision"] == "hold":
         readiness["hold_until_utc"] = hold_until_utc(readiness["hold_until"], now).isoformat()
-    return {**{k: data.get(k) for k in ("what", "why_it_matters", "known", "tried", "owner_wishes",
-                                        "depends_on_it", "open_questions", "recommendation")},
-            "readiness": readiness}
+    return {**brief, "readiness": readiness}
 
 
 def run_briefs(*, call=None, register_connect=None, calendar: Optional[str] = None) -> Dict[str, Any]:
@@ -266,6 +304,6 @@ def briefs_for_refs(refs: List[str]) -> List[Dict[str, Any]]:
         bucket, c = matches[0]
         out.append({"concern_id": c["concern_id"], "title": c.get("title"), "status": bucket,
                     "done_when": c.get("done_when"), "owner_words": (c.get("owner_request") or {}).get("words"),
-                    "brief": c.get("brief"), "attempts": attempts(c),
+                    "brief": c.get("brief"), "plan": c.get("plan"), "attempts": attempts(c),
                     "brief_current": (c.get("brief") or {}).get("basis") == basis(c, bucket)})
     return out

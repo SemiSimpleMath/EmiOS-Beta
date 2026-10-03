@@ -235,7 +235,8 @@ def _squash(text: str) -> str:
     return " ".join(str(text or "").split())
 
 
-def _problems(data: Any, events: Dict[str, Dict[str, Any]], concern_labels: List[str]) -> List[str]:
+def _problems(data: Any, events: Dict[str, Dict[str, Any]], concern_labels: List[str],
+              standing_labels: List[str] = ()) -> List[str]:
     if not isinstance(data, dict) or not isinstance(data.get("event_decisions"), list):
         return ["no event_decisions list"]
     out: List[str] = []
@@ -262,6 +263,8 @@ def _problems(data: Any, events: Dict[str, Dict[str, Any]], concern_labels: List
         updated.add(label)
         if u.get("action") not in ("note", "resolve"):
             out.append(f"{label}: action {u.get('action')!r} is not note or resolve")
+        if u.get("action") == "resolve" and label in standing_labels:
+            out.append(f"{label} is a standing concern, a recurring part of the day: it is never resolved; note it")
         refs = u.get("events") or []
         if not refs or any(r not in events for r in refs):
             out.append(f"{label}: events must be labels of events given, got {refs}")
@@ -322,13 +325,16 @@ def process_matter(events: List[Dict[str, Any]], *, call: Optional[Callable[[Dic
     now = datetime.now(timezone.utc)
     register = load_register(connect=register_connect)
     payload, by_label, labels = build_payload(events, register, now, calendar)
+    standing = {c["concern_id"] for b in ("active", "addressing") for c in register.get(b) or []
+                if c.get("kind") == "standing"}
+    standing_labels = [label for label, cid in labels.items() if cid in standing]
     call = call or _agent_call
     data = call(payload)
-    problems = _problems(data, by_label, list(labels))
+    problems = _problems(data, by_label, list(labels), standing_labels)
     if problems:
         logger.warning("[brain] invalid answer, one correction: %s", problems)
         data = call({**payload, "correction": "; ".join(problems)})
-        problems = _problems(data, by_label, list(labels))
+        problems = _problems(data, by_label, list(labels), standing_labels)
         if problems:
             raise ValueError(f"brain answer still invalid after one correction: {problems}")
 
