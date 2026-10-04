@@ -91,7 +91,8 @@ def concern_text(concern: Dict[str, Any], bucket: str) -> str:
     view = {"concern_id": concern["concern_id"], "title": concern.get("title"), "status": bucket, "severity": concern.get("severity"),
             "done_when": concern.get("done_when"), "owner_words": (concern.get("owner_request") or {}).get("words"),
             "brief": concern.get("brief"), "attempts": concern_brief.attempts(concern), "brief_current": True}
-    journal = (concern.get("reinforcement_notes") or "").strip()
+    from app.assistant.subconscious.persist import journal_for_prompt
+    journal = journal_for_prompt(concern.get("reinforcement_notes") or "")
     return render_view("concern_brief", concerns=[view]).strip() + (f"\n  journal:\n{journal}" if journal else "")
 
 

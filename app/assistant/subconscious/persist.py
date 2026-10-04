@@ -68,6 +68,20 @@ def _journal_entries(notes: str) -> List[str]:
     return [ln.strip() for ln in (notes or "").splitlines() if ln.strip()]
 
 
+def journal_for_prompt(notes: str) -> str:
+    """A concern's journal as agents read it: each entry's stored UTC stamp shown in local time, as every
+    time in a prompt is. The journal is stored "[<UTC ISO>] text" per line; a line without a stamp (the
+    archive marker, older entries) is shown as stored. On 2026-10-04 the concern planner read UTC stamps
+    beside a local "Current Time" and called a 9 AM notice "now-past" at 3:31 AM."""
+    from app.assistant.utils.time_utils import local_time_text, parse_iso_utc
+    lines = []
+    for line in _journal_entries(notes):
+        end = line.find("]")
+        stamp = parse_iso_utc(line[1:end]) if line.startswith("[") and end > 0 else None
+        lines.append(f"[{local_time_text(stamp)}]{line[end + 1:]}" if stamp else line)
+    return "\n".join(lines)
+
+
 def _trim_journal(existing: Dict[str, Any]) -> None:
     """Cap the reinforcement_notes journal to the newest entries."""
     entries = _journal_entries(existing.get("reinforcement_notes") or "")

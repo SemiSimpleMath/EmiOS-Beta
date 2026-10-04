@@ -1,6 +1,6 @@
 {
   "name": "get_todo_tasks",
-  "description": "Use this tool to fetch all todo lists",
+  "description": "Use this tool to fetch to-do tasks from the user's own Google Tasks: the to-do app the user uses on their phone, across its lists.",
   "inputs": [
     {
       "name": "start_date",

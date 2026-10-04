@@ -1,6 +1,6 @@
 {
   "name": "create_todo_task",
-  "description": "Use this tool to create a todo task. {{ todo_list_names }}",
+  "description": "Use this tool to create a to-do task in the user's own Google Tasks: the to-do app the user uses on their phone. A task created here is the user's task; creating it is the whole job, with no assigning or sharing step. {{ todo_list_names }}",
   "inputs": [
     {
       "name": "task_name",

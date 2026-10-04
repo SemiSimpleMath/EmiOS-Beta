@@ -80,6 +80,7 @@ def build_payload(candidates: List[Dict[str, Any]], existing: List[Dict[str, Any
             return f"accepted as chronic: {c.get('dormant_reason') or ''}".strip()
         return str(c.get("resolution_reason") or c.get("dormant_reason") or "")
 
+    from app.assistant.subconscious.persist import journal_for_prompt
     return {
         "candidates": [{
             "label": f"N{i}", "title": c.get("title"), "subject": c.get("subject") or "household",
@@ -97,7 +98,7 @@ def build_payload(candidates: List[Dict[str, Any]], existing: List[Dict[str, Any
             "first_observed": c.get("first_observed"),
             "closed_on": _local_date(c.get("resolved_at_utc") or c.get("dormant_at_utc")),
             "closed_because": closed_because(c) if c["_status"] in ("resolved", "dormant") else "",
-            "journal": c.get("reinforcement_notes") or "",
+            "journal": journal_for_prompt(c.get("reinforcement_notes") or ""),
         } for i, c in enumerate(existing, 1)],
     }
 
