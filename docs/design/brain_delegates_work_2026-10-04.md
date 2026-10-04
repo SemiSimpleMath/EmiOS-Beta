@@ -162,6 +162,29 @@ A cancel takes effect between steps. A tool call already running finishes or tim
 rule revokes further calls and does not kill threads (`EXECUTION_OWNERSHIP.md`). The brain hears what ran and
 what did not.
 
+### When the work changes course
+
+The owner (2026-10-04): "I would not want the brain to be overactive in over ruling [the architect] when [it]
+changes tacts as long as it is still serving overall goal."
+
+- **The architect keeps its freedom to change tack**, rewording the objective included (`revise_objective`, from
+  `dayflow_goal_ownership_2026-09-30.md`), whenever a judgment shows a better route to the same outcome. It needs
+  no permission.
+- **The brain is told, not asked.** Today an objective change sends no receipt (the work store's receipts are
+  attached, judged, done and abandoned; `work_objects/concern_outbox.py`), so the brain learns of it only at the
+  next judgment. A `revised` receipt carries the new objective and the reason to the item, by its id. It is
+  information, not a checkpoint.
+- **The brain steps in only when the work no longer serves the item's outcome or the concern behind it** (the
+  first replay's homework plan, where "the owner knows the deadlines" became "do the homework"), never because it
+  would have done it differently. At each report its question is "is this still serving?", and the default is to
+  leave the work alone.
+- **New facts are not overruling.** When something changes the outcome itself (the owner said he would handle it,
+  the event was cancelled), the brain modifies or cancels the item by id: its own job on new information, not a
+  correction of dayflow's plan.
+
+Drift inside a step that is already running is out of reach: the brain's checkpoints are the step boundaries,
+which is when the reports arrive.
+
 ## 4. What changes, per part
 
 | Part | Today | Then |
