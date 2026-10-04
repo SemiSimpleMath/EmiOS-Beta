@@ -62,6 +62,8 @@ One record per thing that needs doing (new; stored by the brain, beside the conc
 |---|---|
 | id | the task's identity; carried by every work object made for it and every report about it |
 | what | the outcome wanted ("the doorbell battery is charged"), not a delivery ("send a notice") |
+| who acts | the assistant, the owner, or another person by name; for someone else's job, `what` is the assistant's part in it (tell, remind, ask or check) |
+| when | when it makes sense to do it (the evening before a deadline, not 3 AM), or now |
 | why | the concern it serves, or the calendar item and its belief |
 | decision | needed / not needed (with the reason) / done elsewhere (e.g. by chat, with the message id) |
 | assigned to | dayflow, or none |
@@ -79,7 +81,11 @@ entries, so a changed plan adds only what is missing and never re-sends what is 
   place and "I'll start at 5" in chat, is "not needed".
 - **What the owner did directly**: a chat request becomes an entry already done (with the message id), so the
   brain never delegates it again. The chat side of this (chat reporting what it did) is in the work-engine note
-  (`work_engine_2026-10-03.md`, build step 1).
+  (`work_engine_2026-10-03.md`, build step 1). Today the brain learns of a task chat took up only by accident: on
+  2026-10-04 the chat gate tracked "I will start the timesheets at 5PM" as a task, and the brain's replay read
+  "already in flight" from the internal marker that leaked into the chat as the assistant's reply (bug list). The
+  fact was true and settled the timesheets item; the leak is a display bug. So chat's tracked tasks reach the brain
+  as records before, or together with, the fix that stops the marker leaking.
 
 ### What the assistant does with each calendar item
 
@@ -87,6 +93,61 @@ Approving a belief for the calendar today carries no instruction. The morning re
 assistant does with it: **remind** (when), **do it** (the act), or **just know it** (context for the day, no act).
 That answer is the item's standing instruction; the brain's daily decision is only whether today needs it. B455
 would be "just know it", or at most one reminder at 5 PM.
+
+### Who acts, and why it belongs to the brain
+
+The concern decider's prompt says "you say what should be done, never how or by whom", which made sense while the
+steward interpreted its bullets. Replayed straight to the architect (2026-10-04,
+`scratch/replay/brain_feeds_architect.py`), the brain's outcome "Complete Integrated Math IIIA LT 4 Practice by
+October 9" became, in all three runs, a plan for the assistant to do a child's homework: nobody can tell from
+that line whose job it is. The brain knows (whose school, the owner's own words), so the rule becomes "never
+how": each entry names who acts and, for someone else's job, the assistant's part and when.
+
+### What travels with a task
+
+Maximum content, never a summary (owner, 2026-10-04: "The concern has to travel with it maximum content"; "it has
+to list the email it came from all the details that went into the task ask"):
+- everything the brain saw when it decided: the concern's record and journal (times local), the work on it with
+  its progress, and everything it looked up (calendar, email, todos, work);
+- every source email and message the concern's evidence names, verbatim, with its sender, subject and the local
+  time it arrived.
+
+### Replay, round 2 (2026-10-04)
+
+`scratch/replay/brain_decides_with_whom.py` re-ran five recorded act_now decider calls with the "who acts" rule,
+then gave the architect the brain's whole input and the sources verbatim (2 runs each):
+
+| Case | Brain before | Brain with "who acts" | Architect |
+|---|---|---|---|
+| Workshop | act now: resolve the quiz conflict | no action: the owner chose to handle it | nothing to plan |
+| Canvas, first | "Complete Math LT 4 by Oct 9" and others, no who | the assistant tells the owner the deadlines, asks him to confirm they are his son's, reminds him to check each | tell, ask, reminders the evening before each deadline; no homework plan |
+| Canvas, after "Handle myself" | "Have the study guide submitted…" | the assistant tells the owner what is unconfirmed and leaves it to him | one message, no repeated clarification |
+| Reflections | get the decision; ensure it is submitted | the owner asks his son today; the assistant reminds him of the form and deadline if his son enters | 2 steps instead of 4–6 that drafted and submitted the entry for him |
+
+(The Ring case is not counted: the replay's template carried that day's completed notice.) Round 1, without "who
+acts" and with the brief only, over-reached on Canvas in every run and planned the Reflections submission for
+the owner's son.
+
+### Replay of a day's calendar (2026-10-04)
+
+`scratch/replay/brain_decides_the_day.py`: at 07:30 local, just after the owner told chat "I will start the
+timesheets at 5PM or so", a prototype brain decided each of the 31 calendar placements dayflow received that day,
+given the owner's todo list, his chat so far, the work in motion that did not come from the calendar, and the open
+concerns (3 runs each).
+
+- **Timesheets** (B455, all day and 5 PM): no task in every run, against dayflow's todo work, its spiral and a 5 PM
+  heads-up.
+- **Without the steward's purpose** the brain treated "family time at 6" as context and dropped the heads-up: the
+  context-switch reminders the steward existed to give (owner: "we are losing context reminders"). With the
+  steward's sections 7, 9 and 10 in its prompt (`--stewardship`), the 6:00 PM heads-up came back in every run,
+  covering the dinner and family-time placements; the bedtime items became one 10:30 PM reminder ("stop coding,
+  use the bathroom, and leave the computer for bed"); the timesheets item still made no task. So the purpose moves
+  to the brain; calendar beliefs do not need to become concerns.
+- **Open for the owner**: the 10 PM liquid cutoff (the brain dropped it in 2 of 3 runs: "his usual last glass
+  around 9 PM is already before the 10 PM cutoff"), the combined bedtime reminder, the schoolwork item.
+- **Found in the input**: the day pass placed the same belief several times as it re-ran (31 placements for about
+  20 beliefs: lights after bedtime three times, timesheets and bathroom twice); some runs left items undecided, so
+  the real agent checks that every item is answered (one correction round).
 
 ## 3. Delegation and interruption, on existing plumbing
 
@@ -122,6 +183,8 @@ Each of the steward's jobs (`strategic_planner_wo`, `prompts/system.j2`) has a n
 | Avoid duplicates by reading the portfolio | the brain's list: each item is decided once, against its own entries |
 | Map the owner's feedback to existing work ("request its end or CHANGE it") | the brain's cancel and modify by task id |
 | Check for missing high-impact information | the architect, which can already plan a step that asks the owner |
+| Stewardship and when to interrupt (sections 7 and 10 of its prompt): help the day go well, reduce friction, protect focus, **smooth transitions**, prevent likely misses, support routines; a heads-up belongs on the boundary ("family time is starting" at 6:00 PM); interrupt for an imminent context switch, an important reminder or deadline; the smallest helpful action, including none | **the brain**, which decides what the day needs |
+| The owner's standing directives (`resource_orchestrator_user_prefs`, section 9): the executor capabilities, the notification and device-control rules, the escalation policy, the personal overlay (wellness nudges are separate cron reminders, not to be duplicated) | **the brain** (and the architect, which already reads them since 2026-09-18) |
 | Capability and safety limits (section 5 of its prompt): work only within real system capabilities; out of bounds unless the owner asks (enrolling, forms, purchases and subscriptions, sign-ups, choosing doctors or financial products, submitting official documents, unknown portals, personal details); "reduce it to the nearest safe reachable action: summarize, notify, draft, or ask the user"; the assistant is the automation | **the architect**, as a shared partial both read during the transition (the architect's prompt has none of it today) |
 
 The steward's capability judgment is real work. On 2026-10-04 the brain asked for "the doorbell battery is
@@ -131,6 +194,17 @@ outcome is not reachable at all, the architect says so as a report to the brain 
 battery; it can notify and check"), never by quietly substituting a different goal. The brain decides what to do
 with that, and gets a short summary of the assistant's capabilities (the same partial, abbreviated) so it rarely
 asks for what cannot be done; the detail stays with the architect and the workers, who know their tools.
+
+The summary also says what the assistant can sense, since a wait needs a signal (owner, 2026-10-04):
+- **Away from the keyboard (AFK)**, usable as a bedtime signal at night ("if i go afk around 10pm+ then i guess i am
+  in bed"); not reliable during a fullscreen game (the AFK blind spot found 2026-09-17).
+- The bedroom camera is left out until it is in use.
+
+AFK changes become an input like the camera's: they reach the brain's inbox, and a step waiting on "inactive after
+bedtime" can be woken by them. Today event waits match only intake (emails, pods), so "turn off the lights after
+he has gone to bed" (B488, whose own wording names the signal) waited on a condition nothing could report and was
+abandoned twice on 2026-10-04, "bedtime could not be confirmed". The work-engine note lists sensor events as an
+open gap; this is its daily case.
 
 **Intake that does not come from the brain** reaches the steward today: camera pods and allowlisted pods (memory:
 steward intake = concern handoffs + camera pods). It moves to the brain's inbox like every other source. The
@@ -180,13 +254,19 @@ the steward) before anything is planned.
    then again when something bears on an item)?
 3. How is "what the assistant does with each calendar item" asked in the morning review, and for the 45 approved
    beliefs already on the calendar, once in a batch?
+4. Why the day pass places one belief several times in a day, and whether placements become one per belief and
+   time before the brain reads them.
 
 ## Build order
 
-1. The delegation decision as an agent, replayed on 2026-10-01 to 10-04 against the owner's expected answers.
+1. The delegation decision as an agent, replayed on 2026-10-01 to 10-04 against the owner's expected answers
+   (concern pieces and one day's calendar replayed, see above), with the steward's purpose and the owner's
+   directives in its prompt, "who acts", and every item answered.
 2. Shadow mode in the brain's pass, with its table and the daily comparison.
 3. "What the assistant does with it" in the morning review.
 4. The capability and safety section as a shared partial in the architect's prompt (and abbreviated for the
-   brain), replayed on recorded architect calls before the first lane cuts over.
+   brain, with what can be sensed), replayed on recorded architect calls before the first lane cuts over.
+   AFK changes as an input (the brain's inbox and event waits). Chat's tracked tasks reach the brain as records,
+   before the leaked-marker fix.
 5. The calendar lane cut over behind a switch, code creating its work objects; then concern handoffs, with cancel
    and modify by task id; then pod and camera intake into the brain's inbox. The steward retires.
