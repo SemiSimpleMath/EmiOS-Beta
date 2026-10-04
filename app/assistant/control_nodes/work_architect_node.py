@@ -265,11 +265,21 @@ class WorkArchitectNode(ControlNode):
                         objective = (goal.content or goal.title) if goal else c["objective"]
                         task = render_view("architect_task", mode="create", objective=objective)
                         result = agent.action_handler(Message(task=task, information=why, scope_context=scope))
-                        nodes = (getattr(result, "data", {}) or {}).get("nodes", []) or []
-                        res = apply_architect_dag(store, work_id, nodes, expected_updated_at=wo.updated_at)
-                        decomposed.append({"work_id": work_id, "nodes": len(res.get("added", []))})
-                        logger.info("[%s] decomposed %s into %d node(s)",
-                                    self.name, work_id, len(res.get("added", [])))
+                        data = getattr(result, "data", {}) or {}
+                        # A goal can be moot or need rewording before anything is planned. Until 2026-10-04 only
+                        # the re-plan branch passed these on: a task-less goal the architect ended ("its useful
+                        # moment has passed") stayed active and was decomposed again every tick, from 10-02 on.
+                        res = apply_architect_dag(store, work_id, data.get("nodes", []) or [],
+                                                  revise_objective=data.get("revise_objective"),
+                                                  end_goal=data.get("end_goal"),
+                                                  expected_updated_at=wo.updated_at)
+                        decomposed.append({"work_id": work_id, "nodes": len(res.get("added", [])),
+                                           "ended": res.get("ended")})
+                        logger.info("[%s] decomposed %s into %d node(s), revised=%s ended=%s",
+                                    self.name, work_id, len(res.get("added", [])), bool(res.get("revised")),
+                                    res.get("ended"))
+                        if res.get("ended"):
+                            _deliver_ending(store, work_id, res["ended"])
                     except Exception as e:
                         logger.error("[%s] decompose failed for %s: %s", self.name, work_id, e)
                         logger.debug("[%s] decompose exception", self.name, exc_info=True)
