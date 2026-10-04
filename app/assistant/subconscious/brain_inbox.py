@@ -171,22 +171,21 @@ def ingest_email(*, now_utc: Optional[datetime] = None, connect=None, fetch=None
     return added
 
 
-def add_work_event(*, work_id: str, receipt_id: str, occurred_at: str, text: str, concern_ids: List[str],
-                   connect=None) -> bool:
-    """Dayflow's work on concerns reports here (owner, 2026-09-30): each finalizer judgment and each
-    ending of work attached to a concern (concern_feedback.py). The work names its concerns by id, so
-    the event arrives routed to them by code, without the gate. Idempotent on the receipt. Returns
-    True when the row is new."""
+def add_work_event(*, work_id: str, receipt_id: str, occurred_at: str, text: str, connect=None) -> bool:
+    """What dayflow did reports here: each finalizer judgment and each ending of every work object
+    (concern_feedback.py). The event is pending like a chat message or an email: the gate routes it to
+    every open concern its outcome bears on. The text names the concerns the work was made for, as the
+    gate's hint (docs/design/what_was_done_reaches_the_brain_2026-10-03.md; until then work reported only
+    when it cited a concern, already routed to those). Idempotent on the receipt. Returns True when the
+    row is new."""
     connect = connect or _connect
     ensure_schema(connect)
     now = _iso(datetime.now(timezone.utc))
     with connect(True) as c:
         cur = c.execute(
             "INSERT OR IGNORE INTO brain_events (source, source_ref, occurred_at, room_id, speaker, text, "
-            "received_at, gate_status, route, concern_ids, gate_reasoning, gated_at) "
-            "VALUES ('work', ?, ?, NULL, 'dayflow', ?, ?, 'routed', 'concern', ?, ?, ?)",
-            (f"work:{work_id}:{receipt_id}", occurred_at, text, now, json.dumps(concern_ids),
-             "linked by id: the work cites these concerns", now))
+            "received_at) VALUES ('work', ?, ?, NULL, 'dayflow', ?, ?)",
+            (f"work:{work_id}:{receipt_id}", occurred_at, text, now))
     return cur.rowcount == 1
 
 

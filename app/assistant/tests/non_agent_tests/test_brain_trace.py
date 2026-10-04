@@ -3,7 +3,9 @@
 Pins: a traced agent's call is stored with the system and user prompts as sent, the result, the
 engine and the tags of the block it ran in (tags nest and unwind); an error is stored instead of a
 result; untraced agents are not stored; calls are found by event and by concern; a failed write is
-logged, never raised into the call. Scratch store; invented data only.
+logged, never raised into the call. A wake is a run: its calls carry its id, the decisions code made
+are its steps (none recorded outside a run), a run that raises keeps its error; runs list newest first,
+idle ones only on request, and by concern. Scratch store; invented data only.
 """
 from __future__ import annotations
 
@@ -121,3 +123,46 @@ def test_the_dayflow_diagram_follows_the_managers_configs():
                                              "work_finalizer_node"]
     assert next(s for s in dispatch if s["name"] == "dayflow_tool_caller")["work_calls"]
     assert "dayflow_orchestrator::state_mover" in [s["name"] for s in wake]
+
+
+def test_a_run_holds_its_calls_and_steps(connect):
+    brain_trace.step("brief", "stale", subject="c-1", connect=connect)          # outside a run: not recorded
+    with brain_trace.run("event", connect=connect) as recorded:
+        with brain_trace.trace(stage="brief", concern_id="c-1"):
+            _record(connect, agent="subconscious::brief", result={"what": "w"})
+            brain_trace.step("brief", "stale", subject="c-1", reason="no brief yet", connect=connect)
+        brain_trace.step("handoff", "handed", subject="c-2", item_id="concern_handoff:c-2:abc", connect=connect)
+        recorded["summary"] = {"briefs_written": 1}
+    with brain_trace.run("timer", connect=connect) as recorded:                  # idle
+        recorded["summary"] = {}
+    [run] = brain_trace.list_runs(connect=connect)
+    assert run["trigger"] == "event" and run["summary"] == {"briefs_written": 1} and run["ended_at"]
+    assert (run["steps"], run["calls"]) == (2, 1)
+    assert len(brain_trace.list_runs(active_only=False, connect=connect)) == 2
+    assert [r["id"] for r in brain_trace.list_runs(concern_id="c-2", connect=connect)] == [run["id"]]
+    assert brain_trace.list_runs(concern_id="c-9", connect=connect) == []
+    full = brain_trace.get_run(run["id"], connect=connect)
+    assert [(s["stage"], s["what"], s["subject"]) for s in full["steps"]] == [
+        ("brief", "stale", "c-1"), ("handoff", "handed", "c-2")]
+    assert full["steps"][0]["detail"] == {"reason": "no brief yet"}
+    [call] = full["calls"]
+    assert call["trace"] == {"run_id": run["id"], "stage": "brief", "concern_id": "c-1"}
+
+
+def test_a_run_that_raises_keeps_its_error(connect):
+    with pytest.raises(RuntimeError):
+        with brain_trace.run("boot", connect=connect):
+            raise RuntimeError("register locked")
+    [run] = brain_trace.list_runs(connect=connect)
+    assert run["error"] == "RuntimeError: register locked" and run["summary"] is None
+    assert brain_trace.current("run_id") is None
+
+
+def test_the_brain_diagram_is_consistent():
+    from app.routes import brain_flow
+    ids = {n["id"] for n in brain_flow.NODES}
+    assert all(a in ids and b in ids for a, b, _ in brain_flow.EDGES)
+    for agent in brain_flow.AGENT_NODE:
+        assert brain_flow._engine(agent), f"{agent} has no config with a model tier"
+    brain_agents = {a for a in brain_trace.TRACED_AGENTS if a != "subconscious::noticer"}
+    assert brain_agents <= set(brain_flow.AGENT_NODE), "every traced brain agent has a place in the diagram"

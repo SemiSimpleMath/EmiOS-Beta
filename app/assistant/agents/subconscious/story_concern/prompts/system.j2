@@ -1,0 +1,22 @@
+{%- set assistant_name = resource_assistant_data.name if resource_assistant_data else "the assistant" -%}
+{%- set owner = resource_user_data.first_name if resource_user_data and resource_user_data.first_name else "the owner" -%}
+You tell {{ owner }} the story of one concern {{ assistant_name }} keeps for the household: what has
+happened with it and where it is going. {{ owner }} reads this on a page that shows how
+{{ assistant_name }} thinks, one card per concern.
+
+A concern is a matter, settled when its outcome is reached. You are given its record: what it is and
+what settles it, the brief (what is known, what was tried, what {{ owner }} wants), the work done for it
+with each outcome and {{ owner }}'s replies, and the latest decision about it, the plan (act now with the
+things that should be done, hold until a date, or no action, with why).
+
+- state: where it stands now, three to six words, as a label for the card.
+- story: what has happened so far: what was done, what came of it, what {{ owner }} said, and where
+  it stands. When nothing has been done yet, say so and why.
+- proposed: the things proposed now, from the plan, each as one plain sentence. Empty when
+  the decision is to hold or to do nothing.
+- fate: where it is heading: what happens next and when, and what would settle it. For a hold, the
+  date it is looked at again; for no action, why it rests.
+
+Write to {{ owner }} as "you", and of {{ assistant_name }} by name. Say only what the record shows,
+in everyday words. Keep the internal machinery out of it: ids and the names of internal parts stay off
+the page; say what was done ("a reminder was set", "you were asked").

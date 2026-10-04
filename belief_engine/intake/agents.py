@@ -39,33 +39,38 @@ def _call(name: str, payload: dict, scope_ctx) -> dict:
     return data
 
 
-def _extraction_problems(result: dict, insight_ns: set, n_items: int) -> list[str]:
+def _extraction_problems(result: dict, sources_of: dict[int, set]) -> list[str]:
+    """A belief cites an insight given, and only entries from that insight's own sources."""
     problems = []
     for b in result.get("beliefs") or []:
-        if b["insight_ref"] not in insight_ns:
-            problems.append(f"belief cites insight {b['insight_ref']}, not one of {sorted(insight_ns)}")
+        allowed = sources_of.get(b["insight_ref"])
+        if allowed is None:
+            problems.append(f"belief cites insight {b['insight_ref']}, not one of {sorted(sources_of)}")
+            continue
         refs = b.get("sources") or []
-        bad = [r for r in refs if not 1 <= r <= n_items]
+        bad = [r for r in refs if r not in allowed]
         if bad:
-            problems.append(f"belief cites timeline items outside 1..{n_items}: {bad}")
+            problems.append(f"a belief from insight {b['insight_ref']} cites entries {bad}, which are not among "
+                            f"that insight's sources {sorted(allowed)}")
         if len(set(refs)) != len(refs):
-            problems.append("a belief cites the same item twice")
+            problems.append("a belief cites the same entry twice")
     return problems
 
 
-def extract_day(day: str, insights: list, items: list, provenance: dict, scope_ctx) -> list[dict]:
-    """The day's beliefs, each with its sources restored from the timeline."""
+def extract_day(day: str, insights: list, provenance: dict, scope_ctx) -> list[dict]:
+    """The day's beliefs, each resting on entries from its insight's sources, restored to their source refs
+    (day_items.insights gives each insight with its sources, and the provenance of every source)."""
     if not insights:
         return []
-    insight_ns = {i["n"] for i in insights}
-    payload = {"date": day, "insights": insights, "timeline_items": items}
+    sources_of = {i["n"]: {s["n"] for s in i["sources"]} for i in insights}
+    payload = {"date": day, "insights": insights}
     result = _call(EXTRACTOR, payload, scope_ctx)
-    problems = _extraction_problems(result, insight_ns, len(items))
+    problems = _extraction_problems(result, sources_of)
     if problems:
         logger.warning("[intake] %s extraction invalid, one correction: %s", day, problems)
         result = _call(EXTRACTOR, {**payload, "date": f"{day} (correct these problems in your previous "
                                    f"answer: {'; '.join(problems)})"}, scope_ctx)
-        problems = _extraction_problems(result, insight_ns, len(items))
+        problems = _extraction_problems(result, sources_of)
         if problems:
             raise ValueError(f"{day} extraction still invalid after one correction: {problems}")
     beliefs = []
@@ -133,16 +138,18 @@ def dedup(atom: dict, day: str, candidates: list[dict], scope_ctx) -> dict:
             "reasoning": result.get("reasoning")}
 
 
-def revise(belief: dict, new_atom: dict, day: str, scope_ctx) -> dict:
-    """Restate a held belief after a new belief arrived that bears against it.
+def draft_revision(belief: dict, new_atom: dict, day: str, scope_ctx) -> dict:
+    """Draft the held belief's wording reconciled with a new belief that contradicts it, for the owner to apply in
+    the morning review (owner, 2026-10-03: "maybe these will again be things you get to approve in the morning").
+    Nothing is written here.
 
-    Returns outcome/statement/kind/reasoning. `unchanged` means the belief stands as held (the new
-    evidence confirmed it, asked a question, or was one occasion); the statement and kind are then
-    the held ones, whatever the model wrote. The new belief is shown whole — statement, the kind
-    the extractor gave it, its evidence — so a one-occasion exception and a new lasting state can
-    be told apart.
-    """
+    Returns outcome/statement/kind/reasoning. `unchanged` means no rewrite reconciles them (the new belief was one
+    occasion, or the two cannot both be said); the statement and kind are then the held ones. Until 2026-10-03 the
+    same call rewrote the held belief at once: right in content (the switch from intermittent fasting to
+    calorie-reduced meals, 2026-05-07, in four beliefs overnight), but with "until <date>" history clauses, and once
+    a misread (B198). The prompt now writes the present state only."""
     held = {"statement": belief["statement"], "kind": belief["kind"]}
+
     def view(srcs):
         return [{k: s[k] for k in ("day", "time", "kind", "relation", "text", "in_reply_to") if s.get(k)} for s in srcs]
     evidence = sorted(belief["sources"], key=lambda s: (s.get("day") or "", s.get("time") or ""))

@@ -1,0 +1,29 @@
+/* The morning belief review (/beliefs/review). Colours and cards come from beliefs.css. */
+.rv-link{color:var(--acc);text-decoration:none}
+.rv-link:hover{text-decoration:underline}
+.rv-panel{padding:6px 0 18px}
+.rv-h{margin:6px 22px 2px;font-size:17px}
+.rv-count{color:var(--mut);font-weight:400;font-size:14px}
+.rv-hint{margin:0 22px;color:var(--mut);font-size:12.5px}
+.rv-list{padding-bottom:16px}
+.rv-card{cursor:default}
+.rv-card:hover{border-color:var(--line);background:var(--panel)}
+.rv-note{margin-top:6px;color:var(--mut);font-size:12px;font-style:italic}
+.rv-note-label{font-style:normal;color:var(--warn)}
+.rv-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.rv-btn{background:transparent;color:var(--ink);border:1px solid var(--line);border-radius:8px;
+  padding:5px 12px;font-size:12.5px;cursor:pointer}
+.rv-btn:hover{background:var(--panel2)}
+.rv-btn.primary{background:var(--acc);color:#0b1020;border-color:var(--acc);font-weight:600}
+.rv-btn.primary:hover{filter:brightness(1.08)}
+.rv-btn.danger{color:var(--bad);border-color:#5a2a2a}
+.rv-edit{width:100%;background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:8px;
+  padding:8px 10px;font:inherit}
+.rv-label{color:var(--mut);font-size:12px;margin-bottom:3px}
+.rv-old{margin-top:12px;padding-top:10px;border-top:1px dashed var(--line)}
+.rv-evidence{margin:6px 0 4px;display:flex;flex-direction:column;gap:6px}
+.rv-ev{border-left:2px solid var(--line);padding-left:8px}
+.rv-ev-date{color:var(--mut);font-size:11.5px}
+.rv-ev-reply{color:var(--mut);font-size:12px}
+.rv-ev-text{font-size:13px}
+.hidden{display:none}

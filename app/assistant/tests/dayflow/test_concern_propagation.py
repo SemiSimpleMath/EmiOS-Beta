@@ -110,14 +110,14 @@ class TestPropagateWorkOutcome:
                                                content=reply_text)
         return SimpleNamespace(id="work_x", constraints={"concern_refs": refs}, nodes=nodes)
 
-    def test_work_citing_no_concern_leaves_no_receipt(self, tmp_path):
+    def test_work_citing_no_concern_still_leaves_a_receipt_for_the_brain(self, tmp_path):
+        # Everything done reports to the brain (2026-10-03); delivery is pinned in test_concern_outbox.py.
         from work_objects.store import WorkStore
         store = WorkStore(str(tmp_path / "work.db"))
         try:
             wo = store.apply("create_work_object", {"title": "Unlinked", "constraints": {}})
             store.apply("set_work_status", {"work_id": wo.id, "status": "done", "reason": "done"})
-            assert store.pending_concern_feedback() == []
-            propagate_work_outcome(store, wo.id, "done")
+            assert [r["outcome"] for r in store.pending_concern_feedback()] == ["done"]
         finally:
             store.close()
 

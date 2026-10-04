@@ -59,7 +59,11 @@ Source dates below are the original dates, not the time this item entered this p
 - [{{ meta.get("short_id", meta.get("item_id","")) }}] {% if meta.get("source_type","") == "concern" %}Handed over by the brain: {{ meta.get("summary","") }}
   why now: {{ meta.get("why_now","") }}
   the concern and everything known about it:
-    {{ meta.get("brief_text","") | replace("\n", "\n    ") }}{% elif meta.get("source_type","") == "email" %}Email from {{ meta.get("email_sender","Unknown") }}: "{{ meta.get("email_subject", meta.get("summary","")) }}"{% if meta.get("email_summary") %} — {{ meta.get("email_summary") }}{% endif %}{% else %}{{ meta.get("summary","(no summary)") }} ({{ meta.get("source_type","") }}){% endif %}
+    {{ meta.get("brief_text","") | replace("\n", "\n    ") }}{% elif meta.get("source_type","") == "belief" %}On today's calendar, from the owner's belief [belief:{{ meta.get("belief_key","") }}]: {{ meta.get("summary","") }}
+{%- if meta.get("read_with") %}
+  read it with:
+    {{ meta.get("read_with","") | replace("\n", "\n    ") }}
+{%- endif %}{% elif meta.get("source_type","") == "email" %}Email from {{ meta.get("email_sender","Unknown") }}: "{{ meta.get("email_subject", meta.get("summary","")) }}"{% if meta.get("email_summary") %} — {{ meta.get("email_summary") }}{% endif %}{% else %}{{ meta.get("summary","(no summary)") }} ({{ meta.get("source_type","") }}){% endif %}
   source date: {{ (meta.get("created_at") or m.get("timestamp")) | local_time or "unknown; do not assume current" }}
 {%- if meta.get("pod_id") %}
   full source: {{ meta.get("pod_id") }}

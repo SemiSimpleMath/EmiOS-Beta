@@ -194,13 +194,7 @@ def _settled_anchors(register: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
 def _refuse_owner_close(concern: Dict[str, Any], now_iso: str, what: str) -> bool:
     """A concern the owner asked for closes only when its done_when is met (work achieved it) or
     the owner says it is over (the brain step reads the owner's words). The noticer infers; it does
-    not get to close one. A standing concern (a recurring part of the day, from the owner's beliefs)
-    is never closed: each day's outcome is recorded on it, and it changes when its beliefs do.
-    Refused attempts are journalled on the concern."""
-    if concern.get("kind") == "standing":
-        _journal_on(concern, now_iso, f"REFUSED a noticer {what}: a standing concern is never closed")
-        logger.warning("[noticer.persist] refused to close standing concern %s: %s", concern.get("concern_id"), what)
-        return True
+    not get to close one. Refused attempts are journalled on the concern."""
     if not concern.get("owner_request"):
         return False
     _journal_on(concern, now_iso, f"REFUSED a noticer {what}: the owner asked for this; it closes when "
@@ -249,43 +243,27 @@ def apply_brain_matter(updates: List[Dict[str, Any]], plan: List[Dict[str, Any]]
     return admitted
 
 
-def record_day_beliefs(plan: List[Dict[str, Any]], occurrences: Dict[str, List[Dict[str, Any]]], day: str, *,
-                       connect=None) -> Dict[str, Optional[str]]:
-    """The day's placed beliefs get their owners (subconscious/day_pass.py), under the register lock:
-    new owners through the concern door (`plan` was made before the lock), then today's occurrences on
-    every open owner, `occurrences[belief_key] = [{"time", ...}]`, recorded as
-    `concern["occurrences"] = {day: [{"time", "belief_keys"}]}` (other days dropped). Saves only when
-    something changed, since a save wakes the brain. Returns belief_key -> the open concern that owns it,
-    or None when a closed concern settled it."""
-    from app.assistant.subconscious import concern_door
+def retire_standing_concerns(reason: str, *, connect=None) -> List[str]:
+    """Move every open standing concern (one made from the owner's beliefs by the day pass, until
+    2026-10-03) to dormant, journalled with `reason`. Beliefs are no longer made into concerns
+    (docs/design/what_was_done_reaches_the_brain_2026-10-03.md). Returns the concern ids moved."""
     with _REGISTER_LOCK:
         register = _load_register(connect)
         now_iso = datetime.now(timezone.utc).isoformat()
-        before = json.dumps(register, sort_keys=True, default=str)
-        if plan:
-            concern_door.apply_admission(plan, register, source="day_pass", now_iso=now_iso)
-        owners: Dict[str, Optional[str]] = {}
-        open_ids = {c["concern_id"] for b in ("active", "addressing") for c in register.get(b) or []}
-        for bucket in ("resolved", "dormant", "active", "addressing"):
-            for c in register.get(bucket) or []:
-                for key in c.get("belief_refs") or []:
-                    if key in occurrences:
-                        owners[key] = c["concern_id"] if c["concern_id"] in open_ids else None
+        moved = []
         for bucket in ("active", "addressing"):
-            for c in register.get(bucket) or []:
-                times: Dict[str, List[str]] = {}
-                for key in c.get("belief_refs") or []:
-                    for occurrence in occurrences.get(key) or []:
-                        times.setdefault(occurrence["time"], []).append(key)
-                today = [{"time": t, "belief_keys": keys} for t, keys in times.items()]
-                if today:
-                    c["occurrences"] = {day: today}
-                else:
-                    c.pop("occurrences", None)
-        if json.dumps(register, sort_keys=True, default=str) != before:
+            for c in [c for c in register.get(bucket) or [] if c.get("kind") == "standing"]:
+                register[bucket].remove(c)
+                c.pop("occurrences", None)
+                c["dormant_at_utc"] = now_iso
+                c["dormant_reason"] = reason
+                _journal_on(c, now_iso, f"RETIRED to dormant: {reason}")
+                register.setdefault("dormant", []).append(c)
+                moved.append(c["concern_id"])
+        if moved:
             register["last_updated_utc"] = now_iso
             _save_register(connect, register)
-    return owners
+    return moved
 
 
 def journal_concern(concern_id: str, line: str, *, connect=None) -> None:
@@ -320,7 +298,8 @@ def set_concern_brief(concern_id: str, written_from: str, *, brief: Optional[Dic
                     concern["brief"] = {**brief, "basis": written_from, "written_at": now_iso}
                     concern.pop("brief_error", None)
                 else:
-                    concern["brief_error"] = {"basis": written_from, "error": error, "at": now_iso}
+                    concern["brief_error"] = {"basis": written_from, "error": error, "at": now_iso,
+                                              "writer": concern_brief.WRITER_REVISION}
                 _save_register(connect, register)
                 return True
     raise KeyError(f"concern {concern_id} is not in the register")
@@ -786,6 +765,53 @@ def attach_work(concern_ref: str, *, work_id: str, work: Dict[str, Any], receipt
         return "attached"
 
 
+def concern_title(concern_ref: str, *, connect=None) -> Optional[str]:
+    """The title of the concern a ref names, or None when it names no single concern."""
+    found = _find_concern(_load_register(connect), concern_ref)
+    return found[2].get("title") if found else None
+
+
+def concerns_holding_work(work_id: str, *, connect=None) -> List[str]:
+    """Every concern, in any bucket, that holds this work as attached work: the ones it cites, and the
+    ones the brain attached it to (`attach_seen_work`). Concern ids."""
+    register = _load_register(connect)
+    return [c["concern_id"] for b in ("active", "addressing", "dormant", "resolved") for c in register.get(b) or []
+            if work_id in (c.get("attached_work") or {})]
+
+
+def attach_seen_work(concern_id: str, *, work_id: str, work: Dict[str, Any], receipt_id: str,
+                     connect=None) -> str:
+    """The brain found that work bears on a concern it was not made for (it used the work's report on the
+    concern; docs/design/what_was_done_reaches_the_brain_2026-10-03.md): the work is attached here too, so
+    its later judgments and its ending reach this concern by code. `work` carries the work's status now
+    ('active' | 'done' | 'abandoned') and, when it ended, `ended`; the concern is in progress only while
+    the work is. Returns 'attached' | 'already_attached' | 'unresolved'."""
+    with _REGISTER_LOCK:
+        register = _load_register(connect)
+        found = _find_concern(register, concern_id)
+        if found is None:
+            logger.warning("[persist.attach_seen_work] %r names no single concern", concern_id)
+            return "unresolved"
+        bucket, index, concern = found
+        if work_id in (concern.get("attached_work") or {}) or receipt_id in concern.get("work_receipts", []):
+            return "already_attached"
+        now_iso = datetime.now(timezone.utc).isoformat()
+        status = work.get("status") or "active"
+        concern.setdefault("attached_work", {})[work_id] = {
+            "work_id": work_id, "title": work.get("title"), "objective": work.get("objective"),
+            "success_criteria": work.get("success_criteria") or "", "attached_at": now_iso,
+            "status": status, "judgments": [], "ended": work.get("ended")}
+        _journal_on(concern, now_iso, f"WORK ATTACHED {work_id} by the brain (its outcome bears on this concern): "
+                                      f"{work.get('objective')}")
+        concern.setdefault("work_receipts", []).append(receipt_id)
+        if bucket == "active" and status == "active":
+            _move(register, bucket, index, concern, "addressing")
+            concern["addressing_since_utc"] = now_iso
+        register["last_updated_utc"] = now_iso
+        _save_register(connect, register)
+        return "attached"
+
+
 def record_judgment(concern_ref: str, *, work_id: str, task: Dict[str, Any], receipt_id: str = "",
                     connect=None) -> str:
     """The finalizer judged one task of attached work: its verdict, account, and the owner's replies,
@@ -970,7 +996,7 @@ def rederive_attached_work(load_work_objects, *, connect=None) -> List[Dict[str,
                     concern.pop("addressing_reviewed_at_utc", None)
                     ended = [w for w in attached.values() if w["ended"]]
                     if ended:
-                        reopened.append({"concern_id": concern["concern_id"],
+                        reopened.append({"concern_id": concern["concern_id"], "title": concern.get("title"),
                                          "work": max(ended, key=lambda w: str(w["ended"]["at"]))})
                 changed += 1
         if changed:

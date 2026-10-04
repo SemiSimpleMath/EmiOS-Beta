@@ -2,7 +2,8 @@
 
 It reads the day's insights and timeline (written by the daily_insights pipeline at 00:05) and
 the assistant's turns, and writes its own `belief_intake_*` tables. After the days are processed
-it tags the new and revised beliefs (belief_tags, the shared retrieval vocabulary) and rewrites
+it tags the new and revised beliefs (belief_tags, the shared retrieval vocabulary), proposes the
+new beliefs that might be calendar material (intake/calendar.py), and rewrites
 the export (resource_user_beliefs.json) that the routine writer, the health and entertainment
 stages, the feedback-extractor context and the insights page read.
 
@@ -47,7 +48,9 @@ class BeliefIntakeAdapter:
         from belief_engine.export.export_beliefs import export_beliefs
         from belief_engine.tagging import tag_beliefs
         tags = tag_beliefs(mode="needs", source="intake")
+        from belief_engine.intake.calendar import tag_calendar_candidates
+        calendar = tag_calendar_candidates(app_store())
         out_path = export_beliefs()
-        logger.info("[belief_intake:%s] tagged %s; exported -> %s", run_id, tags, out_path)
+        logger.info("[belief_intake:%s] tagged %s; calendar %s; exported -> %s", run_id, tags, calendar, out_path)
         return {"pipeline_id": self.pipeline_id, "run_id": run_id, "status": "success",
-                "date": day, "days": results, "tags": tags, "export_path": str(out_path)}
+                "date": day, "days": results, "tags": tags, "calendar": calendar, "export_path": str(out_path)}

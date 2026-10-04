@@ -307,21 +307,23 @@ def test_work_reports_render_under_their_work_and_attached_work_under_its_concer
 
 
 def test_the_wake_sleeps_until_a_room_goes_quiet_or_a_hold_passes_whichever_is_first(monkeypatch):
-    from app.assistant.subconscious import (brain_wake, concern_brief, concern_handoff, concern_planner,
-                                            concern_store, day_pass)
+    from app.assistant.subconscious import (belief_occurrences, brain_wake, concern_brief, concern_handoff,
+                                            concern_planner, concern_store, day_pass)
     quiet, hold = NOW + timedelta(minutes=4), NOW + timedelta(minutes=2)
     monkeypatch.setattr(day_pass, "run_day_pass", lambda: {"day_pass": "unchanged"})
+    monkeypatch.setattr(belief_occurrences, "run_occurrence_handoffs", lambda: {"occurrences_handed": 0})
     monkeypatch.setattr(concern_planner, "run_planners", lambda: {})
-    monkeypatch.setattr(concern_planner, "next_hold_at", lambda register, now: None)
+    from app.assistant.subconscious import brain_stories
+    monkeypatch.setattr(brain_stories, "run_stories", lambda: {})
     monkeypatch.setattr(gate, "run_gate", lambda: {"next_ready_at": quiet})
     monkeypatch.setattr(brain_step, "run_brain_step", lambda: {"matters": 0})
     monkeypatch.setattr(concern_brief, "run_briefs", lambda: {})
     monkeypatch.setattr(concern_handoff, "run_handoffs", lambda: {})
     monkeypatch.setattr(concern_store, "load_register", lambda: {})
-    monkeypatch.setattr(concern_brief, "next_hold_at", lambda register, now: hold)
+    monkeypatch.setattr(concern_planner, "next_hold_at", lambda register, now: hold)
     summary = brain_wake.run_brain()
     assert summary["next_wake_at"] == hold and summary["day_pass"] == "unchanged"
-    monkeypatch.setattr(concern_brief, "next_hold_at", lambda register, now: None)
+    monkeypatch.setattr(concern_planner, "next_hold_at", lambda register, now: None)
     assert brain_wake.run_brain()["next_wake_at"] == quiet
     monkeypatch.setattr(gate, "run_gate", lambda: {"next_ready_at": None})
     assert brain_wake.run_brain()["next_wake_at"] is None

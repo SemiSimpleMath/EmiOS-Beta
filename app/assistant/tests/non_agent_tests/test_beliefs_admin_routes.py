@@ -81,3 +81,56 @@ def test_trends_count_support_and_list_revisions(client):
     t = client.get("/api/beliefs/trends?days=400&min_net=1").get_json()
     assert {r["belief_id"] for r in t["trending_up"]} == {"B1", "B2"}
     assert t["recently_changed"][0]["belief_id"] == "B1"
+
+
+# ── the morning review (2026-10-03) ─────────────────────────────────────────────────────────────────────
+
+def _review(client):
+    data = client.get("/api/beliefs/review").get_json()
+    return [b["belief_id"] for b in data["calendar"]], [b["belief_id"] for b in data["new"]]
+
+
+def _state(client, bid):
+    with client.store._connect(False) as c:
+        return dict(c.execute("SELECT status, calendar, review, reviewed_day FROM belief_intake_beliefs WHERE id=?",
+                              (bid,)).fetchone())
+
+
+def test_the_review_shows_calendar_proposals_and_other_unreviewed_beliefs(client):
+    client.store.apply("2026-09-03", _atom("The owner has tea at 4 PM.", "tea at four"), [0.9, 0.1], {"verdict": "new"})
+    client.store.set_calendar("B3", "proposed", "every day at 4 PM: a habit at a time")
+    with client.store._connect(True) as c:
+        c.execute("UPDATE belief_intake_beliefs SET review='baseline' WHERE id='B1'")
+    assert _review(client) == (["B3"], ["B2"])
+    assert client.get("/api/beliefs/review").get_json()["calendar"][0]["calendar_note"].startswith("every day")
+
+
+def test_review_decisions_write_the_calendar_and_the_review(client):
+    client.store.set_calendar("B1", "proposed", "note")
+    assert client.post("/api/beliefs/review/decide", json={"belief_id": "B1", "action": "add_to_calendar"}).status_code == 200
+    assert _state(client, "B1") == {"status": "active", "calendar": "approved", "review": "approved",
+                                    "reviewed_day": "2026-09-29"}
+    client.post("/api/beliefs/review/decide", json={"belief_id": "B2", "action": "dismiss"})
+    assert _state(client, "B2")["status"] == "retired" and _state(client, "B2")["review"] == "dismissed"
+    assert _review(client) == ([], [])
+
+
+def test_an_edited_proposal_stays_until_its_calendar_decision(client):
+    client.store.set_calendar("B1", "proposed", "note")
+    r = client.post("/api/beliefs/review/decide", json={"belief_id": "B1", "action": "edit",
+                                                         "statement": "The owner likes tea at 4 PM."})
+    assert r.get_json()["belief"]["statement"] == "The owner likes tea at 4 PM."
+    assert _state(client, "B1")["review"] == "edited" and _review(client)[0] == ["B1"]
+    owner = [e for e in client.get("/api/beliefs/item?belief_id=B1").get_json()["evidence"] if e["source_ref"] == "owner"]
+    assert owner and owner[0]["text"] == "The owner likes tea at 4 PM."
+
+
+def test_any_belief_can_be_put_on_the_calendar_from_the_drawer(client):
+    client.post("/api/beliefs/update", json={"belief_id": "B2", "calendar": "approved"})
+    assert _state(client, "B2")["calendar"] == "approved"
+    assert client.post("/api/beliefs/update", json={"belief_id": "B2", "calendar": "maybe"}).status_code == 400
+
+
+def test_an_unknown_review_action_is_refused(client):
+    assert client.post("/api/beliefs/review/decide", json={"belief_id": "B1", "action": "keep"}).status_code == 400
+    assert client.post("/api/beliefs/review/decide", json={"belief_id": "B1", "action": "edit", "statement": " "}).status_code == 400

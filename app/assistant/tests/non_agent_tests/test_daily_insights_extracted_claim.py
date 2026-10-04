@@ -21,6 +21,7 @@ def test_item_validates_without_extracted_claim():
         tags=["routine"],
         change_recommended="Reduce standing-break cadence.",
         evidence=["snoozed standing-break 3x"],
+        sources=[3],
     )
     assert item.extracted_claim is None
     assert item.temporal_scope == "chronic"
@@ -32,6 +33,7 @@ def test_item_validates_with_full_claim():
         tags=["routine"],
         change_recommended="Space them out.",
         evidence=["snoozed 3x"],
+        sources=[3, 4],
         extracted_claim=ExtractedClaim(
             subject_phrase="the user",
             predicate_phrase="finds too frequent",
@@ -59,9 +61,9 @@ def test_claim_soft_field_defaults():
 def test_agent_form_roundtrip_mixed():
     # A batch with one structured + one bare item validates and round-trips through JSON.
     form = AgentForm(actionable_information=[
-        ActionableItem(fact_summary="a", tags=[], change_recommended="x"),
+        ActionableItem(fact_summary="a", tags=[], change_recommended="x", sources=[1]),
         ActionableItem(
-            fact_summary="b", tags=[], change_recommended="y",
+            fact_summary="b", tags=[], change_recommended="y", sources=[2],
             extracted_claim=ExtractedClaim(
                 subject_phrase="the user", predicate_phrase="prefers",
                 object_phrase="coffee before 11am",
@@ -71,3 +73,12 @@ def test_agent_form_roundtrip_mixed():
     back = AgentForm.model_validate(form.model_dump())
     assert back.actionable_information[0].extracted_claim is None
     assert back.actionable_information[1].extracted_claim.predicate_phrase == "prefers"
+
+
+def test_an_item_must_cite_the_entries_it_rests_on():
+    import pytest
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        ActionableItem(fact_summary="a", tags=[], change_recommended="x")
+    with pytest.raises(ValidationError):
+        ActionableItem(fact_summary="a", tags=[], change_recommended="x", sources=[])

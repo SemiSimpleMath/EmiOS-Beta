@@ -4,6 +4,12 @@
   kind={{ belief.kind | default('unspecified') }}{% if belief.tags %}; tags={{ belief.tags | join(', ') }}{% endif %}{% if belief.observation_count %}; observed {{ belief.observation_count }}x{% endif %}
   {% if belief.conditions %}conditions={{ belief.conditions | tojson }}{% endif %}
   {% if belief.first_observed %}first_observed={{ belief.first_observed }};{% endif %}{% if belief.last_confirmed %}last_confirmed={{ belief.last_confirmed }}{% endif %}
+{%- if belief.get('related') %}
+  read with these related beliefs (they are not entries):
+{%- for r in belief.related %}
+    - [belief:{{ r.belief_key }}] {{ r.statement }}
+{%- endfor %}
+{%- endif %}
 {% else %}
-(no selected beliefs)
+(no beliefs approved for the calendar)
 {% endfor %}

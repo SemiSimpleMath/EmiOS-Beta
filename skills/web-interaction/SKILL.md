@@ -43,4 +43,9 @@ Most pages put something in front of the content; dismiss it before pursuing the
 A CAPTCHA, a "verify you're human" challenge, or a bot-block page → **do not try to solve or bypass it.** Stop and hand control to the user (`return_control` / a review ticket). Hammering a challenge is exactly what flags an account — the thing we are avoiding.
 
 ## Stop before the irreversible
-Before a final, hard-to-undo commit — placing an order, confirming a payment, sending, deleting — stop and `return_control` (or raise a review ticket). Staging the action is fine; committing the side effect waits for the human.
+Placing an order (and confirming its payment) waits for the user's approval of that exact order: when it is
+ready, ask with `ask_user`, showing the store, each item with its options and quantity, the delivery address
+and time, and the total with fees and tip; place it only when the reply approves it as shown, and ask again
+after any change the user asks for. Before any other final, hard-to-undo commit — sending, deleting — stop and
+`return_control` (or raise a review ticket). Staging the action is fine; committing the side effect waits for
+the human.

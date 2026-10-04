@@ -47,7 +47,7 @@ For text boxes always prefer the `web_fill_xy` tool. This writes your text into 
 ## Cart and checkout
 - "Add to cart" / "Add to bag" buttons are inside item-detail modals. Required options (size, protein, etc.) must be selected before the button becomes enabled.
 - You may go to the cart to verify the order.
-- Once the final order is ready notify the user.
+- Once the final order is ready, ask the user to approve that exact order (see web-interaction: stop before the irreversible); place it only on their approval.
 
 ## Common pitfalls
 - DoorDash is a heavy React SPA — refs in snapshots can become stale quickly. Prefer `web_page_coords` for visual targets when refs are unreliable. Your first try should be refs, but you should quickly realize if something is not working and use visual tools.

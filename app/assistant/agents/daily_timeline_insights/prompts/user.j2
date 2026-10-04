@@ -5,7 +5,7 @@ Task: {{ task }}
 Known tags (if provided):
 {{ memory_available_tags }}
 
-Merged timeline data:
+Merged timeline data (every entry numbered `n`; cite those numbers in `sources`):
 {{ timeline_merged }}
 
 Return actionable_information items with:
@@ -13,5 +13,6 @@ Return actionable_information items with:
 - tags
 - change_recommended
 - evidence
+- sources
 - temporal_scope
 - extracted_claim (subject_phrase, predicate_phrase, object_phrase, qualifiers, applies_when?, polarity)

@@ -28,10 +28,9 @@ A candidate the owner asked for carries `owner_request` ({words, at, ref}: the o
 and the event they came from). The owner asking for something makes it live, so such a candidate is
 never judged the same as a closed matter; folded into an open concern, it carries the request there.
 
-A candidate made from the owner's beliefs (the day pass, subconscious/day_pass.py) carries `belief_refs`
-and is of kind `standing`: a recurring part of the day. Wherever it lands (a new concern, an open one it
-is folded into, or a closed one that settled it) the concern keeps those belief keys, so the next day's
-placement of the same belief finds its owner by code without asking again.
+Until 2026-10-03 the day pass made a candidate of kind `standing` from each placed belief. Beliefs are no
+longer made into concerns (docs/design/what_was_done_reaches_the_brain_2026-10-03.md); the standing
+concerns were retired to dormant, and are not compared with candidates: none of them is a matter.
 """
 from __future__ import annotations
 
@@ -63,7 +62,7 @@ def _comparable(register: Dict[str, Any], now: datetime) -> List[Dict[str, Any]]
         if when is not None and now - when <= CLOSED_WINDOW:
             out.append({**c, "_status": "resolved"})
     out += [{**c, "_status": "dormant"} for c in register.get("dormant") or []]
-    return out
+    return [c for c in out if c.get("kind") != "standing"]
 
 
 def _local_date(value: Any) -> str:
@@ -190,7 +189,9 @@ def plan_admission(candidates: List[Dict[str, Any]], register: Dict[str, Any], *
         data = call(payload)
         problems = _problems(data, cand_labels, open_labels, closed_labels, owner_labels)
         if problems:
+            from app.assistant.subconscious.brain_trace import step
             logger.warning("[concern_door] invalid decisions, one correction: %s", problems)
+            step("door", "answer refused, one correction", problems=problems, answer=data)
             data = call({**payload, "correction": "; ".join(problems)})
             problems = _problems(data, cand_labels, open_labels, closed_labels, owner_labels)
             if problems:
@@ -205,7 +206,22 @@ def plan_admission(candidates: List[Dict[str, Any]], register: Dict[str, Any], *
             steps[i] = {"candidate": candidates[i], "action": action, "reason": str(d.get("reason") or ""),
                         "target": (by_ex[target]["concern_id"] if action in ("merge_open", "suppress_closed")
                                    else by_cand[target] if action == "merge_candidate" else None)}
+    _record_outcomes(steps, register)
     return steps  # type: ignore[return-value]
+
+
+def _record_outcomes(steps: List[Dict[str, Any]], register: Dict[str, Any]) -> None:
+    """Each candidate's outcome as a step: what it became, the concern it lands in, and why."""
+    from app.assistant.subconscious.brain_trace import step
+    titles = {c["concern_id"]: c.get("title") for b in ("active", "addressing", "resolved", "dormant")
+              for c in register.get(b) or []}
+    for s in steps:
+        target = s["target"]
+        into = (steps[target]["candidate"].get("title") if s["action"] == "merge_candidate"
+                else titles.get(target) if target else None)
+        step("door", s["action"], subject=target if isinstance(target, str) else None,
+             candidate=s["candidate"].get("title"), label=s["candidate"].get("label"), into=into,
+             reason=s["reason"])
 
 
 def _find(register: Dict[str, Any], concern_id: str) -> Dict[str, Any]:
@@ -214,12 +230,6 @@ def _find(register: Dict[str, Any], concern_id: str) -> Dict[str, Any]:
             if c.get("concern_id") == concern_id:
                 return c
     raise KeyError(f"concern {concern_id} is no longer in the register")
-
-
-def _add_belief_refs(target: Dict[str, Any], candidate: Dict[str, Any]) -> None:
-    for key in candidate.get("belief_refs") or []:
-        if key not in target.setdefault("belief_refs", []):
-            target["belief_refs"].append(key)
 
 
 def apply_admission(steps: List[Dict[str, Any]], register: Dict[str, Any], *, source: str,
@@ -252,7 +262,6 @@ def apply_admission(steps: List[Dict[str, Any]], register: Dict[str, Any], *, so
             target.setdefault("evidence", []).extend(c.get("evidence") or [])
             if c.get("owner_request") and not target.get("owner_request"):
                 target["owner_request"] = c["owner_request"]
-            _add_belief_refs(target, c)
             persist._bump_reinforcement_count(target)
             target["last_reinforced_utc"] = now_iso
             persist._journal_on(target, now_iso, f"MERGED a re-raise from {source}: {title} ({step['reason']})")
@@ -260,7 +269,6 @@ def apply_admission(steps: List[Dict[str, Any]], register: Dict[str, Any], *, so
             landed[i] = target_id
         elif action == "suppress_closed":
             prior = _find(register, step["target"])
-            _add_belief_refs(prior, c)
             persist._journal_on(prior, now_iso, f"SUPPRESSED a re-mint of this ({step['reason']}): {title}")
             prior["suppressed_remint_count"] = int(prior.get("suppressed_remint_count") or 0) + 1
             prior["suppressed_remint_at_utc"] = now_iso

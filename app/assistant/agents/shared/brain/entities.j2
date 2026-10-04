@@ -1,9 +1,12 @@
-{#- People, places and things named here, from the knowledge graph (subconscious/kg_links.py).
-    Expects `agent_input` with entities and shared. -#}
+{#- People, places and things named here, from the knowledge graph (subconscious/kg_links.py), each
+    with its ties to the household's people; what joins them; the facts closest in meaning.
+    Expects `agent_input` with entities and shared, and optionally facts. -#}
 ## Named here, from the knowledge graph
 
 {% for e in agent_input.entities -%}
 - {{ e.label }}: {{ e.description or "(no description recorded)" }}
+{% for t in e.get("ties") or [] %}  - {{ t }}
+{% endfor -%}
 {% else -%}
 (no person, place or thing in the knowledge graph is named here)
 {% endfor %}
@@ -14,5 +17,12 @@ What joins them in the knowledge graph (recorded before today):
 {% endfor -%}
 {% for s in agent_input.shared.entities -%}
 - connected to both: {{ s.label }}: {{ s.description or "(no description)" }}
+{% endfor %}
+{% endif %}
+{% if agent_input.get("facts") %}
+## From the knowledge graph, closest in meaning (it may say whose school, club or account this is)
+
+{% for f in agent_input.facts -%}
+- {{ f.sentence }}
 {% endfor %}
 {% endif %}

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mind</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/mind.css') }}">
+  <script>window.SCRIPT_NAME = {{ request.script_root | tojson }};</script>
+</head>
+<body>
+  <div class="mn-sky" aria-hidden="true"></div>
+  <header class="mn-header">
+    <div class="mn-brand">
+      <span class="mn-pulse" aria-hidden="true"></span>
+      <h1>Mind</h1>
+    </div>
+    <nav class="mn-days" aria-label="Choose a day">
+      <button id="mn-prev" type="button" aria-label="earlier day">&larr;</button>
+      <span id="mn-day" class="mn-day">today</span>
+      <button id="mn-next" type="button" aria-label="later day">&rarr;</button>
+    </nav>
+    <a class="mn-dev" href="{{ url_for('brain_flow.brain_flow_page') }}">how it was decided &rarr;</a>
+  </header>
+
+  <main class="mn-main">
+    <section id="mn-ribbon" class="mn-ribbon" aria-label="The day's flow"></section>
+
+    <section class="mn-story" aria-live="polite">
+      <h2 id="mn-headline" class="mn-headline">&nbsp;</h2>
+      <p id="mn-overview" class="mn-overview"></p>
+    </section>
+
+    <section class="mn-block">
+      <h3 class="mn-h">What came in, and what became of it</h3>
+      <div id="mn-matters" class="mn-matters"></div>
+      <details id="mn-aside" class="mn-aside hidden">
+        <summary></summary>
+        <div class="mn-aside-list"></div>
+      </details>
+    </section>
+
+    <section class="mn-block">
+      <h3 class="mn-h">Concerns in motion</h3>
+      <div id="mn-concerns" class="mn-cards"></div>
+    </section>
+
+    <section id="mn-settled-block" class="mn-block hidden">
+      <h3 class="mn-h">Settled this day</h3>
+      <ul id="mn-settled" class="mn-settled"></ul>
+    </section>
+
+    <section class="mn-block">
+      <details class="mn-routines-wrap">
+        <summary class="mn-h">Today's calendar <span id="mn-calendar-count" class="mn-faint"></span></summary>
+        <ul id="mn-calendar" class="mn-settled"></ul>
+      </details>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='js/mind.js') }}"></script>
+</body>
+</html>

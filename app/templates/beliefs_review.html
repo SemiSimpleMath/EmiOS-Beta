@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Belief review</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/beliefs.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/beliefs_review.css') }}">
+</head>
+<body>
+  <header class="bx-header">
+    <h1>Belief review</h1>
+    <div class="bx-sub">
+      what was learned that needs your eye &middot;
+      <a class="rv-link" href="{{ request.script_root }}/beliefs">all beliefs</a>
+    </div>
+  </header>
+
+  <section class="rv-panel">
+    <h2 class="rv-h">For the calendar <span id="rv-cal-count" class="rv-count"></span></h2>
+    <p class="rv-hint">Beliefs that look like things happening at a time. The daily plan is built from the ones you add.</p>
+    <div id="rv-calendar" class="bx-list rv-list"></div>
+  </section>
+
+  <section class="rv-panel">
+    <h2 class="rv-h">New beliefs <span id="rv-new-count" class="rv-count"></span></h2>
+    <p class="rv-hint">Formed from what you said and did. Approve, dismiss, or reword them.</p>
+    <div id="rv-new" class="bx-list rv-list"></div>
+  </section>
+
+  <section id="rv-con-panel" class="rv-panel hidden">
+    <h2 class="rv-h">Contradictions <span id="rv-con-count" class="rv-count"></span></h2>
+    <p class="rv-hint">Something new that disagrees with a current belief. Nothing changes until you decide.</p>
+    <div id="rv-contradictions" class="bx-list rv-list"></div>
+  </section>
+
+  <script src="{{ url_for('static', filename='js/beliefs_review.js') }}"></script>
+</body>
+</html>

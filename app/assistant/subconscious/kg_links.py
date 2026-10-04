@@ -13,10 +13,20 @@ For the brain and the brief writer:
   name only where the text capitalizes it, unless the whole text is lowercase or the entity is
   central to the graph (CENTRAL_PAGERANK). The primary user's own nodes are left out: every matter is
   the household's, and the owner's node touches most of the graph.
+  Each found entity carries its `ties`: the sentences of its links through an Event or State node
+  that also links to one of the household's people (the central entities, the owner included), the
+  TIES_K most important. An entity named alone otherwise says nothing of whose it is: on 2026-10-02 a
+  Woodbridge High announcement became concerns about "the student", the school's own node having no
+  description, while "their son's school is Woodbridge High School." sat on its links.
 - `shared(entity_ids)`: for two or more entities, what joins them, in one set-based query: the
   Event and State nodes linked to two or more of them (the graph links entities through those,
   not directly), and the other entities reachable from two or more of them through one such node.
   The SHARED_K most important of each.
+- `facts_by_meaning(texts)`: the link sentences closest in meaning to each text (the edge collection
+  in Chroma, each text embedded whole), the FACTS_K closest overall, read back from SQLite. Names miss
+  what a text calls by another name ("WHS", "Woodbridge students"); the meaning finds it. Probe on that
+  announcement (2026-10-02, 13,790 sentences): their son's school facts ranked 1st to 5th by the whole
+  text; by its subject line alone, 309th and lower.
 
 Code proposes; the brain decides what bears on the matter.
 """
@@ -31,6 +41,8 @@ from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 SHARED_K = 10
+TIES_K = 5
+FACTS_K = 12
 # Entities this central to the graph (PageRank; 39 on 2026-09-30: the household's people, dogs and
 # places, plus a few household words such as Dogs and Timesheets) match a lowercase single word in
 # any text: the owner often types names in lowercase.
@@ -131,7 +143,67 @@ def find_entities(texts: List[str]) -> List[Dict[str, Any]]:
             else:
                 i += 1
     found -= _owner_ids()
-    return sorted(_node_views(found), key=lambda v: -(v["importance"] or 0))
+    views = sorted(_node_views(found), key=lambda v: -(v["importance"] or 0))
+    ties = household_ties([v["node_id"] for v in views])
+    return [{**v, "ties": ties.get(v["node_id"], [])} for v in views]
+
+
+def _household_ids() -> List[str]:
+    """The household's people and places: the central entities, the owner's own nodes included."""
+    central = [r[0] for r in _raw("SELECT id FROM kg_node_metadata WHERE node_type='Entity' AND pagerank_score >= ?",
+                                  (CENTRAL_PAGERANK,))]
+    return list(dict.fromkeys(central + sorted(_owner_ids())))
+
+
+def household_ties(entity_ids: List[str]) -> Dict[str, List[str]]:
+    """entity id -> the sentences of its links through an Event or State node that also links to one of the
+    household's people, the TIES_K most important each. A household entity is not tied to itself."""
+    ids = list(dict.fromkeys(entity_ids))
+    household = _household_ids()
+    if not ids or not household:
+        return {}
+    marks, hmarks = ",".join("?" * len(ids)), ",".join("?" * len(household))
+    rows = _raw(f"""
+        WITH e(a, b, sentence, importance) AS (
+            SELECT source_id, target_id, sentence, importance FROM kg_edge_metadata
+            UNION ALL SELECT target_id, source_id, sentence, importance FROM kg_edge_metadata)
+        SELECT DISTINCT x.a, x.sentence, x.importance FROM e x
+        JOIN kg_node_metadata m ON m.id = x.b AND m.node_type IN ('Event', 'State')
+        JOIN e y ON y.a = x.b AND y.b IN ({hmarks}) AND y.b != x.a
+        WHERE x.a IN ({marks}) AND x.sentence IS NOT NULL AND x.sentence != ''
+        ORDER BY x.importance DESC""", [*household, *ids])
+    out: Dict[str, List[str]] = {}
+    for entity_id, sentence, _ in rows:
+        kept = out.setdefault(entity_id, [])
+        if sentence not in kept and len(kept) < TIES_K:
+            kept.append(sentence)
+    return out
+
+
+def facts_by_meaning(texts: List[str]) -> List[Dict[str, Any]]:
+    """The FACTS_K link sentences closest in meaning to any of the texts, closest first: {sentence, score}.
+    Each text is embedded whole; the edge index answers by id and the sentences are read from SQLite."""
+    from app.assistant.embeddings.embedder import embed_texts
+    from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
+    queries = [t for t in texts if str(t or "").strip()]
+    if not queries:
+        return []
+    manager = get_chroma_manager()
+    best: Dict[str, float] = {}
+    for vector in embed_texts(queries):
+        for edge_id, score in manager.search_similar_edges(vector, k=FACTS_K):
+            best[edge_id] = max(score, best.get(edge_id, 0.0))
+    if not best:
+        return []
+    marks = ",".join("?" * len(best))
+    sentences = dict(_raw(f"SELECT id, sentence FROM kg_edge_metadata WHERE id IN ({marks})", list(best)))
+    out, seen = [], set()
+    for edge_id in sorted(best, key=lambda i: -best[i]):
+        sentence = sentences.get(edge_id)
+        if sentence and sentence not in seen:
+            seen.add(sentence)
+            out.append({"sentence": sentence, "score": round(best[edge_id], 3)})
+    return out[:FACTS_K]
 
 
 def shared(entity_ids: List[str]) -> Dict[str, List[Dict[str, Any]]]:

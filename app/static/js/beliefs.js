@@ -7,6 +7,7 @@ const el = (tag, cls, txt) => {
   return e;
 };
 let CURRENT = null;
+let CURRENT_ON_CALENDAR = false;
 
 function fillSelects(tagCounts, kinds) {
   const ft = $("#f-tag");
@@ -62,9 +63,33 @@ function renderList(beliefs) {
     if (retired) tags.appendChild(el("span", "bx-badge supp", "retired"));
     main.appendChild(tags);
     row.appendChild(main);
+    const act = el("button", "bx-row-act" + (retired ? " restore" : ""), retired ? "restore" : "delete");
+    act.title = retired ? "restore this belief" : "delete: retired, kept with its history, restorable from the retired filter";
+    act.addEventListener("click", (e) => { e.stopPropagation(); setRetired(b, row, !retired); });
+    row.appendChild(act);
     row.addEventListener("click", () => openDrawer(b.belief_id));
     list.appendChild(row);
   });
+}
+
+// One-click delete (retire) or restore from the list. In the active or retired view the row leaves
+// the list; in "all" it is redrawn in its new state.
+async function setRetired(b, row, retired) {
+  const r = await fetch((window.SCRIPT_NAME || "") + "/api/beliefs/update", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ belief_id: b.belief_id, retired }),
+  });
+  if (!r.ok) {
+    const data = await r.json().catch(() => ({}));
+    alert(`Could not ${retired ? "delete" : "restore"} ${b.belief_id}: ${data.error || r.status}`);
+    return;
+  }
+  if ($("#f-status").value === "all") {
+    load();
+    return;
+  }
+  row.remove();
+  $("#bx-count").textContent = Math.max(0, Number($("#bx-count").textContent) - 1);
 }
 
 function renderTagPicker(selected) {
@@ -112,6 +137,8 @@ async function openDrawer(id) {
 
   $("#d-statement").value = stmt;
   $("#d-retired").checked = b.status === "retired";
+  CURRENT_ON_CALENDAR = b.calendar === "approved";
+  $("#d-calendar").checked = CURRENT_ON_CALENDAR;
   renderTagPicker(data.tags || []);
 
   const ev = $("#d-evidence");
@@ -157,6 +184,9 @@ async function save() {
     statement: $("#d-statement").value,
     tags: [...document.querySelectorAll("#d-tags .bx-tagchip.on")].map((c) => c.textContent),
   };
+  if ($("#d-calendar").checked !== CURRENT_ON_CALENDAR) {
+    body.calendar = $("#d-calendar").checked ? "approved" : "declined";
+  }
   const r = await fetch("/api/beliefs/update", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

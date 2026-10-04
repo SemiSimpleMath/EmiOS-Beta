@@ -1,13 +1,15 @@
-"""Durable concern feedback. Only local SQLite writes; no application callbacks.
+"""Durable work feedback. Only local SQLite writes; no application callbacks.
 
 A concern the work cites keeps a record of that work (owner, 2026-09-30: "the concern does not become
-a work object, it has a work object attached to it now so we can see how it is progressing"). Each
-change the concern must hear about is a receipt written in the same transaction as the change:
+a work object, it has a work object attached to it now so we can see how it is progressing"). And
+whatever is done reaches the brain, which attaches it to every concern it bears on (owner, 2026-10-03,
+docs/design/what_was_done_reaches_the_brain_2026-10-03.md), so every work object's judgments and ending
+are receipts, whether it cites a concern or not. Each is written in the same transaction as the change:
 
 - `attached`  the work cites a concern it did not cite before (created citing it, or revised to);
 - `judged`    the finalizer judged one of the work's tasks: the verdict, its account, and the owner's
-              replies that task received, verbatim;
-- `done` / `abandoned`  the work ended.
+              replies that task received, verbatim (every work object);
+- `done` / `abandoned`  the work ended (every work object).
 
 Receipts of one transaction keep their order (the id starts with its position). Delivery lives in
 app/assistant/subconscious/concern_feedback.py.
@@ -46,25 +48,25 @@ def _replies(wo, node_id):
 class ConcernOutboxMixin:
     def _queue_concern_feedback(self, wo, previous_status, now, before):
         refs = _concern_refs(wo)
-        if not refs:
-            return
+        constraints = wo.constraints or {}
+        work = {'title': wo.title, 'objective': constraints.get('objective') or wo.title}
         rows = []
         added = [r for r in refs if r not in before['refs']]
         if added:
-            constraints = wo.constraints or {}
             rows.append(('attached', {'concern_refs': added, 'work': {
                 'title': wo.title, 'objective': constraints.get('objective') or wo.title,
                 'success_criteria': constraints.get('success_criteria') or '', 'attached_at': now}}))
         for node in wo.nodes.values():
             fin = node.payload.get('finalizer') or {}
             if wo.is_work_unit(node) and fin and fin.get('at') != before['judged'].get(node.id):
-                rows.append(('judged', {'concern_refs': refs, 'work': {'title': wo.title}, 'task': {
+                rows.append(('judged', {'concern_refs': refs, 'work': work, 'task': {
                     'node_id': node.id, 'title': node.title, 'status': node.status,
                     'finalizer': fin, 'replies': _replies(wo, node.id)}}))
         if wo.status in {'done', 'abandoned'} and wo.status != previous_status:
             goal = wo.nodes.get(wo.goal_node_id)
             rows.append((wo.status, {
                 'concern_refs': refs,
+                'work': work,
                 'context': {
                     'title': wo.title,
                     'completed_at': now,

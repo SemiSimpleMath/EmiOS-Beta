@@ -1,5 +1,6 @@
-{#- One past work object (work_links.work_view). Expects `w`. -#}
-### {{ w.title }} [{{ w.work_id }}; {{ w.status }}; started {{ w.created }}, last changed {{ w.updated }}; {{ w.link }}{% if w.score is not none %} {{ w.score }}{% endif %}]
+{#- One past work object (work_links.work_view). Expects `w`; a labelled ref shows its label. -#}
+{%- set L = (agent_input.get("source_labels") if agent_input is defined else none) or {} -%}
+### {{ w.title }} [{{ L.get(w.work_id, w.work_id) }}; {{ w.status }}; started {{ w.created }}, last changed {{ w.updated }}; {{ w.link }}{% if w.score is not none %} {{ w.score }}{% endif %}]
 {% if w.objective and w.objective != w.title %}- objective: {{ w.objective }}
 {% endif -%}
 {% if w.ended_because %}- ended because: {{ w.ended_because }}

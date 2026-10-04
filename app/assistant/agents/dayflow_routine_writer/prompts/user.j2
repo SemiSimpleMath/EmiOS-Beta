@@ -4,12 +4,8 @@
 {{ daily_context }}
 
 ########## BELIEFS ##########
-**Beliefs selected as possibly bearing on {{ day_of_week }}:**
+**Beliefs approved for the calendar, each with the beliefs closest to it in meaning (decide which apply on {{ day_of_week }}):**
 {{ beliefs_block }}
-{% if related_beliefs_block is defined and related_beliefs_block and related_beliefs_block.strip() != "(no selected beliefs)" %}
-**Conditions on the beliefs above — beliefs of the same topics that qualify them (a day, a limit, an exception, a reminder wish). Read each with the belief it qualifies; one that applies today on its own gets its own entry:**
-{{ related_beliefs_block }}
-{% endif %}
 {% if correction %}
 ########## CORRECTION ##########
 Your previous answer had these problems: {{ correction }}

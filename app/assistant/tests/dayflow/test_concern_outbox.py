@@ -1,8 +1,11 @@
-"""The work attached to a concern reports to it and to the brain, and survives delivery failures.
+"""Whatever is done reports to the concerns that hold it and to the brain, and survives delivery failures.
 
 Owner, 2026-09-30: the concern does not become the work; the work is attached to it, so the concern
 shows how it is progressing. Every change reaches the concern through a receipt committed with the
-change: attached, each finalizer judgment, the ending. Judgments and endings also reach the brain.
+change: attached, each finalizer judgment, the ending. Owner, 2026-10-03: everything done reaches the
+brain, which attaches it to every concern it bears on: every work object's judgments and ending reach the
+brain inbox, pending for the gate, naming what the work was made for; a concern the brain attached the
+work to hears its later judgments as a cited one does.
 """
 import json
 from datetime import datetime, timedelta, timezone
@@ -83,7 +86,9 @@ def test_every_judgment_and_the_ending_reach_the_concern_and_the_brain(setup):
     assert judgment['replies'][0]['user_text']=='I have arranged it. Stop asking.'
     judged, ended = work_events(inbox)
     for e in (judged, ended):
-        assert (e['gate_status'], e['route'], json.loads(e['concern_ids']))==('routed','concern',[_CID])
+        assert (e['gate_status'], e['route']) == ('pending', None)    # the gate routes it, like chat
+        assert 'Objective: Settle the maintenance question' in e['text']
+        assert f'Made for the concerns: "{concern["title"]}"' in e['text']
     assert 'I have arranged it. Stop asking.' in judged['text'] and 'achieved' in judged['text']
     assert 'ended: done' in ended['text']
     for view in (context_builder._render_concern_summary(concern,status='active'),
@@ -238,7 +243,8 @@ def test_a_concern_whose_work_already_ended_goes_back_to_the_brain(tmp_path,monk
         assert concern_feedback.report_earlier_endings(reopened)==1
         assert concern_feedback.report_earlier_endings(reopened)==0
         [event]=work_events(inbox)
-        assert 'ended: done' in event['text'] and json.loads(event['concern_ids'])==[_CID]
+        assert 'ended: done' in event['text'] and event['gate_status']=='pending'
+        assert 'Made for the concerns:' in event['text']
     finally:
         store.close()
 
@@ -274,3 +280,26 @@ def test_noticer_prompt_renders_handling_policy():
         resource_user_data={'first_name':'User'},resource_subconscious_noticer_house_rules='')
     assert 'four days in addressing alone is not new evidence' in prompt
     assert 'attached_work' in prompt
+
+
+def test_work_citing_no_concern_still_reports_to_the_brain(setup):
+    store,path,inbox=setup
+    wid=graph(store,refs=[])
+    finish(store,wid)
+    assert [r['outcome'] for r in store.pending_concern_feedback()]==['judged','done']
+    assert concern_feedback.recover_pending_concern_feedback(store)==2
+    judged, ended = work_events(inbox)
+    assert judged['gate_status']=='pending' and 'Made for the concerns' not in judged['text']
+    assert path.read()['active'][0].get('attached_work', {})=={}   # no concern holds it
+
+
+def test_a_concern_the_brain_attached_hears_later_judgments(setup):
+    store,path,inbox=setup
+    wid=graph(store,refs=[])
+    assert persist.attach_seen_work(_CID, work_id=wid, work={'title':'Discuss maintenance','objective':'o',
+                                                              'status':'active'}, receipt_id='brain:1:x',
+                                    connect=path.connect)=='attached'
+    finish(store,wid)
+    concern_feedback.recover_pending_concern_feedback(store)
+    work=path.read()['active'][0]['attached_work'][wid]
+    assert work['status']=='done' and len(work['judgments'])==1

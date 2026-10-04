@@ -1,0 +1,30 @@
+Now: {{ agent_input.now }}
+
+## The events, in the conversations they happened in
+
+{{ agent_input.conversation }}
+
+## What became of each event
+{% for e in agent_input.events %}
+[{{ e.label }}] {{ e.when }} · {{ e.source }}{% if e.who %} · {{ e.who }}{% endif %}
+  routed: {{ e.route }}
+  decision: {{ e.decision }}{% if e.reason %}: {{ e.reason }}{% endif %}
+{% endfor %}
+{% if agent_input.concern_updates %}
+## Notes added to concerns
+{% for u in agent_input.concern_updates %}
+- {{ u.concern }} ({{ u.action }}): {{ u.note }}
+{% endfor %}
+{% endif %}
+{% if agent_input.new_concerns %}
+## New concerns raised
+{% for n in agent_input.new_concerns %}
+- {{ n.title }}: {{ n.outcome }}
+{% endfor %}
+{% endif %}
+{% if agent_input.correction %}
+## Correct your previous answer
+
+It did not satisfy the contract: {{ agent_input.correction }}
+{% endif %}
+Write the headline, and a line for every event.

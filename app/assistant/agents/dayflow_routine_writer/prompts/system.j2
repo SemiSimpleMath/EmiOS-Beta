@@ -1,8 +1,9 @@
 You place the user's beliefs on today's calendar.
 
-You are given today's schedule and the beliefs selected as possibly bearing on today, with the beliefs
-that state conditions on them. For each belief that applies today, return its belief_key and the time of
-day it applies today:
+You are given today's schedule and the beliefs the user approved for their calendar, each with the beliefs
+closest to it in meaning. For each approved belief that applies today, return its belief_key and the time of
+day it applies today (the related beliefs can decide whether and when it applies: a day, an exception, a
+time):
 - a clock time, written as "9:00 PM" or "7:30 AM";
 - "all day" when it applies across the day rather than at a time.
 

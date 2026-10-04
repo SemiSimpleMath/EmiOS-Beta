@@ -72,6 +72,7 @@ def _int_arg(name: str, default: int) -> int:
 # Every belief with its tags and evidence counts, aliased to the field names the page reads.
 _SELECT = (
     f"SELECT b.id AS belief_id, b.statement, b.kind, b.scope, b.status, b.parent_id, b.created_day, "
+    f" b.calendar, b.calendar_note, b.review, "
     f" (SELECT GROUP_CONCAT(tag) FROM belief_tags t WHERE t.belief_id = b.id) AS tags, "
     f" (SELECT COUNT(*) FROM {_P}evidence e WHERE e.belief_id = b.id AND e.relation='support') AS support, "
     f" (SELECT COUNT(*) FROM {_P}evidence e WHERE e.belief_id = b.id AND e.relation='contradict') AS contradict, "
@@ -145,7 +146,7 @@ def beliefs_item():
 
 @beliefs_admin_bp.route("/api/beliefs/update", methods=["POST"])
 def beliefs_update():
-    """Owner corrections. JSON body ``{belief_id, statement?, retired?, tags?}`` — omitted keys
+    """Owner corrections. JSON body ``{belief_id, statement?, retired?, tags?, calendar?}`` — omitted keys
     unchanged. See the module docstring for what each correction writes."""
     from belief_engine.export.export_beliefs import export_beliefs
     from belief_engine.tagging import sanitize
@@ -166,12 +167,13 @@ def beliefs_update():
         statement = (data.get("statement") or "").strip()
         if not statement:
             return jsonify({"error": "statement cannot be empty"}), 400
-        if statement != current["statement"]:
-            from app.assistant.embeddings.embedder import embed_texts
-            store.revise(bid, day, {"statement": statement, "kind": current["kind"],
-                                    "reasoning": "owner correction in /beliefs"}, embed_texts([statement])[0])
-            store.add_evidence(bid, day, kind="said", relation="support", text=statement,
-                               source_ref="owner", via="owner_correction")
+        _correct_statement(store, bid, current, statement, day)
+    if "calendar" in data:
+        if data["calendar"] not in ("approved", "declined"):
+            return jsonify({"error": "calendar must be approved or declined"}), 400
+        with _read() as c:
+            note = c.execute(f"SELECT calendar_note FROM {_P}beliefs WHERE id = ?", (bid,)).fetchone()[0]
+        store.set_calendar(bid, data["calendar"], note)
     if "retired" in data:
         want = "retired" if data.get("retired") else "active"
         if want != current["status"]:
@@ -192,6 +194,125 @@ def beliefs_update():
     with _read() as c:
         row = _row(c, bid)
     logger.info("[beliefs] corrected %s: %s", bid, sorted(k for k in data if k != "belief_id"))
+    return jsonify({"success": True, "belief": row})
+
+
+def _correct_statement(store, bid: str, current: Dict[str, Any], statement: str, day: str) -> None:
+    """The owner's rewording: a revision, and the owner's words as the newest evidence."""
+    if statement == current["statement"]:
+        return
+    from app.assistant.embeddings.embedder import embed_texts
+    store.revise(bid, day, {"statement": statement, "kind": current["kind"],
+                            "reasoning": "owner correction in /beliefs"}, embed_texts([statement])[0])
+    store.add_evidence(bid, day, kind="said", relation="support", text=statement,
+                       source_ref="owner", via="owner_correction")
+
+
+# ── The morning review (2026-10-03) ─────────────────────────────────────────────────────────────────────
+# Two panels: the beliefs proposed as calendar items (the nightly tagger, belief_engine/intake/calendar.py),
+# and the other beliefs formed since the last review. A calendar decision also reviews the belief.
+
+_REVIEW_ACTIONS = ("add_to_calendar", "not_for_calendar", "approve", "dismiss", "edit", "keep_new", "keep_old",
+                   "keep_both", "apply_rewrite")
+_KEEP = {"keep_new": "new", "keep_old": "old", "keep_both": "both"}
+
+
+def _evidence(c, belief_id: str) -> List[Dict[str, Any]]:
+    return [dict(e) for e in c.execute(
+        f"SELECT day, time, kind, relation, text, in_reply_to, source_ref FROM {_P}evidence WHERE belief_id = ? "
+        "ORDER BY day DESC, time DESC, id DESC", (belief_id,))]
+
+
+@beliefs_admin_bp.route("/beliefs/review")
+def beliefs_review_page():
+    return render_template("beliefs_review.html")
+
+
+@beliefs_admin_bp.route("/api/beliefs/review")
+def beliefs_review_list():
+    """{calendar: beliefs proposed as calendar items, new: the other unreviewed beliefs (active ones only),
+    contradictions: each held belief with its evidence and the held beliefs it contradicts, with theirs}."""
+    import json
+    with _read() as c:
+        calendar = [dict(r) for r in c.execute(
+            _SELECT + " WHERE b.status = 'active' AND b.calendar = 'proposed' ORDER BY CAST(SUBSTR(b.id, 2) AS INTEGER)")]
+        new = [dict(r) for r in c.execute(
+            _SELECT + " WHERE b.status = 'active' AND b.review IS NULL AND COALESCE(b.calendar, '') != 'proposed' "
+            "ORDER BY CAST(SUBSTR(b.id, 2) AS INTEGER)")]
+        contradictions = []
+        for r in c.execute(_SELECT + " WHERE b.status = 'pending' ORDER BY CAST(SUBSTR(b.id, 2) AS INTEGER)").fetchall():
+            held = dict(r)
+            raw_targets, raw_drafts = c.execute(f"SELECT contradicts, drafts FROM {_P}beliefs WHERE id = ?",
+                                                (held["belief_id"],)).fetchone()
+            drafts = json.loads(raw_drafts or "{}")
+            contradictions.append({**held, "evidence": _evidence(c, held["belief_id"]),
+                                   "contradicts": [{**_row(c, t), "evidence": _evidence(c, t),
+                                                    "draft": (drafts.get(t) or {}).get("statement")}
+                                                   for t in json.loads(raw_targets)]})
+    return jsonify({"calendar": calendar, "new": new, "contradictions": contradictions})
+
+
+@beliefs_admin_bp.route("/api/beliefs/review/decide", methods=["POST"])
+def beliefs_review_decide():
+    """One review decision. JSON body ``{belief_id, action, statement?}``:
+    add_to_calendar / not_for_calendar: the owner's calendar decision (the belief counts as reviewed);
+    approve: reviewed as it is; dismiss: retired and reviewed; edit: reworded (``statement``) as an owner
+    correction, and reviewed; a proposed calendar item stays proposed until it is decided, and a held
+    contradiction stays held; keep_new / keep_old / keep_both: the owner's decision on a held contradiction
+    (IntakeStore.resolve_contradiction); apply_rewrite: the drafted rewrites applied, ``rewrites`` {id: statement}
+    carrying the owner's edits of them."""
+    from belief_engine.export.export_beliefs import export_beliefs
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        data = {}
+    bid, action = (data.get("belief_id") or "").strip(), data.get("action")
+    if not bid or action not in _REVIEW_ACTIONS:
+        return jsonify({"error": f"belief_id and an action of {list(_REVIEW_ACTIONS)} required"}), 400
+    store = _store()
+    current = store.get(bid)
+    if current is None:
+        return jsonify({"error": "not found"}), 404
+    day = _today()
+    with _read() as c:
+        note = c.execute(f"SELECT calendar_note FROM {_P}beliefs WHERE id = ?", (bid,)).fetchone()[0]
+    if action == "apply_rewrite":
+        rewrites = {str(k): str(v or "").strip() for k, v in (data.get("rewrites") or {}).items()}
+        if not rewrites or not all(rewrites.values()):
+            return jsonify({"error": "apply_rewrite needs the rewritten statements"}), 400
+        from app.assistant.embeddings.embedder import embed_texts
+        ids = list(rewrites)
+        vectors = embed_texts([rewrites[i] for i in ids])
+        try:
+            store.resolve_contradiction(bid, "rewrite", day, {i: (rewrites[i], v) for i, v in zip(ids, vectors)})
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+    elif action in _KEEP:
+        try:
+            store.resolve_contradiction(bid, _KEEP[action], day)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+    elif action == "add_to_calendar":
+        store.set_calendar(bid, "approved", note)
+        store.set_review(bid, "approved", day)
+    elif action == "not_for_calendar":
+        store.set_calendar(bid, "declined", note)
+        store.set_review(bid, "approved", day)
+    elif action == "approve":
+        store.set_review(bid, "approved", day)
+    elif action == "dismiss":
+        store.retire(bid, day, "owner dismissed it in the morning review")
+        store.set_review(bid, "dismissed", day)
+    else:
+        statement = (data.get("statement") or "").strip()
+        if not statement:
+            return jsonify({"error": "statement cannot be empty"}), 400
+        _correct_statement(store, bid, current, statement, day)
+        if current["status"] != "pending":
+            store.set_review(bid, "edited", day)
+    export_beliefs()
+    with _read() as c:
+        row = _row(c, bid)
+    logger.info("[beliefs] review %s: %s", bid, action)
     return jsonify({"success": True, "belief": row})
 
 

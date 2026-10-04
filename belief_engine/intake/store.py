@@ -85,6 +85,27 @@ class IntakeStore:
             cols = {r[1] for r in c.execute(f"PRAGMA table_info({prefix}beliefs)")}
             if "status" not in cols:
                 c.execute(f"ALTER TABLE {prefix}beliefs ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
+            # calendar arrived 2026-10-03: whether the belief is day-planning material. NULL until the nightly
+            # tagger looks at it (intake/calendar.py), then proposed | not_proposed; the owner's decision is
+            # approved | declined. calendar_note: when it would appear on the calendar, and why.
+            if "calendar" not in cols:
+                c.execute(f"ALTER TABLE {prefix}beliefs ADD COLUMN calendar TEXT")
+                c.execute(f"ALTER TABLE {prefix}beliefs ADD COLUMN calendar_note TEXT")
+            # review arrived 2026-10-03: the owner's morning review of a new belief: NULL until reviewed, then
+            # approved | dismissed | edited, on reviewed_day. Beliefs that existed when the column arrived are
+            # `baseline`: they predate the review (the owner cleaned the catalog by hand that day).
+            if "review" not in cols:
+                c.execute(f"ALTER TABLE {prefix}beliefs ADD COLUMN review TEXT")
+                c.execute(f"ALTER TABLE {prefix}beliefs ADD COLUMN reviewed_day TEXT")
+                c.execute(f"UPDATE {prefix}beliefs SET review='baseline'")
+            # contradicts arrived 2026-10-03: a new belief that contradicts held ones is kept `pending` for the
+            # owner with the ids it contradicts (a JSON list); nothing is revised until the owner decides.
+            if "contradicts" not in cols:
+                c.execute(f"ALTER TABLE {prefix}beliefs ADD COLUMN contradicts TEXT")
+            # drafts: for a held contradiction, the drafted rewrite of each belief it contradicts that reconciles
+            # them (a JSON object id -> {statement, kind, reasoning}), applied only on the owner's word.
+            if "drafts" not in cols:
+                c.execute(f"ALTER TABLE {prefix}beliefs ADD COLUMN drafts TEXT")
 
     def days_done(self) -> set[str]:
         with self._connect(False) as c:
@@ -189,6 +210,159 @@ class IntakeStore:
                 "VALUES (?,?,?,?,?,?,?)", (belief_id, day, row["statement"], row["statement"], row["kind"], row["kind"],
                                           f"retired: {reason}"))
             c.execute(f"UPDATE {self.p}beliefs SET status='retired' WHERE id=?", (belief_id,))
+
+    def merge(self, drop_id: str, into_id: str, day: str, reason: str) -> int:
+        """Fold a duplicate into the belief that states the same claim: every evidence row of `drop_id` moves to
+        `into_id`, and `drop_id` is retired. Both histories record the merge; the duplicate's statement stays in
+        its own. Returns the evidence rows moved. Raises unless both beliefs are active and distinct."""
+        if drop_id == into_id:
+            raise ValueError(f"cannot merge {drop_id} into itself")
+        with self._connect(True) as c:
+            rows = {r["id"]: r for r in c.execute(
+                f"SELECT id, statement, kind, status FROM {self.p}beliefs WHERE id IN (?, ?)", (drop_id, into_id))}
+            for bid in (drop_id, into_id):
+                if bid not in rows or rows[bid]["status"] != "active":
+                    raise ValueError(f"belief {bid} is not active")
+            moved = c.execute(f"UPDATE {self.p}evidence SET belief_id=? WHERE belief_id=?", (into_id, drop_id)).rowcount
+            for bid, note in ((drop_id, f"retired: merged into {into_id} ({reason})"),
+                              (into_id, f"merged {drop_id} into it, {moved} evidence row(s) moved ({reason})")):
+                r = rows[bid]
+                c.execute(
+                    f"INSERT INTO {self.p}revisions (belief_id, day, old_statement, new_statement, old_kind, new_kind, "
+                    "reasoning) VALUES (?,?,?,?,?,?,?)", (bid, day, r["statement"], r["statement"], r["kind"], r["kind"], note))
+            c.execute(f"UPDATE {self.p}beliefs SET status='retired' WHERE id=?", (drop_id,))
+        return moved
+
+    def split(self, belief_id: str, day: str, statements: list[str], embeddings: list[list], reason: str) -> list[str]:
+        """Split a belief that holds several claims into one belief per claim. The first statement replaces
+        the belief's own (a revision), so whatever cites its id keeps its main claim; each further statement
+        becomes a new belief with the same kind, scope and parent, resting on a copy of every evidence row
+        (via `split:<id>`: the evidence supported the combined statement, so it supports each part). Returns
+        the new ids. Raises unless the belief is active and there are at least two statements."""
+        if len(statements) < 2 or len(statements) != len(embeddings):
+            raise ValueError("a split needs two or more statements, each with its embedding")
+        with self._connect(True) as c:
+            row = c.execute(f"SELECT * FROM {self.p}beliefs WHERE id=?", (belief_id,)).fetchone()
+            if row is None or row["status"] != "active":
+                raise ValueError(f"belief {belief_id} is not active")
+            evidence = c.execute(f"SELECT day, time, kind, relation, text, in_reply_to, source_ref FROM "
+                                 f"{self.p}evidence WHERE belief_id=? ORDER BY id", (belief_id,)).fetchall()
+            n = c.execute(f"SELECT COALESCE(MAX(CAST(SUBSTR(id, 2) AS INTEGER)), 0) FROM {self.p}beliefs").fetchone()[0]
+            new_ids = [f"B{n + i}" for i in range(1, len(statements))]
+            for bid, statement, embedding in zip(new_ids, statements[1:], embeddings[1:]):
+                c.execute(f"INSERT INTO {self.p}beliefs (id, statement, later_use, kind, scope, parent_id, "
+                          "created_day, embedding) VALUES (?,?,?,?,?,?,?,?)",
+                          (bid, statement, row["later_use"], row["kind"], row["scope"], row["parent_id"], day,
+                           json.dumps(embedding)))
+                c.executemany(
+                    f"INSERT INTO {self.p}evidence (belief_id, day, time, kind, relation, text, in_reply_to, "
+                    "source_ref, via) VALUES (?,?,?,?,?,?,?,?,?)",
+                    [(bid, e["day"], e["time"], e["kind"], e["relation"], e["text"], e["in_reply_to"],
+                      e["source_ref"], f"split:{belief_id}") for e in evidence])
+                c.execute(f"INSERT INTO {self.p}revisions (belief_id, day, old_statement, new_statement, old_kind, "
+                          "new_kind, reasoning) VALUES (?,?,?,?,?,?,?)",
+                          (bid, day, row["statement"], statement, row["kind"], row["kind"],
+                           f"split from {belief_id}: {reason}"))
+            c.execute(f"INSERT INTO {self.p}revisions (belief_id, day, old_statement, new_statement, old_kind, "
+                      "new_kind, reasoning) VALUES (?,?,?,?,?,?,?)",
+                      (belief_id, day, row["statement"], statements[0], row["kind"], row["kind"],
+                       f"split into {', '.join(new_ids)}: {reason}"))
+            c.execute(f"UPDATE {self.p}beliefs SET statement=?, embedding=? WHERE id=?",
+                      (statements[0], json.dumps(embeddings[0]), belief_id))
+        return new_ids
+
+    def calendar_undecided(self) -> list[dict]:
+        """Active beliefs the calendar tagger has not looked at: {id, statement}, in creation order."""
+        with self._connect(False) as c:
+            return [dict(r) for r in c.execute(
+                f"SELECT id, statement FROM {self.p}beliefs WHERE status='active' AND calendar IS NULL ORDER BY rowid")]
+
+    def set_calendar(self, belief_id: str, status: str, note: str | None) -> None:
+        """Record whether a belief is day-planning material: the tagger's proposed | not_proposed, or the
+        owner's approved | declined."""
+        if status not in ("proposed", "not_proposed", "approved", "declined"):
+            raise ValueError(f"unknown calendar status {status!r}")
+        with self._connect(True) as c:
+            c.execute(f"UPDATE {self.p}beliefs SET calendar=?, calendar_note=? WHERE id=?", (status, note, belief_id))
+
+    def hold(self, day: str, atom: dict, embedding: list, targets: list[str], reasoning: str | None,
+             drafts: dict | None = None) -> str:
+        """A new belief that contradicts held ones, kept `pending` for the owner: its own sources as support,
+        the ids it contradicts in `contradicts`, and for each of them a drafted rewrite that reconciles the two
+        (`drafts`, id -> {statement, kind, reasoning}; none when no rewrite reconciles them). The held beliefs are
+        left as they are. Returns its id."""
+        if not targets:
+            raise ValueError("a held contradiction names the beliefs it contradicts")
+        with self._connect(True) as c:
+            n = c.execute(f"SELECT COALESCE(MAX(CAST(SUBSTR(id, 2) AS INTEGER)), 0) FROM {self.p}beliefs").fetchone()[0]
+            bid = f"B{n + 1}"
+            c.execute(f"INSERT INTO {self.p}beliefs (id, statement, later_use, kind, scope, parent_id, created_day, "
+                      "embedding, status, contradicts) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                      (bid, atom["statement"], atom.get("later_use"), atom["kind"], atom.get("scope"), None, day,
+                       json.dumps(embedding), "pending", json.dumps(targets)))
+            c.execute(f"UPDATE {self.p}beliefs SET drafts=? WHERE id=?", (json.dumps(drafts or {}), bid))
+            for s in atom["sources"]:
+                c.execute(
+                    f"INSERT INTO {self.p}evidence (belief_id, day, time, kind, relation, text, in_reply_to, source_ref, via) "
+                    "VALUES (?,?,?,?,?,?,?,?,?)",
+                    (bid, day, s.get("time"), s["kind"], s["relation"], s.get("text"), s.get("in_reply_to"),
+                     s.get("source_ref"), "contradicts"))
+            c.execute(f"INSERT INTO {self.p}decisions (day, statement, verdict, target, result_belief, reasoning) "
+                      "VALUES (?,?,?,?,?,?)", (day, atom["statement"], "contradicts", targets[0], bid, reasoning))
+        return bid
+
+    def resolve_contradiction(self, belief_id: str, keep: str, day: str,
+                              rewrites: dict[str, tuple[str, list]] | None = None) -> None:
+        """The owner's decision on a held contradiction. new: the new belief becomes active and the beliefs it
+        contradicts are retired; old: the new belief is retired; both: the new belief becomes active beside them;
+        rewrite: each belief in `rewrites` (id -> (statement, embedding): the drafted rewrite, or the owner's edit
+        of it) takes that wording, gains the new belief's evidence as support, and the new belief is retired,
+        folded into them."""
+        if keep not in ("new", "old", "both", "rewrite"):
+            raise ValueError(f"unknown decision {keep!r}")
+        with self._connect(False) as c:
+            row = c.execute(f"SELECT status, contradicts, kind FROM {self.p}beliefs WHERE id=?", (belief_id,)).fetchone()
+        if row is None or row["status"] != "pending":
+            raise ValueError(f"belief {belief_id} is not a held contradiction")
+        targets = json.loads(row["contradicts"])
+        if keep == "rewrite":
+            if not rewrites or not set(rewrites) <= set(targets):
+                raise ValueError(f"a rewrite names beliefs {sorted(rewrites or {})} the contradiction does not: {targets}")
+            with self._connect(True) as c:
+                evidence = c.execute(f"SELECT day, time, kind, relation, text, in_reply_to, source_ref FROM "
+                                     f"{self.p}evidence WHERE belief_id=? ORDER BY id", (belief_id,)).fetchall()
+                for t in rewrites:
+                    c.executemany(
+                        f"INSERT INTO {self.p}evidence (belief_id, day, time, kind, relation, text, in_reply_to, "
+                        "source_ref, via) VALUES (?,?,?,?,?,?,?,?,?)",
+                        [(t, e["day"], e["time"], e["kind"], "support", e["text"], e["in_reply_to"], e["source_ref"],
+                          f"reconciled:{belief_id}") for e in evidence])
+            for t, (statement, embedding) in rewrites.items():
+                kind = (self.get(t) or {}).get("kind")
+                self.revise(t, day, {"statement": statement, "kind": kind,
+                                     "reasoning": f"the owner applied the rewrite reconciling it with {belief_id}"},
+                            embedding)
+            self.retire(belief_id, day, f"folded into {', '.join(rewrites)} by the owner's rewrite")
+            self.set_review(belief_id, "approved", day)
+            return
+        if keep == "old":
+            self.retire(belief_id, day, f"the owner kept {', '.join(targets)} over it")
+            self.set_review(belief_id, "dismissed", day)
+            return
+        with self._connect(True) as c:
+            c.execute(f"UPDATE {self.p}beliefs SET status='active' WHERE id=?", (belief_id,))
+        self.set_review(belief_id, "approved", day)
+        if keep == "new":
+            for t in targets:
+                if (self.get(t) or {}).get("status") == "active":
+                    self.retire(t, day, f"replaced by {belief_id} on the owner's review")
+
+    def set_review(self, belief_id: str, review: str, day: str) -> None:
+        """Record the owner's review of a belief: approved | dismissed | edited."""
+        if review not in ("approved", "dismissed", "edited"):
+            raise ValueError(f"unknown review {review!r}")
+        with self._connect(True) as c:
+            c.execute(f"UPDATE {self.p}beliefs SET review=?, reviewed_day=? WHERE id=?", (review, day, belief_id))
 
     def restore(self, belief_id: str, day: str, reason: str) -> None:
         """Undo a retirement (the owner's call in /beliefs); recorded in the revision history."""

@@ -22,7 +22,13 @@ body{margin:0;background:var(--bg);color:var(--ink);
 
 .bx-list{padding:10px 22px 60px;display:flex;flex-direction:column;gap:8px}
 .bx-item{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 13px;
-  cursor:pointer;transition:border-color .12s,background .12s}
+  cursor:pointer;transition:border-color .12s,background .12s;display:flex;align-items:flex-start;gap:12px}
+.bx-item-main{flex:1;min-width:0}
+.bx-row-act{flex:none;background:transparent;color:var(--bad);border:1px solid #5a2a2a;border-radius:8px;
+  padding:4px 10px;font-size:12px;cursor:pointer}
+.bx-row-act:hover{background:#2a1414}
+.bx-row-act.restore{color:var(--ok);border-color:#2a5a34}
+.bx-row-act.restore:hover{background:#142a18}
 .bx-item:hover{border-color:var(--acc);background:var(--panel2)}
 .bx-item.suppressed{opacity:.5}
 .bx-item.suppressed .bx-stmt{text-decoration:line-through}

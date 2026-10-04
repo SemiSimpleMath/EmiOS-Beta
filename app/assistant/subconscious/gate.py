@@ -83,7 +83,9 @@ def route_page(events: List[Dict[str, Any]], concerns: List[Dict[str, Any]],
     data = call(payload)
     problems = _problems(data, ev_labels, c_labels)
     if problems:
+        from app.assistant.subconscious.brain_trace import step
         logger.warning("[gate] invalid routing, one correction: %s", problems)
+        step("gate", "answer refused, one correction", subject=[e["id"] for e in events], problems=problems)
         data = call({**payload, "correction": "; ".join(problems)})
         problems = _problems(data, ev_labels, c_labels)
         if problems:
@@ -129,16 +131,20 @@ def run_gate(*, ingest: bool = True, call: Optional[Callable[[Dict[str, Any]], A
 
     routed = passed = failed = 0
     for page in pages(events, max_chars=_PAGE_CHARS):
-        from app.assistant.subconscious.brain_trace import trace
+        from app.assistant.subconscious.brain_trace import step, trace
         try:
             with trace(stage="gate", event_ids=[e["id"] for e in page]):
                 decisions = route_page(page, concerns, call)
         except Exception as exc:
             logger.error("[gate] %d event(s) could not be routed; the brain reads them unrouted: %s",
                          len(page), exc, exc_info=True)
+            step("gate", "page failed: the brain reads it unrouted", subject=[e["id"] for e in page],
+                 error=f"{type(exc).__name__}: {exc}")
             inbox.record_failure([e["id"] for e in page], str(exc), **kw)
             failed += len(page)
             continue
+        step("gate", "routed", subject=[e["id"] for e in page],
+             routes={str(event_id): d for event_id, d in decisions.items()})
         for event_id, d in decisions.items():
             inbox.record_route(event_id, d["route"], d["concern_ids"], d["reasoning"], **kw)
             routed += 1

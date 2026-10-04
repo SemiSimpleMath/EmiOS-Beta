@@ -15,7 +15,8 @@ object (`instruct_goal`) for the architect to act on.
 `based_on` entries prefixed `concern:` are lifted into `constraints.concern_refs` at creation: the
 work is attached to those concerns, which then hear of each judgment and of its ending
 (concern_feedback.propagate_work_outcome, called here after creation, revision and closure). Work made from an intake item the brain handed over carries
-that item's concern whatever the steward cites (work_intake.concern_refs_of).
+that item's concern whatever the steward cites (work_intake.concern_refs_of), and work made from a placement
+of today's calendar carries its belief (work_intake.belief_refs_of).
 """
 from __future__ import annotations
 
@@ -29,7 +30,7 @@ logger = get_logger(__name__)
 def persist_steward_output(store, output: Dict[str, Any], *, admitted_artifacts=()) -> Dict[str, Any]:
     """Mint new work objects from `new_or_changed`, update changed objectives, and record each end
     request for the architect. Returns a summary {created, changed, changed_records, end_requested}."""
-    from app.assistant.dayflow_orchestrator.work_intake import concern_refs_of, source_records, goal_update
+    from app.assistant.dayflow_orchestrator.work_intake import belief_refs_of, concern_refs_of, source_records, goal_update
     from app.assistant.dayflow_orchestrator.work_context import render_view
     created: List[Dict[str, str]] = []
     changed_records: List[Dict[str, Any]] = []
@@ -53,10 +54,11 @@ def persist_steward_output(store, output: Dict[str, Any], *, admitted_artifacts=
             # Belief provenance rides constraints for the same reason: a belief that caused
             # this work wants the outcome back. Stored as the belief_key, not the row id —
             # a merge deprecates the losing id but the surviving key still resolves.
-            belief_refs = [str(b).strip()[len("belief:"):].strip()
-                           for b in (spec.get("based_on") or [])
-                           if str(b).strip().startswith("belief:")
-                           and str(b).strip()[len("belief:"):].strip()]
+            belief_refs = list(dict.fromkeys(
+                [str(b).strip()[len("belief:"):].strip()
+                 for b in (spec.get("based_on") or [])
+                 if str(b).strip().startswith("belief:") and str(b).strip()[len("belief:"):].strip()]
+                + belief_refs_of(sources)))
             wo = store.apply("create_work_object", {
                 "title": objective[:80],
                 "goal_content": render_view("goal_content", objective=objective, sources=sources,

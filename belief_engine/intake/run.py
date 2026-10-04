@@ -1,4 +1,4 @@
-"""Run the intake for stored days: extract → dedup → apply → revise → fan-out, one day at a time.
+"""Run the intake for stored days: extract → dedup → apply (a contradiction is held for the owner), one day at a time.
 
 Shared by the replay (scratch file, cached extractions) and shadow mode (the app DB's
 belief_intake_* tables, nothing read by the assistant yet). Days are processed in date order because each
@@ -27,53 +27,57 @@ APP_TABLE_PREFIX = "belief_intake_"
 
 
 def judge_day(day: str, atoms: list[dict], store: IntakeStore, scope_ctx, embed_texts, log=print) -> dict:
-    """Dedup, apply, revise and fan out one day's atoms against the store. Returns verdict counts."""
+    """Dedup and apply one day's atoms against the store (contradictions held for the owner). Returns verdict
+    counts."""
     counts: dict[str, int] = {}
     vectors = embed_texts([a["statement"] for a in atoms]) if atoms else []
     for atom, vec in zip(atoms, vectors):
-        judge_atom(day, atom, vec, store, scope_ctx, embed_texts, log, counts)
+        judge_atom(day, atom, vec, store, scope_ctx, log, counts)
     return counts
 
 
-def judge_atom(day: str, atom: dict, vec: list, store: IntakeStore, scope_ctx, embed_texts, log=print,
+def judge_atom(day: str, atom: dict, vec: list, store: IntakeStore, scope_ctx, log=print,
                counts: dict | None = None) -> str:
-    """Dedup, apply, revise and fan out one atom. Returns the id of the belief it landed on."""
+    """Dedup and apply one atom. Returns the id of the belief it landed on.
+
+    An atom that contradicts held beliefs is not applied to them: it is kept as its own `pending` belief with
+    every held belief it contradicts (the one dedup named, and the others the fan-out finds) and, for each, a
+    drafted rewrite that reconciles the two (agents.draft_revision), for the owner to apply or decline in the
+    morning review (owner, 2026-10-03). Until then the held beliefs stand as they were. Until 2026-10-03 a
+    contradiction rewrote the held belief at once with the same call: right in content (intermittent fasting to
+    calorie-reduced meals, four beliefs overnight) but with "until <date>" clauses, and once a misread (B198)."""
     counts = {} if counts is None else counts
 
     def tick(key):
         counts[key] = counts.get(key, 0) + 1
 
     verdict = agents.dedup(atom, day, ordered(store.beliefs(), vec), scope_ctx)
-    bid = store.apply(day, atom, vec, verdict)
     tick(verdict["verdict"])
-    tgt = f" -> {verdict['target']}" if verdict.get("target") else ""
-    log(f"  {day} [{verdict['verdict']:11}] {bid}{tgt}: {atom['statement'][:110]}")
     if verdict["verdict"] != "contradicts":
+        bid = store.apply(day, atom, vec, verdict)
+        tgt = f" -> {verdict['target']}" if verdict.get("target") else ""
+        log(f"  {day} [{verdict['verdict']:11}] {bid}{tgt}: {atom['statement'][:110]}")
         return bid
-    # Beliefs evolve: restate the held belief from its whole evidence, new item included.
-    held = next(b for b in store.beliefs() if b["id"] == bid)
-    revision = agents.revise(held, atom, day, scope_ctx)
-    if revision["outcome"] == "revised":
-        store.revise(bid, day, revision, embed_texts([revision["statement"]])[0])
-    tick(revision["outcome"])
-    log(f"  {day} [{revision['outcome']:11}] {bid}: {revision['statement'][:110]}")
-    # ...and the same new belief may bear on other held beliefs than the one named.
-    others = [b for b in store.beliefs() if b["id"] != bid]
-    for other, revision, hit in contradiction_fanout(atom, day, others, vec, [bid], scope_ctx):
-        store.apply(day, atom, vec, hit)
-        if revision["outcome"] == "revised":
-            store.revise(other, day, revision, embed_texts([revision["statement"]])[0])
-        tick(revision["outcome"])
-        log(f"  {day} [also {revision['outcome']:6}] {other}: {revision['statement'][:110]}")
+    others = [b for b in store.beliefs() if b["id"] != verdict["target"]]
+    targets = [verdict["target"]] + [t for t, _ in contradiction_fanout(atom, day, others, vec, [verdict["target"]],
+                                                                         scope_ctx)]
+    held = {b["id"]: b for b in store.beliefs()}
+    drafts = {}
+    for t in targets:
+        draft = agents.draft_revision(held[t], atom, day, scope_ctx)
+        if draft["outcome"] == "revised":
+            drafts[t] = {k: draft[k] for k in ("statement", "kind", "reasoning")}
+    bid = store.hold(day, atom, vec, targets, verdict.get("reasoning"), drafts)
+    log(f"  {day} [held       ] {bid} contradicts {', '.join(targets)} ({len(drafts)} rewrite(s) drafted): "
+        f"{atom['statement'][:110]}")
     return bid
 
 
 def run_day(day: str, store: IntakeStore, scope_ctx, embed_texts, log=print) -> dict:
     """Extract and judge one day. Marks the day done, or failed and re-raises."""
     try:
-        insights = day_items.insights(day)
-        items, provenance = day_items.timeline_items(day)
-        atoms = agents.extract_day(day, insights, items, provenance, scope_ctx)
+        insights, provenance = day_items.insights(day)
+        atoms = agents.extract_day(day, insights, provenance, scope_ctx)
         log(f"  {day}: {len(insights)} insights -> {len(atoms)} atoms")
         counts = judge_day(day, atoms, store, scope_ctx, embed_texts, log)
     except Exception as exc:

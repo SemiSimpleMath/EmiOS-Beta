@@ -16,9 +16,9 @@ record is newer.
 - what: what the matter is.
 - why_it_matters: what happens to the household if it is missed or done wrong.
 - known: the facts: dates, times, places, people, amounts, the current state. Give each its source
-  as shown in the context (an evidence ref, a work id, a calendar or reminder ref; several separated
-  by ';'), or journal, notes or knowledge graph for what the concern's journal, its notes, or the
-  knowledge graph's description says. State only what the context shows. What is not known is not a
+  by the label it is shown with (S1, S2, ...: on the evidence, the work, the reminders and the calendar
+  entries; several separated by ';'), or journal, notes or knowledge graph for what the concern's
+  journal, its notes, or the knowledge graph's description says. State only what the context shows. What is not known is not a
   fact: put it in open_questions.
 - tried: what was already done and how each attempt went, from the work outcomes, the journal and
   past work. A reminder that was sent is a delivery; say whether the matter itself moved.
@@ -27,19 +27,8 @@ record is newer.
   entry, active work, an arrangement made with someone.
 - open_questions: what is not known and would change what to do.
 - recommendation: the broad next step and why, or no action and why. Leave the steps to whoever acts.
-- readiness: only for a standing concern, as below. For any other concern leave it empty: the concern
-  planner reads your brief and decides what the concern needs now.
 
-A standing concern (kind standing) is a recurring part of {{ owner }}'s day, built from {{ owner }}'s
-beliefs (its evidence): the evening AC, the liquid cutoff, a weekly link to send. It is never settled;
-each day it applies, its occurrences are placed at their times. Its readiness is a rule for every
-occurrence, the same on every day, and it stands until an occurrence goes wrong or its beliefs change:
-  - act_now: something should happen at each occurrence (a device action, a reminder, a message, a
-    task). The task is what is done at one occurrence, at its time, stated as that act itself (an
-    arrangement for future occurrences is not the task); each occurrence is handed to the planner with
-    its time.
-  - no_action: it is context for timing and wording only; nothing is done at its occurrences.
-  Decide the rule from what the concern asks for. Work already in motion for today's occurrence leaves
-  the rule as it is: the planner sees that work and does not repeat it. A standing concern is not held.
+{{ assistant_name }} is the automation: when {{ owner }} wants something done automatically, every day or
+on a schedule, {{ assistant_name }} does the act itself at each time, and nothing is set up in advance.
 
 When the record is thin, the brief is short. Say what is not known rather than filling it in.

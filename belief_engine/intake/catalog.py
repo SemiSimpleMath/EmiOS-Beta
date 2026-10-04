@@ -12,6 +12,8 @@ export had, so consumers keep their fields:
     observation_count      supporting evidence rows
     first_observed / last_confirmed   first / last day with supporting evidence
     refines                the parent belief's id, for a one-level refinement
+    calendar               the owner's calendar decision: approved | declined, or the tagger's proposed |
+                           not_proposed, or None (the day pass places the approved ones)
     cluster_id / cluster   the topic the belief belongs to and its label (belief_engine/clusters.py);
                            None until the belief is placed
 
@@ -39,7 +41,7 @@ def active_entries(*, conn=None) -> List[Dict[str, Any]]:
 
 
 def _entries(c) -> List[Dict[str, Any]]:
-    rows = c.execute(f"SELECT id, statement, kind, scope, status, parent_id, created_day FROM {_P}beliefs "
+    rows = c.execute(f"SELECT id, statement, kind, scope, status, parent_id, created_day, calendar FROM {_P}beliefs "
                      "WHERE status='active' ORDER BY CAST(SUBSTR(id, 2) AS INTEGER)").fetchall()
     support = {r[0]: (r[1], r[2], r[3]) for r in c.execute(
         f"SELECT belief_id, MIN(day), MAX(day), COUNT(*) FROM {_P}evidence WHERE relation='support' GROUP BY belief_id")}
@@ -57,7 +59,7 @@ def _entries(c) -> List[Dict[str, Any]]:
             "belief_key": bid, "short_id": bid, "statement": r[1], "kind": r[2], "scope": r[3],
             "status": r[4], "tags": t, "domain": t[0] if t else "", "confidence": None,
             "observation_count": n, "first_observed": first, "last_confirmed": last,
-            "refines": r[5],
+            "refines": r[5], "calendar": r[7],
             "cluster_id": topic.get(bid, (None, None))[0], "cluster": topic.get(bid, (None, None))[1],
         })
     return out

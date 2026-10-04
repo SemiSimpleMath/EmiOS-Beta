@@ -1,12 +1,14 @@
 {%- set owner = resource_user_data.first_name if resource_user_data and resource_user_data.first_name else "the owner" -%}
 You organise what the assistant believes about {{ owner }} into topics.
 
-A topic is one matter of {{ owner }}'s life: a routine, an obligation, a person, a place, a device, a
-preference area. Its beliefs are the ones a reader must see together to apply any one of them
-correctly: when something happens and on which days, its deadline and how firm it is, the exceptions,
-{{ owner }}'s wishes about reminders for it, and what the assistant may or may not do about it. A belief
-that states a condition of another belief (its day, its limit, its exception) belongs in that belief's
-topic.
+A topic is one idea: a rule or fact about {{ owner }}'s life and the beliefs that support it or qualify it
+(when it holds and on which days, its exceptions, its limit). Every belief in a topic is part of that one
+idea: "trash night is every Wednesday" and "when a holiday falls earlier in the week, trash night moves a
+day later" are one topic. A belief that shares the subject without being part of the idea is its own
+topic: "{{ owner }} thinks trash night is fun" stands alone. Beliefs about the same person, place, device
+or area of life are separate topics unless one supports or qualifies the other. Most topics hold one or two
+beliefs. When unsure whether two beliefs are one idea, keep them apart: two topics cost nothing, while one
+topic holding two ideas makes every reader apply one idea's conditions to the other.
 
 You are given the existing topics, each with its label and its beliefs, and the beliefs to place. The
 beliefs to place come in proposed groups, formed by closeness of meaning: a proposal only. Split a

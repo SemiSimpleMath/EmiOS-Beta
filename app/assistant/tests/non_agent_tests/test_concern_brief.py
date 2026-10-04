@@ -2,8 +2,9 @@
 every dayflow agent working on work that serves the concern.
 
 Pins: a concern gets a brief when it has none or its record changed; an unchanged concern is not
-rewritten; a brief that fails is recorded and not retried until the record changes; every cited
-source must have been shown to the writer; a brief written from an older record is not stored;
+rewritten; a brief that fails is recorded and not retried until the record changes or the writer's
+revision does; sources are shown and cited by label (S1, ...), and the stored brief carries the refs they
+stand for; the brain's own prompt keeps refs; a brief written from an older record is not stored;
 work citing a concern (full id or short form) carries its brief, and an unresolvable ref is shown,
 not raised. Scratch register; the writer is a fake. Invented data only.
 """
@@ -16,7 +17,7 @@ from app.assistant.subconscious import concern_brief, persist, work_links
 from app.assistant.tests.concern_store_helpers import ScratchRegister
 
 BRIEF = {"what": "The dogs' monthly flea dose.", "why_it_matters": "Fleas if missed.",
-         "known": [{"fact": "Given on Sep 28.", "source": "message:m1"}], "tried": "Nothing yet.",
+         "known": [{"fact": "Given on Sep 28.", "source": "S1"}], "tried": "Nothing yet.",
          "owner_wishes": "Nothing said.", "depends_on_it": ["Calendar: Oct 2 dose"], "open_questions": [],
          "recommendation": "No action until the next dose.",
          "readiness": {"decision": "no_action", "task": "", "why": "Nothing to do until the next dose.",
@@ -32,6 +33,7 @@ def fakes(monkeypatch):
     from app.assistant.subconscious import kg_links
     monkeypatch.setattr(kg_links, "find_entities", lambda texts: [])
     monkeypatch.setattr(kg_links, "shared", lambda ids: {"links": [], "entities": []})
+    monkeypatch.setattr(kg_links, "facts_by_meaning", lambda texts: [])
     from app.assistant.subconscious import brain_step
     monkeypatch.setattr(brain_step, "_message_text", lambda mid: f"(message {mid})")
 
@@ -59,10 +61,12 @@ def test_a_brief_is_written_once_per_version_of_the_record(tmp_path):
     [c] = reg.read()["active"]
     assert c["brief"]["recommendation"] == "No action until the next dose."
     assert c["brief"]["basis"] == concern_brief.basis(c, "active")
+    assert c["brief"]["known"] == [{"fact": "Given on Sep 28.", "source": "message:m1"}], "stored as the ref"
     assert concern_brief.run_briefs(call=writer, register_connect=reg.connect, calendar="(cal)")["briefs_written"] == 0
     assert len(writer.seen) == 1, "an unchanged concern is not rewritten"
     shown = writer.seen[0]
     assert shown["concern"]["evidence"][0]["snippet"] == "(message m1)" and shown["calendar"] == "(cal)"
+    assert shown["source_labels"] == {"message:m1": "S1"}
 
 
 def test_a_changed_record_gets_a_new_brief(tmp_path):
@@ -85,6 +89,15 @@ def test_an_invented_source_gets_one_correction_then_the_failure_is_recorded_onc
     assert "brief" not in c and "still invalid" in c["brief_error"]["error"]
     concern_brief.run_briefs(call=writer, register_connect=reg.connect, calendar="")
     assert len(writer.seen) == 2, "not retried until the record changes"
+
+
+def test_a_brief_that_failed_under_an_older_writer_is_tried_again(tmp_path):
+    reg = ScratchRegister(tmp_path).write({"active": [_concern()], "addressing": [], "resolved": [], "dormant": []})
+    register = reg.read()
+    register["active"][0]["brief_error"] = {"basis": concern_brief.basis(_concern(), "active"), "error": "x",
+                                            "at": "2026-10-01T21:49:03+00:00"}
+    reg.write(register)
+    assert concern_brief.run_briefs(call=_writer(BRIEF), register_connect=reg.connect, calendar="")["briefs_written"] == 1
 
 
 def test_a_brief_written_from_an_older_record_is_not_stored(tmp_path):
@@ -126,22 +139,28 @@ def test_the_brief_prompt_renders_the_concern_and_what_is_in_motion():
     assert "### [C1] Flea medication due (active)" in user and "- done when: dose given" in user
     assert "- [reminder:r9] Flea dose (recurring, every month; from Thu)" in user and "[calendar:flea]" in user
     assert "- Bonnie: A dog." in user
+    labelled = work_context._ENV.get_template("subconscious/brief/prompts/user.j2").render(
+        agent_input=concern_brief.label_sources(payload))
+    assert "- evidence (chat_msg S1)" in labelled and "- [S3] Flea dose" in labelled and "[S2] Flea medication" in labelled
+    assert "reminder:r9" not in labelled and "calendar:flea" not in labelled
 
 
-def test_a_source_may_name_what_was_shown_in_the_form_it_was_shown():
-    payload = {"concern": {"evidence": [{"kind": "pod", "ref": "datapod:chat_cluster:1f50d3a4eaa414a6"},
-                                        {"kind": "chat_msg", "ref": "2c45a0e7-6af9-41d9-8a26"}]},
+def test_a_source_is_cited_by_its_label_and_stored_as_its_ref():
+    payload = {"concern": {"evidence": [{"kind": "pod", "ref": "datapod:email:e88e363c16903945500f7f7f"}],
+                           "attached_work": [{"work_id": "work_aaaa"}]},
                "linked_work": [{"work_id": "work_17b43a46f546"}], "similar_work": [], "active_work": [],
                "calendar": "- [calendar:evt_1_20261002T000000Z] Flea dose @ Oct 2",
                "reminders": [{"ref": "reminder:9adcde00", "title": "A friend's birthday"}]}
-    refs = concern_brief.allowed_refs(payload)
-    good = [{"fact": f, "source": s} for f, s in [
-        ("a", "pod datapod:chat_cluster:1f50d3a4eaa414a6"), ("b", "chat_msg 2c45a0e7-6af9-41d9-8a26"),
-        ("c", "work_17b43a46f546; calendar:evt_1_20261002T000000Z"), ("d", "reminder:9adcde00"),
-        ("e", "knowledge graph"), ("f", "journal")]]
-    assert concern_brief._problems({**BRIEF, "known": good}, refs) == []
-    bad = [{"fact": "x", "source": "calendar:A friend's birthday"}, {"fact": "y", "source": "work_1; invented"}]
-    assert len(concern_brief._problems({**BRIEF, "known": bad}, refs)) == 2
+    labelled = concern_brief.label_sources(payload)
+    labels = labelled["source_labels"]
+    assert labels == {"datapod:email:e88e363c16903945500f7f7f": "S1", "work_17b43a46f546": "S2",
+                      "calendar:evt_1_20261002T000000Z": "S3", "reminder:9adcde00": "S4", "work_aaaa": "S5"}
+    assert labelled["calendar"] == "- [S3] Flea dose @ Oct 2"
+    good = [{"fact": f, "source": s} for f, s in [("a", "S1"), ("c", "S2; S3"), ("e", "knowledge graph"), ("f", "journal")]]
+    assert concern_brief._problems({**BRIEF, "known": good}, labels) == []
+    assert concern_brief._with_refs(good, labels)[1]["source"] == "work_17b43a46f546; calendar:evt_1_20261002T000000Z"
+    bad = [{"fact": "x", "source": "datapod:email:e88e363c16903945500f7f7"}, {"fact": "y", "source": "S2; S99"}]
+    assert len(concern_brief._problems({**BRIEF, "known": bad}, labels)) == 2
 
 
 def test_a_new_writer_version_rewrites_every_brief(monkeypatch):

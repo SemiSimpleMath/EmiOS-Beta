@@ -12,17 +12,18 @@ written, run by the brain's wake (subconscious/brain_wake.py) after the brain st
 a concern whose brief could not be written carries `brief_error` with the same fingerprint and is
 not retried until its record, or the writer, changes. Every cited source must contain a ref the
 writer was shown (evidence, work ids, calendar anchors, reminder refs), or name the concern's
-journal or notes, or the knowledge graph; one correction.
+journal or notes, or the knowledge graph; one correction. Sources are shown and cited by label (S1, S2,
+...), and stored as the refs they stand for (2026-10-02).
 
 Dayflow reads it through `briefs_for_refs`: every agent working on a work object that cites a
 concern (architect, worker, finalizer) gets that concern's brief whole, and the work attached to
 it so far (`attempts`) (dayflow_orchestrator/work_context.work_data). The steward gets the same view
 in a handoff (concern_handoff._brief_text), so it can judge whether another attempt is productive.
 
-For a standing concern the brief ends in a readiness rule for its occurrences: act_now (each occurrence
-is handed to the planner, subconscious/concern_handoff.py) or no_action. For a matter concern the brief
-decides nothing: the concern planner (subconscious/concern_planner.py) reads it and decides what the
-concern needs now (until 2026-10-02 the brief's readiness decided that too).
+The brief decides nothing: the concern planner (subconscious/concern_planner.py) reads it and decides what
+the concern needs now. (Until 2026-10-02 the brief's readiness decided that; until 2026-10-03 a standing
+concern, made from the owner's beliefs, ended its brief in a readiness rule for its occurrences. Beliefs
+are no longer made into concerns: docs/design/what_was_done_reaches_the_brain_2026-10-03.md.)
 """
 from __future__ import annotations
 
@@ -39,60 +40,22 @@ logger = get_logger(__name__)
 _AGENT = "subconscious::brief"
 # Part of every brief's basis: raising it rewrites every brief, and retries every brief the older
 # writer failed on. 2: sources are checked against the refs shown, reminders carry refs, KG entities.
-WRITER_VERSION = 3   # 3: readiness (act_now / hold / no_action)
+WRITER_VERSION = 3   # 3: readiness (act_now / hold / no_action), since removed
+# A failed brief is tried again when the writer's revision changes, without rewriting the briefs that
+# succeeded (raising WRITER_VERSION rewrites them all, and every new brief is planned again).
+# 1: sources are shown and cited by label (S1, S2, ...), mapped back to their refs by code.
+WRITER_REVISION = 1
 _OWN_KEYS = ("brief", "brief_error", "plan", "plan_error")   # what is written from the record
 _FIELDS = ("what", "why_it_matters", "tried", "owner_wishes", "recommendation")
 # A fact from the concern's own journal or notes, or from a knowledge-graph description, has no ref.
 _NAMED_SOURCES = ("journal", "notes", "knowledge graph")
 
 
-# A standing concern's record changes every day without anything to decide: work attaches and ends,
-# journal lines and receipts accumulate, it moves between active and addressing. Its brief is written
-# again only when an occurrence went wrong or what defines it (its beliefs) changed (owner, 2026-10-02).
-_STANDING_CHURN = ("reinforcement_notes", "work_receipts", "last_reinforced_utc", "addressing_since_utc",
-                   "addressing_reviewed_at_utc", "reinforcement_count")
-
-
-def _went_wrong(work: Dict[str, Any]) -> bool:
-    return work.get("status") == "abandoned" or any(
-        j.get("verdict") not in ("achieved", "achieved_plan_changes") for j in work.get("judgments") or [])
-
-
 def basis(concern: Dict[str, Any], bucket: str) -> str:
-    """Fingerprint of the concern's record, excluding the brief itself and today's occurrences (the
-    day pass rewrites those; they are not a change to decide on). For a standing concern, the daily
-    churn and work that went as intended are left out too."""
-    record = {k: v for k, v in concern.items() if k not in _OWN_KEYS and k != "occurrences"}
-    if concern.get("kind") == "standing":
-        for key in _STANDING_CHURN:
-            record.pop(key, None)
-        record["attached_work"] = {w: rec for w, rec in (concern.get("attached_work") or {}).items()
-                                   if _went_wrong(rec)}
-        bucket = "standing"
+    """Fingerprint of the concern's record, excluding what is written from it (the brief, the plan)."""
+    record = {k: v for k, v in concern.items() if k not in _OWN_KEYS}
     return hashlib.sha256(json.dumps([WRITER_VERSION, bucket, record], sort_keys=True, ensure_ascii=False,
                                      default=str).encode("utf-8")).hexdigest()
-
-
-def _held_until_passed(brief: Dict[str, Any], now: datetime) -> bool:
-    readiness = brief.get("readiness") or {}
-    when = readiness.get("hold_until_utc")
-    return readiness.get("decision") == "hold" and bool(when) and datetime.fromisoformat(when) <= now
-
-
-def next_hold_at(register: Dict[str, Any], now_utc: datetime) -> Optional[datetime]:
-    """The earliest future time an open concern's current brief holds until, or None. At that time
-    the brief is stale (see `stale`) and is written again, so the brain's wake sleeps until it."""
-    times = []
-    for bucket in ("active", "addressing"):
-        for c in register.get(bucket) or []:
-            brief = c.get("brief") or {}
-            readiness = brief.get("readiness") or {}
-            when = readiness.get("hold_until_utc")
-            if readiness.get("decision") == "hold" and when and brief.get("basis") == basis(c, bucket):
-                at = datetime.fromisoformat(when)
-                if at > now_utc:
-                    times.append(at)
-    return min(times) if times else None
 
 
 def attempts(concern: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -108,33 +71,29 @@ def attempts(concern: Dict[str, Any]) -> List[Dict[str, Any]]:
             for w in works]
 
 
-def _failed_on_this_record(concern: Dict[str, Any], b: str, now: datetime) -> bool:
-    """The brief already failed on this record. A standing concern's record rarely changes, so its failed
-    brief is tried again once a day rather than never."""
+def _failed_on_this_record(concern: Dict[str, Any], b: str) -> bool:
+    """The brief already failed on this record, with this revision of the writer."""
     error = concern.get("brief_error") or {}
-    if error.get("basis") != b:
-        return False
-    if concern.get("kind") != "standing":
-        return True
-    from app.assistant.utils.time_utils import utc_to_local
-    return utc_to_local(str(error.get("at"))).date() == utc_to_local(now.isoformat()).date()
+    return error.get("basis") == b and error.get("writer") == WRITER_REVISION
 
 
 def stale(register: Dict[str, Any], now_utc: Optional[datetime] = None) -> List[Tuple[str, Dict[str, Any]]]:
-    """Open concerns whose brief is missing, was written from an older record, or holds until a time
-    that has passed; minus those whose brief already failed on the current record. (bucket, concern)."""
-    now = now_utc or datetime.now(timezone.utc)
+    """Open concerns whose brief is missing or was written from an older record, minus those whose brief
+    already failed on the current record. (bucket, concern). `now_utc` is kept for the callers' symmetry
+    with the planner's `stale` and is not read."""
     out = []
     for bucket in ("active", "addressing"):
         for c in register.get(bucket) or []:
             b = basis(c, bucket)
-            brief = c.get("brief") or {}
-            if _failed_on_this_record(c, b, now):
-                continue
-            if brief.get("basis") == b and not _held_until_passed(brief, now):
+            if _failed_on_this_record(c, b) or (c.get("brief") or {}).get("basis") == b:
                 continue
             out.append((bucket, c))
     return out
+
+
+def stale_reason(concern: Dict[str, Any], bucket: str) -> str:
+    """Why a stale brief is written again, for the run record."""
+    return "its record changed" if concern.get("brief") else "no brief yet"
 
 
 def build_payload(concern: Dict[str, Any], bucket: str, *, calendar: str, now_utc: datetime) -> Dict[str, Any]:
@@ -145,33 +104,42 @@ def build_payload(concern: Dict[str, Any], bucket: str, *, calendar: str, now_ut
                                       exclude=[w["work_id"] for w in linked])
     view = brain_step._concern_view("C1", {**concern, "_status": bucket})
     entities = kg_links.find_entities([view["title"] or "", view["notes"]] + [e["snippet"] for e in view["evidence"]])
-    return {
+    payload = {
         "now": utc_to_local(now_utc.isoformat()).strftime("%a %Y-%m-%d %H:%M"),
         "concern": view,
         "entities": entities, "shared": kg_links.shared([x["node_id"] for x in entities]),
+        "facts": kg_links.facts_by_meaning([view["title"] or "", view["notes"]] + [e["snippet"] for e in view["evidence"]]),
         "linked_work": linked, "similar_work": similar,
         "active_work": work_links.active_work(), "reminders": work_links.live_reminders(now_utc),
         "calendar": calendar,
     }
+    return label_sources(payload)
+
+
+def label_sources(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Give every source shown a short label (S1, S2, ...), shown in its ref's place, so the writer cites a
+    label instead of copying a long id (it once dropped one character of a pod id, and the brief failed on
+    that record for good). `source_labels`: ref -> label, read by the shared templates; the calendar's
+    refs are replaced in its text."""
+    refs = allowed_refs(payload) + [w["work_id"] for w in payload["concern"]["attached_work"]]
+    labels: Dict[str, str] = {}
+    for ref in refs:
+        labels.setdefault(ref, f"S{len(labels) + 1}")
+    calendar = payload.get("calendar") or ""
+    for ref, label in labels.items():
+        if ref.startswith("calendar:"):
+            calendar = calendar.replace(f"[{ref}]", f"[{label}]")
+    return {**payload, "calendar": calendar, "source_labels": labels}
 
 
 def allowed_refs(payload: Dict[str, Any]) -> List[str]:
-    """Every ref the writer is shown: the concern's evidence, work ids, calendar anchors, reminders."""
+    """Every ref shown: the concern's evidence, work ids, calendar anchors, reminders (read before the
+    calendar's refs are replaced by labels)."""
     refs = [str(e.get("ref") or "") for e in payload["concern"]["evidence"]]
     refs += [w["work_id"] for key in ("linked_work", "similar_work", "active_work") for w in payload[key]]
     refs += re.findall(r"calendar:[^\s\]\)]+", payload.get("calendar") or "")
     refs += [r["ref"] for r in payload["reminders"]]
     return [r for r in refs if r]
-
-
-def _cites_shown(part: str, refs: List[str]) -> bool:
-    """A cited source part is good when it contains a shown ref, or a shown ref's id without its
-    `kind:` prefix (evidence is displayed as "kind ref", and older evidence refs are bare ids)."""
-    for ref in refs:
-        bare = ref.split(":", 1)[-1]
-        if ref in part or (len(bare) >= 8 and bare in part):
-            return True
-    return False
 
 
 def hold_until_utc(value: str, now_utc: datetime) -> datetime:
@@ -184,39 +152,30 @@ def hold_until_utc(value: str, now_utc: datetime) -> datetime:
     return when
 
 
-def _readiness_problems(readiness: Any, now_utc: datetime) -> List[str]:
-    if not isinstance(readiness, dict):
-        return ["readiness is missing"]
-    decision = readiness.get("decision")
-    if decision not in ("act_now", "hold", "no_action"):
-        return [f"readiness decision {decision!r} is not act_now, hold or no_action"]
-    out = [] if str(readiness.get("why") or "").strip() else ["readiness why is empty"]
-    if decision == "act_now" and not str(readiness.get("task") or "").strip():
-        out.append("act_now needs a task for the planner")
-    if decision == "hold":
-        try:
-            hold_until_utc(readiness.get("hold_until"), now_utc)
-        except ValueError as exc:
-            out.append(f"hold needs hold_until as a future local YYYY-MM-DD HH:MM: {exc}")
-    return out
+def _source_parts(source: Any) -> List[str]:
+    return [p.strip() for p in str(source or "").split(";") if p.strip()]
 
 
-def _problems(data: Any, refs: List[str], now_utc: Optional[datetime] = None, *, standing: bool = True) -> List[str]:
-    """What is wrong with a brief. Readiness is the brief's to decide only for a standing concern; for a
-    matter concern the concern planner decides (subconscious/concern_planner.py)."""
+def _problems(data: Any, labels: Dict[str, str]) -> List[str]:
+    """What is wrong with a brief: an empty field, or a fact citing a source that was not shown."""
     if not isinstance(data, dict):
         return ["no brief"]
     out = [f"{f} is empty" for f in _FIELDS if not str(data.get(f) or "").strip()]
-    if standing:
-        out += _readiness_problems(data.get("readiness"), now_utc or datetime.now(timezone.utc))
+    shown = set(labels.values())
     for fact in data.get("known") or []:
         source = str(fact.get("source") or "").strip()
-        parts = [p.strip() for p in re.split(r";", source) if p.strip()]
-        bad = [p for p in parts if p.lower() not in _NAMED_SOURCES and not _cites_shown(p, refs)]
+        parts = _source_parts(source)
+        bad = [p for p in parts if p.lower() not in _NAMED_SOURCES and p not in shown]
         if not parts or bad:
-            out.append(f"source {source!r} (for {str(fact.get('fact'))!r}) names nothing that was shown: "
-                       "cite the ref as shown, or journal, notes or knowledge graph")
+            out.append(f"source {source!r} (for {str(fact.get('fact'))!r}) is not a label shown: cite the "
+                       "label of what was shown (S1, S2, ...), or journal, notes or knowledge graph")
     return out
+
+
+def _with_refs(known: List[Dict[str, Any]], labels: Dict[str, str]) -> List[Dict[str, Any]]:
+    """Each fact's cited labels as the refs they stand for: every reader of the brief sees refs."""
+    ref_of = {label: ref for ref, label in labels.items()}
+    return [{**f, "source": "; ".join(ref_of.get(p, p) for p in _source_parts(f.get("source")))} for f in known]
 
 
 def _agent_call(payload: Dict[str, Any]) -> Any:
@@ -230,25 +189,22 @@ def write_brief(concern: Dict[str, Any], bucket: str, *, calendar: str,
     """The brief for one concern; raises when still invalid after one correction."""
     now = datetime.now(timezone.utc)
     payload = build_payload(concern, bucket, calendar=calendar, now_utc=now)
-    refs = allowed_refs(payload)
+    labels = payload["source_labels"]
     call = call or _agent_call
-    standing = concern.get("kind") == "standing"
     data = call(payload)
-    problems = _problems(data, refs, now, standing=standing)
+    problems = _problems(data, labels)
     if problems:
+        from app.assistant.subconscious.brain_trace import step
         logger.warning("[brief] invalid brief for %s, one correction: %s", concern["concern_id"], problems)
+        step("brief", "answer refused, one correction", subject=concern["concern_id"], problems=problems)
         data = call({**payload, "correction": "; ".join(problems)})
-        problems = _problems(data, refs, now, standing=standing)
+        problems = _problems(data, labels)
         if problems:
             raise ValueError(f"brief still invalid after one correction: {problems}")
     brief = {k: data.get(k) for k in ("what", "why_it_matters", "known", "tried", "owner_wishes",
                                        "depends_on_it", "open_questions", "recommendation")}
-    if not standing:
-        return brief
-    readiness = {k: data["readiness"].get(k) for k in ("decision", "hold_until", "task", "why")}
-    if readiness["decision"] == "hold":
-        readiness["hold_until_utc"] = hold_until_utc(readiness["hold_until"], now).isoformat()
-    return {**brief, "readiness": readiness}
+    brief["known"] = _with_refs(brief["known"] or [], labels)
+    return brief
 
 
 def run_briefs(*, call=None, register_connect=None, calendar: Optional[str] = None) -> Dict[str, Any]:
@@ -264,19 +220,26 @@ def run_briefs(*, call=None, register_connect=None, calendar: Optional[str] = No
     written = failed = 0
     for bucket, concern in todo:
         written_from = basis(concern, bucket)
-        from app.assistant.subconscious.brain_trace import trace
+        cid = concern["concern_id"]
+        from app.assistant.subconscious.brain_trace import step, trace
+        step("brief", "stale", subject=cid, title=concern.get("title"), reason=stale_reason(concern, bucket))
         try:
-            with trace(stage="brief", concern_id=concern["concern_id"]):
+            with trace(stage="brief", concern_id=cid):
                 brief = write_brief(concern, bucket, calendar=calendar, call=call)
         except Exception as exc:
             logger.error("[brief] could not write the brief for %s; not retried until it changes: %s",
-                         concern["concern_id"], exc, exc_info=True)
-            persist.set_concern_brief(concern["concern_id"], written_from, error=f"{type(exc).__name__}: {exc}",
+                         cid, exc, exc_info=True)
+            step("brief", "failed: not retried until the record changes", subject=cid,
+                 error=f"{type(exc).__name__}: {exc}")
+            persist.set_concern_brief(cid, written_from, error=f"{type(exc).__name__}: {exc}",
                                       connect=register_connect)
             failed += 1
             continue
-        if persist.set_concern_brief(concern["concern_id"], written_from, brief=brief, connect=register_connect):
+        if persist.set_concern_brief(cid, written_from, brief=brief, connect=register_connect):
+            step("brief", "written", subject=cid)
             written += 1
+        else:
+            step("brief", "not stored: the record changed while it was written", subject=cid)
     logger.info("[brief] written=%d failed=%d", written, failed)
     return {"briefs_written": written, "briefs_failed": failed}
 

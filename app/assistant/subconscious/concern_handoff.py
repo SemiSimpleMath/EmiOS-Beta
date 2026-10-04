@@ -25,11 +25,9 @@ active; the planner sees that work and decides act_now only when it should be ad
   the concern and its agents read the brief.
 - The steward's answer is journalled on the concern (`record_intake_outcome`).
 
-A standing concern (a recurring part of the day, from the owner's beliefs; subconscious/day_pass.py) is
-handed over per occurrence instead: when its brief says act_now, each of today's occurrences goes over once,
-with its time, as soon as the day pass places it (owner, 2026-10-02: concerns are handed over when they
-are created, unless they are for another day), and the work made from it waits for that time. The item id
-is `concern_handoff:<concern id>:<day>:<time>`; an occurrence more than an hour past is not handed over.
+Today's calendar is not handed over through concerns: each placement goes to dayflow from the calendar
+(subconscious/belief_occurrences.py). Until 2026-10-03 a placed belief got a standing concern whose
+occurrences were handed over here, with the concern's single rule as their task.
 
 One handoff per version of the plan (one per brief version): the item id is
 `concern_handoff:<concern id>:<brief basis>`. Not `concern:…`: the steward cites the item id in
@@ -116,56 +114,24 @@ def _meta(concern: Dict[str, Any], bucket: str, now_utc: datetime, item: str, *,
     }
 
 
-def occurrence_item_id(concern_id: str, day: str, time: str) -> str:
-    return f"concern_handoff:{concern_id}:{day}:{'-'.join(time.lower().split())}"
-
-
-def occurrence_meta(concern: Dict[str, Any], bucket: str, day: str, occurrence: Dict[str, Any],
-                    now_utc: datetime) -> Dict[str, Any]:
-    """The intake item for one occurrence of a standing concern: the brief's task at its time today."""
-    readiness = concern["brief"]["readiness"]
-    when = occurrence["time"]
-    return {**_meta(concern, bucket, now_utc, occurrence_item_id(concern["concern_id"], day, when),
-                    summary=f"{'All day' if when == 'all day' else 'At ' + when} today ({day}): {readiness['task']}",
-                    why=readiness["why"]),
-            "occurrence_day": day, "occurrence_time": when}
-
-
-def _occurrence_passed(day: str, when: str, now_utc: datetime) -> bool:
-    """True when a clock-time occurrence today was more than an hour ago."""
-    from app.assistant.subconscious.day_pass import _clock_hour_minute
-    from app.assistant.utils.time_utils import get_local_timezone
-    if when == "all day":
-        return False
-    hour, minute = _clock_hour_minute(when)
-    at = datetime.fromisoformat(day).replace(hour=hour, minute=minute, tzinfo=get_local_timezone())
-    return (now_utc - at.astimezone(timezone.utc)).total_seconds() > 3600
-
-
-def _standing_handoffs(concern: Dict[str, Any], bucket: str, items: List[Dict[str, Any]],
-                       now_utc: datetime) -> List[Dict[str, Any]]:
-    from app.assistant.pipelines.context import boundary_date_local_str
-    from app.assistant.utils.time_utils import get_local_timezone
-    day = boundary_date_local_str(now_utc.astimezone(get_local_timezone()))
-    handed = {i.get("item_id") for i in items}
-    return [occurrence_meta(concern, bucket, day, occ, now_utc)
-            for occ in (concern.get("occurrences") or {}).get(day) or []
-            if occurrence_item_id(concern["concern_id"], day, occ["time"]) not in handed
-            and not _occurrence_passed(day, occ["time"], now_utc)]
-
-
 def run_handoffs(*, register_connect=None, now_utc: Optional[datetime] = None,
                  existing_items: Callable[[str], List[Dict[str, Any]]] = None,
                  write_item: Callable[[Dict[str, Any]], None] = None,
                  poke: Callable[[], None] = None) -> Dict[str, Any]:
-    """Hand every open matter concern whose current plan says act_now to dayflow, once per plan version,
-    and each of today's occurrences of every standing concern whose brief says act_now. The keyword
-    arguments after `now_utc` are test seams."""
+    """Hand every open concern whose current plan says act_now to dayflow, once per plan version. The
+    keyword arguments after `now_utc` are test seams."""
     from app.assistant.subconscious import concern_brief
+    from app.assistant.subconscious.brain_trace import step
     from app.assistant.subconscious.concern_store import load_register
     now = now_utc or datetime.now(timezone.utc)
     existing_items = existing_items or _existing_items
-    write_item = write_item or _write_item
+    write = write_item or _write_item
+
+    def write_item(meta: Dict[str, Any]) -> None:
+        write(meta)
+        step("handoff", "handed", subject=meta["concern_id"], item_id=meta["item_id"],
+             title=meta["concern_title"], summary=meta["summary"], why=meta["why_now"])
+
     register = load_register(connect=register_connect)
     handed, skipped = [], []
     for bucket in ("active", "addressing"):
@@ -174,13 +140,6 @@ def run_handoffs(*, register_connect=None, now_utc: Optional[datetime] = None,
             if brief.get("basis") != concern_brief.basis(concern, bucket):
                 continue                                   # a newer brief is on its way
             cid = concern["concern_id"]
-            if concern.get("kind") == "standing":
-                if (brief.get("readiness") or {}).get("decision") != "act_now":
-                    continue
-                for meta in _standing_handoffs(concern, bucket, existing_items(cid), now):
-                    write_item(meta)
-                    handed.append(cid)
-                continue
             plan = concern.get("plan") or {}
             if plan.get("decision") != "act_now" or plan.get("basis") != brief["basis"]:
                 continue                                   # no plan from this brief yet, or nothing to do
@@ -189,6 +148,8 @@ def run_handoffs(*, register_connect=None, now_utc: Optional[datetime] = None,
                 continue                                   # this plan was handed over already
             if any(i.get("state") == "artifact" and i.get("evaluator_pending") for i in items):
                 skipped.append((cid, "an earlier handoff is still in the planner's inbox"))
+                step("handoff", "held back", subject=cid, title=concern.get("title"),
+                     reason="an earlier handoff is still in the planner's inbox")
                 continue
             write_item(handoff_meta(concern, bucket, now))
             handed.append(cid)

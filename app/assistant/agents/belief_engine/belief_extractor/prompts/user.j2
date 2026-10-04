@@ -1,8 +1,16 @@
 ## The day
 {{ date }}
 
-## Lasting things noticed that day
-{{ insights | tojson }}
+## What was noticed that day, each with the entries it rests on
+{% for i in insights %}
+### Insight {{ i.n }} ({{ i.scope }})
+{{ i.insight }}
+Sources:
+{% for s in i.sources %}- {{ s | tojson }}
+{% endfor %}
+{% endfor %}
+{% if entity_card %}
 
-## Timeline items they rest on
-{{ timeline_items | tojson }}
+## People, places and things named above
+{{ entity_card }}
+{% endif %}

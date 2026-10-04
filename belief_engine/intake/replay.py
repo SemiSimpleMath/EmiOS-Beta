@@ -54,10 +54,9 @@ def main() -> int:
     t0 = time.monotonic()
 
     def run_extract(day):
-        ins = day_items.insights(day)
-        items, provenance = day_items.timeline_items(day)
+        ins, provenance = day_items.insights(day)
         try:
-            atoms = agents.extract_day(day, ins, items, provenance, scope_ctx)
+            atoms = agents.extract_day(day, ins, provenance, scope_ctx)
             record = {"day": day, "insights": len(ins), "atoms": atoms}
         except Exception as exc:
             record = {"day": day, "insights": len(ins), "error": f"{type(exc).__name__}: {exc}"}

@@ -1,9 +1,10 @@
 """The brain's day pass: today's plan, beliefs placed against the calendar (2026-10-01).
 
 Moved from the dayflow pipeline's routine stage into the brain (docs/design/brain_owns_the_day_2026-10-01.md,
-step 1): one place reasons about the day. dayflow_belief_selector chooses the beliefs that bear on today,
-reading the catalog in whole topics; dayflow_routine_writer says, for each that applies today, the time of
-day it applies (a belief once per time; "all day" for one tied to no time). Code builds the day from those
+step 1): one place reasons about the day. The beliefs it places are the ones the owner approved for the calendar
+(the morning review, /beliefs/review; `calendar = 'approved'` in the export); dayflow_routine_writer says, for
+each that applies today, the time of day it applies (a belief once per time; "all day" for one tied to no
+time). Code builds the day from those
 placements: a deterministic hour grid from today's calendar (one slot per local hour, each calendar item in
 the hour it starts; long umbrella blocks such as "Work Hours" are backdrops, not slots), each placed belief
 in the slot of its time, in its own words. Stored as data (subconscious/day_plan.py), rendered by every
@@ -11,19 +12,24 @@ reader. The model never writes the day; it places beliefs (owner, 2026-10-02: "w
 prose ... build the calendar"). Until then the writer wrote guidance per slot, and in about one call in ten
 filed a 9 PM item under 9 AM; placements of the same inputs did not, in 100 replays.
 
-Every placed belief has an owner: a concern (docs/design/day_items_have_owners_2026-10-02.md). A belief an
-open concern already holds (`belief_refs`) is owned by it, found by code; the rest go through the concern
-door together as standing candidates (a recurring part of the day), merged by habit or into an existing
-concern, or admitted new. Today's times are recorded on each owner (`occurrences`), from which the brain
-hands them to dayflow (subconscious/concern_handoff.py). Each plan line names its owner.
+Each approved belief is read with the beliefs nearest to it in meaning (`_related`: up to RELATED_MAX, at least
+RELATED_MIN cosine over the stored statement embeddings), found by code: the holiday rule beside trash night,
+the morning setpoint beside the night one. The writer reads them as context and places only approved beliefs;
+the plan line keeps them, and each placement is handed to dayflow from the calendar
+(subconscious/belief_occurrences.py). Until 2026-10-03 a selector chose each morning from the whole catalog
+(dayflow_belief_selector) and an agent named each selected belief's modifiers (dayflow_belief_modifiers); the
+selection differed day to day and placed context as items. Beliefs are not
+made into concerns (owner, 2026-10-03); until then each placed belief got an owner concern through the
+concern door, and the door merged beliefs about different acts.
 
 It runs on every brain wake (subconscious/brain_wake.py) and is free unless something changed: a plan
-is written when today has none, or when its inputs changed (calendar, daily context, belief catalog,
-weekly insights) and the last attempt is at least an hour old.
+is written when today has none, or when its inputs changed (calendar, daily context, the approved beliefs
+and their related ones) and the last attempt is at least an hour old.
 
 Inputs: resources/dayflow_pipeline_outputs/resource_daily_context_generator_output.json and
 resource_expected_calendar.json (the dayflow pipeline still produces them),
-resources/kg_derived/resource_user_beliefs.json, and the weekly insights (for the selector).
+resources/kg_derived/resource_user_beliefs.json (which beliefs are approved), and the intake store's statement
+embeddings (for `_related`).
 """
 from __future__ import annotations
 
@@ -40,10 +46,14 @@ logger = get_logger(__name__)
 
 _INPUTS_DIR = _get_resources_dir() / "dayflow_pipeline_outputs"
 _BELIEFS_PATH = _get_resources_dir() / "kg_derived" / "resource_user_beliefs.json"
-_WEEKLY_INSIGHTS_PATH = _get_resources_dir() / "weekly_insights_pipeline_outputs" / "resource_weekly_insights_latest.json"
 
 _MIN_REGEN_INTERVAL_SECONDS = 3600
 _BACKDROP_MIN_HOURS = 4  # calendar items longer than this are backdrops, not slots
+
+RELATED_MAX = 5      # nearest beliefs shown beside each approved one
+RELATED_MIN = 0.65   # least cosine similarity; measured 2026-10-03: trash night drew its holiday rule, pickup
+                     # day and timing beliefs and nothing else, the night AC its morning setpoint and the
+                     # bedtime temperature check, the monthly timesheets the other timesheet beliefs
 
 _last_attempt_utc: Optional[datetime] = None  # an attempt that failed is not retried within the hour
 
@@ -124,94 +134,47 @@ def _read_belief_entries() -> list[dict]:
 
 
 def _render_belief_block(entries: list) -> str:
-    """Preserve eligible beliefs and their qualifiers; relevance is an LLM decision."""
+    """Beliefs as the writer reads them, each with its related beliefs; whether one applies today is the writer's
+    decision."""
     from app.assistant.agent_runtime.services.prompt_builder import _jinja_env
     beliefs = sorted((e for e in entries if e.get("statement") and e.get("status", "active") == "active"),
                      key=lambda e: str(e.get("belief_key", "")))
     return _jinja_env.get_template("dayflow_routine_writer/prompts/beliefs.j2").render(beliefs=beliefs)
 
 
-def _by_topic(entries: list[dict]) -> list[list[dict]]:
-    """Entries grouped by topic (belief_engine/clusters.py), topics in label order; a belief not yet
-    placed is a topic of its own."""
-    groups: dict[str, list[dict]] = {}
-    for e in entries:
-        groups.setdefault(e.get("cluster_id") or f"~{e['belief_key']}", []).append(e)
-    return [groups[k] for k in sorted(groups, key=lambda k: (groups[k][0].get("cluster") or "~", k))]
+def _belief_vectors() -> Dict[str, List[float]]:
+    """belief_key -> the stored statement embedding, for every active belief."""
+    from belief_engine.intake.run import app_store
+    return {b["id"]: b["embedding"] for b in app_store().beliefs()}
 
 
-def _topic_pages(entries: list[dict], max_chars: int) -> list[list[dict]]:
-    """Whole topics per page: a belief is always judged with the beliefs that qualify it."""
-    from belief_engine.matching.context import encode
-    pages, page, size = [], [], 0
-    for group in _by_topic(entries):
-        length = sum(len(encode(e)) for e in group)
-        if page and size + length > max_chars:
-            pages.append(page)
-            page, size = [], 0
-        page.extend(group)
-        size += length
-    if page:
-        pages.append(page)
-    return pages
+def _related(pool: List[dict], entries: List[dict], vectors: Dict[str, List[float]]) -> Dict[str, List[Dict[str, str]]]:
+    """For each approved belief, the active beliefs nearest to it in meaning (belief_key -> [{belief_key,
+    statement}], nearest first): up to RELATED_MAX, each at least RELATED_MIN cosine."""
+    import math
+    statements = {e["belief_key"]: e["statement"] for e in entries}
 
+    def cos(a, b):
+        return sum(x * y for x, y in zip(a, b)) / math.sqrt(sum(x * x for x in a) * sum(y * y for y in b))
 
-def _select_beliefs(entries: list[dict], daily_context: str, scope, *,
-                    weekly_insights: str = "") -> tuple[list[dict], str, list[dict]]:
-    """The agent selects by belief_key, the one id each record shows; Python restores exact original
-    records. The catalog goes in pages of whole topics (owner, 2026-09-30: relevant beliefs cluster).
-    Returns the beliefs that change what the assistant does today, the reasoning, and the beliefs the
-    selector named as conditions on them (their day, limit, exception, reminder wish), for the writer."""
-    from app.assistant.ServiceLocator.service_locator import DI
-    from app.assistant.utils.pydantic_classes import Message
-    from app.assistant.agents.dayflow_belief_selector.agent_form import AgentForm
-    by_key = {e["belief_key"]: e for e in entries}
-    if len(by_key) != len(entries):
-        raise ValueError("Duplicate belief keys in export")
-    if not entries:
-        return [], "Empty active belief catalog", []
-    from belief_engine.matching.selection import select_records
-
-    def invoke(records, retry):
-        agent = DI.agent_factory.create_agent("dayflow_belief_selector")
-        if agent is None:
-            raise RuntimeError("dayflow_belief_selector agent unavailable")
-        # One id per record: short_id repeats the belief_key and cluster_id is a second id; the topic
-        # name (`cluster`) carries the grouping.
-        shown = [{k: v for k, v in r.items() if k not in ("short_id", "cluster_id")} for r in records]
-        result = agent.action_handler(Message(scope_context=scope, agent_input={
-            "daily_context": daily_context, "belief_catalog": shown,
-            "weekly_insights": weekly_insights, "selection_retry": retry}))
-        return getattr(result, "data", None)
-
-    selected, reasons, qualifiers = [], [], []
-    for page in _topic_pages(entries, max_chars=48000):
-        chosen, reason, extra = select_records(page, invoke, AgentForm, extra=("qualifier_keys",))
-        selected.extend(chosen)
-        qualifiers.extend(extra["qualifier_keys"])
-        reasons.append(reason)
-    chosen_keys = {e["belief_key"] for e in selected}
-    qualifiers = list({e["belief_key"]: e for e in qualifiers if e["belief_key"] not in chosen_keys}.values())
-    return selected, "\n".join(reasons), qualifiers
-
-
-def _format_weekly_insights() -> str:
-    data = _read_json(_WEEKLY_INSIGHTS_PATH)
-    if data is None:
-        return ""
-    from app.assistant.agent_runtime.services.prompt_builder import _jinja_env
-    return _jinja_env.get_template("dayflow_routine_writer/prompts/weekly.j2").render(weekly=data)
+    out = {}
+    for e in pool:
+        key = e["belief_key"]
+        v = vectors[key]
+        near = sorted(((cos(v, vectors[k]), k) for k in statements if k != key and k in vectors), reverse=True)
+        out[key] = [{"belief_key": k, "statement": statements[k]} for sim, k in near[:RELATED_MAX] if sim >= RELATED_MIN]
+    return out
 
 
 def _routine_inputs_fingerprint(boundary_date_local: str, expected_schedule: list, beliefs_block: str,
-                                *, daily_context: Optional[dict] = None, weekly_insights: str = "",
-                                belief_catalog: Optional[list] = None) -> str:
-    """The exact decision inputs, excluding wall-clock/scaffold rendering and generated timestamps."""
+                                *, daily_context: Optional[dict] = None) -> str:
+    """The exact decision inputs, excluding wall-clock/scaffold rendering and generated timestamps. The beliefs
+    block is the approved beliefs with their related ones, as the writer reads them."""
     context = daily_context or {}
-    payload = {"projection_version": 4, "day": boundary_date_local,
-               "schedule": expected_schedule, "beliefs": beliefs_block, "belief_catalog": belief_catalog,
+    payload = {"projection_version": 5, "day": boundary_date_local,
+               "schedule": expected_schedule, "beliefs": beliefs_block,
                "day_theme": context.get("day_theme"), "current_status": context.get("current_status"),
-               "milestones": context.get("milestones"), "weekly_insights": weekly_insights}
+               "milestones": context.get("milestones")}
     return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
@@ -238,26 +201,31 @@ def _clock_hour_minute(text: str) -> Optional[Tuple[int, int]]:
     return t.hour, t.minute
 
 
-def _problems(data: Dict[str, Any], belief_keys: set) -> List[str]:
-    """What is wrong with the writer's placements: an unknown belief key, or a time that is neither a clock
-    time nor 'all day'."""
+def _problems(data: Dict[str, Any], belief_keys: set, conditions: set = frozenset()) -> List[str]:
+    """What is wrong with the writer's placements: a key that is not an approved belief (a related belief is read
+    beside the one it relates to and is never an entry of its own: on 2026-10-03 the condition "keeps the
+    bedroom fan running continuously" was placed for all day and handed over as work), or a time that is
+    neither a clock time nor 'all day'."""
     out = []
     for p in data.get("placements") or []:
         key, when = str(p.get("belief_key") or ""), str(p.get("time") or "")
         if key not in belief_keys:
             bare = key.removeprefix("belief:")
             out.append(f"{key!r}: write the key alone, as {bare!r}" if bare in belief_keys
-                       else f"{key!r} is not one of the beliefs given")
+                       else f"{key!r} is read beside the approved beliefs, not an entry: leave it out"
+                       if key in conditions else f"{key!r} is not one of the beliefs given")
         if when.strip().lower() != "all day" and _clock_hour_minute(when) is None:
             out.append(f"{key}: time {when!r} is not a clock time like '9:00 PM', or 'all day'")
     return out
 
 
-def _place(placements: List[Dict[str, Any]], slots: List[dict],
-           statements: Dict[str, str]) -> Tuple[List[dict], List[dict]]:
-    """Each placement in the slot of its hour, in time order, as data (time, belief key, statement); 'all day'
-    ones are the day's flags. A time whose hour is not in the grid (before its first hour) has passed and is
-    not stored. When the grid spans midnight an hour label repeats; the later slot is today's."""
+def _place(placements: List[Dict[str, Any]], slots: List[dict], statements: Dict[str, str],
+           related: Optional[Dict[str, List[Dict[str, str]]]] = None) -> Tuple[List[dict], List[dict]]:
+    """Each placement in the slot of its hour, in time order, as data (time, belief key, statement, and the
+    belief's related beliefs); 'all day' ones are the day's flags. A time whose hour is not in the grid (before its
+    first hour) has passed and is not stored. When the grid spans midnight an hour label repeats; the later
+    slot is today's."""
+    related = related or {}
     slot_of_hour = {datetime.fromisoformat(s["hour_local_iso"]).hour: s["slot"] for s in slots}
     timed: Dict[str, List[Tuple[int, dict]]] = {s["slot"]: [] for s in slots}
     flags: List[dict] = []
@@ -267,56 +235,24 @@ def _place(placements: List[Dict[str, Any]], slots: List[dict],
         if (key, when.lower()) in seen:
             continue
         seen.add((key, when.lower()))
+        line = {"time": "all day" if when.lower() == "all day" else when, "belief_key": key,
+                "statement": statements[key], "related": related.get(key, [])}
         if when.lower() == "all day":
-            flags.append({"time": "all day", "belief_key": key, "statement": statements[key]})
+            flags.append(line)
             continue
         hour, minute = _clock_hour_minute(when)
         if hour in slot_of_hour:
-            timed[slot_of_hour[hour]].append((minute, {"time": when, "belief_key": key, "statement": statements[key]}))
+            timed[slot_of_hour[hour]].append((minute, line))
     return ([{"slot": s["slot"], "hour_local_iso": s["hour_local_iso"], "items": s["items"],
               "lines": [line for _, line in sorted(timed[s["slot"]], key=lambda t: t[0])]} for s in slots], flags)
 
 
-def _candidate(key: str, statement: str, now_iso: str) -> Dict[str, Any]:
-    """A standing concern candidate for one placed belief nothing owns yet."""
-    return {"label": key, "title": statement, "subject": "household", "kind": "standing",
-            "severity": "low", "horizon": "long_horizon",
-            "done_when": f"Each day it applies, handled at its time: {statement}",
-            "notes": "", "domain_tags": [], "addressable_by": [], "first_observed": now_iso,
-            "evidence": [{"kind": "belief", "ref": f"belief:{key}", "snippet": statement}],
-            "belief_refs": [key]}
-
-
-def _assign_owners(day: str, plan_slots: List[dict], flags: List[dict], statements: Dict[str, str],
-                   now_utc: datetime, *, register_connect=None, judge=None) -> None:
-    """Every placed belief's owner, set on its plan line as `concern_id` (None when a closed concern
-    settled it). Beliefs no concern holds go through the concern door in one call; today's times are
-    recorded on the owners."""
-    from app.assistant.subconscious import concern_door, persist
-    from app.assistant.subconscious.concern_store import load_register
-    lines = [line for s in plan_slots for line in s["lines"]] + flags
-    occurrences: Dict[str, List[Dict[str, Any]]] = {}
-    for line in lines:
-        occurrences.setdefault(line["belief_key"], []).append({"time": line["time"]})
-    register = load_register(connect=register_connect)
-    held = {k for b in ("active", "addressing", "resolved", "dormant") for c in register.get(b) or []
-            for k in c.get("belief_refs") or []}
-    now_iso = now_utc.isoformat()
-    candidates = [_candidate(k, statements[k], now_iso) for k in occurrences if k not in held]
-    plan = concern_door.plan_admission(candidates, register, judge=judge) if candidates else []
-    owners = persist.record_day_beliefs(plan, occurrences, day, connect=register_connect)
-    for line in lines:
-        line["concern_id"] = owners.get(line["belief_key"])
-
-
-def run_day_pass(now_utc: Optional[datetime] = None, *, connect=None, register_connect=None,
-                 judge=None) -> Dict[str, Any]:
+def run_day_pass(now_utc: Optional[datetime] = None, *, connect=None) -> Dict[str, Any]:
     """Write today's plan when it is missing or its inputs changed (at most hourly). `connect` is the
-    plan store, `register_connect` the concerns register, `judge` the concern door: test seams."""
+    plan store: a test seam."""
     global _last_attempt_utc
     from app.assistant.pipelines.context import boundary_date_local_str
     from app.assistant.pipelines.dayflow.utils.expected_calendar_utils import build_hour_grid, end_of_local_day_utc
-    from app.assistant.scope.loader import load_scope_for_source
     from app.assistant.subconscious import day_plan
 
     now_utc = now_utc or datetime.now(timezone.utc)
@@ -325,10 +261,11 @@ def run_day_pass(now_utc: Optional[datetime] = None, *, connect=None, register_c
 
     ctx_data = _read_daily_context()
     entries = _read_belief_entries()
-    beliefs_block = _render_belief_block(entries)
-    weekly = _format_weekly_insights()
+    pool = [e for e in entries if e.get("calendar") == "approved"]
+    related = _related(pool, entries, _belief_vectors())
+    beliefs_block = _render_belief_block([{**e, "related": related[e["belief_key"]]} for e in pool])
     fingerprint = _routine_inputs_fingerprint(day, ctx_data.get("expected_schedule") or [], beliefs_block,
-                                              daily_context=ctx_data, weekly_insights=weekly, belief_catalog=entries)
+                                              daily_context=ctx_data)
     plan = day_plan.load_plan(day, connect=connect)
     if plan is not None:
         if plan["inputs_fingerprint"] == fingerprint:
@@ -341,30 +278,32 @@ def run_day_pass(now_utc: Optional[datetime] = None, *, connect=None, register_c
     specific, backdrops = _day_items(ctx_data, now_utc)
     slots = build_hour_grid(specific, now_utc, end_of_local_day_utc(now_utc))
     daily_context_block = _format_daily_context(ctx_data, specific, backdrops)
-    scope = load_scope_for_source(kind="pipeline", source_id="dayflow", actor_id="dayflow_belief_selector")
-    selected, selection_reason, qualifiers = _select_beliefs(entries, daily_context_block, scope,
-                                                             weekly_insights=weekly)
-    given = {e["belief_key"]: e["statement"] for e in [*selected, *qualifiers]}
+    given = {e["belief_key"]: e["statement"] for e in pool}
+    conditions = {r["belief_key"] for found in related.values() for r in found} - set(given)
     agent_input = {
         "date_time": now_local.strftime("%Y-%m-%d %H:%M"), "day_of_week": now_local.strftime("%A"),
-        "boundary_date_local": day, "daily_context": daily_context_block,
-        "beliefs_block": _render_belief_block(selected), "related_beliefs_block": _render_belief_block(qualifiers)}
+        "boundary_date_local": day, "daily_context": daily_context_block, "beliefs_block": beliefs_block}
     data = _write(agent_input)
-    problems = _problems(data, set(given))
+    problems = _problems(data, set(given), conditions)
+    from app.assistant.subconscious.brain_trace import step
     if problems:
         logger.warning("[day_pass] invalid placements, one correction: %s", problems)
+        step("day_pass", "answer refused, one correction", problems=problems)
         data = _write({**agent_input, "correction": "; ".join(problems)})
-        problems = _problems(data, set(given))
+        problems = _problems(data, set(given), conditions)
         if problems:
             raise ValueError(f"routine writer placements still invalid after one correction: {problems}")
-    plan_slots, flags = _place(data.get("placements") or [], slots, given)
-    _assign_owners(day, plan_slots, flags, given, now_utc, register_connect=register_connect, judge=judge)
+    plan_slots, flags = _place(data.get("placements") or [], slots, given, related)
+    step("day_pass", "placed", day=day, approved=sorted(given),
+         related={k: [r["belief_key"] for r in v] for k, v in related.items()},
+         placements=data.get("placements") or [])
     day_plan.save_plan({
         "day": day, "generated_at_utc": now_utc.isoformat(), "inputs_fingerprint": fingerprint,
-        "selected_belief_keys": [e["belief_key"] for e in selected],
-        "qualifier_belief_keys": [e["belief_key"] for e in qualifiers],
-        "selection_reason": selection_reason, "change_summary": "",
+        "selected_belief_keys": sorted(given),                # the beliefs approved for the calendar
+        "qualifier_belief_keys": sorted(conditions),         # the related beliefs read beside them
+        "selection_reason": "the beliefs the owner approved for the calendar", "change_summary": "",
         "backdrops": backdrops, "flags": flags, "slots": plan_slots}, connect=connect)
-    logger.info("[day_pass] wrote the plan for %s: %d placements of %d beliefs (+%d qualifiers)",
-                day, sum(len(s["lines"]) for s in plan_slots) + len(flags), len(selected), len(qualifiers))
+    step("day_pass", "written", day=day)
+    logger.info("[day_pass] wrote the plan for %s: %d placements of %d approved beliefs (%d related)",
+                day, sum(len(s["lines"]) for s in plan_slots) + len(flags), len(given), len(conditions))
     return {"day_pass": "written", "day": day, "slots": len(plan_slots)}

@@ -4,6 +4,9 @@ Status: shape agreed 2026-10-02. Built 2026-10-02: points 1–5 (placements; own
 concerns; handoff of occurrences; the steward reads the routine as context) and the concern planner for matter concerns
 (`subconscious/concern_planner.py`, `concern_planner_manager`; it replaces the brief's readiness for them).
 Not built: the check that a node's wake matches its occurrence's time.
+Superseded 2026-10-03 for points 2–4 (owners through the door, standing concerns, occurrence handoffs by
+concern): beliefs are not concerns (`what_was_done_reaches_the_brain_2026-10-03.md`). Placements and the
+concern planner stay.
 Step 2 (with 3) of `brain_owns_the_day_2026-10-01.md`.
 
 ## The problem

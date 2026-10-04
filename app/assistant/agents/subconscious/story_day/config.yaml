@@ -1,0 +1,24 @@
+name: subconscious::story_day
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  model_tier: "mini"
+
+# Tells the owner, in plain words, what reached the brain on one day and what came of it: a headline
+# and a short overview, from the day's matter stories and counts. Rewritten when the day's record
+# changes, for the owner's /mind page; context fully pre-injected by subconscious/brain_stories.py.
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+accept_auto_skills: false
+
+user_context_items:
+  - agent_input
+
+required_context_items:
+  - agent_input
+
+system_context_items:
+  - resource_assistant_data
+  - resource_user_data

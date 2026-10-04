@@ -23,8 +23,9 @@ For each matter `subconscious::brain` gets:
   concerns, or came from an email in one of its Gmail threads) and similar past work by meaning;
 - what is already in motion: active work, live scheduled reminders, and the calendar for the next
   CALENDAR_DAYS, so the brain can name everything that depends on a fact that changed;
-- the people, places and things the events name, from the knowledge graph, and what joins them
-  (subconscious/kg_links.py).
+- the people, places and things the events name, from the knowledge graph, each with its ties to the
+  household's people, and what joins them; and the knowledge graph's facts closest in meaning to the
+  events, which say whose school or club an event is about when it does not (subconscious/kg_links.py).
 
 It answers with notes and resolutions on concerns, new concerns (with done-when, and the owner's
 words verbatim when the owner asked for it), and a decision on every event. Code validates the
@@ -32,6 +33,11 @@ answer (one correction round), admits new concerns through the concern door, app
 under the register lock, marks the events consumed and records the matter in `brain_matters`.
 A matter that still fails is recorded failed and not retried automatically: its events stay in
 the inbox, visible, instead of being dropped or re-sent every five minutes.
+
+What the assistant did reaches the brain as `work` events, routed by the gate like chat and email
+(docs/design/what_was_done_reaches_the_brain_2026-10-03.md). When the brain cites a work report on a
+concern, or raises a new concern from one, the work is attached to that concern if it was not already
+(`persist.attach_seen_work`), so the work's later judgments and its ending reach the concern by code.
 """
 from __future__ import annotations
 
@@ -225,6 +231,7 @@ def build_payload(events: List[Dict[str, Any]], register: Dict[str, Any],
         "calendar": calendar if calendar is not None else _calendar(now),
         "entities": entities,
         "shared": kg_links.shared([x["node_id"] for x in entities]),
+        "facts": kg_links.facts_by_meaning([e["text"] for e in events]),
     }
     return payload, {e["mark"]: e for e in marked}, labels
 
@@ -235,8 +242,7 @@ def _squash(text: str) -> str:
     return " ".join(str(text or "").split())
 
 
-def _problems(data: Any, events: Dict[str, Dict[str, Any]], concern_labels: List[str],
-              standing_labels: List[str] = ()) -> List[str]:
+def _problems(data: Any, events: Dict[str, Dict[str, Any]], concern_labels: List[str]) -> List[str]:
     if not isinstance(data, dict) or not isinstance(data.get("event_decisions"), list):
         return ["no event_decisions list"]
     out: List[str] = []
@@ -263,8 +269,6 @@ def _problems(data: Any, events: Dict[str, Dict[str, Any]], concern_labels: List
         updated.add(label)
         if u.get("action") not in ("note", "resolve"):
             out.append(f"{label}: action {u.get('action')!r} is not note or resolve")
-        if u.get("action") == "resolve" and label in standing_labels:
-            out.append(f"{label} is a standing concern, a recurring part of the day: it is never resolved; note it")
         refs = u.get("events") or []
         if not refs or any(r not in events for r in refs):
             out.append(f"{label}: events must be labels of events given, got {refs}")
@@ -316,8 +320,46 @@ def _evidence(e: Dict[str, Any]) -> Dict[str, Any]:
 
 # ── one matter ──────────────────────────────────────────────────────────────
 
+def _work_record(work_id: str) -> Dict[str, Any]:
+    """A work object as a concern records it: title, objective, status now, and its ending when it ended."""
+    from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+    wo = get_dayflow_work_store().load(work_id)
+    constraints = wo.constraints or {}
+    record = {"title": wo.title, "objective": constraints.get("objective") or wo.title,
+              "success_criteria": constraints.get("success_criteria") or "",
+              "status": wo.status if wo.status in ("done", "abandoned") else "active"}
+    if wo.status in ("done", "abandoned"):
+        goal = wo.nodes.get(wo.goal_node_id)
+        record["ended"] = {"outcome": wo.status, "at": str(wo.updated_at),
+                           "reason": ((goal.payload.get("terminal") or {}).get("reason") if goal else "") or ""}
+    return record
+
+
+def _attach_cited_work(data: Dict[str, Any], by_label: Dict[str, Dict], labels: Dict[str, str],
+                       admitted: Dict[str, Optional[str]], work_record, register_connect) -> List[tuple]:
+    """Attach the work behind every work report the brain cited on a concern (an update, or a new concern
+    raised from it) to that concern, unless the concern holds it already. Returns (concern_id, work_id)."""
+    from app.assistant.subconscious import persist
+    cited = [(labels[u["concern"]], r) for u in data.get("concern_updates") or [] for r in u["events"]]
+    cited += [(admitted.get(n["label"]), r) for n in data.get("new_concerns") or [] for r in n["events"]]
+    attached = []
+    for concern_id, label in cited:
+        event = by_label[label]
+        if not concern_id or event["source"] != "work":
+            continue
+        work_id = event["source_ref"].split(":")[1]
+        if concern_id in persist.concerns_holding_work(work_id, connect=register_connect):
+            continue
+        result = persist.attach_seen_work(concern_id, work_id=work_id, work=work_record(work_id),
+                                          receipt_id=f"brain:{event['id']}:{concern_id}", connect=register_connect)
+        if result == "attached":
+            attached.append((concern_id, work_id))
+    return attached
+
+
 def process_matter(events: List[Dict[str, Any]], *, call: Optional[Callable[[Dict[str, Any]], Any]] = None,
-                   judge=None, register_connect=None, calendar: Optional[str] = None) -> Dict[str, Any]:
+                   judge=None, register_connect=None, calendar: Optional[str] = None,
+                   work_record=None) -> Dict[str, Any]:
     """Decide and apply one matter. Returns {decisions, admitted, concern_ids}; raises when the
     brain's answer is still invalid after one correction or applying it fails."""
     from app.assistant.subconscious import concern_door, persist
@@ -325,16 +367,15 @@ def process_matter(events: List[Dict[str, Any]], *, call: Optional[Callable[[Dic
     now = datetime.now(timezone.utc)
     register = load_register(connect=register_connect)
     payload, by_label, labels = build_payload(events, register, now, calendar)
-    standing = {c["concern_id"] for b in ("active", "addressing") for c in register.get(b) or []
-                if c.get("kind") == "standing"}
-    standing_labels = [label for label, cid in labels.items() if cid in standing]
     call = call or _agent_call
     data = call(payload)
-    problems = _problems(data, by_label, list(labels), standing_labels)
+    problems = _problems(data, by_label, list(labels))
     if problems:
+        from app.assistant.subconscious.brain_trace import step
         logger.warning("[brain] invalid answer, one correction: %s", problems)
+        step("brain", "answer refused, one correction", subject=[e["id"] for e in events], problems=problems)
         data = call({**payload, "correction": "; ".join(problems)})
-        problems = _problems(data, by_label, list(labels), standing_labels)
+        problems = _problems(data, by_label, list(labels))
         if problems:
             raise ValueError(f"brain answer still invalid after one correction: {problems}")
 
@@ -356,13 +397,21 @@ def process_matter(events: List[Dict[str, Any]], *, call: Optional[Callable[[Dic
         candidates.append(candidate)
     plan = concern_door.plan_admission(candidates, load_register(connect=register_connect), judge=judge)
     admitted = persist.apply_brain_matter(updates, plan, connect=register_connect)
+    attached = _attach_cited_work(data, by_label, labels, admitted or {}, work_record or _work_record,
+                                  register_connect)
     decisions = {
         "events": {by_label[d["event"]]["source_ref"]: {"decision": d["decision"], "reason": d["reason"]}
                    for d in data["event_decisions"]},
-        "concern_updates": [{"concern_id": u["concern_id"], "action": u["action"], "note": u["note"]} for u in updates],
-        "new_concerns": [{"label": c["label"], "title": c["title"], "owner_request": c.get("owner_request")}
-                         for c in candidates],
+        "concern_updates": [{"concern_id": u["concern_id"], "action": u["action"], "note": u["note"],
+                             "events": [by_label[r]["source_ref"] for r in d["events"]]}
+                            for u, d in zip(updates, data.get("concern_updates") or [])],
+        # door: what the concern door made of it (create | merge_open | suppress_closed | merge_candidate)
+        "new_concerns": [{"label": c["label"], "title": c["title"], "owner_request": c.get("owner_request"),
+                          "door": s["action"], "door_reason": s["reason"]}
+                         for c, s in zip(candidates, plan)],
     }
+    if attached:
+        decisions["attached_work"] = [{"concern_id": c, "work_id": w} for c, w in attached]
     return {"decisions": decisions, "admitted": admitted,
             "concern_ids": sorted({cid for e in events for cid in e["concern_ids"]})}
 
@@ -379,7 +428,7 @@ def _record(connect, events, status, *, concern_ids=(), decisions=None, admitted
             c.executemany("UPDATE brain_events SET consumed_at=? WHERE id=?", [(now, e["id"]) for e in events])
 
 
-def run_brain_step(*, connect=None, register_connect=None, call=None, judge=None) -> Dict[str, Any]:
+def run_brain_step(*, connect=None, register_connect=None, call=None, judge=None, work_record=None) -> Dict[str, Any]:
     """Every pending matter, one at a time. Free when nothing is pending. The keyword arguments are
     test seams (inbox store, register store, the brain agent, the concern_door judge)."""
     connect = connect or _connect
@@ -390,17 +439,21 @@ def run_brain_step(*, connect=None, register_connect=None, call=None, judge=None
     matters = group_matters(events)
     calendar = _calendar(datetime.now(timezone.utc))
     for matter in matters:
-        from app.assistant.subconscious.brain_trace import trace
+        from app.assistant.subconscious.brain_trace import step, trace
         try:
             with trace(stage="brain", event_ids=[e["id"] for e in matter]):
                 result = process_matter(matter, call=call, judge=judge, register_connect=register_connect,
-                                        calendar=calendar)
+                                        calendar=calendar, work_record=work_record)
         except Exception as exc:
             logger.error("[brain] matter of %d event(s) failed; its events stay in the inbox, not retried: %s",
                          len(matter), exc, exc_info=True)
+            step("brain", "matter failed: its events stay in the inbox", subject=[e["id"] for e in matter],
+                 error=f"{type(exc).__name__}: {exc}")
             _record(connect, matter, "failed", error=f"{type(exc).__name__}: {exc}")
             failed += 1
             continue
+        step("brain", "matter applied", subject=[e["id"] for e in matter], decisions=result["decisions"],
+             admitted=result["admitted"])
         _record(connect, matter, "applied", concern_ids=result["concern_ids"], decisions=result["decisions"],
                 admitted=result["admitted"])
         applied += 1

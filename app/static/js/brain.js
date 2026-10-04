@@ -181,7 +181,7 @@ async function loadMatters() {
   });
 }
 
-// ── Concerns: brief, readiness, handoffs, work ────────────────────────────────
+// ── Concerns: brief, plan, handoffs, work ────────────────────────────────
 async function loadConcerns() {
   const list = $("#c-list");
   list.innerHTML = "";
@@ -190,9 +190,8 @@ async function loadConcerns() {
   if (!data.concerns.length) { list.appendChild(el("div", "br-empty", "No open concerns.")); return; }
   data.concerns.forEach((c) => {
     const b = c.brief || {};
-    // A standing concern's rule is its brief's readiness; a matter concern's decision is its plan.
-    const ready = c.kind === "standing" ? (b.readiness || {}) : (c.plan || {});
-    const badges = [[c.status, c.status], c.kind === "standing" && ["standing", "standing"],
+    const ready = c.plan || {};
+    const badges = [[c.status, c.status],
       ready.decision && [ready.decision, ready.decision + (ready.hold_until ? " until " + ready.hold_until : "")],
       c.brief && !c.brief_current && ["pending", "brief out of date"]];
     list.appendChild(card(c.title, badges, (body) => {
@@ -204,16 +203,13 @@ async function loadConcerns() {
         ["known", (b.known || []).map((f) => `${f.fact} (${f.source})`)], ["tried", b.tried],
         ["the owner's wishes", b.owner_wishes], ["depends on it", b.depends_on_it], ["open questions", b.open_questions],
         ["recommendation", b.recommendation],
-        ["readiness", c.kind === "standing" && ready.decision ? `${ready.decision}${ready.task ? ": " + ready.task : ""} (${ready.why})` : null],
         ["written", when(b.written_at)]]));
       else body.appendChild(el("div", "br-note", "No brief yet."));
-      if (c.kind !== "standing") {
-        body.appendChild(el("div", "br-h", "Plan"));
-        if (c.plan_error) body.appendChild(el("div", "br-err", "plan failed: " + c.plan_error.error));
-        if (c.plan) body.appendChild(kv([["decision", c.plan.decision + (c.plan.hold_until ? " until " + c.plan.hold_until : "")],
-          ["things that should be done", c.plan.todo], ["why", c.plan.why], ["written", when(c.plan.written_at)]]));
-        else body.appendChild(el("div", "br-note", "No plan yet."));
-      }
+      body.appendChild(el("div", "br-h", "Plan"));
+      if (c.plan_error) body.appendChild(el("div", "br-err", "plan failed: " + c.plan_error.error));
+      if (c.plan) body.appendChild(kv([["decision", c.plan.decision + (c.plan.hold_until ? " until " + c.plan.hold_until : "")],
+        ["things that should be done", c.plan.todo], ["why", c.plan.why], ["written", when(c.plan.written_at)]]));
+      else body.appendChild(el("div", "br-note", "No plan yet."));
       body.appendChild(el("div", "br-h", "Brief writer's calls"));
       if (!c.brief_calls.length) body.appendChild(el("div", "br-note", "None recorded."));
       c.brief_calls.forEach((k) => body.appendChild(callRow(k)));

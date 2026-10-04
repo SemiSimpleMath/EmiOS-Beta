@@ -285,10 +285,9 @@ There are two routes, and they work differently.
 
 **The daily compile.** This is the main one. Once a day, and again whenever the inputs change
 meaningfully, a step builds a document describing today: a series of time slots, each with a few
-plain instructions, each citing the beliefs behind it. An agent called **dayflow_belief_selector**
-picks which beliefs are relevant to today from the full set — again returning identifiers, with the
-original records restored by code — and a second agent turns the selected beliefs plus the day's
-context into the time-slotted document. The orchestrator that runs your day reads the slot it is
+plain instructions, each citing the beliefs behind it. The beliefs it works from are the ones you
+approved for the calendar in the morning review; each is shown with the beliefs closest to it in
+meaning, found by code, and an agent places the approved beliefs that apply today at their times. The orchestrator that runs your day reads the slot it is
 currently in.
 
 This is worth understanding as a *compile* rather than a search. Beliefs are resolved into concrete
@@ -322,7 +321,8 @@ updates the belief that asked for it.
 Fifteen language-model agents exist in this subsystem. Ten are live and each appears above:
 `belief_updater`, `evidence_match`, `belief_reevaluator`, `match_discover`, `match_review`,
 `evidence_page`, `merge_check`, `belief_tagger` (which assigns the retrieval tags from a fixed
-vocabulary), `work_outcome`, and `dayflow_belief_selector`.
+vocabulary), `work_outcome`, and `calendar_candidate` (which proposes beliefs for the calendar; it
+replaced `dayflow_belief_selector` on 2026-10-03).
 
 The pattern they all follow is the same and is the most important thing to notice about this
 subsystem: **an agent decides, and ordinary code writes.** Where an agent must refer to something

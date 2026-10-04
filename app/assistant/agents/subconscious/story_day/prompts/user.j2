@@ -1,0 +1,28 @@
+Day: {{ agent_input.day }}{% if agent_input.today %} (today, so far){% endif %}
+
+## What came in
+{% for source, n in agent_input.counts.items() %}- {{ source }}: {{ n }}
+{% endfor %}
+## The matters read
+{% for m in agent_input.matters %}
+{{ m.when }} · {{ m.headline }}
+{% for line in m.lines %}  - {{ line }}
+{% endfor %}{% else %}
+None.
+{% endfor %}
+{% if agent_input.opened %}
+## Concerns opened
+{% for t in agent_input.opened %}- {{ t }}
+{% endfor %}{% endif %}
+{% if agent_input.settled %}
+## Concerns settled
+{% for t in agent_input.settled %}- {{ t }}
+{% endfor %}{% endif %}
+
+Handed on to be done: {{ agent_input.handed_on }}
+{% if agent_input.correction %}
+## Correct your previous answer
+
+It did not satisfy the contract: {{ agent_input.correction }}
+{% endif %}
+Write the headline and the overview of this day.

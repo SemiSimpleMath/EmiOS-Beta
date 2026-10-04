@@ -62,11 +62,10 @@ def main() -> int:
     for day, (lesson, present, absent) in CASES.items():
         if args.days and day not in args.days:
             continue
-        ins = day_items.insights(day)
-        items, provenance = day_items.timeline_items(day)
+        ins, provenance = day_items.insights(day)
         for trial in range(1, args.trials + 1):
             try:
-                atoms = agents.extract_day(day, ins, items, provenance, scope_ctx)
+                atoms = agents.extract_day(day, ins, provenance, scope_ctx)
             except Exception as exc:
                 print(f"FAIL {day} t{trial}: extraction raised {type(exc).__name__}: {exc}")
                 failures += 1

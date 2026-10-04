@@ -1,16 +1,22 @@
-"""Concern feedback — the work attached to a concern reports to it, and to the brain.
+"""Work feedback — whatever is done reports to the concerns that hold it, and to the brain.
 
-WorkStore commits a receipt in the same transaction as each change a concern must hear about
-(work_objects/concern_outbox.py): the work was attached (it cites the concern), the finalizer judged
-one of its tasks, or the work ended, including automatic rollup. Dayflow delivers after creation,
-each judgment and each closure; evaluator prep retries receipts left by a crash or register failure.
+WorkStore commits a receipt in the same transaction as each change (work_objects/concern_outbox.py):
+the work was attached (it cites a concern), the finalizer judged one of its tasks, or the work ended,
+including automatic rollup. Every work object's judgments and ending are receipts, whether it cites a
+concern or not. Dayflow delivers after creation, each judgment and each closure; evaluator prep retries
+receipts left by a crash or register failure.
 
-Delivery writes the work's record on the concern (persist.attach_work / record_judgment /
-apply_work_outcome) and, for a judgment or an ending, a brain inbox event routed to the concerns by
-id (owner, 2026-09-30: when work objects are worked on and the finalizer runs, the concerns are
-updated). The brain reads it with the concern's record and decides whether the concern is settled.
-Each receipt is idempotent in the register and in the inbox. Delivery failures never roll back
-work; a receipt remains until every linked concern and the inbox have it.
+Delivery writes the work's record on every concern that holds it: the ones it cites, and the ones the
+brain attached it to (persist.attach_work / record_judgment / apply_work_outcome). For a judgment or an
+ending it also writes a brain inbox event that the gate routes like any chat message or email
+(owner, 2026-10-03: "there is in a brain a daemon who is receiving from all sources information about
+what was done and it attaches it to appropriate concerns";
+docs/design/what_was_done_reaches_the_brain_2026-10-03.md): the concerns the work was made for are named
+in it, as a hint, and the gate names every open concern its outcome bears on. Until 2026-10-03 only work
+citing a concern reported, already routed to the cited concerns, so the outcome of work made for one
+concern never reached another it settled. Each receipt is idempotent in the register and in the inbox.
+Delivery failures never roll back work; a receipt remains until every holding concern and the inbox
+have it.
 """
 from __future__ import annotations
 
@@ -66,19 +72,30 @@ def _reply_line(reply: dict) -> str:
     return "; ".join(parts) or "The owner replied (no words recorded)."
 
 
-def _event_text(receipt) -> str:
+def _made_for(work: dict, concern_titles: list) -> str:
+    """What the work was made for, as the gate reads it: its objective and the concerns that hold it."""
+    line = f"Objective: {work.get('objective') or work.get('title')}"
+    if concern_titles:
+        line += "\nMade for the concerns: " + "; ".join(f'"{t}"' for t in concern_titles)
+    return line
+
+
+def _event_text(receipt, concern_titles=()) -> str:
     """The brain event for a judgment or an ending: what happened, in the finalizer's and the
-    owner's own words."""
+    owner's own words, with what the work was made for."""
     payload, kind = receipt['payload'], receipt['outcome']
+    work = payload.get('work') or {'title': (payload.get('context') or {}).get('title')}
     if kind == 'judged':
         task, fin = payload['task'], payload['task']['finalizer']
-        lines = [f'Work "{payload["work"]["title"]}" ({receipt["work_id"]}): the finalizer judged the task '
+        lines = [f'Work "{work["title"]}" ({receipt["work_id"]}): the finalizer judged the task '
                  f'"{task["title"]}": {fin.get("verdict")}, next step {fin.get("next_step") or "none"}.',
+                 _made_for(work, list(concern_titles)),
                  f"What happened: {fin.get('outcome')}"]
         lines += [_reply_line(r) for r in task.get('replies') or []]
         return "\n".join(lines)
     context = payload['context']
-    return (f'Work "{context["title"]}" ({receipt["work_id"]}) ended: {kind}. '
+    return (f'Work "{context["title"]}" ({receipt["work_id"]}) ended: {kind}.\n'
+            f'{_made_for(work, list(concern_titles))}\n'
             f'Reason: {(context.get("terminal") or {}).get("reason") or "(none recorded)"}.')
 
 
@@ -92,9 +109,9 @@ def report_earlier_endings(reopened) -> int:
         w = r["work"]
         added += brain_inbox.add_work_event(
             work_id=w["work_id"], receipt_id=f"rederive-{r['concern_id']}", occurred_at=w["ended"]["at"],
-            text=(f'Work "{w.get("title")}" ({w["work_id"]}) ended: {w["ended"]["outcome"]}. '
-                  f'Reason: {w["ended"].get("reason") or "(none recorded)"}.'),
-            concern_ids=[r["concern_id"]])
+            text=(f'Work "{w.get("title")}" ({w["work_id"]}) ended: {w["ended"]["outcome"]}.\n'
+                  f'{_made_for(w, [r["title"]] if r.get("title") else [])}\n'
+                  f'Reason: {w["ended"].get("reason") or "(none recorded)"}.'))
     if added:
         brain_wake.poke()
     return added
@@ -104,7 +121,11 @@ def _deliver_receipt(store, receipt):
     from types import SimpleNamespace
     from app.assistant.subconscious import brain_inbox, brain_wake, persist
     payload, kind, work_id = receipt['payload'], receipt['outcome'], receipt['work_id']
-    refs = payload['concern_refs']
+    refs = list(payload['concern_refs'])
+    if kind != 'attached':
+        # The concerns the brain attached this work to hear of it as the cited ones do.
+        cited = {persist.concern_id_for(r) for r in refs}
+        refs += [f"concern:{cid}" for cid in persist.concerns_holding_work(work_id) if cid not in cited]
     if kind == 'attached':
         results = [persist.attach_work(ref, work_id=work_id, work=payload['work'], receipt_id=receipt['id'])
                    for ref in refs]
@@ -122,7 +143,7 @@ def _deliver_receipt(store, receipt):
     if kind != 'attached':
         brain_inbox.add_work_event(
             work_id=work_id, receipt_id=receipt['id'], occurred_at=receipt['created_at'],
-            text=_event_text(receipt), concern_ids=[persist.concern_id_for(ref) for ref in refs])
+            text=_event_text(receipt, [t for t in (persist.concern_title(ref) for ref in refs) if t]))
         brain_wake.poke()
     store.acknowledge_concern_feedback(receipt['id'])
 

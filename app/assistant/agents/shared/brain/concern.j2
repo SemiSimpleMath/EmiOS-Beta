@@ -1,4 +1,6 @@
-{#- One concern's full record, as the brain and the brief writer read it. Expects `c` (brain_step._concern_view). -#}
+{#- One concern's full record, as the brain and the brief writer read it. Expects `c` (brain_step._concern_view).
+    Where agent_input.source_labels labels a ref (the brief writer), the label is shown in its place. -#}
+{%- set L = (agent_input.get("source_labels") if agent_input is defined else none) or {} -%}
 ### [{{ c.label }}] {{ c.title }} ({{ c.status }})
 - about: {{ c.subject }}; kind: {{ c.kind }}; severity: {{ c.severity }}; horizon: {{ c.horizon }}
 {% if c.owner_words %}- the owner asked for this: "{{ c.owner_words }}"
@@ -7,10 +9,10 @@
 - first observed: {{ c.first_observed }}
 - notes: {{ c.notes }}
 {% for e in c.evidence -%}
-- evidence ({{ e.kind }} {{ e.ref }}){% if e.snippet %}: {{ e.snippet }}{% endif %}
+- evidence ({{ e.kind }} {{ L.get(e.ref, e.ref) }}){% if e.snippet %}: {{ e.snippet }}{% endif %}
 {% endfor -%}
 {% for w in c.attached_work -%}
-- work attached {{ w.attached_at | local_time }}: {{ w.work_id }} ({{ w.status }}): {{ w.objective }}
+- work attached {{ w.attached_at | local_time }}: {{ L.get(w.work_id, w.work_id) }} ({{ w.status }}): {{ w.objective }}
 {% for j in w.judgments -%}
 {{ "  " }}- task "{{ j.title }}" judged {{ j.verdict }} ({{ j.at | local_time }}), next step {{ j.next_step or "none" }}: {{ j.outcome }}
 {% for r in j.replies -%}

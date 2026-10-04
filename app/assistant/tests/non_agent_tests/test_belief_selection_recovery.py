@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 import pytest
 from belief_engine.matching.selection import select_records
-from app.assistant.agents.dayflow_belief_selector.agent_form import AgentForm
+from app.assistant.agents.belief_engine.evidence_match.agent_form import AgentForm
 
 
 def test_repairs_complete_selection_preserving_all_context():
@@ -39,20 +39,6 @@ def test_malformed_output_repaired_but_provider_errors_not_retried():
     with pytest.raises(RuntimeError):
         select_records([{'belief_key':'a'}],broken,AgentForm)
     assert len(calls)==1
-
-
-def test_dayflow_retry_receives_weekly_context(monkeypatch):
-    from app.assistant.ServiceLocator.service_locator import DI
-    from app.assistant.subconscious.day_pass import _select_beliefs
-    calls=[]
-    def run(msg):
-        calls.append(msg.agent_input)
-        return SimpleNamespace(data={'belief_keys':['wrong'] if len(calls)==1 else ['actual'], 'reasoning':'relevant'})
-    monkeypatch.setattr(DI,'agent_factory',SimpleNamespace(create_agent=lambda _:SimpleNamespace(action_handler=run)))
-    records=[{'belief_key':'actual','statement':'morning only','conditions':{'when':'morning'}}]
-    assert _select_beliefs(records,'day context',None,weekly_insights='whole weekly context')[0]==records
-    assert calls[1]['weekly_insights']=='whole weekly context'
-    assert calls[1]['selection_retry']['allowed_belief_keys']==['actual']
 
 
 def test_evidence_path_repairs_and_caches_only_valid_keys(tmp_path, monkeypatch):

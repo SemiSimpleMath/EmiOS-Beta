@@ -15,7 +15,9 @@ Tables in emi.db (subconscious/db.py):
                     writer's change summary, the day's backdrops and flags.
     day_plan_slots  one row per hour slot: its key (`YYYY-MM-DDTHH:00`, local), the calendar items
                     that start in it, the beliefs placed in it ({time, belief_key, statement,
-                    concern_id: the concern that owns it}).
+                    related: [{belief_key, statement}]}: the beliefs closest in meaning; lines
+                    stored on 2026-10-03 carry modifiers ({belief_key, statement, how}); lines stored before 2026-10-03
+                    carry concern_id, the standing concern that owned the belief, instead).
 Past days stay: the table is the day archive.
 """
 from __future__ import annotations
@@ -100,12 +102,8 @@ def _clock(dt: datetime) -> str:
     return dt.strftime("%I:%M %p").lstrip("0")
 
 
-def _owner(line: Dict[str, Any]) -> str:
-    return f" [concern:{line['concern_id']}]" if line.get("concern_id") else ""
-
-
 def _placement_text(line: Dict[str, Any]) -> str:
-    return f"{line['time']} — {line['statement']} [belief:{line['belief_key']}]{_owner(line)}"
+    return f"{line['time']} — {line['statement']} [belief:{line['belief_key']}]"
 
 
 def _item_text(item: Dict[str, Any]) -> str:
@@ -164,7 +162,7 @@ def render_plan(plan: Dict[str, Any], now_utc: datetime) -> str:
     close_run()
     if plan["flags"]:
         out.append("## All day")
-        out.extend(f"- {flag['statement']} [belief:{flag['belief_key']}]{_owner(flag)}" for flag in plan["flags"])
+        out.extend(f"- {flag['statement']} [belief:{flag['belief_key']}]" for flag in plan["flags"])
     return "\n".join(out) + "\n"
 
 

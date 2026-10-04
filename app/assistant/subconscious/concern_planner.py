@@ -47,8 +47,6 @@ def stale(register: Dict[str, Any], now_utc: Optional[datetime] = None) -> List[
     out = []
     for bucket in ("active", "addressing"):
         for c in register.get(bucket) or []:
-            if c.get("kind") == "standing":
-                continue
             b = _brief_basis(c)
             if b is None or b != basis(c, bucket):
                 continue                                   # no current brief yet: the brief comes first
@@ -59,6 +57,16 @@ def stale(register: Dict[str, Any], now_utc: Optional[datetime] = None) -> List[
                 continue
             out.append((bucket, c))
     return out
+
+
+def stale_reason(concern: Dict[str, Any]) -> str:
+    """Why a plan is written again, for the run record."""
+    plan = concern.get("plan") or {}
+    if not plan:
+        return "no plan yet"
+    if plan.get("basis") == _brief_basis(concern):
+        return "its hold passed"
+    return "its brief changed"
 
 
 def next_hold_at(register: Dict[str, Any], now_utc: datetime) -> Optional[datetime]:
@@ -120,6 +128,11 @@ def _invoke(task: str, information: str) -> Optional[Dict[str, Any]]:
                             "surface": "system", "room_id": "dayflow_orchestrator"})
     manager = DI.multi_agent_manager_factory.create_manager(_MANAGER)
     DI.manager_invoker.invoke(manager, Message(task=task, information=information, scope_context=scope))
+    from app.assistant.subconscious.brain_trace import current, step
+    for m in manager.blackboard.get_messages():
+        if getattr(m, "data_type", None) == "tool_result":
+            step("plan", "tool result", subject=current("concern_id"), result_type=list(m.sub_data_type or []),
+                 content=m.content)
     for m in reversed(manager.blackboard.get_messages()):
         if str(getattr(m, "sender", "") or "").endswith(_DECIDER.split("::")[-1]):
             data = getattr(m, "data", None)
@@ -154,18 +167,23 @@ def run_planners(*, invoke=None, register_connect=None) -> Dict[str, Any]:
     written = failed = 0
     for bucket, concern in todo:
         from_brief = _brief_basis(concern)
-        from app.assistant.subconscious.brain_trace import trace
+        cid = concern["concern_id"]
+        from app.assistant.subconscious.brain_trace import step, trace
+        step("plan", "stale", subject=cid, title=concern.get("title"), reason=stale_reason(concern))
         try:
-            with trace(stage="plan", concern_id=concern["concern_id"]):
+            with trace(stage="plan", concern_id=cid):
                 plan = write_plan(concern, bucket, invoke=invoke)
         except Exception as exc:
-            logger.error("[plan] could not plan %s; not retried until it changes: %s",
-                         concern["concern_id"], exc, exc_info=True)
-            persist.set_concern_plan(concern["concern_id"], from_brief, error=f"{type(exc).__name__}: {exc}",
-                                     connect=register_connect)
+            logger.error("[plan] could not plan %s; not retried until it changes: %s", cid, exc, exc_info=True)
+            step("plan", "failed: not retried until the brief changes", subject=cid,
+                 error=f"{type(exc).__name__}: {exc}")
+            persist.set_concern_plan(cid, from_brief, error=f"{type(exc).__name__}: {exc}", connect=register_connect)
             failed += 1
             continue
-        if persist.set_concern_plan(concern["concern_id"], from_brief, plan=plan, connect=register_connect):
+        if persist.set_concern_plan(cid, from_brief, plan=plan, connect=register_connect):
+            step("plan", "written", subject=cid, plan=plan)
             written += 1
+        else:
+            step("plan", "not stored: the brief changed while it was planned", subject=cid)
     logger.info("[plan] written=%d failed=%d", written, failed)
     return {"plans_written": written, "plans_failed": failed}

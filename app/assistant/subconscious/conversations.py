@@ -184,8 +184,9 @@ def _work_groups(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for work_id, evs in by_work.items():
         turns = sorted((_event_turn(e) for e in evs), key=lambda t: t["at"])
         groups.append({"heading": f"Work {work_id}",
-                       "description": "Dayflow's work on the concerns it is attached to: each entry is a "
-                                      "finalizer judgment of one of its tasks, or the work's ending.",
+                       "description": "What the assistant did: each entry is a finalizer judgment of one of "
+                                      "the work's tasks, or the work's ending, with the objective and the "
+                                      "concerns the work was made for.",
                        "first_at": turns[0]["at"],
                        "conversations": [{"label": "Progress", "turns": _render_turns(turns)}]})
     return groups

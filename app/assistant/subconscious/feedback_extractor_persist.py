@@ -97,7 +97,7 @@ def apply_feedback_extractor_output(output: Dict[str, Any], *, intake_store=None
                     continue
                 bid = intake.apply(day, atom, vec, verdict)
             else:
-                bid = judge_atom(day, atom, vec, intake, scope_ctx, embed_texts,
+                bid = judge_atom(day, atom, vec, intake, scope_ctx,
                                  log=lambda line: logger.info("[feedback_persist]%s", line))
             ids_by_comment[cid].append(bid)
             upserted.append({"belief_id": bid, "signal_type": signal, "comment_pod_id": cid})

@@ -10,9 +10,9 @@ from belief_engine.intake.store import sqlite_file
 def entries():
     return [{'belief_key':'lesson.glasses','kind':'stable_preference','tags':['health'],
              'statement':'Often forgets reading glasses for lessons.', 'conditions':{'text':'Before lessons'},
-             'last_confirmed':'2026-01-02','status':'active'},
+             'last_confirmed':'2026-01-02','status':'active','calendar':'approved'},
             {'belief_key':'coffee.morning','kind':'episodic_context','tags':[],
-             'statement':'Likes creamer in morning coffee.', 'status':'active'}]
+             'statement':'Likes creamer in morning coffee.', 'status':'active','calendar':'approved'}]
 
 
 @pytest.fixture
@@ -33,26 +33,6 @@ def test_projection_preserves_conditions_and_identity():
     assert '2026-01-02' in out and 'coffee.morning' in out
 
 
-def test_llm_selects_cross_domain_belief_without_python_matching(monkeypatch):
-    from app.assistant.ServiceLocator.service_locator import DI
-    seen=[]
-    def call(msg):
-        seen.append(msg.agent_input)
-        return SimpleNamespace(data={'belief_keys':['lesson.glasses'],'reasoning':'Preparation before lesson'})
-    monkeypatch.setattr(DI,'agent_factory',SimpleNamespace(create_agent=lambda _:SimpleNamespace(action_handler=call)))
-    selected,reason,qualifiers=drs._select_beliefs(entries(),'17:00 instrument lesson',None)
-    assert len(seen[0]['belief_catalog'])==2
-    assert [e['belief_key'] for e in selected]==['lesson.glasses']
-    assert selected[0]['conditions']=={'text':'Before lessons'}
-
-
-def test_unknown_selection_fails_without_guessing(monkeypatch):
-    from app.assistant.ServiceLocator.service_locator import DI
-    monkeypatch.setattr(DI,'agent_factory',SimpleNamespace(create_agent=lambda _:SimpleNamespace(
-        action_handler=lambda _:SimpleNamespace(data={'belief_keys':['invented'],'reasoning':'x'}))))
-    with pytest.raises(ValueError,match='not in this catalog'): drs._select_beliefs(entries(),'day',None)
-
-
 @pytest.mark.parametrize('field,value',[
     ('current_status','Glasses already packed'),
     ('milestones',[{'description':'Reminder already delivered'}]),
@@ -64,37 +44,12 @@ def test_changed_context_invalidates_projection(field,value):
     assert old!=new
 
 
-def test_weekly_changes_invalidate_but_generation_timestamp_does_not():
-    make=lambda context,weekly: drs._routine_inputs_fingerprint('day',[],'beliefs',daily_context=context,weekly_insights=weekly)
-    assert make({'generated_at':'one'},'a')==make({'generated_at':'two'},'a')
-    assert make({},'a')!=make({},'b')
-
-
 def test_empty_authoritative_calendar_clears_stale_daily_schedule(tmp_path, monkeypatch):
     (tmp_path/'resource_daily_context_generator_output.json').write_text(
         json.dumps({'expected_schedule':[{'title':'Cancelled lesson'}]}), encoding='utf-8')
     (tmp_path/'resource_expected_calendar.json').write_text(json.dumps({'expected_schedule':[]}), encoding='utf-8')
     monkeypatch.setattr(drs, '_INPUTS_DIR', tmp_path)
     assert drs._read_daily_context()['expected_schedule']==[]
-
-
-def test_catalog_metadata_change_invalidates_selection():
-    before = entries()
-    after = entries()
-    after[0]['tags'] = ['travel']
-    make = lambda catalog: drs._routine_inputs_fingerprint('day', [], 'same rendering', belief_catalog=catalog)
-    assert make(before) != make(after)
-
-
-def test_weekly_candidates_do_not_bypass_belief_reconciliation(tmp_path, monkeypatch):
-    path = tmp_path / 'weekly.json'
-    path.write_text(json.dumps({'week_start': '2026-01-01', 'week_end': '2026-01-07',
-        'insights': {'belief_candidates': [{'statement': 'Coffee preference', 'domain': 'food',
-            'confidence': 'medium', 'conditions': 'Morning only', 'evidence': ['source-1']}]*4}}), encoding='utf-8')
-    monkeypatch.setattr(drs, '_WEEKLY_INSIGHTS_PATH', path)
-    text = drs._format_weekly_insights()
-    assert 'Coffee preference' not in text
-    assert 'reconciled through the belief engine' in text
 
 
 # ── the day pass: placements, caching, validation ─────────────────────────────────────────────────────
@@ -115,12 +70,10 @@ def day_inputs(monkeypatch):
     calls, context = [], {'expected_schedule': [], 'milestones': []}
     monkeypatch.setattr(drs, '_read_daily_context', lambda: json.loads(json.dumps(context)))
     monkeypatch.setattr(drs, '_read_belief_entries', entries)
-    monkeypatch.setattr(drs, '_format_weekly_insights', lambda: '')
     monkeypatch.setattr(loader, 'load_scope_for_source', lambda **k: None)
-    monkeypatch.setattr(drs, '_select_beliefs', lambda *a, **k: (calls.append('select') or entries(), 'relevant', []))
     monkeypatch.setattr(drs, '_write', _writer_for(calls))
-    # Owners (the concern door, the register) are pinned in test_day_items_have_owners.py.
-    monkeypatch.setattr(drs, '_assign_owners', lambda *a, **k: None)
+    # Related beliefs are pinned in test_belief_calendar.py; these two point different ways and relate to nothing.
+    monkeypatch.setattr(drs, '_belief_vectors', lambda: {'lesson.glasses': [1.0, 0.0], 'coffee.morning': [0.0, 1.0]})
     return context, calls
 
 
@@ -129,11 +82,11 @@ def test_the_plan_is_written_once_and_regenerated_hourly_on_change(connect, day_
     now = datetime(2026, 1, 1, 18, tzinfo=timezone.utc)
     assert drs.run_day_pass(now, connect=connect)['day_pass'] == 'written'
     assert drs.run_day_pass(now, connect=connect) == {'day_pass': 'unchanged'}
-    assert calls == ['select', 'write']
+    assert calls == ['write']
     context['milestones'] = [{'description': 'Glasses packed'}]
     assert drs.run_day_pass(now + timedelta(minutes=20), connect=connect) == {'day_pass': 'changed_too_soon'}
     assert drs.run_day_pass(now + timedelta(hours=1), connect=connect)['day_pass'] == 'written'
-    assert calls == ['select', 'write', 'select', 'write']
+    assert calls == ['write', 'write']
 
 
 def _lesson_day(context):
@@ -154,10 +107,11 @@ def test_the_writer_places_beliefs_and_code_builds_the_day(connect, day_inputs):
     plan = day_plan.load_plan('2026-01-01', connect=connect)
     by_slot = {s['slot']: s for s in plan['slots']}
     assert by_slot['2026-01-01T16:00']['lines'] == [
-        {'time': '4:30 PM', 'belief_key': 'lesson.glasses', 'statement': 'Often forgets reading glasses for lessons.'}]
+        {'time': '4:30 PM', 'belief_key': 'lesson.glasses', 'statement': 'Often forgets reading glasses for lessons.',
+         'related': []}]
     assert by_slot['2026-01-01T17:00']['items'][0]['title'] == 'Lesson'
     assert plan['flags'] == [{'time': 'all day', 'belief_key': 'coffee.morning',
-                              'statement': 'Likes creamer in morning coffee.'}]
+                              'statement': 'Likes creamer in morning coffee.', 'related': []}]
 
     text = day_plan.render_day(now, connect=connect)
     assert '### Now (1:30 PM)' in text

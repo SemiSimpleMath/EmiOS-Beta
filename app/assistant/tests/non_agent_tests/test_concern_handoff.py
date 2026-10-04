@@ -89,12 +89,11 @@ def test_hold_and_no_action_stay_with_the_brain_and_a_passed_hold_is_planned_aga
     assert concern_brief.stale(reg.read(), now_utc=NOW + timedelta(hours=2)) == [], "the brief itself is still current"
 
 
-def test_a_hold_needs_a_future_time_and_act_now_a_task():
+def test_a_hold_needs_a_future_time():
     later = (NOW + timedelta(days=3)).astimezone().strftime("%Y-%m-%d %H:%M")
-    assert concern_brief._readiness_problems({"decision": "hold", "hold_until": later, "why": "w"}, NOW) == []
-    assert concern_brief._readiness_problems({"decision": "hold", "hold_until": "2020-01-01 09:00", "why": "w"}, NOW)
-    assert concern_brief._readiness_problems({"decision": "act_now", "task": "", "why": "w"}, NOW) == [
-        "act_now needs a task for the planner"]
+    assert concern_brief.hold_until_utc(later, NOW) > NOW
+    with pytest.raises(ValueError, match="not in the future"):
+        concern_brief.hold_until_utc("2020-01-01 09:00", NOW)
 
 
 def test_work_made_from_the_item_carries_the_concern_whatever_the_steward_cites():

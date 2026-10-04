@@ -1,5 +1,6 @@
 {#- Past work and what is already in motion. Expects `agent_input` with linked_work, similar_work,
-    active_work, reminders, calendar. -#}
+    active_work, reminders, calendar; a ref labelled in agent_input.source_labels shows its label. -#}
+{%- set L = (agent_input.get("source_labels") if agent_input is defined else none) or {} -%}
 ## Past work linked to this matter
 
 {% for w in agent_input.linked_work -%}
@@ -18,13 +19,13 @@
 
 Active work:
 {% for w in agent_input.active_work -%}
-- {{ w.title }} [{{ w.work_id }}] (started {{ w.created }}){% if w.objective and w.objective != w.title %}: {{ w.objective }}{% endif %}
+- {{ w.title }} [{{ L.get(w.work_id, w.work_id) }}] (started {{ w.created }}){% if w.objective and w.objective != w.title %}: {{ w.objective }}{% endif %}
 {% else -%}
 (none)
 {% endfor %}
 Scheduled reminders:
 {% for r in agent_input.reminders -%}
-- [{{ r.ref }}] {{ r.title }} ({{ r.kind }}{% if r.repeats %}, {{ r.repeats }}{% endif %}; {% if r.kind == "one time" %}at{% else %}from{% endif %} {{ r.start }}{% if r.end %} until {{ r.end }}{% endif %})
+- [{{ L.get(r.ref, r.ref) }}] {{ r.title }} ({{ r.kind }}{% if r.repeats %}, {{ r.repeats }}{% endif %}; {% if r.kind == "one time" %}at{% else %}from{% endif %} {{ r.start }}{% if r.end %} until {{ r.end }}{% endif %})
 {% else -%}
 (none)
 {% endfor %}

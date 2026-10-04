@@ -1,0 +1,46 @@
+Now: {{ agent_input.now }}
+
+## The concern
+{% set c = agent_input.concern -%}
+{{ c.title }} ({{ c.status }})
+Settled when: {{ c.done_when or "(not stated)" }}
+{% if c.owner_words %}What the owner asked, in their words: "{{ c.owner_words }}"
+{% endif %}
+## The brief
+{% set b = c.brief -%}
+What it is: {{ b.what }}
+Why it matters: {{ b.why_it_matters }}
+Known:
+{% for f in b.known or [] %}- {{ f.fact }}
+{% endfor %}Tried: {{ b.tried }}
+The owner's wishes: {{ b.owner_wishes }}
+{% if b.open_questions %}Open questions:
+{% for q in b.open_questions %}- {{ q }}
+{% endfor %}{% endif %}
+## The work done for it
+{% for w in c.attempts %}
+- {{ w.objective or w.title }} ({{ w.status }})
+{%- for j in w.judgments %}
+  judged {{ j.verdict }}: {{ j.outcome }}
+{%- for r in j.replies %}
+  {{ r }}
+{%- endfor %}
+{%- endfor %}
+{%- if w.ended %}
+  ended {{ w.ended.outcome }}{% if w.ended.reason %}: {{ w.ended.reason }}{% endif %}
+{%- endif %}
+{% else %}
+Nothing yet.
+{% endfor %}
+## The latest decision
+{% if c.plan %}Plan: {{ c.plan.decision }}{% if c.plan.hold_until %} until {{ c.plan.hold_until }}{% endif %}
+{% for t in c.plan.todo %}- {{ t }}
+{% endfor %}Why: {{ c.plan.why }}
+{% else %}No decision yet.
+{% endif %}
+{% if agent_input.correction %}
+## Correct your previous answer
+
+It did not satisfy the contract: {{ agent_input.correction }}
+{% endif %}
+Tell the story of this concern and where it is going.

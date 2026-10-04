@@ -1,16 +1,24 @@
-# Reads ONE day's insights together with that day's numbered timeline items and writes the atomic
-# beliefs they support, each citing the timeline items it rests on. Step 0 + step 1 of
-# docs/design/belief_intake_redesign_2026-09-26.md, prototyped as a single agent.
+# Reads ONE day's insights, each with the entries it rests on (its provenance, cited by the insights
+# writer), and writes the atomic beliefs they support, each citing entries from its insight's sources.
+# Run by the belief intake (belief_engine/intake/run.py); the day's input is built by
+# belief_engine/intake/day_items.insights.
 #
-# It DECIDES only. Timeline items are numbered by code and restored by code; nothing is written to
-# the belief store. Not wired into any pipeline yet — exercised by
-# app/assistant/tests/agent_tests/belief_extractor/run_extractor.py.
+# It DECIDES only. Entries are numbered by code and restored to their source refs by code; nothing is
+# written to the belief store here.
 name: belief_engine::belief_extractor
 class_name: Agent
 llm_params:
   llm_provider: openai
-  model_tier: "mini"
+  model_tier: "smart"   # reads each reply through the message it answers; mini did not (2026-10-03)
 allowed_tools: []
 except_tools: []
-user_context_items: [date, insights, timeline_items]
+# Entity cards for whatever the day's insights and their source entries name (detected in the rendered
+# prompt), so each belief names its people and things correctly. Level 0 is each entity's one-liner.
+entity_scan_keys: [insights]
+entity_card_level: 0
+user_context_items: [date, insights, entity_card]
 system_context_items: [resource_user_data]
+# Log the rendered prompts to the agents log: what the extractor reads decides what beliefs exist.
+prompt_debug:
+  system: true
+  user: true

@@ -64,6 +64,11 @@ class ActionableItem(BaseModel):
         default_factory=list,
         description="Short evidence strings or ids from the timeline.",
     )
+    sources: List[int] = Field(
+        min_length=1,
+        description="Numbers `n` of the timeline entries this insight rests on: every entry whose words or "
+                    "response establish it, and the assistant's message or prompt it answered.",
+    )
     temporal_scope: Optional[str] = Field(
         default="chronic",
         description="chronic | daily | historical",

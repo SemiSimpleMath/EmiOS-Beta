@@ -19,6 +19,9 @@ Rules:
 - Prefer a few high-signal items over many low-signal items.
 - Do NOT create durable insights from "ticket accepted" events unless there is accompanying user-authored text (chat message or ticket free-text) that actually expresses a preference/rule.
 - You MUST include at least one evidence string that quotes or paraphrases user-authored text for every item you output.
+- Every timeline entry carries a number `n`. In `sources`, cite the number of every entry the item rests on: the
+  user's message or ticket, and the assistant's message or prompt it answered, so whoever reads the item later can
+  read exactly what was said.
 
 Durability rules (critical):
 - `temporal_scope="chronic"` ONLY if the user explicitly states a durable rule/preference (e.g. "I never leave the house before 9am") OR if evidence shows repetition across days.

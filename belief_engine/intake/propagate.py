@@ -4,9 +4,10 @@ Dedup names the ONE held belief a new belief most directly relates to. When that
 `contradicts`, the same new belief usually bears on siblings too — "I am ending intermittent
 fasting" contradicts "practices intermittent fasting", "is trying intermittent fasting" and
 "delays breakfast for the fast" alike, and revising only the named one left the others asserting
-a state that had ended (185-day replay, 2026-09-27: five stale siblings). So after the named
-belief is revised, dedup is asked again with that belief removed, and again for each further
-`contradicts`, until the verdict is something else. Each round is one more belief kept current.
+a state that had ended (185-day replay, 2026-09-27: five stale siblings). So dedup is asked again
+with the named belief removed, and again for each further `contradicts`, until the verdict is something
+else. Every belief found is held with the new one for the owner to decide (run.judge_atom); nothing is
+revised here.
 """
 from __future__ import annotations
 
@@ -23,12 +24,11 @@ _MAX_ROUNDS = 5
 
 
 def contradiction_fanout(atom: dict, day: str, held: list[dict], vector: list, already: list[str],
-                         scope_ctx) -> list[tuple[str, dict, dict]]:
-    """(belief id, revision, dedup verdict) for every further held belief the atom contradicts.
+                         scope_ctx) -> list[tuple[str, dict]]:
+    """(belief id, dedup verdict) for every further held belief the atom contradicts.
 
     `held` are the beliefs as currently held (with sources); `already` the ids the atom has already
-    been judged against. Nothing is written; the caller applies each verdict (which names the
-    bearing sources) and revision.
+    been judged against. Nothing is written.
     """
     visited = set(already)
     hits = []
@@ -41,9 +41,7 @@ def contradiction_fanout(atom: dict, day: str, held: list[dict], vector: list, a
             break
         target = verdict["target"]
         visited.add(target)
-        belief = next(b for b in rest if b["id"] == target)
-        revision = agents.revise(belief, atom, day, scope_ctx)
-        hits.append((target, revision, verdict))
+        hits.append((target, verdict))
     else:
         logger.warning("[intake] %s contradiction fan-out stopped after %d rounds: %s",
                        day, _MAX_ROUNDS, atom["statement"])

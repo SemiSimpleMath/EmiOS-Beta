@@ -6,7 +6,9 @@ text capitalizes it unless the text is all lowercase (so "water" is not the enti
 longest name at a position wins,
 so "South Lake Middle School" does not also match "Lake"; the owner's own nodes are left out; what
 joins two entities is the Event/State nodes linked to both and the entities reached from both
-through one. An in-memory graph; invented data only.
+through one; each entity found carries its ties to the household's people (the sentences of its links
+through a node that also links to one of them); facts by meaning are the closest link sentences, read
+back from the graph, deduplicated. An in-memory graph and a fake edge index; invented data only.
 """
 from __future__ import annotations
 
@@ -28,8 +30,13 @@ NODES = [("n-owner", "Sam", "Entity", '["user", "Sam"]', "The owner.", 10),
          ("n-cake", "Princess Cake", "Entity", "[]", "A cake.", 3),
          ("n-trip", "Summer Trip", "Event", "[]", "The brother and the father at Karjalohja.", 6),
          ("n-own", "Ownership", "State", "[]", "Owns the cottage at Karjalohja.", 5)]
-EDGES = [("n-trip", "n-bro"), ("n-trip", "n-kar"), ("n-trip", "n-dad"), ("n-own", "n-kar"),
-         ("n-own", "n-bro"), ("n-own", "n-owner"), ("n-trip", "n-owner")]
+EDGES = [("e1", "n-trip", "n-bro", "Olli went on the summer trip.", 5),
+         ("e2", "n-trip", "n-kar", "The summer trip was at Karjalohja.", 6),
+         ("e3", "n-trip", "n-dad", "Aarne went on the summer trip.", 5),
+         ("e4", "n-own", "n-kar", "The cottage at Karjalohja is owned.", 7),
+         ("e5", "n-own", "n-bro", "Olli owns the cottage.", 7),
+         ("e6", "n-own", "n-owner", "Sam co-owns the cottage.", 4),
+         ("e7", "n-trip", "n-owner", "Sam went on the summer trip.", 3)]
 
 
 @pytest.fixture(autouse=True)
@@ -37,10 +44,10 @@ def graph(monkeypatch):
     db = sqlite3.connect(":memory:")
     db.execute("CREATE TABLE kg_node_metadata (id, label, node_type, aliases, description, importance, "
                "start_date, end_date, pagerank_score)")
-    db.execute("CREATE TABLE kg_edge_metadata (source_id, target_id)")
+    db.execute("CREATE TABLE kg_edge_metadata (id, source_id, target_id, sentence, importance)")
     db.executemany("INSERT INTO kg_node_metadata VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?)",
                    [(*n, 0.02 if n[1] in ("Olli", "Leena", "Sam") else 0.001) for n in NODES])
-    db.executemany("INSERT INTO kg_edge_metadata VALUES (?, ?)", EDGES)
+    db.executemany("INSERT INTO kg_edge_metadata VALUES (?, ?, ?, ?, ?)", EDGES)
     monkeypatch.setattr(kg_links, "_raw", lambda sql, params=(): db.execute(sql, tuple(params)).fetchall())
     monkeypatch.setattr("app.assistant.kg_core.user_identity.get_primary_user_name", lambda: "Sam")
 
@@ -75,3 +82,23 @@ def test_case_decides_a_single_word_name_unless_the_text_is_all_lowercase():
     assert _labels(kg_links.find_entities(["only leena drinks water"])) == ["Leena", "Water"]
     assert _labels(kg_links.find_entities(["Talked to leena about the Water bill."])) == ["Leena", "Water"], (
         "a central person matches in lowercase; others need the capital")
+
+
+def test_an_entity_found_carries_its_ties_to_the_household():
+    [kar] = kg_links.find_entities(["The cottage at Karjalohja needs a new roof."])
+    assert kar["ties"] == ["The cottage at Karjalohja is owned.", "The summer trip was at Karjalohja."]
+    [school] = kg_links.find_entities(["South Lake Middle School sent a note."])
+    assert school["ties"] == [], "no link reaches the household"
+
+
+def test_facts_by_meaning_are_the_closest_link_sentences(monkeypatch):
+    class Index:
+        def search_similar_edges(self, vector, k):
+            return {1: [("e4", 0.61), ("e2", 0.55)], 2: [("e2", 0.70), ("e9-gone", 0.9)]}[vector[0]]
+    monkeypatch.setattr("app.assistant.kg.chroma.chroma_embedding_manager.get_chroma_manager", lambda: Index())
+    monkeypatch.setattr("app.assistant.embeddings.embedder.embed_texts", lambda texts: [[1], [2]][:len(texts)])
+    facts = kg_links.facts_by_meaning(["The roof at the cottage", "A trip in summer", ""])
+    assert facts == [{"sentence": "The summer trip was at Karjalohja.", "score": 0.7},
+                     {"sentence": "The cottage at Karjalohja is owned.", "score": 0.61}], (
+        "best score per sentence; an id the graph no longer has is dropped")
+    assert kg_links.facts_by_meaning(["", " "]) == []

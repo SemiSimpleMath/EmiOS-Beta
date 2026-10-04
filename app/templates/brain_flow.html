@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Brain Flow</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/brain_flow.css') }}">
+  <script>window.SCRIPT_NAME = {{ request.script_root | tojson }};</script>
+</head>
+<body>
+  <header class="bf-header">
+    <div>
+      <h1>Brain flow</h1>
+      <div class="bf-sub">each wake of the brain, replayed stage by stage: every model call with its prompts and
+        answer, and every decision code made with its reason &middot;
+        <a href="{{ url_for('brain_debug.brain_page') }}">brain tabs</a> &middot;
+        <a href="{{ url_for('dayflow_flow.dayflow_flow_page') }}">dayflow</a></div>
+    </div>
+  </header>
+
+  <section class="bf-scrubber" aria-label="Choose a wake">
+    <div class="bf-controls">
+      <button id="bf-prev" type="button" title="earlier wake (←)">&larr; earlier</button>
+      <div id="bf-run" class="bf-run">loading…</div>
+      <button id="bf-next" type="button" title="later wake (→)">later &rarr;</button>
+      <button id="bf-latest" type="button">latest</button>
+      <label class="bf-sub"><input id="bf-idle" type="checkbox"> idle wakes</label>
+      <label class="bf-sub"><input id="bf-follow" type="checkbox"> follow live</label>
+    </div>
+    <div id="bf-filter" class="bf-filter hidden"></div>
+    <div id="bf-strip" class="bf-strip" role="listbox" aria-label="wakes, oldest to newest"></div>
+  </section>
+
+  <main class="bf-main">
+    <div class="bf-diagram-wrap">
+      <div id="bf-canvas" class="bf-canvas">
+        <div id="bf-diagram" class="bf-diagram"></div>
+        <svg id="bf-edges" class="bf-edges" aria-hidden="true"></svg>
+      </div>
+    </div>
+    <aside id="bf-detail" class="bf-detail hidden" aria-live="polite"></aside>
+  </main>
+
+  <script src="{{ url_for('static', filename='js/brain_flow.js') }}"></script>
+</body>
+</html>

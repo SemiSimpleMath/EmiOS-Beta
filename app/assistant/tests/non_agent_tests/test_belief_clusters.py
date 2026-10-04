@@ -15,7 +15,7 @@ import pytest
 
 from belief_engine import clusters
 from belief_engine.intake.catalog import active_entries
-from belief_engine.intake.store import SCHEMA as INTAKE_SCHEMA, sqlite_file
+from belief_engine.intake.store import IntakeStore, sqlite_file
 
 WORK, MEAL = [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]
 BELIEFS = [
@@ -29,9 +29,8 @@ BELIEFS = [
 @pytest.fixture
 def connect(tmp_path):
     connect = sqlite_file(tmp_path / "beliefs.db")
+    IntakeStore(connect, "belief_intake_")       # the intake's tables, with every column it adds
     with connect(True) as c:
-        for s in INTAKE_SCHEMA:
-            c.execute(s.format(p="belief_intake_"))
         c.execute("CREATE TABLE belief_tags (belief_id TEXT, tag TEXT, assigned_at TEXT, method TEXT)")
         c.executemany("INSERT INTO belief_intake_beliefs (id, statement, kind, created_day, embedding) "
                       "VALUES (?, ?, 'routine_pattern', '2026-09-30', ?)",
@@ -98,28 +97,3 @@ def test_the_export_carries_each_beliefs_topic(connect):
         entries = active_entries(conn=c)
     assert {e["belief_key"]: e["cluster"] for e in entries} == {"B1": "Reports", "B2": "Reports",
                                                                 "B3": "Meals", "B4": "Meals"}
-
-
-def test_the_selector_reads_whole_topics_and_names_the_conditions_for_the_writer(monkeypatch):
-    from types import SimpleNamespace
-    from app.assistant.ServiceLocator.service_locator import DI
-    from app.assistant.subconscious import day_pass as stage
-    entries = [{"belief_key": f"B{i}", "statement": "x" * 300, "cluster_id": k, "cluster": label}
-               for i, (k, label) in enumerate([("K1", "Reports"), ("K2", "Meals"), ("K1", "Reports"),
-                                               ("K2", "Meals"), (None, None)], 1)]
-    pages = stage._topic_pages(entries, max_chars=900)
-    assert [[e["belief_key"] for e in p] for p in pages] == [["B2", "B4"], ["B1", "B3"], ["B5"]]
-
-    def answer(msg):                      # on the Reports page: B1 for today, B3 its condition
-        shown = msg.agent_input["belief_catalog"]
-        assert all(set(r) & {"short_id", "cluster_id", "selection_id"} == set() for r in shown)  # one id
-        if "B1" in {r["belief_key"] for r in shown}:
-            return SimpleNamespace(data={"belief_keys": ["B1"], "qualifier_keys": ["B3", "B1"],
-                                         "reasoning": "reports today"})
-        return SimpleNamespace(data={"belief_keys": [], "qualifier_keys": [], "reasoning": "nothing"})
-    monkeypatch.setattr(DI, "agent_factory", SimpleNamespace(
-        create_agent=lambda _: SimpleNamespace(action_handler=answer)), raising=False)
-    monkeypatch.setattr(stage, "_topic_pages", lambda e, max_chars: pages)
-    selected, _, qualifiers = stage._select_beliefs(entries, "today", None)
-    assert [e["belief_key"] for e in selected] == ["B1"]
-    assert [e["belief_key"] for e in qualifiers] == ["B3"]            # a selected belief is not its own condition

@@ -18,12 +18,20 @@ def intake_source(item):
             "thread_id": str(meta.get("email_thread_id") or ""),
             # A concern handed over by the brain (subconscious/concern_handoff.py): work made from
             # this item serves that concern, whatever the steward cites.
-            "concern_id": str(meta.get("concern_id") or "")}
+            "concern_id": str(meta.get("concern_id") or ""),
+            # A placement of today's calendar (subconscious/belief_occurrences.py): work made from it
+            # serves that belief, and its outcome returns to the belief.
+            "belief_key": str(meta.get("belief_key") or "")}
 
 
 def concern_refs_of(sources):
     """The concern refs work made from these intake sources must carry."""
     return [f"concern:{s['concern_id']}" for s in sources if s.get("concern_id")]
+
+
+def belief_refs_of(sources):
+    """The belief keys work made from these intake sources must carry."""
+    return [s["belief_key"] for s in sources if s.get("belief_key")]
 
 
 def source_records(items, references):
@@ -50,6 +58,8 @@ def goal_update(wo, *, objective=None, sources=(), success_criteria=None):
     constraints["source_intake"] = list(merged.values())
     constraints["concern_refs"] = list(dict.fromkeys([*(constraints.get("concern_refs") or []),
                                                       *concern_refs_of(sources)]))
+    constraints["belief_refs"] = list(dict.fromkeys([*(constraints.get("belief_refs") or []),
+                                                     *belief_refs_of(sources)]))
     constraints["objective"] = original if objective is None else objective
     if success_criteria is not None:
         constraints["success_criteria"] = success_criteria

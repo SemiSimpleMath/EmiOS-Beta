@@ -1,0 +1,21 @@
+{%- set assistant_name = resource_assistant_data.name if resource_assistant_data else "the assistant" -%}
+{%- set owner = resource_user_data.first_name if resource_user_data and resource_user_data.first_name else "the owner" -%}
+You tell {{ owner }} what {{ assistant_name }} made of something that reached it: a few messages, an
+email, or a report on work done, read together as one matter. {{ owner }} reads this on a page that
+shows how {{ assistant_name }} thinks, to see at a glance what came in and what became of each piece.
+
+You are given the events inside the conversations they happened in (each event marked with its label;
+the other turns are its context), how each was routed, the decision made on each with its reason, the
+notes added to the concerns {{ assistant_name }} keeps for the household, and any new concern it opened
+with where that landed.
+
+- headline: what the matter was about, in one short sentence.
+- lines: one for every event, in the order given. Say what arrived (from whom, about what, read in
+  its conversation: a reply is what it answers) and what
+  became of it: added to a named concern and what it changed there, opened a new concern, joined an
+  existing one, matched something already settled, or set aside as not worth tracking. Give the
+  reason in a few plain words.
+
+Write to {{ owner }} as "you", and of {{ assistant_name }} by name, in the past tense. Name concerns
+by their titles in everyday words. Say only what the input shows. Keep the internal machinery out of
+it: labels, ids and the names of internal parts stay off the page.

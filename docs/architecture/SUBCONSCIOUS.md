@@ -29,10 +29,11 @@ The Subconscious is EmiOS's autonomous background "mind." It runs while the user
        └─► answer_capture ──► subconscious::answer_matcher ──► mark_answered
                               ──► annotate_concern ──► trigger_noticer (cooldown)
 
-   dayflow work attached to a concern (receipts: attached, each judgment, the ending)
-       ──► concern_feedback ──► persist.attach_work (active→addressing) / record_judgment /
-           apply_work_outcome (last work ended: addressing→active; user-declined→DORMANT)
-       ──► brain inbox event per judgment and ending ──► the brain decides (brain_wake)
+   every dayflow work object (receipts: attached, each judgment, the ending)
+       ──► concern_feedback ──► for the concerns that hold it: persist.attach_work (active→addressing) /
+           record_judgment / apply_work_outcome (last work ended: addressing→active; user-declined→DORMANT)
+       ──► brain inbox event per judgment and ending, pending ──► the gate routes it ──► the brain
+           decides, and attaches the work to a concern it cites it on (brain_wake)
 ```
 
 The register is the **spine**: every other component either feeds it (noticer, answer-capture, work-outcome propagation) or reads it (proposers, digest, dashboard). The noticer is the only LLM that mutates concern lifecycle — the propagation writers are deterministic id-joins (2026-08-01: the evaluator cites `[concern:<prefix>]` ids in `based_on`, work objects carry `constraints.concern_refs`, and every dayflow closure path back-propagates; before this, 19 duplicate AC-service work objects were minted because outcomes never reached the register).
@@ -56,23 +57,26 @@ Scope comes from `app/assistant/subconscious/scope.yaml`, loaded as `load_scope_
 
 A concern carries: `concern_id`, `title`, `subject`, `kind`, `domain_tags`, `severity` (low/medium/high), `horizon` (today/this_week/this_month/long_horizon), `evidence[]`, `addressable_by[]` (e.g. `["dayflow_orchestrator", "wellness_proposer"]`), `notes`, `first_observed`, plus lifecycle bookkeeping (`reinforcement_count`, `reinforcement_notes` journal, `last_reinforced_utc`, `addressing_since_utc`, `last_disposition_at_count`, `escalation`). `ConcernKind` ∈ `{pattern_drift, anticipated_need, opportunity_external, opportunity_internal, schedule_collision, gift_opportunity}`.
 
-### Standing concerns (2026-10-02)
+### Beliefs are not concerns (2026-10-03)
 
-`kind = "standing"`: a recurring part of the owner's day, built from the owner's beliefs
-(`docs/design/day_items_have_owners_2026-10-02.md`). The brain's day pass (`subconscious/day_pass.py`)
-places today's beliefs at their times; every placed belief has an owner. A belief an open concern holds in
-its `belief_refs` is owned by it, found by code; the rest go through the concern door together as standing
-candidates, merged by habit (the AC beliefs become one concern) or into an existing concern, or admitted.
-Today's times are recorded on the owner as `occurrences` (`persist.record_day_beliefs`).
+From 2026-10-02 to 2026-10-03 every belief placed on the day's calendar got an owner concern of
+`kind = "standing"` through the concern door, and that concern's brief handed each occurrence to dayflow.
+The door merged beliefs about different acts and the concern's single rule misdescribed them; the owner:
+"There is no good reason to make these beliefs into concerns"
+(`docs/design/what_was_done_reaches_the_brain_2026-10-03.md`). Now:
 
-- Never closed: the brain step may not resolve one (`brain_step._problems`), and the noticer's resolution or
-  `accept_chronic` is refused and journalled (`persist._refuse_owner_close`).
-- Its brief's readiness is a rule for every occurrence: `act_now` hands each occurrence to dayflow with its
-  time (`concern_handoff._standing_handoffs`, item `concern_handoff:<id>:<day>:<time>`, once each, not when
-  an hour past); `no_action` keeps it as context. The brief is rewritten only when an occurrence went wrong
-  or its beliefs changed (`concern_brief.basis` leaves daily churn out); a failed brief is retried once a day.
-- The steward no longer makes work from routine text: the routine's work reaches it as these handoffs, and
-  work made from one is tagged to the concern by code (`work_intake.concern_refs_of`).
+- The day pass (`subconscious/day_pass.py`) places the beliefs the owner approved for the calendar that apply
+  today, each read with the beliefs closest to it in meaning (found by code, 2026-10-03; until then an agent,
+  `dayflow_belief_modifiers`, named each belief's modifiers), and code hands each placement to dayflow as a belief intake item
+  (`subconscious/belief_occurrences.py`, item `belief_occurrence:<belief_key>:<day>:<time>`, once each, not
+  when an hour past). Work made from it carries the belief (`constraints.belief_refs`), so its outcome returns
+  to the belief.
+- Every finalizer judgment and ending of every work object enters the brain inbox as a pending `work` event
+  (`concern_feedback`), with its objective and the concerns it was made for; the gate routes it to the open
+  concerns it bears on, and the brain attaches work it cites on a concern (`brain_step._attach_cited_work`,
+  `persist.attach_seen_work`).
+- The standing concerns were retired to dormant (`persist.retire_standing_concerns`) and the door no longer
+  compares candidates with them.
 
 ### Lifecycle pressure
 
@@ -237,6 +241,29 @@ All share `on_error: {max_failures:3, then:"disable_with_ticket"}` with backoff 
 `POST /subconscious/comment` is the **universal comment endpoint** — every surface (this page, `/meals`, future per-domain pages) POSTs `{target_pod_id, text, target_scope?}` here. It mints a `feedback.comment` pod (`feedback_service.mint_feedback_comment`, tags `["feedback","user_comment","unprocessed"]`, `for_agents=["feedback_extractor"]`) and returns the refreshed comment list.
 
 **Feedback → belief sink**: the `feedback_extractor` agent (`gpt-5.1`, routine `feedback_extractor_daily`) drains unprocessed `feedback.comment` pods (`feedback_service.list_recent_unprocessed_comments`), extracts belief updates, writes them to the belief store (`upsert_belief` / `add_evidence_to_existing`), and stamps each pod `processed_at_utc` + flips its tag to `processed`. A `contradicts` signal never mints a new belief (only weakens an existing one; otherwise recorded as `phantom_skipped`). This closes the loop: comment → extractor → belief → next-day proposer reads the belief snapshot. See [16_BELIEF_ENGINE.md](16_BELIEF_ENGINE.md).
+
+### Seeing the brain work: /mind and /brain/flow (2026-10-02)
+
+Design: `docs/design/brain_insight_2026-10-02.md`.
+
+- **Runs and steps** (`subconscious/brain_trace.py`). Each wake of the brain is a run (`brain_runs`: trigger
+  boot / event / timer, the run's summary, its error). The run id rides in the trace contextvar, so every
+  model call made during it carries `run_id`. What code decides is recorded where it is decided with
+  `step(stage, what, subject=..., **detail)` (`brain_steps`): answers refused and corrected, routes, each
+  door outcome with the concern it landed in, stale reasons, tool results, handoffs handed or held back,
+  placements and owners. Steps outside a wake are not recorded.
+- **`/brain/flow`** (`app/routes/brain_flow.py`, local-only): the stages as a diagram (`NODES`, `EDGES`),
+  a scrubber over the runs, and each stage's calls and steps in time order for the chosen run; the
+  steward's calls are found by the item ids the run handed over. `?concern=` lists the runs that touched
+  one concern.
+- **Stories** (`subconscious/brain_stories.py`, last stage of the wake): `subconscious::story_matter` (per
+  matter: headline + a line per event), `story_concern` (per open concern with a brief: state, story,
+  proposed now, fate) and `story_day` (per local day: headline + overview), stored in `brain_stories`
+  against the fingerprint of their input and rewritten only when it changes; the last `STORY_DAYS` days.
+- **`/mind`** (`app/routes/mind.py`, local-only): the owner's page. The day's ribbon (came in → read →
+  concerns touched → handed on → settled), its story, each matter with its lines and a tag from the data,
+  what was set aside without a concern, a card per open concern, the routines apart. It reads stored
+  stories only; each card links to `/brain/flow` filtered to its concern.
 
 ## 10. Data Stores & Pod-Kind Reference
 

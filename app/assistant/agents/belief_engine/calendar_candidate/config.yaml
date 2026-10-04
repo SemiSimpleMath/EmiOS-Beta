@@ -1,0 +1,19 @@
+# Decides, for a page of beliefs, which ones might belong on the owner's day-planning calendar some day: a belief
+# about something that happens or matters at a time. It only PROPOSES: the owner approves or declines each proposal
+# in the morning review, and the planner reads approved beliefs only. Run after the nightly belief intake over the
+# beliefs not yet looked at (belief_engine/intake/calendar.py).
+#
+# Smart tier: a belief this misses is never shown to the owner, so recall matters more than cost; after the first
+# run it reads only the night's new beliefs.
+name: belief_engine::calendar_candidate
+class_name: Agent
+llm_params:
+  llm_provider: openai
+  model_tier: "smart"
+allowed_tools: []
+except_tools: []
+user_context_items: [beliefs, correction]
+system_context_items: [resource_user_data]
+prompt_debug:
+  system: true
+  user: true

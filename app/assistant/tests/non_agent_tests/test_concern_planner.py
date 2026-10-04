@@ -48,13 +48,12 @@ def test_it_plans_a_briefed_matter_concern_once_per_brief():
     assert len(concern_planner.stale(register, NOW)) == 1
 
 
-def test_it_waits_for_the_brief_and_leaves_standing_concerns_alone():
+def test_it_waits_for_the_brief_and_a_failed_plan_waits_for_a_change():
     unbriefed = _matter("c-new")
     stale_brief = _matter("c-old", brief={**BRIEF, "basis": "an older record"})
-    standing = _briefed(_matter("c-ac", kind="standing"))
     failed = _briefed(_matter("c-fail"))
     failed["plan_error"] = {"basis": failed["brief"]["basis"], "error": "x"}
-    assert concern_planner.stale({**EMPTY, "active": [unbriefed, stale_brief, standing, failed]}, NOW) == []
+    assert concern_planner.stale({**EMPTY, "active": [unbriefed, stale_brief, failed]}, NOW) == []
 
 
 def test_a_passed_hold_is_planned_again_and_wakes_the_brain():
@@ -117,7 +116,6 @@ def test_a_plan_for_a_brief_that_changed_meanwhile_is_refused(tmp_path):
     assert "plan" not in reg.read()["active"][0]
 
 
-def test_the_brief_decides_readiness_only_for_a_standing_concern():
+def test_the_brief_decides_nothing():
     brief = {k: v for k, v in BRIEF.items()}
-    assert concern_brief._problems(brief, [], NOW, standing=False) == []
-    assert "readiness is missing" in concern_brief._problems(brief, [], NOW, standing=True)
+    assert concern_brief._problems(brief, {}) == []

@@ -1,0 +1,8 @@
+## Beliefs to decide
+{% for b in beliefs %}- {{ b.id }}: {{ b.statement }}
+{% endfor %}
+{% if correction %}
+## Correct your previous answer
+It did not satisfy the contract: {{ correction }}
+{% endif %}
+Decide each belief: might it belong on the day-planning calendar some day?

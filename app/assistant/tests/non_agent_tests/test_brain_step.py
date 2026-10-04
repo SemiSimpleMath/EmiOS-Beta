@@ -46,6 +46,7 @@ def fakes(monkeypatch):
     from app.assistant.subconscious import kg_links
     monkeypatch.setattr(kg_links, "find_entities", lambda texts: [])
     monkeypatch.setattr(kg_links, "shared", lambda ids: {"links": [], "entities": []})
+    monkeypatch.setattr(kg_links, "facts_by_meaning", lambda texts: [])
 
 
 @pytest.fixture
@@ -226,3 +227,28 @@ def test_the_brain_prompt_renders_every_section():
         resource_assistant_data={"name": "the assistant"}, resource_user_data={"first_name": "Sam"})
     assert "closes only when its done-when is met or Sam says" in system
     assert "name in your note every item that depends on the old fact" in system
+
+
+def test_a_work_report_the_brain_cites_attaches_the_work_to_that_concern(inbox, tmp_path):
+    """Work made for another concern settled this one: the brain cites its report here, so the work is
+    attached to this concern too, as it is now (ended), and the concern is not left in progress."""
+    reg = _register(tmp_path, active=[_concern("c-vet", "Vet appointment for the dog")])
+    brain_inbox.ensure_schema(inbox)
+    with inbox(True) as c:
+        c.execute("INSERT INTO brain_events (source, source_ref, occurred_at, speaker, text, received_at, gate_status, "
+                  "route, concern_ids) VALUES ('work', 'work:work_cal:000-r1', ?, 'dayflow', ?, ?, 'routed', "
+                  "'concern', ?)", (NOW.isoformat(), 'Work "Fix the calendar" (work_cal) ended: done.\n'
+                                    'Objective: Clean up next week\'s calendar\nReason: the vet visit was moved to '
+                                    'Friday 9:00 while cleaning up.', NOW.isoformat(), json.dumps(["c-vet"])))
+    brain = _brain({"event_decisions": [{"event": "E1", "decision": "used", "reason": "the visit moved"}],
+                    "concern_updates": [{"concern": "C1", "action": "note", "events": ["E1"],
+                                         "note": "The appointment is now Friday 9:00."}],
+                    "new_concerns": []})
+    record = {"title": "Fix the calendar", "objective": "Clean up next week's calendar", "status": "done",
+              "ended": {"outcome": "done", "at": NOW.isoformat(), "reason": "cleaned up"}}
+    brain_step.run_brain_step(connect=inbox, register_connect=reg.connect, call=brain, judge=_all_new,
+                              work_record=lambda wid: record)
+    [c] = reg.read()["active"]
+    work = c["attached_work"]["work_cal"]
+    assert (work["status"], work["ended"]["outcome"]) == ("done", "done")
+    assert "WORK ATTACHED work_cal by the brain" in c["reinforcement_notes"]
