@@ -291,6 +291,11 @@ def test_work_reports_render_under_their_work_and_attached_work_under_its_concer
     text = conversations.render(conversations.build([event], now_utc=NOW))
     assert "### Work work_a" in text and '[E1] dayflow: Work "Check in"' in text
     monkeypatch.setattr(brain_step, "_evidence_text", lambda e: e.get("snippet") or "")
+    from app.assistant.subconscious import work_links
+    monkeypatch.setattr(work_links, "progress", lambda work_id: {
+        "work_id": work_id, "state": "done", "ended_at": "2026-03-10T11:00:00+00:00", "reason": "judged complete",
+        "replanning": False, "dropped": [], "unfinished": [], "to_come": [],
+        "done": [{"title": "Ask", "verdict": "achieved", "at": "2026-03-10T10:30:00+00:00"}]})
     concern = {"concern_id": "c1", "title": "Stress", "_status": "addressing", "evidence": [],
                "attached_work": {"work_a": {"work_id": "work_a", "title": "Check in", "objective": "Check in on stress",
                    "attached_at": "2026-03-10T10:00:00+00:00", "status": "done", "ended": {
@@ -301,9 +306,10 @@ def test_work_reports_render_under_their_work_and_attached_work_under_its_concer
     c = brain_step._concern_view("C1", concern)
     rendered = work_context._ENV.from_string("{% include 'shared/brain/concern.j2' %}").render(c=c)
     from app.assistant.utils.time_utils import local_time_text
-    assert f"work attached {local_time_text('2026-03-10T10:00:00+00:00')}: work_a (done): Check in on stress" in rendered
+    assert f"work attached {local_time_text('2026-03-10T10:00:00+00:00')}: work_a: Check in on stress" in rendered
+    assert f"  Ended {local_time_text('2026-03-10T11:00:00+00:00')}: done, every step finished." in rendered
     assert 'task "Ask" judged achieved' in rendered and "He is less stressed." in rendered
-    assert 'said: "less stress now"' in rendered and "ended done" in rendered
+    assert 'said: "less stress now"' in rendered
 
 
 def test_the_wake_sleeps_until_a_room_goes_quiet_or_a_hold_passes_whichever_is_first(monkeypatch):

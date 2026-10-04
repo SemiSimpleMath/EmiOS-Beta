@@ -72,31 +72,29 @@ def _reply_line(reply: dict) -> str:
     return "; ".join(parts) or "The owner replied (no words recorded)."
 
 
-def _made_for(work: dict, concern_titles: list) -> str:
-    """What the work was made for, as the gate reads it: its objective and the concerns that hold it."""
-    line = f"Objective: {work.get('objective') or work.get('title')}"
-    if concern_titles:
-        line += "\nMade for the concerns: " + "; ".join(f'"{t}"' for t in concern_titles)
-    return line
+def _report_text(report: dict) -> str:
+    """A work report as the brain inbox holds it, worded by shared/work/work_report.j2 (the template every
+    reader of a work report shares)."""
+    from app.assistant.dayflow_orchestrator.work_context import render_view
+    return render_view("work_report", report=report).strip()
 
 
 def _event_text(receipt, concern_titles=()) -> str:
-    """The brain event for a judgment or an ending: what happened, in the finalizer's and the
-    owner's own words, with what the work was made for."""
+    """The brain event for a judgment or an ending: what happened, in the finalizer's and the owner's own
+    words, what the work was made for, and where the work stands at that moment (its progress: what is
+    done and what is still to come), so a reader sees whether the work goes on."""
     payload, kind = receipt['payload'], receipt['outcome']
     work = payload.get('work') or {'title': (payload.get('context') or {}).get('title')}
+    report = {'kind': kind, 'work_id': receipt['work_id'], 'title': work['title'],
+              'objective': work.get('objective') or work['title'], 'concern_titles': list(concern_titles),
+              'progress': payload.get('progress')}
     if kind == 'judged':
         task, fin = payload['task'], payload['task']['finalizer']
-        lines = [f'Work "{work["title"]}" ({receipt["work_id"]}): the finalizer judged the task '
-                 f'"{task["title"]}": {fin.get("verdict")}, next step {fin.get("next_step") or "none"}.',
-                 _made_for(work, list(concern_titles)),
-                 f"What happened: {fin.get('outcome')}"]
-        lines += [_reply_line(r) for r in task.get('replies') or []]
-        return "\n".join(lines)
-    context = payload['context']
-    return (f'Work "{context["title"]}" ({receipt["work_id"]}) ended: {kind}.\n'
-            f'{_made_for(work, list(concern_titles))}\n'
-            f'Reason: {(context.get("terminal") or {}).get("reason") or "(none recorded)"}.')
+        report.update(task_title=task['title'], verdict=fin.get('verdict'), next_step=fin.get('next_step'),
+                      outcome=fin.get('outcome'), replies=[_reply_line(r) for r in task.get('replies') or []])
+    else:
+        report['reason'] = (payload['context'].get('terminal') or {}).get('reason')
+    return _report_text(report)
 
 
 def report_earlier_endings(reopened) -> int:
@@ -109,9 +107,10 @@ def report_earlier_endings(reopened) -> int:
         w = r["work"]
         added += brain_inbox.add_work_event(
             work_id=w["work_id"], receipt_id=f"rederive-{r['concern_id']}", occurred_at=w["ended"]["at"],
-            text=(f'Work "{w.get("title")}" ({w["work_id"]}) ended: {w["ended"]["outcome"]}.\n'
-                  f'{_made_for(w, [r["title"]] if r.get("title") else [])}\n'
-                  f'Reason: {w["ended"].get("reason") or "(none recorded)"}.'))
+            text=_report_text({'kind': w["ended"]["outcome"], 'work_id': w["work_id"], 'title': w.get("title"),
+                               'objective': w.get("objective") or w.get("title"),
+                               'concern_titles': [r["title"]] if r.get("title") else [],
+                               'reason': w["ended"].get("reason"), 'progress': None}))
     if added:
         brain_wake.poke()
     return added

@@ -11,11 +11,17 @@ are receipts, whether it cites a concern or not. Each is written in the same tra
               replies that task received, verbatim (every work object);
 - `done` / `abandoned`  the work ended (every work object).
 
+A judged or ended receipt carries the work's progress at that moment (work_objects/progress.py: what is
+done, what is still to come and what each step waits for), so whoever reads the report sees whether the
+work goes on (docs/design/work_progress_for_outside_readers_2026-10-04.md).
+
 Receipts of one transaction keep their order (the id starts with its position). Delivery lives in
 app/assistant/subconscious/concern_feedback.py.
 """
 import json
 from uuid import uuid4
+
+from work_objects.progress import work_progress
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS work_concern_feedback (
@@ -51,6 +57,7 @@ class ConcernOutboxMixin:
         constraints = wo.constraints or {}
         work = {'title': wo.title, 'objective': constraints.get('objective') or wo.title}
         rows = []
+        progress = work_progress(wo)
         added = [r for r in refs if r not in before['refs']]
         if added:
             rows.append(('attached', {'concern_refs': added, 'work': {
@@ -61,12 +68,13 @@ class ConcernOutboxMixin:
             if wo.is_work_unit(node) and fin and fin.get('at') != before['judged'].get(node.id):
                 rows.append(('judged', {'concern_refs': refs, 'work': work, 'task': {
                     'node_id': node.id, 'title': node.title, 'status': node.status,
-                    'finalizer': fin, 'replies': _replies(wo, node.id)}}))
+                    'finalizer': fin, 'replies': _replies(wo, node.id)}, 'progress': progress}))
         if wo.status in {'done', 'abandoned'} and wo.status != previous_status:
             goal = wo.nodes.get(wo.goal_node_id)
             rows.append((wo.status, {
                 'concern_refs': refs,
                 'work': work,
+                'progress': progress,
                 'context': {
                     'title': wo.title,
                     'completed_at': now,

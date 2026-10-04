@@ -45,12 +45,15 @@ def test_architect_instructions_and_concern_history_are_local():
     concerns = [{"concern_id": "c1234567", "title": "t", "status": "addressing", "done_when": "d", "owner_words": "", "brief": None,
                  "attempts": [{"work_id": "w", "objective": "o", "status": "abandoned",
                                "attached_at": "2026-09-30T07:39:00+00:00",
+                               "progress": {"work_id": "w", "state": "abandoned", "ended_at": "2026-09-30T14:20:00+00:00",
+                                            "reason": "r", "replanning": False, "done": [], "dropped": [],
+                                            "unfinished": [], "to_come": []},
                                "ended": {"outcome": "abandoned", "at": "2026-09-30T14:20:00+00:00", "reason": "r"},
                                "judgments": [{"title": "set", "verdict": "retry", "outcome": "x",
                                               "at": "2026-09-30T14:01:03+00:00", "replies": []}]}]}]
     text = render_view("concern_brief", concerns=concerns)
     assert "attached Wed 09-30 12:39 AM" in text
-    assert "ended abandoned Wed 09-30 07:20 AM" in text
+    assert "Abandoned Wed 09-30 07:20 AM: r" in text
     assert "judged retry (Wed 09-30 07:01 AM)" in text
 
 

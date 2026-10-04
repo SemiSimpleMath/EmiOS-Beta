@@ -60,11 +60,13 @@ def basis(concern: Dict[str, Any], bucket: str) -> str:
 
 def attempts(concern: Dict[str, Any]) -> List[Dict[str, Any]]:
     """The work attached to the concern, oldest first, as every reader shows it: objective, status,
-    each judgment with the owner's replies as lines, and the ending."""
+    where it stands now (read live from the work store: what is done, what is still to come and what
+    each step waits for), each judgment with the owner's replies as lines, and the ending."""
     from app.assistant.subconscious.concern_feedback import _reply_line
+    from app.assistant.subconscious.work_links import progress
     works = sorted((concern.get("attached_work") or {}).values(), key=lambda w: str(w.get("attached_at") or ""))
     return [{"work_id": w["work_id"], "title": w.get("title"), "objective": w.get("objective"),
-             "attached_at": w.get("attached_at"), "status": w.get("status"),
+             "attached_at": w.get("attached_at"), "status": w.get("status"), "progress": progress(w["work_id"]),
              "judgments": [{**j, "replies": [_reply_line(r) for r in j.get("replies") or []]}
                            for j in w.get("judgments") or []],
              "ended": w.get("ended")}

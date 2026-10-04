@@ -20,6 +20,7 @@
 Active work:
 {% for w in agent_input.active_work -%}
 - {{ w.title }} [{{ L.get(w.work_id, w.work_id) }}] (started {{ w.created }}){% if w.objective and w.objective != w.title %}: {{ w.objective }}{% endif %}
+{% with p = w.progress, pad = "  " %}{% include 'shared/work/work_progress.j2' %}{% endwith -%}
 {% else -%}
 (none)
 {% endfor %}

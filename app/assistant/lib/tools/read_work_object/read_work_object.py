@@ -49,7 +49,13 @@ class ReadWorkObjectTool(BaseTool):
         L = [f"WORK OBJECT {wo.id}  (status: {wo.status})", f"GOAL: {goal.title}"]
         if goal.content:
             L.append((goal.content or "")[:_MAX_NODE_CHARS])
-        L.append("\nSTEPS & RESULTS:")
+        # Where the work stands, in words a reader outside dayflow understands: the step statuses below
+        # are dayflow's own (docs/design/work_progress_for_outside_readers_2026-10-04.md).
+        from app.assistant.dayflow_orchestrator.work_context import render_view
+        from work_objects.progress import work_progress
+        L.append("\nWHERE THE WORK STANDS NOW:")
+        L.append(render_view("work_progress", p=work_progress(wo), pad="").rstrip())
+        L.append("\nSTEPS & RESULTS (every record, with dayflow's own status words):")
         for n in wo.nodes.values():
             if n.id == wo.goal_node_id:
                 continue

@@ -24,6 +24,22 @@ BRIEF = {"what": "The bake sale moved to Monday.", "why_it_matters": "Cookies ar
          "open_questions": [], "recommendation": "Update the plans for Monday."}
 
 
+# Where each attached work stands, as the work store would report it (work_objects/progress.py).
+PROGRESS = {
+    "work_1": {"work_id": "work_1", "state": "in_progress", "ended_at": None, "reason": None, "replanning": False,
+               "done": [], "dropped": [], "unfinished": [], "to_come": [{"title": "Order the cake", "wait": {"kind": "ready"}}]},
+    "work_a": {"work_id": "work_a", "state": "done", "ended_at": "2026-03-10T11:00:00+00:00", "reason": "judged complete",
+               "replanning": False, "dropped": [], "unfinished": [], "to_come": [],
+               "done": [{"title": "Ask", "verdict": "achieved", "at": "2026-03-10T10:30:00+00:00"}]},
+}
+
+
+@pytest.fixture(autouse=True)
+def _work_store(monkeypatch):
+    from app.assistant.subconscious import work_links
+    monkeypatch.setattr(work_links, "progress", lambda work_id: PROGRESS[work_id])
+
+
 def _with_brief(reg, readiness_by_id):
     """Each concern gets a current brief and a plan made from it: decision, things to do, why, hold."""
     register = reg.read()
@@ -153,7 +169,9 @@ def test_the_steward_sees_every_earlier_attempt_with_the_owners_replies(tmp_path
     text = item["brief_text"]
     assert "work on this concern so far:" in text
     from app.assistant.utils.time_utils import local_time_text
-    assert (f"Check in on the bake sale plan (work_a; done; attached {local_time_text('2026-03-10T10:00:00+00:00')}; "
-            "ended done") in text
+    assert (f"Check in on the bake sale plan (work_a; attached {local_time_text('2026-03-10T10:00:00+00:00')})\n"
+            f"      Ended {local_time_text('2026-03-10T11:00:00+00:00')}: done, every step finished.\n"
+            f"      Done:\n        - Ask (achieved {local_time_text('2026-03-10T10:30:00+00:00')})\n"
+            "      judgments of its steps:") in text
     assert 'task "Ask" judged achieved' in text and "The owner will bake on Sunday." in text
     assert 'said: "I will, Sunday"' in text

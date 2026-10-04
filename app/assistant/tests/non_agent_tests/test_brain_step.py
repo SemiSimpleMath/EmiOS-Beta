@@ -205,7 +205,10 @@ def test_the_brain_prompt_renders_every_section():
                                 "ended_because": "", "link": "cites a concern of this matter", "score": None,
                                 "outcomes": [{"verdict": "achieved", "outcome": "Two dozen baked."}]}],
                "similar_work": [],
-               "active_work": [{"work_id": "w2", "title": "Remind about the sale", "objective": "", "created": "Mon"}],
+               "active_work": [{"work_id": "w2", "title": "Remind about the sale", "objective": "", "created": "Mon",
+                                "progress": {"work_id": "w2", "state": "in_progress", "ended_at": None, "reason": None,
+                                             "replanning": False, "done": [], "dropped": [], "unfinished": [],
+                                             "to_come": [{"title": "Send the reminder", "wait": {"kind": "ready"}}]}}],
                "reminders": [{"ref": "reminder:r1", "title": "Bake cookies", "kind": "one time", "repeats": "",
                               "start": "Thu 18:00", "end": ""}],
                "calendar": "- [calendar:bake] Bake sale @ Fri 08:00",
@@ -219,7 +222,10 @@ def test_the_brain_prompt_renders_every_section():
     assert "- [C2] Car service (active; about owner; done when: (not stated))" in user
     assert "### Bake cookies for the sale [w1; done; started Mon, last changed Tue; cites a concern of this matter]" in user
     assert "OUTCOME: Two dozen baked." in user and "(none close enough)" in user
-    assert "- Remind about the sale [w2] (started Mon)" in user and "- [reminder:r1] Bake cookies (one time; at Thu 18:00)" in user
+    assert "- Remind about the sale [w2] (started Mon)\n  In progress. The assistant carries this work" in user
+    assert ("  Still to come in this work (the assistant does each step itself, as part of this work):\n"
+            "    - Send the reminder: ready now; the assistant does it next") in user
+    assert "- [reminder:r1] Bake cookies (one time; at Thu 18:00)" in user
     assert "- [calendar:bake] Bake sale @ Fri 08:00" in user
     assert "- Karjalohja: A place the family travels to." in user
     assert '- Event "Summer Trip" (2019-07-01): At the cottage.' in user

@@ -12,15 +12,15 @@
 - evidence ({{ e.kind }} {{ L.get(e.ref, e.ref) }}){% if e.snippet %}: {{ e.snippet }}{% endif %}
 {% endfor -%}
 {% for w in c.attached_work -%}
-- work attached {{ w.attached_at | local_time }}: {{ L.get(w.work_id, w.work_id) }} ({{ w.status }}): {{ w.objective }}
+- work attached {{ w.attached_at | local_time }}: {{ L.get(w.work_id, w.work_id) }}: {{ w.objective }}
+{% with p = w.progress, pad = "  " %}{% include 'shared/work/work_progress.j2' %}{% endwith -%}
 {% for j in w.judgments -%}
-{{ "  " }}- task "{{ j.title }}" judged {{ j.verdict }} ({{ j.at | local_time }}), next step {{ j.next_step or "none" }}: {{ j.outcome }}
+{% if loop.first %}{{ "  " }}Judgments of its steps:
+{% endif %}{{ "  " }}- task "{{ j.title }}" judged {{ j.verdict }} ({{ j.at | local_time }}), next step {{ j.next_step or "none" }}: {{ j.outcome }}
 {% for r in j.replies -%}
 {{ "    " }}- {{ r }}
 {% endfor -%}
 {% endfor -%}
-{% if w.ended %}{{ "  " }}- ended {{ w.ended.outcome }} ({{ w.ended.at | local_time }}){% if w.ended.reason %}: {{ w.ended.reason }}{% endif %}
-{% endif -%}
 {% endfor -%}
 {% if c.journal %}- journal:{{ c.journal }}
 {% endif %}

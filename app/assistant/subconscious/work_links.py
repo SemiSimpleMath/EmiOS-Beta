@@ -185,10 +185,17 @@ def similar_work(texts: List[str], *, exclude: Iterable[str] = (), k: int = SIMI
 
 # ── what is already in motion ───────────────────────────────────────────────
 
+def progress(work_id: str) -> Dict[str, Any]:
+    """Where one work object stands now, read from the work store (work_objects/progress.py); readers
+    word it with shared/work/work_progress.j2."""
+    from work_objects.progress import work_progress
+    return work_progress(_store().load(work_id))
+
+
 def active_work() -> List[Dict[str, Any]]:
-    """Every active work object: title, objective, when it started."""
+    """Every active work object: title, objective, when it started, and where it stands."""
     return [{"work_id": r["id"], "title": r["title"], "objective": str(r["constraints"].get("objective") or ""),
-             "created": _local(r["created_at"])}
+             "created": _local(r["created_at"]), "progress": progress(r["id"])}
             for r in sorted(_rows(), key=lambda r: r["created_at"] or "") if r["status"] == "active"]
 
 

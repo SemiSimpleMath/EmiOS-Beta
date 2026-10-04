@@ -1,0 +1,24 @@
+{#- A report on work the assistant did, as the brain inbox holds it (subconscious/concern_feedback.py):
+    one finalizer judgment or the work's ending, what the work was made for, and where the work stands.
+    Expects `report`: kind (judged | done | abandoned), work_id, title, objective, concern_titles, and
+    for judged: task_title, verdict, next_step, outcome, replies (lines); for an ending: reason;
+    progress (work_objects/progress.work_progress) when the report carries it. -#}
+{% if report.kind == "judged" -%}
+Work "{{ report.title }}" ({{ report.work_id }}): the finalizer judged the task "{{ report.task_title }}": {{ report.verdict }}, next step {{ report.next_step or "none" }}.
+{% else -%}
+Work "{{ report.title }}" ({{ report.work_id }}) ended: {{ report.kind }}.
+{% endif -%}
+Objective: {{ report.objective }}
+{% if report.concern_titles %}Made for the concerns: {% for t in report.concern_titles %}"{{ t }}"{% if not loop.last %}; {% endif %}{% endfor %}
+{% endif -%}
+{% if report.kind == "judged" -%}
+What happened in this task: {{ report.outcome }}
+{% for r in report.replies %}{{ r }}
+{% endfor -%}
+{% else -%}
+Reason: {{ report.reason or "(none recorded)" }}.
+{% endif -%}
+{% if report.progress -%}
+Where the work stands now:
+{% with p = report.progress, pad = "  " %}{% include 'shared/work/work_progress.j2' %}{% endwith -%}
+{% endif -%}

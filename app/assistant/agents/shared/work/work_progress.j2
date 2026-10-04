@@ -1,0 +1,37 @@
+{#- Where one work object stands, for readers outside dayflow (work_objects/progress.work_progress).
+    Expects `p` (the progress) and `pad` (the indent of its lines).
+    docs/design/work_progress_for_outside_readers_2026-10-04.md -#}
+{%- if p.state == "in_progress" -%}
+{{ pad }}In progress. The assistant carries this work until every step is done, or abandons it with a reason.
+{% elif p.state == "on_hold" -%}
+{{ pad }}On hold. The assistant carries this work until every step is done, or abandons it with a reason.
+{% elif p.state == "done" -%}
+{{ pad }}Ended {{ p.ended_at | local_time }}: done, every step finished.
+{% elif p.state == "abandoned" -%}
+{{ pad }}Abandoned {{ p.ended_at | local_time }}: {{ p.reason or "(no reason recorded)" }}
+{% else -%}
+{{ p.state_has_no_wording }}
+{% endif -%}
+{% if p.replanning -%}
+{{ pad }}A step's result asked for a change of plan; the assistant is re-planning this work before the next step.
+{% endif -%}
+{% for t in p.done -%}{% if loop.first %}{{ pad }}Done:
+{% endif %}{{ pad }}  - {{ t.title }} ({{ t.verdict }}{% if t.at %} {{ t.at | local_time }}{% endif %})
+{% endfor -%}
+{% for t in p.dropped -%}{% if loop.first %}{{ pad }}Dropped from the plan:
+{% endif %}{{ pad }}  - {{ t.title }}{% if t.reason %}: {{ t.reason }}{% endif %}
+{% endfor -%}
+{% for t in p.unfinished -%}{% if loop.first %}{{ pad }}Not finished when the work ended:
+{% endif %}{{ pad }}  - {{ t.title }}
+{% endfor -%}
+{% for t in p.to_come -%}{% if loop.first %}{{ pad }}Still to come in this work (the assistant does each step itself, as part of this work):
+{% endif %}{% set w = t.wait %}{{ pad }}  - {{ t.title }}: {% if w.kind == "ready" %}ready now; the assistant does it next
+{%- elif w.kind == "scheduled" %}scheduled for {{ w.at | local_time }}
+{%- elif w.kind == "after" %}after {% for x in w.tasks %}"{{ x }}"{% if not loop.last %} and {% endif %}{% endfor %}
+{%- elif w.kind == "watching" %}waiting until: {{ w.condition }}
+{%- elif w.kind == "being_done" %}being done now
+{%- elif w.kind == "owner_reply" %}waiting for the owner's reply{% if w.question %} to "{{ w.question }}"{% endif %}{% if w.asked_at %} (asked {{ w.asked_at | local_time }}){% endif %}
+{%- elif w.kind == "being_checked" %}done, its result is being checked
+{%- elif w.kind == "failed" %}did not succeed; the assistant is deciding the next attempt
+{%- else %}{{ w.kind_has_no_wording }}{% endif %}
+{% endfor -%}
