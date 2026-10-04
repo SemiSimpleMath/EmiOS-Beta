@@ -16,7 +16,7 @@
 {% with p = w.progress, pad = "  " %}{% include 'shared/work/work_progress.j2' %}{% endwith -%}
 {% for j in w.judgments -%}
 {% if loop.first %}{{ "  " }}Judgments of its steps:
-{% endif %}{{ "  " }}- task "{{ j.title }}" judged {{ j.verdict }} ({{ j.at | local_time }}), next step {{ j.next_step or "none" }}: {{ j.outcome }}
+{% endif %}{{ "  " }}- task "{{ j.title }}" ({{ j.at | local_time }}): {{ j.outcome }}
 {% for r in j.replies -%}
 {{ "    " }}- {{ r }}
 {% endfor -%}

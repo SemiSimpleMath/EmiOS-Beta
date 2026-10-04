@@ -80,7 +80,7 @@ def test_finished_and_dropped_steps_and_the_plan_order():
     text = _render(p)
     assert text.startswith("In progress. The assistant carries this work until every step is done, "
                            "or abandons it with a reason.")
-    assert "Done:\n  - Compile the briefing (achieved " in text and ("Still to come in this work (the assistant does each step itself, as part of this work):\n"
+    assert "Done:\n  - Compile the briefing (" in text and "achieved" not in text and ("Still to come in this work (the assistant does each step itself, as part of this work):\n"
                                                                      "  - Deliver the briefing: ready now; the assistant does it next") in text
 
 

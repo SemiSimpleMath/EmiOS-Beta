@@ -21,7 +21,7 @@ The owner's wishes: {{ b.owner_wishes }}
 {% for w in c.attempts %}
 - {{ w.objective or w.title }} ({{ w.status }})
 {%- for j in w.judgments %}
-  judged {{ j.verdict }}: {{ j.outcome }}
+  {{ j.title }}: {{ j.outcome }}
 {%- for r in j.replies %}
   {{ r }}
 {%- endfor %}

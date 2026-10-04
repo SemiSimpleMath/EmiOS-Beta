@@ -308,7 +308,7 @@ def test_work_reports_render_under_their_work_and_attached_work_under_its_concer
     from app.assistant.utils.time_utils import local_time_text
     assert f"work attached {local_time_text('2026-03-10T10:00:00+00:00')}: work_a: Check in on stress" in rendered
     assert f"  Ended {local_time_text('2026-03-10T11:00:00+00:00')}: done, every step finished." in rendered
-    assert 'task "Ask" judged achieved' in rendered and "He is less stressed." in rendered
+    assert 'task "Ask" (' in rendered and "judged achieved" not in rendered and "He is less stressed." in rendered
     assert 'said: "less stress now"' in rendered
 
 

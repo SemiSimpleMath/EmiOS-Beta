@@ -5,5 +5,5 @@
 {% endif -%}
 {% if w.ended_because %}- ended because: {{ w.ended_because }}
 {% endif -%}
-{% for finalizer in w.outcomes %}- task outcome: {% include 'shared/work/finalizer_summary.j2' %}
-{%- endfor %}
+{% for o in w.outcomes %}- task "{{ o.title }}"{% if o.at %} ({{ o.at | local_time }}){% endif %}: {{ o.outcome }}
+{% endfor %}

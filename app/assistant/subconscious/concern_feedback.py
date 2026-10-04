@@ -90,8 +90,7 @@ def _event_text(receipt, concern_titles=()) -> str:
               'progress': payload.get('progress')}
     if kind == 'judged':
         task, fin = payload['task'], payload['task']['finalizer']
-        report.update(task_title=task['title'], verdict=fin.get('verdict'), next_step=fin.get('next_step'),
-                      outcome=fin.get('outcome'), replies=[_reply_line(r) for r in task.get('replies') or []])
+        report.update(task_title=task['title'], outcome=fin.get('outcome'), replies=[_reply_line(r) for r in task.get('replies') or []])
     else:
         report['reason'] = (payload['context'].get('terminal') or {}).get('reason')
     return _report_text(report)

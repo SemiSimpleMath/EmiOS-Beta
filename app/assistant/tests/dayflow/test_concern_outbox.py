@@ -89,7 +89,8 @@ def test_every_judgment_and_the_ending_reach_the_concern_and_the_brain(setup):
         assert (e['gate_status'], e['route']) == ('pending', None)    # the gate routes it, like chat
         assert 'Objective: Settle the maintenance question' in e['text']
         assert f'Made for the concerns: "{concern["title"]}"' in e['text']
-    assert 'I have arranged it. Stop asking.' in judged['text'] and 'achieved' in judged['text']
+    assert 'I have arranged it. Stop asking.' in judged['text']
+    assert 'User has arranged maintenance; no further contact.' in judged['text'] and 'achieved' not in judged['text']
     assert 'ended: done' in ended['text']
     for view in (context_builder._render_concern_summary(concern,status='active'),
                  context_builder._render_closed_concern(concern,status='dormant',why='user ownership')):
@@ -104,7 +105,8 @@ def test_a_judgment_that_did_not_achieve_the_goal_reaches_the_brain_too(setup):
     finish(store,wid,verdict='retry')
     concern_feedback.recover_pending_concern_feedback(store)
     [event]=work_events(inbox)
-    assert 'retry' in event['text']
+    # The finalizer's account reaches the brain; its verdict stays with dayflow (2026-10-04).
+    assert 'User has arranged maintenance; no further contact.' in event['text'] and 'retry' not in event['text']
     assert path.read()['addressing'][0]['attached_work'][wid]['status']=='active'
 
 

@@ -203,7 +203,7 @@ def test_the_brain_prompt_renders_every_section():
                "linked_work": [{"work_id": "w1", "title": "Bake cookies for the sale", "status": "done",
                                 "objective": "Bake cookies for the sale", "created": "Mon", "updated": "Tue",
                                 "ended_because": "", "link": "cites a concern of this matter", "score": None,
-                                "outcomes": [{"verdict": "achieved", "outcome": "Two dozen baked."}]}],
+                                "outcomes": [{"title": "Bake the cookies", "outcome": "Two dozen baked.", "at": None}]}],
                "similar_work": [],
                "active_work": [{"work_id": "w2", "title": "Remind about the sale", "objective": "", "created": "Mon",
                                 "progress": {"work_id": "w2", "state": "in_progress", "ended_at": None, "reason": None,
@@ -221,7 +221,7 @@ def test_the_brain_prompt_renders_every_section():
     assert "### [C1] Flea medication due (active)" in user and 'the owner asked for this: "track it"' in user
     assert "- [C2] Car service (active; about owner; done when: (not stated))" in user
     assert "### Bake cookies for the sale [w1; done; started Mon, last changed Tue; cites a concern of this matter]" in user
-    assert "OUTCOME: Two dozen baked." in user and "(none close enough)" in user
+    assert '- task "Bake the cookies": Two dozen baked.' in user and "(none close enough)" in user
     assert "- Remind about the sale [w2] (started Mon)\n  In progress. The assistant carries this work" in user
     assert ("  Still to come in this work (the assistant does each step itself, as part of this work):\n"
             "    - Send the reminder: ready now; the assistant does it next") in user

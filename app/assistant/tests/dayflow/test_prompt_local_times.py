@@ -54,7 +54,7 @@ def test_architect_instructions_and_concern_history_are_local():
     text = render_view("concern_brief", concerns=concerns)
     assert "attached Wed 09-30 12:39 AM" in text
     assert "Abandoned Wed 09-30 07:20 AM: r" in text
-    assert "judged retry (Wed 09-30 07:01 AM)" in text
+    assert '- task "set" (Wed 09-30 07:01 AM): x' in text
 
 
 def test_boot_validator_parses_templates_that_use_the_filter():

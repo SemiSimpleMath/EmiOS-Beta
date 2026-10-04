@@ -2,7 +2,8 @@
 {% for c in concerns %}
 {% if c.get('unresolved') %}- concern {{ c.ref }}: not found ({{ c.unresolved }})
 {% else %}- concern {{ c.concern_id[:8] }}: {{ c.title }} [{{ c.status }}]
-  done when: {{ c.done_when or "(not stated)" }}
+{% if c.get('severity') %}  severity: {{ c.severity }} (how much it matters to the household, as the brain judged it)
+{% endif %}  done when: {{ c.done_when or "(not stated)" }}
 {% if c.owner_words %}  the owner asked for this: "{{ c.owner_words }}"
 {% endif %}{% if c.brief %}{% if not c.brief_current %}  (this brief predates the latest change to the concern; a newer one is being written)
 {% endif %}  what: {{ c.brief.what }}
@@ -22,6 +23,6 @@
 {% endif %}{% for w in c.get('attempts') or [] %}{% if loop.first %}  work on this concern so far:
 {% endif %}    - {{ w.objective }} ({{ w.work_id }}; attached {{ w.attached_at | local_time }})
 {% with p = w.progress, pad = "      " %}{% include 'shared/work/work_progress.j2' %}{% endwith %}{% for j in w.judgments %}{% if loop.first %}      judgments of its steps:
-{% endif %}      - task "{{ j.title }}" judged {{ j.verdict }} ({{ j.at | local_time }}): {{ j.outcome }}
+{% endif %}      - task "{{ j.title }}" ({{ j.at | local_time }}): {{ j.outcome }}
 {% for r in j.replies %}        - {{ r }}
 {% endfor %}{% endfor %}{% endfor %}{% endif %}{% endfor %}

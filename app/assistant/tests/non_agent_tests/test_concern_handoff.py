@@ -171,7 +171,7 @@ def test_the_steward_sees_every_earlier_attempt_with_the_owners_replies(tmp_path
     from app.assistant.utils.time_utils import local_time_text
     assert (f"Check in on the bake sale plan (work_a; attached {local_time_text('2026-03-10T10:00:00+00:00')})\n"
             f"      Ended {local_time_text('2026-03-10T11:00:00+00:00')}: done, every step finished.\n"
-            f"      Done:\n        - Ask (achieved {local_time_text('2026-03-10T10:30:00+00:00')})\n"
+            f"      Done:\n        - Ask ({local_time_text('2026-03-10T10:30:00+00:00')})\n"
             "      judgments of its steps:") in text
-    assert 'task "Ask" judged achieved' in text and "The owner will bake on Sunday." in text
+    assert 'task "Ask" (' in text and "The owner will bake on Sunday." in text
     assert 'said: "I will, Sunday"' in text

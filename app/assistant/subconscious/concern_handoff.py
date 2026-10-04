@@ -85,7 +85,7 @@ def _brief_text(concern: Dict[str, Any], bucket: str) -> str:
     them: the same template the agents doing the work read."""
     from app.assistant.dayflow_orchestrator.work_context import render_view
     from app.assistant.subconscious import concern_brief
-    view = {"concern_id": concern["concern_id"], "title": concern.get("title"), "status": bucket,
+    view = {"concern_id": concern["concern_id"], "title": concern.get("title"), "status": bucket, "severity": concern.get("severity"),
             "done_when": concern.get("done_when"), "owner_words": (concern.get("owner_request") or {}).get("words"),
             "brief": concern["brief"], "plan": concern.get("plan"), "attempts": concern_brief.attempts(concern),
             "brief_current": True}

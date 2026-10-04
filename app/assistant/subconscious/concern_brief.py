@@ -267,7 +267,7 @@ def briefs_for_refs(refs: List[str]) -> List[Dict[str, Any]]:
             out.append({"ref": ref, "unresolved": f"matches {len(matches)} concerns in the register"})
             continue
         bucket, c = matches[0]
-        out.append({"concern_id": c["concern_id"], "title": c.get("title"), "status": bucket,
+        out.append({"concern_id": c["concern_id"], "title": c.get("title"), "status": bucket, "severity": c.get("severity"),
                     "done_when": c.get("done_when"), "owner_words": (c.get("owner_request") or {}).get("words"),
                     "brief": c.get("brief"), "plan": c.get("plan"), "attempts": attempts(c),
                     "brief_current": (c.get("brief") or {}).get("basis") == basis(c, bucket)})

@@ -16,7 +16,7 @@
 {{ pad }}A step's result asked for a change of plan; the assistant is re-planning this work before the next step.
 {% endif -%}
 {% for t in p.done -%}{% if loop.first %}{{ pad }}Done:
-{% endif %}{{ pad }}  - {{ t.title }} ({{ t.verdict }}{% if t.at %} {{ t.at | local_time }}{% endif %})
+{% endif %}{{ pad }}  - {{ t.title }}{% if t.at %} ({{ t.at | local_time }}){% endif %}
 {% endfor -%}
 {% for t in p.dropped -%}{% if loop.first %}{{ pad }}Dropped from the plan:
 {% endif %}{{ pad }}  - {{ t.title }}{% if t.reason %}: {{ t.reason }}{% endif %}

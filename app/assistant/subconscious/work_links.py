@@ -76,7 +76,10 @@ def _local(value: Any) -> str:
 
 
 def work_view(work_id: str, *, link: str, score: Optional[float] = None) -> Dict[str, Any]:
-    """One work object as the brain reads it: what it was for, how it ended, what each task found."""
+    """One work object as the brain reads it: what it was for, how it ended, and what each task found, in the
+    finalizer's own account. The verdict, recommendation and next step stay with dayflow: they are the finalizer's
+    instructions to the architect for that work object, and read outside it they became household rules
+    (2026-10-03: "do not send a reminder" for one expired ticket held a concern until its date had passed)."""
     from app.assistant.control_nodes.strategic_planner_wo_prep_node import _goal_epitaph
     wo = _store().load(work_id)
     nodes = getattr(wo, "nodes", {}) or {}
@@ -90,7 +93,8 @@ def work_view(work_id: str, *, link: str, score: Optional[float] = None) -> Dict
         "objective": str((wo.constraints or {}).get("objective") or ""),
         "created": _local(summary["created_at"]), "updated": _local(summary["updated_at"]),
         "ended_because": _goal_epitaph(wo),
-        "outcomes": [n.payload["finalizer"] for n in nodes.values()
+        "outcomes": [{"title": n.title, "outcome": n.payload["finalizer"].get("outcome"),
+                      "at": n.payload["finalizer"].get("at")} for n in nodes.values()
                      if wo.is_work_unit(n) and (n.payload or {}).get("finalizer")],
         "link": link, "score": round(score, 2) if score is not None else None,
     }
