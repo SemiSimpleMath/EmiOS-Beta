@@ -56,6 +56,14 @@ finding_type values:
                            State and links it succeeded_by its successor. A
                            rejected row is the judge's cooldown stamp.
 
+  "processing_failure" — kg/failure_ledger.py (2026-10-05): an item of a KG
+                           queue (window, proposal, finding, card, node to
+                           rate or tag) failed in SET_ASIDE_AFTER runs and is
+                           set aside; its queue skips it until released.
+                           Born escalated. primary_node_id is the ITEM id,
+                           which is a node id only for node queues;
+                           evidence.item_kind says which queue.
+
   Historical (not produced today):
     "suspect_node" — per-node LLM quality scan, sunsetted 2026-04-27. Existing
                      rows of this type may still exist in DB and remain valid;
