@@ -178,6 +178,18 @@ the schedule and the owner at the keyboard during the wind-down. Found on the wa
 showed every agent UTC times (fixed); calendar-made work citing only a belief was not recognized (fixed); the
 key-dates builder speaks for the romance proposer. The table `brain_day_decisions` keeps its name.
 
+**Decide once, change only on something new (built 2026-10-05, shadow, needs a restart).** Live on the morning of
+2026-10-05, day_tasks re-decided all 28 placements on every run (11 runs from 5:00 to 7:31 AM) and code compared the
+text: 43 modifications, of which about 30 were rewordings ("the assistant" become "assistant"; covers dropped in one
+run and restored in the next; a reminder that grew a clause each run) and about 6 were re-judgments with nothing
+new ("The existing rationale incorrectly says…"). Now, as the steward and the architect: an item not yet on the list
+is decided; an item on the list keeps its entry when the answer leaves it out; a change must name in `new_since` a
+fact it read that is newer than the entry (each chat message, work, reminder sent and concern carries a label, M1,
+W1, R1, C1; `day_tasks.label_refs`), or it is refused like an unlicensed prune; a placement done elsewhere or more than
+an hour past is not offered again; an entry is cancelled only when its placement leaves the day's plan. `who_acts` is
+gone from day_tasks (an entry is the assistant's own task). Three runs on the live inputs against a copy of the day's
+42 entries: no list change in any (one decision restated with the same meaning, kept).
+
 ### What day_tasks reads: the brain's view of the day
 
 The owner's worry (2026-10-04): it "sees less than brain". It is the brain deciding, so it sees what the brain

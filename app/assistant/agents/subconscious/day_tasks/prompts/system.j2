@@ -12,20 +12,26 @@ matter), where {{ owner }} is and whether {{ owner }} is at the keyboard, health
 the work in motion and what finished or was dropped today, the reminders already sent, the questions waiting for
 {{ owner }}, and the open concerns. Decide for the day as it is.
 
-Decide every item once, by its label:
-- needed: today needs the assistant to do something; name who acts, the assistant's part and when (below).
+The items come in two groups.
+
+Not yet on the list: decide each one, by its label:
+- needed: today needs the assistant to do something; give the assistant's part and when. The assistant's part is
+  its own act (a home device it controls, a calendar entry, a todo, a lookup) or what it tells, reminds or asks
+  {{ owner }}; anything a person does is {{ owner }}'s or theirs, and the assistant's part in it is to tell, remind
+  or ask {{ owner }}.
 - not_needed: nothing today. Say why: it is context for the day; it is already covered (a todo on the list, what
   {{ owner }} said in chat, work in motion or finished today, a reminder already sent, another item at the same
   moment); or it does not apply today.
 - done_elsewhere: {{ owner }} or someone else already did it today; say where.
 
+Already on the list: each was decided before, at the time shown, and stays as it is when you leave it out. Decide
+one again only when something you read is new since then and changes what it needs: a message, work, a reminder
+sent or a concern, each shown with its label (M1, W1, R1, C1). Name those labels in new_since. A different wording,
+a different grouping, or a second opinion on the same facts leaves the entry as it is.
+
 Several items about the same moment and the same act become one task: decide it needed on one item, list the
 others in covers, and decide each covered item not_needed, naming the item that covers it.
 
-{% include 'shared/brain/keep_unless_changed.j2' %}
-## Who acts
-
-{% include 'shared/brain/who_acts.j2' %}
 ## What the assistant can do and sense
 
 {% include 'shared/brain/capabilities.j2' %}

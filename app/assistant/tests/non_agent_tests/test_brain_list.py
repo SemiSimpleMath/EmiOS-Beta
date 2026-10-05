@@ -19,24 +19,26 @@ from belief_engine.intake.store import sqlite_file
 NOW = datetime(2026, 3, 10, 15, 0, tzinfo=timezone.utc)
 ITEMS = [{"label": "I1", "belief_key": "B3", "time": "9:00 PM", "statement": "The owner wants the AC at 70 at 9 PM."},
          {"label": "I2", "belief_key": "B4", "time": "9:00 PM", "statement": "The AC runs cool at night."}]
+PLACED = [L.calendar_id("2026-03-10", "B3", "9:00 PM"), L.calendar_id("2026-03-10", "B4", "9:00 PM")]
 
 
 def _decision(when="9:00 PM", why="A standing wish."):
-    return [{"item": "I1", "decision": "needed", "who_acts": "the assistant", "assistant_part": "set the AC to 70",
-             "when": when, "covers": ["I2"], "why": why},
-            {"item": "I2", "decision": "not_needed", "who_acts": "", "assistant_part": "", "when": "", "covers": [],
-             "why": "Covered by I1."}]
+    return [{"item": "I1", "decision": "needed", "assistant_part": "set the AC to 70",
+             "when": when, "covers": ["I2"], "why": why, "new_since": []},
+            {"item": "I2", "decision": "not_needed", "assistant_part": "", "when": "", "covers": [],
+             "why": "Covered by I1.", "new_since": []}]
 
 
 def test_a_changed_decision_is_a_modification_of_the_same_entry(tmp_path):
     conn = sqlite_file(tmp_path / "l.db")
-    assert L.apply_calendar("2026-03-10", ITEMS, _decision(), cause="run 1", at=NOW, connect=conn) == \
-        {"created": 2, "modified": 0, "unchanged": 0, "cancelled": 0}
-    assert L.apply_calendar("2026-03-10", ITEMS, _decision(why="Still a standing wish."), cause="run 2",
-                            at=NOW, connect=conn)["unchanged"] == 2, "a changed reason alone is no change"
+    assert L.apply_calendar("2026-03-10", ITEMS, _decision(), placed_ids=PLACED, cause="run 1", at=NOW,
+                            connect=conn) == {"created": 2, "modified": 0, "unchanged": 0, "kept": 0, "cancelled": 0}
+    assert L.apply_calendar("2026-03-10", ITEMS, _decision(why="Still a standing wish."), placed_ids=PLACED,
+                            cause="run 2", at=NOW, connect=conn)["unchanged"] == 2, "a changed reason alone is no change"
     later = NOW + timedelta(minutes=5)
-    assert L.apply_calendar("2026-03-10", ITEMS, _decision("8:30 PM", "The owner asked for 8:30 today."),
-                            cause="run 3", at=later, connect=conn)["modified"] == 1
+    assert L.apply_calendar("2026-03-10", ITEMS, _decision("8:30 PM", "The owner asked for 8:30 today.")[:1],
+                            placed_ids=PLACED, cause="run 3", at=later, connect=conn) == \
+        {"created": 0, "modified": 1, "unchanged": 0, "kept": 1, "cancelled": 0}, "the undecided entry is kept"
     ac = L.calendar_id("2026-03-10", "B3", "9:00 PM")
     [entry] = [e for e in L.entries(day="2026-03-10", connect=conn) if e["id"] == ac]
     assert (entry["when_local"], entry["status"], entry["covers"]) == \
@@ -49,9 +51,11 @@ def test_a_changed_decision_is_a_modification_of_the_same_entry(tmp_path):
 
 def test_a_placement_dropped_from_the_day_is_cancelled(tmp_path):
     conn = sqlite_file(tmp_path / "l.db")
-    L.apply_calendar("2026-03-10", ITEMS, _decision(), cause="run 1", at=NOW, connect=conn)
-    one = [{**_decision()[0], "covers": []}]
-    assert L.apply_calendar("2026-03-10", ITEMS[:1], one, cause="run 2", at=NOW, connect=conn)["cancelled"] == 1
+    L.apply_calendar("2026-03-10", ITEMS, _decision(), placed_ids=PLACED, cause="run 1", at=NOW, connect=conn)
+    assert L.apply_calendar("2026-03-10", ITEMS, [], placed_ids=PLACED, cause="run 2", at=NOW,
+                            connect=conn)["cancelled"] == 0, "an entry left undecided while still placed is kept"
+    assert L.apply_calendar("2026-03-10", ITEMS[:1], [], placed_ids=PLACED[:1], cause="run 3", at=NOW,
+                            connect=conn)["cancelled"] == 1
     gone = L.calendar_id("2026-03-10", "B4", "9:00 PM")
     assert [e["id"] for e in L.entries(day="2026-03-10", connect=conn)] == [L.calendar_id("2026-03-10", "B3", "9:00 PM")]
     assert L.changes(gone, connect=conn)[-1]["change"] == "cancelled"
@@ -59,7 +63,7 @@ def test_a_placement_dropped_from_the_day_is_cancelled(tmp_path):
 
 def test_the_days_tasks_see_each_placements_entry_and_entries_are_not_a_change_of_input(tmp_path):
     conn = sqlite_file(tmp_path / "l.db")
-    L.apply_calendar("2026-03-10", ITEMS, _decision(), cause="run 1", at=NOW, connect=conn)
+    L.apply_calendar("2026-03-10", ITEMS, _decision(), placed_ids=PLACED, cause="run 1", at=NOW, connect=conn)
     seen = D.with_current("2026-03-10", ITEMS, connect=conn)
     assert seen[0]["current"]["when"] == "9:00 PM" and seen[1]["current"]["decision"] == "not_needed"
     from app.assistant.tests.non_agent_tests.test_day_tasks import situation
@@ -68,8 +72,7 @@ def test_the_days_tasks_see_each_placements_entry_and_entries_are_not_a_change_o
     from app.assistant.dayflow_orchestrator.work_context import _ENV
     user = _ENV.get_template("subconscious/day_tasks/prompts/user.j2").render(
         agent_input={**base, "items": [{**it, "related": []} for it in seen], "correction": None})
-    assert "on the list now: needed: the assistant: set the AC to 70, 9:00 PM" in user
-    assert "on the list now: not needed: Covered by I1." in user
+    assert ": needed: set the AC to 70, 9:00 PM" in user and ": not needed: Covered by I1." in user
 
 
 # ── concerns ───────────────────────────────────────────────────────────────

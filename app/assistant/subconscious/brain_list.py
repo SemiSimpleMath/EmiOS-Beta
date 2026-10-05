@@ -141,16 +141,19 @@ def cancel(c, entry_id: str, *, reason: str, cause: str, at: str) -> None:
     _write(c, entry_id, "cancelled", _state(_row(row)), None, cause, at)
 
 
-def apply_calendar(day: str, items: List[Dict[str, Any]], decisions: List[Dict[str, Any]], *, cause: str,
-                   at: datetime, connect=None) -> Dict[str, int]:
-    """A day decision onto the list: one entry per placement, keyed by code; covers become entry ids; a placement
-    no longer on the day is cancelled. Returns the counts of each change."""
+def apply_calendar(day: str, items: List[Dict[str, Any]], decisions: List[Dict[str, Any]], *, placed_ids,
+                   cause: str, at: datetime, connect=None) -> Dict[str, int]:
+    """A day's-tasks answer onto the list: each decided placement's entry created or changed, keyed by code; a
+    placement it did not decide keeps its entry as it is (silence is keep); covers become entry ids; an entry whose
+    placement is no longer in the day's plan (`placed_ids`: every placement, offered or not) is cancelled. Returns
+    the counts of each change; `kept` counts the offered placements left undecided. The day's tasks name no one
+    who acts: a list entry is the assistant's own task (who_acts stays empty)."""
     connect = connect or _connect
     ensure_schema(connect)
     when = at.isoformat()
     by_label = {it["label"]: it for it in items}
     ids = {label: calendar_id(day, it["belief_key"], it["time"]) for label, it in by_label.items()}
-    counts = {"created": 0, "modified": 0, "unchanged": 0, "cancelled": 0}
+    counts = {"created": 0, "modified": 0, "unchanged": 0, "kept": len(items) - len(decisions), "cancelled": 0}
     with connect(True) as c:
         for d in decisions:
             it = by_label[d["item"]]
@@ -159,10 +162,10 @@ def apply_calendar(day: str, items: List[Dict[str, Any]], decisions: List[Dict[s
                 "id": ids[d["item"]], "kind": "calendar", "day": day, "belief_key": it["belief_key"],
                 "placement_time": it["time"], "concern_id": None,
                 "what": d["assistant_part"] if needed else it["statement"], "decision": d["decision"],
-                "who_acts": d["who_acts"], "assistant_part": d["assistant_part"], "when_local": d["when"],
+                "who_acts": "", "assistant_part": d["assistant_part"], "when_local": d["when"],
                 "covers": [ids[x] for x in d.get("covers") or []], "why": d["why"]}, cause=cause, at=when)
             counts[result] += 1
-        live = set(ids.values())
+        live = set(placed_ids)
         for r in c.execute("SELECT id FROM brain_list_entries WHERE kind='calendar' AND day=? AND status!='cancelled'",
                            (day,)).fetchall():
             if r["id"] not in live:

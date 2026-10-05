@@ -110,9 +110,15 @@ def work(now_utc: datetime, *, calendar_work: bool) -> Dict[str, Any]:
 
 
 def open_concerns() -> List[Dict[str, Any]]:
+    """Each open concern: title, severity, and when its record last changed (its last note, or its brief, which is
+    written again whenever the record changes)."""
     from app.assistant.subconscious.concern_store import load_register
+    from app.assistant.utils.time_utils import parse_iso_utc
     register = load_register()
-    return [{"title": c.get("title"), "severity": c.get("severity")}
+    return [{"title": c.get("title"), "severity": c.get("severity"),
+             "changed_at": max(parse_iso_utc(t) for t in (c.get("last_reinforced_utc"),
+                                                          (c.get("brief") or {}).get("written_at"),
+                                                          c.get("first_observed")) if t).isoformat()}
             for b in ("active", "addressing") for c in register.get(b) or []]
 
 

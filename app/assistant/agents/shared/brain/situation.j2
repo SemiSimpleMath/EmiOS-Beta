@@ -1,5 +1,6 @@
 {#- The brain's situation (subconscious/situation.py): one picture of the moment, the same for every brain decider
-    (docs/design/brain_delegates_work_2026-10-04.md, section 2). Expects `s`; times are shown local. -#}
+    (docs/design/brain_delegates_work_2026-10-04.md, section 2). Expects `s`; times are shown local. A fact a
+    decider can cite carries `ref` (set by the decider's code, e.g. day_tasks.label_refs) and shows it. -#}
 ## The moment
 Now: {{ s.now | local_time }} ({{ s.weekday }})
 {% set p = s.presence -%}
@@ -33,7 +34,7 @@ The calendar ahead:
 
 ## The owner's chat today
 {% for m in s.chat -%}
-[{{ m.at | local_time }}] {{ m.speaker }}: {{ m.text }}
+{% if m.ref is defined %}[{{ m.ref }}] {% endif %}[{{ m.at | local_time }}] {{ m.speaker }}: {{ m.text }}
 {% else -%}
 (no finished conversation yet today)
 {% endfor %}
@@ -45,14 +46,15 @@ The calendar ahead:
 {% endfor %}
 ## Work the assistant has in motion
 {% for w in s.work.in_motion -%}
-- {{ w.objective or w.title }} (started {{ w.created }})
+- {% if w.ref is defined %}[{{ w.ref }}] {% endif %}{{ w.objective or w.title }} (started {{ w.created }})
 {% with p = w.progress, pad = "  " %}{% include 'shared/work/work_progress.j2' %}{% endwith -%}
 {% else -%}
 (none)
 {% endfor %}
 ## Work that ended in the last 18 hours
 {% for w in s.work.ended -%}
-{% include 'shared/brain/past_work.j2' %}
+{% if w.ref is defined %}[{{ w.ref }}]
+{% endif %}{% include 'shared/brain/past_work.j2' %}
 {% else -%}
 (none)
 {% endfor %}
@@ -66,7 +68,7 @@ The calendar ahead:
 
 ## Open concerns
 {% for c in s.concerns -%}
-- {{ c.title }}{% if c.severity %} (severity: {{ c.severity }}){% endif %}
+- {% if c.ref is defined %}[{{ c.ref }}] {% endif %}{{ c.title }}{% if c.severity %} (severity: {{ c.severity }}){% endif %}; record last changed {{ c.changed_at | local_time }}
 {% else -%}
 (none)
 {% endfor %}
