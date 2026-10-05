@@ -1,6 +1,8 @@
 # The brain decides what work exists; dayflow decides how (design, 2026-10-04)
 
-Status: proposed 2026-10-04. Revised the same day: the steward retires (section 4). Build steps 1 and 2 built
+Status: proposed 2026-10-04. Revised the same day: the steward retires (section 4); a control node builds each
+work object shell from the brain's list by code and routes modifications and cancels by entry id (section 3,
+"The list-item intake node"). Build steps 1 and 2 built
 2026-10-04 for calendar items, SHADOW ONLY: `subconscious::day_decider` (`subconscious/day_decision.py`) decides each
 placement on every brain wake when its inputs changed, records it in `brain_day_decisions`, hands nothing to
 dayflow; `python -m app.assistant.subconscious.day_decision <day>` sets it beside what dayflow did. Replayed on the
@@ -60,9 +62,9 @@ wrong this week came from that split:
 
 - **The brain owns what and why.** It keeps one list of what needs doing and decides each entry with its full
   context. It hands each entry to an assistant as a task, by id.
-- **Dayflow owns how.** Code turns a decided task into a work object as given; the architect plans the steps
-  within what the assistant can do; workers act; the finalizer judges each step. Dayflow does not decide whether
-  the task should exist.
+- **Dayflow owns how.** A control node turns a decided task into a work object shell as given (section 3); the
+  architect plans the steps within what the assistant can do; workers act; the finalizer judges each step.
+  Dayflow does not decide whether the task should exist.
 - **The brain may interrupt at any time.** Cancel a task, change its objective because new information came in,
   or add to it, always by the task's id. Dayflow treats that as authoritative.
 - **Dayflow reports every step back by the task's id**: progress, judgments, the ending. "This cannot be done as
@@ -81,10 +83,21 @@ One record per thing that needs doing (new; stored by the brain, beside the conc
 | why | the concern it serves, or the calendar item and its belief |
 | decision | needed / not needed (with the reason) / done elsewhere (e.g. by chat, with the message id) |
 | assigned to | dayflow, or none |
-| status | open, delegated (with the work object id), done, cancelled (with the reason) |
+| status | open, delegated (with the work object id), done, failed, cancelled (with the reason) |
 
 The list is what removes duplicates: a new decision about a concern or a calendar item first reads that item's
 entries, so a changed plan adds only what is missing and never re-sends what is delegated.
+
+**Each entry tracks its work by id.** The real reason for all of this (owner, 2026-10-04): the work dayflow does
+gets back to the brain, and every concern is updated. An entry moves open → delegated (with its work object) →
+done, failed or cancelled, set by code from the work store's receipts, matched by the entry id the work object
+carries (never by the gate's judgment), with the finalizer's account in its own words. Whoever decides the entry
+again sees that status: "the family-time heads-up: delegated to work_X, sent at 6:00 PM, judged achieved", or "the
+lights: abandoned, bedtime could not be confirmed". Concerns keep hearing of all work as today: every judgment and
+ending is a brain inbox event, routed by the gate, and work citing a concern updates its attached work by code.
+
+**Calendar entries are keyed by belief and day, with the time as a field** (`cal:<day>:<belief>`), so a
+placement the day pass moves to another time modifies its entry rather than making a second one.
 
 ## 2. What the brain decides from
 
@@ -100,6 +113,116 @@ entries, so a changed plan adds only what is missing and never re-sends what is 
   "already in flight" from the internal marker that leaked into the chat as the assistant's reply (bug list). The
   fact was true and settled the timesheets item; the leak is a display bug. So chat's tracked tasks reach the brain
   as records before, or together with, the fix that stops the marker leaking.
+
+### What every brain decider sees: the situation
+
+Owner, 2026-10-04: the agent that turns the day's calendar into tasks "better get all the context in the world so
+it can make good decisions. also brain better get the calendar too and if user is afk and users health and all of
+that." It takes over the steward's job for the calendar, so it sees at least what the steward saw, plus the chat
+and the todo list the steward never had.
+
+Code gathers one situation per brain pass, and every brain agent that decides gets the same block (a shared
+partial): the day's tasks agent (`subconscious::day_tasks`, below), the brain step, the concern decider and the
+list decider. Every source exists today; the steward reads most of them.
+
+| Part | Source |
+|---|---|
+| now, the weekday, what kind of day (a workday or not, a holiday) | the clock; today's calendar |
+| dates that matter today (birthdays, anniversaries) | `resource_user_data` (the owner and the people in it) |
+| today's calendar events, and the next 30 days | `resource_expected_calendar`; the brain step's calendar read |
+| day theme and current status | `resource_daily_context_generator_output` |
+| at the keyboard or away, and for how long | `resource_afk_statistics_output` |
+| location, weather, health | `location_summary`, `resource_weather`, `health_status_summary` |
+| today's chat; the todo list | the master room's log; the todo sync |
+| work: everything in motion with its progress, what finished or was dropped today with the owner's reasons | the work store (`work_progress`; the steward's completed and dropped views) |
+| reminders already sent (the cron wellness nudges among them); active tickets | `scheduled_reminder_history`; the ticket manager |
+| open concerns; the owner's standing directives | the concern register; `resource_orchestrator_user_prefs` |
+
+What each sees today (2026-10-04):
+
+| Input | Steward | Day decider (shadow) | Brain step | Concern decider |
+|---|---|---|---|---|
+| the day's calendar items | intake + the ROUTINE | yes | no | no |
+| today's calendar events | yes | no | 30 days | what its planner looks up |
+| day theme, status | yes | no | no | no |
+| away from the keyboard, location, weather, health | yes | no | no | no |
+| reminder history, active tickets, recent nudges | yes | no | live reminders | what its planner looks up |
+| work in motion | all | not from the calendar | all | what its planner looks up |
+| completed and dropped work, recent outcomes | yes | no | linked and similar past work | the concern's attempts |
+| entity cards | yes | no | knowledge-graph entities | no |
+| today's chat | no | yes | the matter's conversations | no |
+| the todo list | no | yes | no | what its planner looks up |
+| directives, the steward's purpose | yes | yes | no | no |
+
+Without the schedule and day theme the day's tasks agent cannot tell a workday from a day off; without the reminder
+history it repeats the cron wellness nudges the owner's overlay says not to duplicate; without what finished today
+it cannot tell that a heads-up already went out.
+
+Once the brain is the only decider of calendar work, calendar-made work comes from its own list entries: the day's
+tasks agent sees each entry with its work's progress (sent, failed, waiting), as a concern sees its attempts. In
+shadow it is shown no calendar-made work, since that work would not exist.
+
+**Name.** The day decider is renamed `subconscious::day_tasks` (owner, 2026-10-04): it turns the day's calendar
+into the day's tasks, and it is part of the brain, run in the brain's pass with the brain's other agents.
+
+### What day_tasks reads: the brain's view of the day
+
+The owner's worry (2026-10-04): it "sees less than brain". It is the brain deciding, so it sees what the brain
+knows. The steward never got email as intake after 2026-09-30 (only inside a concern handoff); what it had beyond
+the day decider was the portfolio, outcomes, the situation and the handed-over concerns. day_tasks reads, from what
+is stored:
+
+| Part | Source | Why |
+|---|---|---|
+| every open concern as the brain knows it | each concern's brief (what, known facts with sources, the owner's wishes, open questions, recommendation), its list entries and its attempts | the matters behind today's calendar items ("the physical is booked", "he will handle it himself") |
+| what the brain read and decided today | today's `brain_matters`: each event (message, email, work report) with the brain's decision and reason, the concern notes it wrote, the new concerns | the owner's chat and email as the brain understood them, and what it set aside and why |
+| all the work dayflow is doing | every active work object with its progress; what finished or was dropped today with its account | what is already in motion or done, wherever it came from |
+| the day's list | every entry from both deciders, with its status | what was already decided and delegated today |
+| the situation | the block above | when and whether now is right |
+
+These records, not the brain's day story (`story_day`): the story is written for the owner, a summary of a summary;
+the briefs and the matter decisions are the brain's own working knowledge (original context over summaries).
+
+In shadow, day_tasks is still shown no calendar-made work: that work comes from the steward, and showing it would
+let day_tasks copy the steward and empty the comparison. Live, everything calendar-made comes from its own entries,
+and it sees all work.
+
+### Two task deciders, one list
+
+The brain decides what work exists in two places, each item in exactly one:
+
+| | Decides | Runs |
+|---|---|---|
+| `day_tasks` | today's calendar items: a task or none, what the assistant does, when | when the day's inputs change |
+| `concern_tasks` | one concern: its entries kept, changed, cancelled or added, or a hold until a time | when that concern's record changes or its hold passes |
+
+`concern_tasks` is the concern planner's two halves at cutover: the read-only planner looks up what the concern
+names (its email threads, calendar entries, reminders, todos, earlier work, pods, the knowledge graph; usually two
+to five lookups), then one decider writes the concern's entries. In shadow the live `concern_decider` and the
+`concern_list_decider` both run per concern; they merge into one.
+
+Per item that is one decider of what, then the architect for how; today a concern's need is decided twice (the
+concern decider, then the steward). Two deciders writing one list can still fire one act twice. The AC change of
+2026-10-04 showed it: the shadow day decider moved its AC entry to 8:30 within 8 seconds of the owner's message;
+the live brain opened a concern and corrected the 9 PM work ten minutes later. With both live, that is two work
+objects. The protections:
+
+1. **Both see the whole list**: every entry of the day from either decider, with its status. An act already on the
+   list is covered by pointing at that entry, never by writing another.
+2. **The other's entries count as new input.** A new or changed entry from the concern side runs day_tasks again,
+   and the reverse; a decider's own entries do not count, so a run never triggers itself. So "we're eating out
+   tonight" (a concern and its work) makes day_tasks drop the 6 PM family-time heads-up.
+3. **A report on an entry's work runs its decider again.** A failed or unanswered task is new information; whether
+   to try again or let it go is the decision remade. A change in its own decisions alone still does not.
+4. **Chat is read when the conversation is finished.** day_tasks reads chat by the gate's rule (a room's messages
+   once the owner has been quiet in it for `brain_inbox.QUIET`), so it never acts on half a conversation ("8:30…
+   actually leave it at 9") and both deciders act on the same finished one.
+5. **One order in the brain's pass**: the concern side first (brain step, `concern_tasks`), then day_tasks, which
+   sees the entries the concern side made in that pass. The AC case: the concern's entry modifies the AC entry by
+   id, and day_tasks sees it done and keeps it; one work object, revised once.
+6. **Done outside the list.** An act done in chat (switchboard → `emi_team`) is seen only by its words until chat
+   reports what it did as a record (work-engine note, build step 1); something the owner did himself only through
+   what he said in chat or a ticket reply; the cron reminders through the reminder history in the situation.
 
 ### What the assistant does with each calendar item
 
@@ -125,6 +248,38 @@ to list the email it came from all the details that went into the task ask"):
   its progress, and everything it looked up (calendar, email, todos, work);
 - every source email and message the concern's evidence names, verbatim, with its sender, subject and the local
   time it arrived.
+
+### Constraints travel, and the architect adjusts the ask
+
+Owner, 2026-10-04: the architect must get the most context possible, so it knows what is happening and why it is
+being asked, and makes common-sense adjustments when the ask is odd in a way the brain cannot know: "brain might not
+know all subagent capabilities so architect needs to figure out its own way to solve the issue." His example:
+"[a child] needs school supplies", without "by September 9", gets a plan for slow delivery that arrives September 12.
+
+1. **The entry carries its constraints, not only its outcome.** "The child has her school supplies" is incomplete;
+   "by September 9" is part of the outcome. Each entry states its deadline and every hard constraint (a budget, a
+   place, whose account) in its outcome and done-when, which become the work object's objective and success
+   criteria; the finalizer then judges a delivery on the 12th as not achieved. The brain's job; the replay suite
+   checks it.
+2. **The architect reads the sources, not only the entry.** When the brain leaves a constraint out, it is still in
+   the school's email, which travels verbatim with the work. The architect gets the entry, its why, the concern's
+   whole record, the sources and the brain's situation (section 2: calendar, away from the keyboard, health and the
+   rest), and plans to every constraint it finds in them. Today it gets the steward's one-line objective and a
+   short rationale.
+3. **The architect adjusts the ask with common sense, and says so.** The brain knows the assistant's abilities
+   only roughly; how is the architect's:
+   - **Same outcome, a better way.** An ask that is odd for the tools at hand gets another route to the same
+     outcome (pickup or a store's stock instead of shipping that arrives too late). No permission needed: this is
+     the freedom to change tack ("When the work changes course", section 3).
+   - **The outcome is not reachable as asked.** It plans the nearest reachable part and reports to the brain by the
+     entry's id ("cannot guarantee delivery by September 9; told the owner the options"), never quietly settling for
+     less.
+   - **The entry and its sources disagree** (the entry says the 12th, the email says the 9th): the source wins, and
+     the architect reports the difference to the brain.
+
+   The architect's prompt today tells it to fold the owner's replies in and not second-guess them, and says nothing
+   about checking an ask's constraints against its sources. This becomes a new section of that prompt, written with
+   the capability and safety section that moves in from the steward (build step 4).
 
 ### Replay, round 2 (2026-10-04)
 
@@ -167,10 +322,49 @@ concerns (3 runs each).
 
 | Order | Today | With this design |
 |---|---|---|
-| Delegate | `subconscious/concern_handoff.py` writes an intake item; the steward judges it | code creates the work object from the task (`work_store` `create_work_object`): objective = the outcome, success criteria = its done-when, the task id and provenance in its constraints; the architect is woken for it |
-| Cancel | the steward can ask the architect to end a work object (`end_requests` → `instruct_goal`) | the brain issues the same `instruct_goal` by task id with its reason; the architect ends the work |
-| Modify | the architect can revise the objective (`revise_objective`) | the brain issues the new objective by task id; the architect revises and re-plans |
-| Report | every judgment and ending reaches the brain inbox (`concern_feedback`) | the same receipts, routed by task id to the entry, not by meaning |
+| Delegate | `subconscious/concern_handoff.py` writes an intake item; the steward judges it; its persist node (`work_persist.persist_steward_output`) creates the goal-only work object; the architect lays its graph in the same tick | the list-item intake node (below) creates the shell from the entry by code; the architect lays its graph in the same tick, as today |
+| Cancel | the steward can ask the architect to end a work object (`end_requests` → `instruct_goal`) | the intake node issues the same `instruct_goal` to the work object carrying the entry id, with the brain's reason; the architect ends the work |
+| Modify | the architect can revise the objective (`revise_objective`) | the intake node revises the work object carrying the entry id (`revise_goal`, as the steward's persist does today) and flags it for re-planning; the architect re-plans |
+| Report | every judgment and ending reaches the brain inbox (`concern_feedback`) | the same receipts, routed by entry id to the entry, not by meaning |
+
+### The list-item intake node
+
+A control node in the planning tick, in place of intake triage, the steward and its persist node:
+list-item intake node (Python) → architect → state mover → … as today. It judges nothing; the brain's list already
+says what changed. Each change on the list (`brain_list_changes`) is typed `created`, `modified` or `cancelled`
+and names the entry's stable id (a calendar entry keyed by code, `cal:<day>:<belief>`; a concern entry by the id
+it got at creation). The handoff carries the kind of change with the id, and the node acts on the kind:
+
+- **created**: build the shell from the entry, as `persist_steward_output` builds one today from the steward's
+  spec, with no model call. Objective and title = the entry's outcome; success criteria = its done-when;
+  `source_intake` = the entry and what it serves (the concern, or the belief and its placement), with the source
+  emails and messages; `concern_refs` / `belief_refs` copied by code as `work_intake` does; the entry id, so reports,
+  cancels and modifications route by it. The architect then lays the graph (its create mode).
+- **modified**: find the work object carrying the entry id; revise its objective and success criteria; flag it for
+  re-planning. No shell is built; the architect re-plans (its re-plan mode).
+- **cancelled**: find the work object carrying the entry id and record an end instruction with the brain's reason
+  (`instruct_goal`); the architect ends it.
+
+The architect judges one case itself: a new entry that overlaps work that did not come from the list (a chat act,
+work running from before the cutover). It sees the portfolio and ends the new shell (`end_goal`) with the reason
+("covered by work_X"), which reaches the brain as a report on the entry. That costs an abandoned shell, in the rare
+overlap case only.
+
+Where care is needed:
+
+1. **The brain modifies instead of re-creating.** A `new` entry for something already on the list under other
+   words becomes a second work object, faithfully. That is the brain's duplicate risk now; the replay suite guards
+   it (the Ring repeat handoff came out "keep" in both runs: one case).
+2. **A modified entry whose work object already ended** (the AC moved from 9 PM to 8:30 after the 9 PM work
+   closed) goes to the brain as a report, never to new work by itself. An entry whose work is done is closed; it
+   runs again only by an explicit decision to do it again, with the reason. Otherwise a reworded entry after its
+   6 PM heads-up went out would send it twice.
+3. **Changes that are not changes.** A changed reason alone is no change (`brain_list.upsert`), so it does not wake
+   the architect.
+4. **A placement the day pass drops** is a question to day_tasks, not a cancel: a re-run of the day pass that
+   leaves a belief out would otherwise end its work in the middle of it.
+5. **Timing.** A modification or cancel takes effect between steps; a step already running finishes first
+   (`EXECUTION_OWNERSHIP.md`).
 
 A cancel takes effect between steps. A tool call already running finishes or times out; the execution-ownership
 rule revokes further calls and does not kill threads (`EXECUTION_OWNERSHIP.md`). The brain hears what ran and
@@ -204,9 +398,11 @@ which is when the reports arrive.
 | Part | Today | Then |
 |---|---|---|
 | Brain | concerns, notes, the concern planner's plans | also the list; decides concern pieces and today's calendar items; issues cancel and modify by id |
-| Concern planner | writes to-dos; hands over to the steward | becomes the brain's delegation step |
+| Concern planner | writes to-dos; hands over to the steward | becomes `concern_tasks`: its lookups, then one decider writes the concern's entries (section 2, "Two task deciders, one list") |
+| Day decider (shadow) | decides today's placements, recorded only | becomes `day_tasks`, reading the brain's view of the day |
 | Day pass / occurrence handoffs | each placement handed to the steward by code | placements go to the brain's decision, not to dayflow |
 | Steward | decides what work exists; reviews intake; maps the owner's feedback to work; keeps work within capabilities; invents acts | retires (below) |
+| Planning tick | intake triage → steward → its persist node → architect → … | the list-item intake node → architect → … (section 3) |
 | Architect, workers, finalizer | as now | as now; reports carry the task id |
 | Morning review | which beliefs go on the calendar | also what the assistant does with each |
 
@@ -301,9 +497,16 @@ the steward) before anything is planned.
    directives in its prompt, "who acts", and every item answered.
 2. Shadow mode in the brain's pass, with its table and the daily comparison.
 3. "What the assistant does with it" in the morning review.
-4. The capability and safety section as a shared partial in the architect's prompt (and abbreviated for the
+3a. The situation for every brain decider (section 2, "What every brain decider sees"), and the rename of
+   `subconscious::day_decider` to `subconscious::day_tasks`; replayed against the shadow decisions before and after.
+3b. day_tasks reads the brain's view of the day (section 2); the list entries track their work by id; calendar
+   entries keyed by belief and day; the protections of "Two task deciders, one list". At cutover the concern
+   decider and the shadow list decider merge into `concern_tasks`.
+4. The architect's adjusting rules (section 2, "Constraints travel, and the architect adjusts the ask") and the
+   capability and safety section as a shared partial in the architect's prompt (and abbreviated for the
    brain, with what can be sensed), replayed on recorded architect calls before the first lane cuts over.
    AFK changes as an input (the brain's inbox and event waits). Chat's tracked tasks reach the brain as records,
    before the leaked-marker fix.
-5. The calendar lane cut over behind a switch, code creating its work objects; then concern handoffs, with cancel
-   and modify by task id; then pod and camera intake into the brain's inbox. The steward retires.
+5. The calendar lane cut over behind a switch, the list-item intake node creating its work objects; then concern
+   handoffs, with cancel and modify by entry id; then pod and camera intake into the brain's inbox. The steward
+   retires.
