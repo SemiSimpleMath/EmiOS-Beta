@@ -206,82 +206,72 @@ def _semantic_entity_candidates(
     node_type, snapshotted for the post-session node_merger confirm.
     Catches "the user's mom" vs "the user's mother" before it mints a twin.
 
-    Failure-isolated: chroma/embedder down → empty list (the proposal just
-    creates, the dup scan remains the safety net)."""
+    A failure (chroma or the embedder down) raises and the proposal stays
+    pending. Until 2026-10-05 it returned no candidates, so the proposal
+    created a twin of an existing entity."""
     if not label or not label.strip():
         return []
-    try:
-        import numpy as np
-        from app.assistant.embeddings.embedder import embed_text
-        from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
-    except Exception as exc:
-        logger.warning("[promoter] entity semantic tier unavailable: %s", exc)
-        return []
+    import numpy as np
+    from app.assistant.embeddings.embedder import embed_text
+    from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
 
     def _unit(text: str):
         v = np.array(embed_text(text), dtype=float)
         n = float(np.linalg.norm(v))
         return (v, n) if n > 0.0 else (None, 0.0)
 
-    try:
-        query_emb, query_n = _unit(label.strip())
-        if query_emb is None:
-            return []
-        cm = get_chroma_manager()
-
-        # Identity collection gets the mention sentence as its query when
-        # the extractor provided one — that is the like-vs-like comparison.
-        identity_emb, identity_n = (query_emb, query_n)
-        if sentence and sentence.strip():
-            emb, n = _unit(sentence.strip())
-            if emb is not None:
-                identity_emb, identity_n = emb, n
-
-        # Top-K per collection, then exact cosine per candidate
-        # (collection.query distances are L2 — same recompute pattern as
-        # the scan's tier 3 and the label-relax filter).
-        cand_ids: set[str] = set()
-        for collection, q_emb, q_n in (
-            (cm.node_collection, query_emb, query_n),
-            (cm.node_context_collection, query_emb, query_n),
-            (cm.node_identity_collection, identity_emb, identity_n),
-        ):
-            try:
-                res = collection.query(
-                    query_embeddings=[q_emb.tolist()],
-                    n_results=_ENTITY_SEMANTIC_TOP_K,
-                    include=["embeddings"],
-                )
-            except Exception:
-                continue
-            ids0 = (res.get("ids") or [[]])[0]
-            # Same defect as step_duplicate_scan.py: `x or [[]]` calls bool(x), and
-            # chromadb >= 1.x returns embeddings as an ndarray, which raises on a
-            # multi-element truth test. Size, never truthiness.
-            raw_embs = res.get("embeddings")
-            embs0 = raw_embs[0] if raw_embs is not None and len(raw_embs) else []
-            for cid, emb in zip(ids0, embs0):
-                if emb is None or len(emb) == 0:
-                    continue
-                v = np.array(emb, dtype=float)
-                n = float(np.linalg.norm(v))
-                if n == 0.0:
-                    continue
-                if float(np.dot(q_emb, v) / (q_n * n)) >= _ENTITY_SEMANTIC_SIM_THRESHOLD:
-                    cand_ids.add(str(cid))
-        if not cand_ids:
-            return []
-
-        cands = (
-            session.query(Node)
-            .filter(Node.id.in_(list(cand_ids)))
-            .filter(Node.node_type == node_type)
-            .all()
-        )
-        return [_snapshot_state_candidate(session, c) for c in cands[:5]]
-    except Exception as exc:
-        logger.warning("[promoter] entity semantic tier failed for %r: %s", label, exc)
+    query_emb, query_n = _unit(label.strip())
+    if query_emb is None:
         return []
+    cm = get_chroma_manager()
+
+    # Identity collection gets the mention sentence as its query when
+    # the extractor provided one — that is the like-vs-like comparison.
+    identity_emb, identity_n = (query_emb, query_n)
+    if sentence and sentence.strip():
+        emb, n = _unit(sentence.strip())
+        if emb is not None:
+            identity_emb, identity_n = emb, n
+
+    # Top-K per collection, then exact cosine per candidate
+    # (collection.query distances are L2 — same recompute pattern as
+    # the scan's tier 3 and the label-relax filter).
+    cand_ids: set[str] = set()
+    for collection, q_emb, q_n in (
+        (cm.node_collection, query_emb, query_n),
+        (cm.node_context_collection, query_emb, query_n),
+        (cm.node_identity_collection, identity_emb, identity_n),
+    ):
+        res = collection.query(
+            query_embeddings=[q_emb.tolist()],
+            n_results=_ENTITY_SEMANTIC_TOP_K,
+            include=["embeddings"],
+        )
+        ids0 = (res.get("ids") or [[]])[0]
+        # Same defect as step_duplicate_scan.py: `x or [[]]` calls bool(x), and
+        # chromadb >= 1.x returns embeddings as an ndarray, which raises on a
+        # multi-element truth test. Size, never truthiness.
+        raw_embs = res.get("embeddings")
+        embs0 = raw_embs[0] if raw_embs is not None and len(raw_embs) else []
+        for cid, emb in zip(ids0, embs0):
+            if emb is None or len(emb) == 0:
+                continue
+            v = np.array(emb, dtype=float)
+            n = float(np.linalg.norm(v))
+            if n == 0.0:
+                continue
+            if float(np.dot(q_emb, v) / (q_n * n)) >= _ENTITY_SEMANTIC_SIM_THRESHOLD:
+                cand_ids.add(str(cid))
+    if not cand_ids:
+        return []
+
+    cands = (
+        session.query(Node)
+        .filter(Node.id.in_(list(cand_ids)))
+        .filter(Node.node_type == node_type)
+        .all()
+    )
+    return [_snapshot_state_candidate(session, c) for c in cands[:5]]
 
 
 def _mint_disambiguation_on_label_collision(session, new_node) -> None:
@@ -297,7 +287,9 @@ def _mint_disambiguation_on_label_collision(session, new_node) -> None:
     node until the investigator re-points them.
     """
     label = (new_node.label or "").strip()
-    if not label:
+    if not label or new_node.node_type == "Property":
+        # Property is subject-scoped: the same label on different subjects
+        # ("Date of Birth") is expected, never a referent collision.
         return
     collision = (
         session.query(Node.id)
@@ -1018,22 +1010,22 @@ def _call_node_merger_for_state_match(
     only makes the LLM call — no DB access — so it can run safely outside
     any write transaction.
 
-    Returns the matched candidate's KG ``node_id`` (a string), or None if
-    no merge.
+    Returns the matched candidate's KG ``node_id`` (a string), or None when the
+    merger DECLINED. A failure raises: the proposal stays pending and is
+    retried. Until 2026-10-05 a failure returned None, i.e. "create": during a
+    network outage on 2026-06-27 the merger's three failed calls minted a
+    second owner Entity, and the label collision then minted a
+    Disambiguation marker that captured every later mention of the owner
+    (381 edges by 2026-10-05; two family members likewise).
     """
     import json
-    try:
-        from app.assistant.ServiceLocator.service_locator import DI
-        from app.assistant.scope.loader import load_scope_for_source
-        from app.assistant.utils.pydantic_classes import Message
-    except Exception as exc:
-        logger.warning("[promoter] node_merger unavailable: %s", exc)
-        return None
+    from app.assistant.ServiceLocator.service_locator import DI
+    from app.assistant.scope.loader import load_scope_for_source
+    from app.assistant.utils.pydantic_classes import Message
 
     agent = DI.agent_factory.create_agent("knowledge_graph_add::node_merger")
     if agent is None:
-        logger.warning("[promoter] could not create node_merger agent")
-        return None
+        raise RuntimeError("[promoter] could not create node_merger agent")
 
     # "Reader #3" (audit P2.5): when the maintenance loop already ruled two
     # of these candidates DISTINCT from each other, tell the merger — it
@@ -1042,31 +1034,28 @@ def _call_node_merger_for_state_match(
     # drop: the verdict says the CANDIDATES differ from each other, not
     # which (if either) matches the new observation — that judgment stays
     # with the LLM (deterministic proposes, LLM decides).
-    try:
-        from app.assistant.kg_maintenance.verdict_store import (
-            load_distinct_verdicts_among,
-        )
-        cand_ids = [str(c.get("node_id") or "") for c in candidate_payload]
-        verdicts = load_distinct_verdicts_among(cand_ids)
-        if verdicts:
-            notes_by_id: Dict[str, List[str]] = {}
-            for a, b, memo, decided_by in verdicts:
-                line = (
-                    f"prior verdict ({decided_by}): DISTINCT from candidate "
-                    f"{{other}} — {memo}"
-                )
-                notes_by_id.setdefault(a, []).append(line.format(other=b[:8]))
-                notes_by_id.setdefault(b, []).append(line.format(other=a[:8]))
-            for c in candidate_payload:
-                notes = notes_by_id.get(str(c.get("node_id") or ""))
-                if notes:
-                    c["prior_distinct_verdicts"] = notes
-            logger.info(
-                "[promoter] injected %d distinct-verdict note(s) into "
-                "node_merger candidates", len(verdicts),
+    from app.assistant.kg_maintenance.verdict_store import (
+        load_distinct_verdicts_among,
+    )
+    cand_ids = [str(c.get("node_id") or "") for c in candidate_payload]
+    verdicts = load_distinct_verdicts_among(cand_ids)
+    if verdicts:
+        notes_by_id: Dict[str, List[str]] = {}
+        for a, b, memo, decided_by in verdicts:
+            line = (
+                f"prior verdict ({decided_by}): DISTINCT from candidate "
+                f"{{other}} — {memo}"
             )
-    except Exception as exc:
-        logger.warning("[promoter] verdict-store consult failed: %s", exc)
+            notes_by_id.setdefault(a, []).append(line.format(other=b[:8]))
+            notes_by_id.setdefault(b, []).append(line.format(other=a[:8]))
+        for c in candidate_payload:
+            notes = notes_by_id.get(str(c.get("node_id") or ""))
+            if notes:
+                c["prior_distinct_verdicts"] = notes
+        logger.info(
+            "[promoter] injected %d distinct-verdict note(s) into "
+            "node_merger candidates", len(verdicts),
+        )
 
     scope = load_scope_for_source(
         kind="pipeline", source_id="kg_pipeline", actor_id="proposal_promoter",
@@ -1075,26 +1064,22 @@ def _call_node_merger_for_state_match(
         "new_node_context": json.dumps(new_node_ctx, ensure_ascii=True, indent=2),
         "existing_node_candidates": json.dumps(candidate_payload, ensure_ascii=True, indent=2),
     }
-    try:
-        resp = agent.action_handler(Message(agent_input=agent_input, scope_context=scope))
-        data = resp.data if resp and hasattr(resp, "data") else {}
-    except Exception as exc:
-        logger.warning("[promoter] node_merger call failed for state %r: %s",
-                       new_node_ctx.get("label"), exc)
-        return None
+    resp = agent.action_handler(Message(agent_input=agent_input, scope_context=scope))
+    data = resp.data if resp and hasattr(resp, "data") else None
+    if hasattr(data, "model_dump"):
+        data = data.model_dump()
+    if not isinstance(data, dict):
+        raise RuntimeError(f"[promoter] node_merger returned no answer for {new_node_ctx.get('label')!r}")
 
     if not bool(data.get("merge_nodes")):
         return None
     merged_id = str(data.get("merged_node_id") or "").strip()
-    if not merged_id:
-        return None
     cand_ids = {c.get("node_id") for c in candidate_payload}
     if merged_id not in cand_ids:
-        logger.warning(
-            "[promoter] node_merger returned id %s not in candidate set",
-            merged_id,
+        raise RuntimeError(
+            f"[promoter] node_merger chose to merge {new_node_ctx.get('label')!r} into {merged_id!r}, "
+            f"which is not a candidate"
         )
-        return None
     logger.info(
         "[promoter] LLM merged state %r → %s: %s",
         new_node_ctx.get("label"), merged_id[:8],
@@ -1334,21 +1319,16 @@ def _estimate_state_ttl(
     participant_labels: Optional[List[str]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Ask state_ttl_estimator agent for a duration estimate. Returns a
-    dict suitable for stashing in the node's attributes, or None if the
-    agent can't be reached (fail silent — the decay job will treat
-    TTL-less states as durable)."""
-    try:
-        from app.assistant.ServiceLocator.service_locator import DI
-        from app.assistant.scope.loader import load_scope_for_source
-        from app.assistant.utils.pydantic_classes import Message
-    except Exception as exc:
-        logger.warning("[promoter] TTL estimator unavailable: %s", exc)
-        return None
+    dict suitable for stashing in the node's attributes. A failure raises and
+    the proposal stays pending (until 2026-10-05 it returned None and the
+    State was written TTL-less, which decay treats as durable)."""
+    from app.assistant.ServiceLocator.service_locator import DI
+    from app.assistant.scope.loader import load_scope_for_source
+    from app.assistant.utils.pydantic_classes import Message
 
     agent = DI.agent_factory.create_agent("knowledge_graph_add::state_ttl_estimator")
     if agent is None:
-        logger.warning("[promoter] could not create state_ttl_estimator agent")
-        return None
+        raise RuntimeError("[promoter] could not create state_ttl_estimator agent")
 
     participants_str = ", ".join(participant_labels) if participant_labels else ""
     agent_input = {
@@ -1363,18 +1343,12 @@ def _estimate_state_ttl(
     scope = load_scope_for_source(
         kind="pipeline", source_id="kg_pipeline", actor_id="proposal_promoter",
     )
-    try:
-        res = agent.action_handler(Message(agent_input=agent_input, scope_context=scope))
-        data = res.data if res and hasattr(res, "data") else {}
-    except Exception as exc:
-        logger.warning(
-            "[promoter] TTL estimator failed for state %r: %s",
-            proposal_node.label, exc,
-        )
-        return None
-
+    res = agent.action_handler(Message(agent_input=agent_input, scope_context=scope))
+    data = res.data if res and hasattr(res, "data") else None
+    if hasattr(data, "model_dump"):
+        data = data.model_dump()
     if not isinstance(data, dict) or not data.get("duration_class"):
-        return None
+        raise RuntimeError(f"[promoter] TTL estimator returned no duration class for {proposal_node.label!r}")
     days = data.get("estimated_duration_days")
     return {
         "duration_class": data.get("duration_class"),
@@ -1566,24 +1540,21 @@ def _canonicalize_sentence(
     on the new KG node so the validity dates have a coherent partner — the
     sentence states the proposition and the dates bound when it's true.
 
-    Returns None on failure; caller falls back to the raw extractor sentence.
-    Verbatim source remains recoverable via window_id + claim_proposal_evidence.
+    Returns None only when there is no sentence to canonicalize. A failure
+    raises and the proposal stays pending (until 2026-10-05 the raw extractor
+    sentence was written instead). Verbatim source remains recoverable via
+    window_id + claim_proposal_evidence.
     """
     if not getattr(proposal_node, "sentence", None):
         return None  # nothing to canonicalize
 
-    try:
-        from app.assistant.ServiceLocator.service_locator import DI
-        from app.assistant.scope.loader import load_scope_for_source
-        from app.assistant.utils.pydantic_classes import Message
-    except Exception as exc:
-        logger.warning("[promoter] fact_canonicalizer unavailable: %s", exc)
-        return None
+    from app.assistant.ServiceLocator.service_locator import DI
+    from app.assistant.scope.loader import load_scope_for_source
+    from app.assistant.utils.pydantic_classes import Message
 
     agent = DI.agent_factory.create_agent("knowledge_graph_add::fact_canonicalizer")
     if agent is None:
-        logger.warning("[promoter] could not create fact_canonicalizer agent")
-        return None
+        raise RuntimeError("[promoter] could not create fact_canonicalizer agent")
 
     agent_input: Dict[str, Any] = {
         "extractor_sentence": proposal_node.sentence,
@@ -1603,21 +1574,13 @@ def _canonicalize_sentence(
     scope = load_scope_for_source(
         kind="pipeline", source_id="kg_pipeline", actor_id="proposal_promoter",
     )
-    try:
-        res = agent.action_handler(Message(agent_input=agent_input, scope_context=scope))
-        data = res.data if res and hasattr(res, "data") else {}
-    except Exception as exc:
-        logger.warning(
-            "[promoter] canonicalizer failed for %r: %s",
-            proposal_node.label, exc,
-        )
-        return None
-
-    if not isinstance(data, dict):
-        return None
-    canonical = data.get("canonical_sentence")
+    res = agent.action_handler(Message(agent_input=agent_input, scope_context=scope))
+    data = res.data if res and hasattr(res, "data") else None
+    if hasattr(data, "model_dump"):
+        data = data.model_dump()
+    canonical = data.get("canonical_sentence") if isinstance(data, dict) else None
     if not isinstance(canonical, str) or not canonical.strip():
-        return None
+        raise RuntimeError(f"[promoter] canonicalizer returned no sentence for {proposal_node.label!r}")
     return canonical.strip()
 
 

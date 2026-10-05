@@ -200,6 +200,8 @@ This is the structural fix for the 2026-05-02 "database is locked" cascade. Each
 2. **LLM** (no session) — run `state_ttl_estimator`, `fact_canonicalizer`, and `node_merger` (only when there are candidates). Results land in a `_PromoterPlan` keyed by proposal-node id.
 3. **APPLY** (`db_manager.transaction`, ≈ sub-millisecond) — `_evaluate_and_apply` makes **zero** LLM calls; every match/create decision is read from the plan. The writer slot is held only for deterministic SQL.
 
+**A failed call is never a decision.** In the LLM phase, a missing agent, a failed call, a malformed answer (a merge into a non-candidate, no TTL class, no canonical sentence) or an unavailable Chroma raises; `run_promoter` logs it as an error and the proposal stays `pending` for the next run. Only the merger's actual decline means "create". Until 2026-10-05 each of these returned None and the proposal was promoted degraded: on 2026-06-27 three failed `node_merger` calls during a network outage minted a second owner Entity, and `_mint_disambiguation_on_label_collision` then parked every later mention of the owner on a Disambiguation marker (381 edges by 2026-10-05; bug list, 2026-10-05). A Property label collision never mints a marker (Properties are subject-scoped).
+
 ### Node resolution tiers (READ + LLM phases)
 
 For entity-like nodes (Entity/Concept/Goal), `_resolve_entity_like` returns a *tier*, and each tier is treated differently:

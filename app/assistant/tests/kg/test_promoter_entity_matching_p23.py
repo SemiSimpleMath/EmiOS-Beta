@@ -164,7 +164,9 @@ def test_semantic_tier_returns_same_type_candidates_above_threshold(monkeypatch)
     assert wrong_type not in ids # similar but Concept ≠ Entity → dropped
 
 
-def test_semantic_tier_degrades_to_empty_without_chroma(monkeypatch):
+def test_semantic_tier_raises_without_chroma(monkeypatch):
+    """2026-10-05: an empty answer here meant "create" — a twin of an existing entity. Now the proposal fails loud
+    and stays pending."""
     import app.assistant.kg.chroma.chroma_embedding_manager as cem
 
     def boom():
@@ -173,7 +175,8 @@ def test_semantic_tier_degrades_to_empty_without_chroma(monkeypatch):
 
     session = get_session()
     try:
-        assert _semantic_entity_candidates(session, "Anything", "Entity") == []
+        with pytest.raises(RuntimeError, match="chroma down"):
+            _semantic_entity_candidates(session, "Anything", "Entity")
     finally:
         session.close()
 
