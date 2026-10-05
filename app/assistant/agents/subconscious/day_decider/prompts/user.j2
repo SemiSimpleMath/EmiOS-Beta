@@ -1,0 +1,44 @@
+{#- The day decider's input (subconscious/day_decision.py). Expects agent_input: now (UTC ISO), day, items
+    [{label, time, statement, related: [statement]}], todos [{title, status, due}], chat [{at (UTC ISO), speaker,
+    text}], work [{objective, progress}], concerns [{title, severity}], correction. Times are shown local. -#}
+{%- set A = agent_input -%}
+Now: {{ A.now | local_time }}
+
+## Today's calendar ({{ A.day }})
+{% for it in A["items"] %}
+[{{ it.label }}] {{ "All day" if it.time == "all day" else "At " ~ it.time }}: {{ it.statement }}
+{%- for r in it.related %}
+    read with: {{ r }}
+{%- endfor %}
+{%- endfor %}
+
+## The todo list
+{% for t in A.todos -%}
+- {{ t.title }} ({{ t.status }}{% if t.due %}, due {{ t.due }}{% endif %})
+{% else -%}
+(empty)
+{% endfor %}
+## Chat today
+{% for m in A.chat -%}
+[{{ m.at | local_time }}] {{ m.speaker }}: {{ m.text }}
+{% else -%}
+(none yet today)
+{% endfor %}
+## Work already in motion (not from the calendar)
+{% for w in A.work -%}
+- {{ w.objective }}
+{% with p = w.progress, pad = "  " %}{% include 'shared/work/work_progress.j2' %}{% endwith -%}
+{% else -%}
+(none)
+{% endfor %}
+## Open concerns
+{% for c in A.concerns -%}
+- {{ c.title }}{% if c.severity %} (severity: {{ c.severity }}){% endif %}
+{% else -%}
+(none)
+{% endfor %}
+{% if A.correction %}
+## Your previous answer was refused
+{{ A.correction }}
+{% endif %}
+Decide every item, by its label.

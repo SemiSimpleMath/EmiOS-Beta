@@ -197,9 +197,11 @@ def progress(work_id: str) -> Dict[str, Any]:
 
 
 def active_work() -> List[Dict[str, Any]]:
-    """Every active work object: title, objective, when it started, and where it stands."""
+    """Every active work object: title, objective, when it started, where it stands, and whether it was made
+    from a placement on today's calendar (an intake item of source type `belief`)."""
     return [{"work_id": r["id"], "title": r["title"], "objective": str(r["constraints"].get("objective") or ""),
-             "created": _local(r["created_at"]), "progress": progress(r["id"])}
+             "created": _local(r["created_at"]), "progress": progress(r["id"]),
+             "from_calendar": any(s.get("source_type") == "belief" for s in r["constraints"].get("source_intake") or [])}
             for r in sorted(_rows(), key=lambda r: r["created_at"] or "") if r["status"] == "active"]
 
 

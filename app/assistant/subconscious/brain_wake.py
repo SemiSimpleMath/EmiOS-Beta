@@ -45,7 +45,7 @@ _start_lock = threading.Lock()
 
 def run_brain() -> Dict[str, Any]:
     """One pass: gate, brain step, briefs, the concern planner, handoffs, the day pass and its occurrences,
-    the stories."""
+    the stories, and the day decision (shadow)."""
     from app.assistant.subconscious.brain_step import run_brain_step
     from app.assistant.subconscious.concern_brief import run_briefs
     from app.assistant.subconscious.concern_handoff import run_handoffs
@@ -71,8 +71,13 @@ def run_brain() -> Dict[str, Any]:
     from app.assistant.subconscious.brain_stories import run_stories
     with trace(stage="stories"):
         stories = run_stories()
+    # Last, and shadow only: what the brain would decide for today's calendar, recorded and compared, never
+    # handed to dayflow (subconscious/day_decision.py; docs/design/brain_delegates_work_2026-10-04.md).
+    from app.assistant.subconscious.day_decision import run_day_decision
+    with trace(stage="day_decision"):
+        decided = run_day_decision()
     return {**gate, **{f"brain_{k}": v for k, v in brain.items()}, **briefs, **plans, **handoffs, **day, **occurrences,
-            **stories,
+            **stories, **decided,
             "next_wake_at": min(due) if due else None}
 
 

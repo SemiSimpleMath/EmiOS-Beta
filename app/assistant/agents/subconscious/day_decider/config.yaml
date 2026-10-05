@@ -1,0 +1,26 @@
+name: subconscious::day_decider
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  model_tier: "smart"
+
+# The brain's day decision (docs/design/brain_delegates_work_2026-10-04.md): for every placement on today's
+# calendar, whether today needs the assistant to do something, who acts, the assistant's part and when. SHADOW
+# ONLY: subconscious/day_decision.py records its answers in brain_day_decisions and hands nothing to dayflow,
+# which keeps handling the calendar through the steward. Context is fully pre-injected; code validates.
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+accept_auto_skills: false
+
+user_context_items:
+  - agent_input
+
+required_context_items:
+  - agent_input
+
+system_context_items:
+  - resource_assistant_data
+  - resource_user_data
+  - resource_orchestrator_user_prefs

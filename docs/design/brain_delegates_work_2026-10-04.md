@@ -1,6 +1,12 @@
 # The brain decides what work exists; dayflow decides how (design, 2026-10-04)
 
-Status: proposed 2026-10-04, no code. Revised the same day: the steward retires (section 4). Follows a week of observation (2026-10-02 to 10-04) and the owner's
+Status: proposed 2026-10-04. Revised the same day: the steward retires (section 4). Build steps 1 and 2 built
+2026-10-04 for calendar items, SHADOW ONLY: `subconscious::day_decider` (`subconscious/day_decision.py`) decides each
+placement on every brain wake when its inputs changed, records it in `brain_day_decisions`, hands nothing to
+dayflow; `python -m app.assistant.subconscious.day_decision <day>` sets it beside what dayflow did. Replayed on the
+recorded 2026-10-04 morning (`scratch/replay/day_decider_replay.py`): timesheets not needed 6/6, the 6 PM
+family-time heads-up 3/3, lights off after bedtime one task on the inactivity signal; every answer valid.
+"Who acts" stays in shadow (the live concern decider is unchanged). Follows a week of observation (2026-10-02 to 10-04) and the owner's
 direction the same day. Builds on `three_layer_mind` (2026-09-29: the brain recommends, dayflow acts),
 `dayflow_goal_ownership_2026-09-30.md`, `what_was_done_reaches_the_brain_2026-10-03.md` and
 `work_progress_for_outside_readers_2026-10-04.md`.

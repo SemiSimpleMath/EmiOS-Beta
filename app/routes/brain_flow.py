@@ -38,6 +38,10 @@ NODES: List[Dict[str, Any]] = [
      "agents": ["dayflow_routine_writer"],
      "role": "Places each belief the owner approved for the calendar at its times today, read with the beliefs "
              "closest to it in meaning; code builds the day from the placements and hands each one to dayflow."},
+    {"id": "day_decision", "title": "Day decision (shadow)", "col": 1, "row": 3,
+     "agents": ["subconscious::day_decider"],
+     "role": "Shadow only: decides what each placement on today's calendar needs (who acts, the assistant's part, "
+             "when, or nothing and why) and records it beside what dayflow did. Nothing is handed over yet."},
     {"id": "door", "title": "Concern door", "col": 2, "row": 2, "agents": ["subconscious::concern_door"],
      "role": "Every new concern enters here: a new matter, the same as an open or a closed concern, or the "
              "same as another candidate. Code assigns ids and folds a duplicate into the concern it matches."},
@@ -68,6 +72,7 @@ EDGES = [
     ("door", "concerns", ""), ("concerns", "brief", ""), ("brief", "plan", ""),
     ("plan", "handoff", ""), ("day_pass", "handoff", "today's calendar"), ("handoff", "steward", ""),
     ("steward", "gate", "work outcomes come back as events"), ("concerns", "stories", ""),
+    ("day_pass", "day_decision", "shadow: recorded, not handed over"),
 ]
 AGENT_NODE = {a: n["id"] for n in NODES for a in n["agents"]}
 
