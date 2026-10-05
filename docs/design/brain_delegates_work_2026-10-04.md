@@ -6,7 +6,15 @@ placement on every brain wake when its inputs changed, records it in `brain_day_
 dayflow; `python -m app.assistant.subconscious.day_decision <day>` sets it beside what dayflow did. Replayed on the
 recorded 2026-10-04 morning (`scratch/replay/day_decider_replay.py`): timesheets not needed 6/6, the 6 PM
 family-time heads-up 3/3, lights off after bedtime one task on the inactivity signal; every answer valid.
-"Who acts" stays in shadow (the live concern decider is unchanged). Follows a week of observation (2026-10-02 to 10-04) and the owner's
+"Who acts" stays in shadow (the live concern decider is unchanged).
+The list itself built 2026-10-04 (shadow): `subconscious/brain_list.py` keeps entries with stable ids and every
+change (created, modified, cancelled, with its cause) in `brain_list_entries` / `brain_list_changes`; calendar entries
+are keyed by code to their placement and the day decider sees each placement's current entry; after each live
+concern plan, `subconscious::concern_list_decider` (`subconscious/concern_list_shadow.py`) keeps, modifies or
+cancels the concern's entries by id and adds what is missing, from the same record and lookups the live decider
+read. Replayed: the Ring repeat handoff of 2026-10-04 becomes "keep" in both runs. Open: "who acts" read two
+ways (the person who does the work, or the one who reminds); one run planned reminders sent to the owner's son
+directly; entries per concern vary from one to five. Follows a week of observation (2026-10-02 to 10-04) and the owner's
 direction the same day. Builds on `three_layer_mind` (2026-09-29: the brain recommends, dayflow acts),
 `dayflow_goal_ownership_2026-09-30.md`, `what_was_done_reaches_the_brain_2026-10-03.md` and
 `work_progress_for_outside_readers_2026-10-04.md`.

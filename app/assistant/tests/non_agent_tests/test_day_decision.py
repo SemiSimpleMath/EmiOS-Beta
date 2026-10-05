@@ -27,7 +27,8 @@ def _plan():
 
 
 def _inputs(chat="I'll start the report at 5"):
-    return {"day": "2026-03-10", "now": NOW.isoformat(), "items": D.placements(_plan()),
+    return {"day": "2026-03-10", "now": NOW.isoformat(),
+            "items": [{**it, "current": None} for it in D.placements(_plan())],
             "todos": [{"title": "Weekly report", "status": "needsAction", "due": ""}],
             "chat": [{"id": "m1", "at": NOW.isoformat(), "speaker": "Owner", "text": chat}],
             "work": [], "concerns": [{"title": "Sleep is poor", "severity": "medium"}], "correction": None}
@@ -70,7 +71,8 @@ def test_a_run_is_recorded_and_repeated_only_when_its_inputs_change(tmp_path):
     calls = []
     call = lambda payload: calls.append(payload) or GOOD
     out = D.run_day_decision(now_utc=NOW, connect=conn, gather_inputs=lambda now: _inputs(), call=call)
-    assert out == {"day_decision": "decided", "day_items": 3, "day_needed": 2}
+    assert out == {"day_decision": "decided", "day_items": 3, "day_needed": 2,
+                   "day_list_changes": {"created": 3, "modified": 0, "unchanged": 0, "cancelled": 0}}
     assert D.run_day_decision(now_utc=NOW, connect=conn, gather_inputs=lambda now: _inputs(), call=call) == \
         {"day_decision": "unchanged"}
     D.run_day_decision(now_utc=NOW, connect=conn, gather_inputs=lambda now: _inputs("dinner moved to 7"), call=call)
@@ -116,7 +118,7 @@ def test_the_prompts_carry_the_rules_the_stewards_purpose_and_the_inputs():
     res = {"resource_assistant_data": {"name": "the assistant"}, "resource_user_data": {"first_name": "Sam"},
            "resource_orchestrator_user_prefs": "Wellness nudges are separate cron reminders."}
     system = _ENV.get_template("subconscious/day_decider/prompts/system.j2").render(**res)
-    assert "Name who acts (the assistant, Sam, or another person by" in system
+    assert "Every piece of work names who acts: the assistant, Sam, or another person by name" in system
     assert "A HEADS-UP is the opposite and belongs exactly on the boundary" in system      # when_to_interrupt.j2
     assert "You are helping the user's day go well" in system                              # stewardship.j2
     assert "Wellness nudges are separate cron reminders." in system

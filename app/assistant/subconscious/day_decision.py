@@ -99,9 +99,24 @@ def open_concerns() -> List[Dict[str, Any]]:
 
 
 def fingerprint(inputs: Dict[str, Any]) -> str:
-    """What the decision read, minus the clock: a run is repeated only when one of these changed."""
-    return hashlib.sha256(json.dumps({k: v for k, v in inputs.items() if k not in ("now", "correction")},
-                                     sort_keys=True, default=str).encode("utf-8")).hexdigest()
+    """What the decision read, minus the clock and minus the list's own entries (they change because of a run, so
+    counting them would make every run trigger the next): a run is repeated only when one of these changed."""
+    read = {k: v for k, v in inputs.items() if k not in ("now", "correction", "items")}
+    read["items"] = [{k: v for k, v in it.items() if k != "current"} for it in inputs["items"]]
+    return hashlib.sha256(json.dumps(read, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
+
+def with_current(day: str, items: List[Dict[str, Any]], *, connect=None) -> List[Dict[str, Any]]:
+    """Each placement with its entry on the brain's list (decision, who acts, the part, when, why), or None."""
+    from app.assistant.subconscious import brain_list
+    now_on = {e["id"]: e for e in brain_list.entries(day=day, connect=connect)}
+    out = []
+    for it in items:
+        e = now_on.get(brain_list.calendar_id(day, it["belief_key"], it["time"]))
+        out.append({**it, "current": None if e is None else {
+            "decision": e["decision"], "who_acts": e["who_acts"], "assistant_part": e["assistant_part"],
+            "when": e["when_local"], "why": e["why"]}})
+    return out
 
 
 # ── the answer ─────────────────────────────────────────────────────────────
@@ -159,7 +174,7 @@ def gather(now_utc: datetime, *, plan_connect=None) -> Optional[Dict[str, Any]]:
     plan = day_plan.load_plan(day, connect=plan_connect)
     if plan is None:
         return None
-    return {"day": day, "now": now_utc.isoformat(), "items": placements(plan), "todos": todos(),
+    return {"day": day, "now": now_utc.isoformat(), "items": with_current(day, placements(plan)), "todos": todos(),
             "chat": chat_today(day, now_utc), "work": work_in_motion(), "concerns": open_concerns(),
             "correction": None}
 
@@ -196,12 +211,16 @@ def run_day_decision(*, now_utc: Optional[datetime] = None, connect=None,
                   "VALUES (?,?,?,?,?)",
                   (inputs["day"], now.isoformat(), fp, json.dumps(inputs["items"], ensure_ascii=False),
                    json.dumps(data["decisions"], ensure_ascii=False)))
+    from app.assistant.subconscious import brain_list
+    changed = brain_list.apply_calendar(inputs["day"], inputs["items"], data["decisions"],
+                                        cause=f"day decision {now.isoformat()}", at=now, connect=connect)
     needed = [d for d in data["decisions"] if d["decision"] == "needed"]
     step("day_decision", "decided (shadow)", subject=inputs["day"], items=len(labels), needed=len(needed),
-         decisions=data["decisions"])
-    logger.info("[day_decision] %s: %d placement(s), %d needed (shadow; nothing handed to dayflow)",
-                inputs["day"], len(labels), len(needed))
-    return {"day_decision": "decided", "day_items": len(labels), "day_needed": len(needed)}
+         list_changes=changed, decisions=data["decisions"])
+    logger.info("[day_decision] %s: %d placement(s), %d needed; list %s (shadow; nothing handed to dayflow)",
+                inputs["day"], len(labels), len(needed), changed)
+    return {"day_decision": "decided", "day_items": len(labels), "day_needed": len(needed),
+            "day_list_changes": changed}
 
 
 # ── the comparison ─────────────────────────────────────────────────────────

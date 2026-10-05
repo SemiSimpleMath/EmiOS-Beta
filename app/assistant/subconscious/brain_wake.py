@@ -45,7 +45,7 @@ _start_lock = threading.Lock()
 
 def run_brain() -> Dict[str, Any]:
     """One pass: gate, brain step, briefs, the concern planner, handoffs, the day pass and its occurrences,
-    the stories, and the day decision (shadow)."""
+    the stories, and the shadow list (the day decision and each planned concern's entries)."""
     from app.assistant.subconscious.brain_step import run_brain_step
     from app.assistant.subconscious.concern_brief import run_briefs
     from app.assistant.subconscious.concern_handoff import run_handoffs
@@ -57,7 +57,8 @@ def run_brain() -> Dict[str, Any]:
     gate = run_gate()
     brain = run_brain_step()
     briefs = run_briefs()
-    plans = concern_planner.run_planners()
+    shadow_jobs: list = []        # concerns planned this wake, for the brain's shadow list (below)
+    plans = concern_planner.run_planners(shadow=shadow_jobs)
     handoffs = run_handoffs()
     register, now = load_register(), datetime.now(timezone.utc)
     due = [t for t in (gate["next_ready_at"], concern_planner.next_hold_at(register, now)) if t is not None]
@@ -76,8 +77,11 @@ def run_brain() -> Dict[str, Any]:
     from app.assistant.subconscious.day_decision import run_day_decision
     with trace(stage="day_decision"):
         decided = run_day_decision()
+    # And the brain's list for each concern planned this wake, shadow only (subconscious/concern_list_shadow.py).
+    from app.assistant.subconscious.concern_list_shadow import run_concern_shadow
+    listed = run_concern_shadow(shadow_jobs)
     return {**gate, **{f"brain_{k}": v for k, v in brain.items()}, **briefs, **plans, **handoffs, **day, **occurrences,
-            **stories, **decided,
+            **stories, **decided, **listed,
             "next_wake_at": min(due) if due else None}
 
 

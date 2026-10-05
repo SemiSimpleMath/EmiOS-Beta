@@ -130,24 +130,32 @@ def _invoke(task: str, information: str) -> Optional[Dict[str, Any]]:
     manager = DI.multi_agent_manager_factory.create_manager(_MANAGER)
     DI.manager_invoker.invoke(manager, Message(task=task, information=information, scope_context=scope))
     from app.assistant.subconscious.brain_trace import current, step
+    looked_up = []
     for m in manager.blackboard.get_messages():
         if getattr(m, "data_type", None) == "tool_result":
             step("plan", "tool result", subject=current("concern_id"), result_type=list(m.sub_data_type or []),
                  content=m.content)
+            looked_up.append(str(m.content or ""))
     for m in reversed(manager.blackboard.get_messages()):
         if str(getattr(m, "sender", "") or "").endswith(_DECIDER.split("::")[-1]):
             data = getattr(m, "data", None)
             if isinstance(data, dict) and "decision" in data:
-                return data
+                # What the planner looked up rides along for the brain's shadow list (concern_list_shadow.py);
+                # it is not part of the plan.
+                return {**data, "_looked_up": looked_up}
     return None
 
 
 def write_plan(concern: Dict[str, Any], bucket: str, *,
-               invoke: Optional[Callable[[str, str], Any]] = None) -> Dict[str, Any]:
-    """The plan for one matter concern; raises when the decider's answer is invalid."""
+               invoke: Optional[Callable[[str, str], Any]] = None,
+               looked_up: Optional[List[str]] = None) -> Dict[str, Any]:
+    """The plan for one matter concern; raises when the decider's answer is invalid. `looked_up`, when given,
+    receives what the planner looked up (for the shadow list)."""
     from app.assistant.subconscious.concern_brief import hold_until_utc
     now = datetime.now(timezone.utc)
     data = (invoke or _invoke)(concern_text(concern, bucket), "")
+    if looked_up is not None and isinstance(data, dict):
+        looked_up.extend(data.get("_looked_up") or [])
     found = problems(data, now)
     if found:
         raise ValueError(f"concern decider answer invalid: {found}")
@@ -158,8 +166,10 @@ def write_plan(concern: Dict[str, Any], bucket: str, *,
     return plan
 
 
-def run_planners(*, invoke=None, register_connect=None) -> Dict[str, Any]:
-    """Plan every matter concern that needs it. Free when none does."""
+def run_planners(*, invoke=None, register_connect=None, shadow: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """Plan every matter concern that needs it. Free when none does. `shadow`, when given, receives each concern
+    planned (its record as the decider read it, and what the planner looked up) for the brain's shadow list
+    (subconscious/concern_list_shadow.py), which runs after the live stages."""
     from app.assistant.subconscious import persist
     from app.assistant.subconscious.concern_store import load_register
     todo = stale(load_register(connect=register_connect))
@@ -171,9 +181,10 @@ def run_planners(*, invoke=None, register_connect=None) -> Dict[str, Any]:
         cid = concern["concern_id"]
         from app.assistant.subconscious.brain_trace import step, trace
         step("plan", "stale", subject=cid, title=concern.get("title"), reason=stale_reason(concern))
+        looked_up: List[str] = []
         try:
             with trace(stage="plan", concern_id=cid):
-                plan = write_plan(concern, bucket, invoke=invoke)
+                plan = write_plan(concern, bucket, invoke=invoke, looked_up=looked_up)
         except Exception as exc:
             logger.error("[plan] could not plan %s; not retried until it changes: %s", cid, exc, exc_info=True)
             step("plan", "failed: not retried until the brief changes", subject=cid,
@@ -184,6 +195,8 @@ def run_planners(*, invoke=None, register_connect=None) -> Dict[str, Any]:
         if persist.set_concern_plan(cid, from_brief, plan=plan, connect=register_connect):
             step("plan", "written", subject=cid, plan=plan)
             written += 1
+            if shadow is not None:
+                shadow.append({"concern": concern, "bucket": bucket, "looked_up": looked_up})
         else:
             step("plan", "not stored: the brief changed while it was planned", subject=cid)
     logger.info("[plan] written=%d failed=%d", written, failed)

@@ -42,6 +42,10 @@ NODES: List[Dict[str, Any]] = [
      "agents": ["subconscious::day_decider"],
      "role": "Shadow only: decides what each placement on today's calendar needs (who acts, the assistant's part, "
              "when, or nothing and why) and records it beside what dayflow did. Nothing is handed over yet."},
+    {"id": "concern_list", "title": "Concern list (shadow)", "col": 5, "row": 2,
+     "agents": ["subconscious::concern_list_decider"],
+     "role": "Shadow only: after the planner, keeps the concern's entries on the brain's list (keep, modify or "
+             "cancel by id, add what is missing), each naming who acts, the assistant's part and when."},
     {"id": "door", "title": "Concern door", "col": 2, "row": 2, "agents": ["subconscious::concern_door"],
      "role": "Every new concern enters here: a new matter, the same as an open or a closed concern, or the "
              "same as another candidate. Code assigns ids and folds a duplicate into the concern it matches."},
@@ -73,6 +77,7 @@ EDGES = [
     ("plan", "handoff", ""), ("day_pass", "handoff", "today's calendar"), ("handoff", "steward", ""),
     ("steward", "gate", "work outcomes come back as events"), ("concerns", "stories", ""),
     ("day_pass", "day_decision", "shadow: recorded, not handed over"),
+    ("plan", "concern_list", "shadow: recorded, not handed over"),
 ]
 AGENT_NODE = {a: n["id"] for n in NODES for a in n["agents"]}
 

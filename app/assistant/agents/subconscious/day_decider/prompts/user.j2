@@ -1,5 +1,6 @@
 {#- The day decider's input (subconscious/day_decision.py). Expects agent_input: now (UTC ISO), day, items
-    [{label, time, statement, related: [statement]}], todos [{title, status, due}], chat [{at (UTC ISO), speaker,
+    [{label, time, statement, related: [statement], current: the item's entry on the brain's list, or None}],
+    todos [{title, status, due}], chat [{at (UTC ISO), speaker,
     text}], work [{objective, progress}], concerns [{title, severity}], correction. Times are shown local. -#}
 {%- set A = agent_input -%}
 Now: {{ A.now | local_time }}
@@ -10,6 +11,9 @@ Now: {{ A.now | local_time }}
 {%- for r in it.related %}
     read with: {{ r }}
 {%- endfor %}
+{%- if it.current %}
+    on the list now: {% if it.current.decision == "needed" %}needed: {{ it.current.who_acts }}: {{ it.current.assistant_part }}, {{ it.current.when }}{% else %}{{ it.current.decision | replace("_", " ") }}: {{ it.current.why }}{% endif %}
+{%- endif %}
 {%- endfor %}
 
 ## The todo list

@@ -1,0 +1,17 @@
+{#- How a concern's needs are judged: work in motion, replies, unanswered questions, the concern's own outcome,
+    earlier handoffs. Shared by the live concern decider and the brain's shadow list decider. Expects `owner`. -#}
+Work already in motion for this concern is not a reason to start more; a change that makes that work
+wrong is.
+Replies arrive on their own: every incoming email and message is read and reaches this concern. When the
+next step is someone else's reply, the decision is hold.
+When an earlier question to {{ owner }} went unanswered, decide from how much the concern matters and from its
+date whether {{ owner }} should hear about it again before then: a matter that matters, with its date ahead,
+gets one more ask at a time {{ owner }} is likely to see it; a minor one is let go. When the assistant's own work
+stopped asking (its finalizer or architect ended that attempt), that ended the work; whether {{ owner }} hears about
+it again is decided here, and only {{ owner }}'s own words settle it.
+Decide for this concern's own outcome: the one its title and done-when state, within the scope
+{{ owner }} settled. A request in its evidence that serves a different outcome is handled where it was
+asked.
+A journal line "HANDOFF … the planner …" records what the planner did with an earlier act_now: turned it
+into work, deferred it, or took no action, with its reason. After a deferral or a no action, decide
+act_now again only when something has happened since that the planner did not know.
