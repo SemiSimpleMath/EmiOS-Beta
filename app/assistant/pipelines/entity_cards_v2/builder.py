@@ -258,6 +258,7 @@ def build_card(entity_node_id: str) -> Dict[str, Any]:
                 'source_node_ids': node_ids,
                 'source_edge_ids': edge_ids,
                 'confidence_tier': worst_tier,
+                'last_said': _latest([sf.get('said') for sf in source_facts]),
             })
 
         # Stage 3: distillation — only when section exceeds its cap
@@ -301,6 +302,7 @@ def build_card(entity_node_id: str) -> Dict[str, Any]:
                     'source_node_ids': node_ids,
                     'source_edge_ids': edge_ids,
                     'confidence_tier': worst_tier,
+                    'last_said': max((srb['last_said'] for srb in source_rbs if srb.get('last_said')), default=None),
                 })
         else:
             # No distillation; drop bullet_id (it was only for distiller threading)
@@ -589,36 +591,15 @@ def _is_user_self_entity(entity: Node) -> bool:
     resource_user_data, user_bio_context, etc., and is injected into
     prompts through other channels. A card here would just duplicate.
 
-    Match is case-insensitive against the user's first_name and
-    full_name from resource_user_data. Falls back to False on any
-    lookup failure (better to build an extra card than to wrongly
-    skip a non-user entity).
+    Matches the label, case-insensitively, against the canonical primary user name (the same name the nightly
+    refresh gates on). Raises when that name is not configured. Until 2026-10-05 this read resource_user_data with a
+    positional get_resource call that raised TypeError on every build; the error was logged at DEBUG and the check
+    returned False.
     """
     if (entity.node_type or "") != "Entity":
         return False
-    label = (entity.label or "").strip().lower()
-    if not label:
-        return False
-    try:
-        from app.assistant.ServiceLocator.service_locator import DI
-        resource_manager = getattr(DI, "resource_manager", None)
-        if resource_manager is None:
-            return False
-        user_data = resource_manager.get_resource("resource_user_data")
-        if not isinstance(user_data, dict):
-            return False
-        candidates = set()
-        for key in ("first_name", "preferred_name", "full_name"):
-            v = user_data.get(key)
-            if isinstance(v, str) and v.strip():
-                candidates.add(v.strip().lower())
-        return label in candidates
-    except Exception:
-        logger.debug(
-            "[entity_cards_v2] _is_user_self_entity lookup failed for %s",
-            entity.label, exc_info=True,
-        )
-        return False
+    from app.assistant.utils.identity_names import get_required_primary_user_name
+    return (entity.label or "").strip().lower() == get_required_primary_user_name().strip().lower()
 
 
 def _collect_candidate_facts(entity: Node) -> List[Dict[str, Any]]:
@@ -871,7 +852,33 @@ def _walk_candidate_facts(session: Session, entity: Node) -> List[Dict[str, Any]
             entity.label, len(seen_2hop_entity_ids),
         )
 
+    said = _said_dates(session, {nid for f in facts for nid in f['source_node_ids']})
+    for f in facts:
+        dates = [said[nid] for nid in f['source_node_ids'] if nid in said]
+        f['said'] = {'first': min(d[0] for d in dates), 'last': max(d[1] for d in dates)} if dates else None
     return facts
+
+
+def _said_dates(session: Session, node_ids: set) -> Dict[str, tuple]:
+    """node_id -> (first, last) date its claim was said, from the source messages' timestamps (kg_node_evidence).
+    Not Node.first_observed: for nodes minted by the legacy chat import it is the import date (2026-05-12 for a
+    claim said 2025-01-02), so 2,206 of 7,884 nodes read as said more than 30 days later than they were."""
+    if not node_ids:
+        return {}
+    from sqlalchemy import bindparam, text
+    rows = session.execute(text(
+        "SELECT node_id, MIN(message_timestamp), MAX(message_timestamp) FROM kg_node_evidence "
+        "WHERE message_timestamp IS NOT NULL AND node_id IN :ids GROUP BY node_id"
+    ).bindparams(bindparam('ids', expanding=True)), {'ids': list(node_ids)}).fetchall()
+    return {r[0]: (str(r[1])[:10], str(r[2])[:10]) for r in rows}
+
+
+def _said_line(said: Optional[Dict[str, str]]) -> str:
+    if not said:
+        return "said: (no source message date)"
+    if said['first'] == said['last']:
+        return f"said: {said['last']}"
+    return f"said: first {said['first']}, last {said['last']}"
 
 
 # --- Selection policy helpers ----------------------------------------------
@@ -1022,6 +1029,7 @@ def _tags_from_persisted(
     }
     # Build {node_id -> [active section names]} after applying the drop filter.
     tags_by_node: Dict[str, List[str]] = {}
+    tagged_node_ids = {tag.node_id for tag in tag_rows}
     for tag in tag_rows:
         node = nodes_by_id.get(tag.node_id)
         if node is None:
@@ -1042,7 +1050,11 @@ def _tags_from_persisted(
     # section not in this entity's template, default to general_facts so
     # nothing card-worthy silently disappears. Matches the existing
     # "reject reroutes to general_facts" pattern but applies to the
-    # untagged-by-omission case too.
+    # untagged-by-omission case too. A fact whose card tags were ALL dropped
+    # (the renderer or distiller rejected it, unchanged since) is skipped:
+    # until 2026-10-05 it fell through to general_facts here and came back on
+    # every build ("regular Zoom call every Thursday", dropped 2026-05-22,
+    # led a friend's card in 2026-09 though the call moved to Mondays).
     default_section = (
         "general_facts" if "general_facts" in valid
         else (bullet_sections[-1] if bullet_sections else None)
@@ -1052,6 +1064,8 @@ def _tags_from_persisted(
         nid = f['source_node_ids'][0] if f.get('source_node_ids') else None
         if not nid:
             continue
+        if nid in tagged_node_ids and not tags_by_node.get(nid):
+            continue  # every card tag dropped: the build skips it (drop ledger)
         emitted = False
         for sec in tags_by_node.get(nid, []):
             if sec not in valid:
@@ -1159,7 +1173,8 @@ def _run_bullet_renderer(
             f"    edge: {(f['edge_sentence'] or '')!r}\n"
             f"    target node: {(f['object_sentence'] or '')!r}\n"
             f"    temporal: start={f['temporal']['start_date']} end={f['temporal']['end_date']}"
-            f" valid_during={f['temporal']['valid_during']}"
+            f" valid_during={f['temporal']['valid_during']}\n"
+            f"    {_said_line(f.get('said'))}"
         )
         fact_blocks.append(block)
 
@@ -1258,7 +1273,7 @@ def _persist_card(
                 bullet_text=b['bullet_text'],
                 source_node_ids=b['source_node_ids'],
                 source_edge_ids=b['source_edge_ids'],
-                source_hash=_compute_hash(b),
+                source_hash=_compute_hash({k: v for k, v in b.items() if k != 'last_said'}),
                 confidence_tier=b['confidence_tier'],
             )
             session.add(bullet)
@@ -1302,7 +1317,7 @@ def _run_section_distiller(
         raise RuntimeError("agent entity_cards::section_distiller not available")
 
     bullet_block = "\n".join(
-        f"  {rb['bullet_id']}: {rb['bullet_text']}"
+        f"  {rb['bullet_id']}: {rb['bullet_text']} (last said {rb.get('last_said') or 'unknown'})"
         for rb in renderer_bullets
     )
     agent_input = {
@@ -1382,7 +1397,7 @@ def _build_summary_section(
     for section_name, bullets in section_bullets.items():
         section_blocks.append(f"### {section_name}")
         for b in bullets:
-            section_blocks.append(f"- {b['bullet_text']}")
+            section_blocks.append(f"- {b['bullet_text']} (last said {b.get('last_said') or 'unknown'})")
 
     agent_input = {
         "entity_descriptor": (
@@ -1424,6 +1439,11 @@ def _build_level_0(entity: Node, summary_text: Optional[str]) -> Optional[str]:
 
 
 # --- Helpers ----------------------------------------------------------------
+
+def _latest(saids: List[Optional[Dict[str, str]]]) -> Optional[str]:
+    """The latest date any of these facts was said, or None when none has a source message date."""
+    return max((s['last'] for s in saids if s), default=None)
+
 
 def _compute_hash(payload: Any) -> str:
     """Stable content hash of source facts. Used for bullet drift detection."""

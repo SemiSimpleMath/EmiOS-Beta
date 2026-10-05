@@ -134,10 +134,21 @@ summarizer — a 5-agent pipeline plus structural walks:
    **shared promotion-time tags** from `kg_node_section_tag` (namespace `card`)
    first; only if *no* fact has a persisted card tag does it fall back to the live
    `entity_cards::section_tagger` (`_run_section_tagger`) — transition-period path.
-4. **Group + reroute.** Facts tagged `reject` or to a section not in this template
-   are rerouted to `general_facts` (a fact that cleared the NOW + importance cuts
-   is card-worthy by definition; the tagger only picks the bucket — it can't drop).
-5. **Render bullets** per section: chunked `entity_cards::bullet_renderer` fuses
+4. **Group + reroute.** Facts tagged `reject` or to a section not in this template,
+   and facts with no card tag at all, are rerouted to `general_facts` (a fact that
+   cleared the NOW + importance cuts is card-worthy by definition; the tagger only
+   picks the bucket — it can't drop). A fact whose card tags were **all dropped**
+   by an earlier build (drop ledger, below) is skipped, not rerouted: until
+   2026-10-05 it fell through to `general_facts` and returned on every build.
+5. **Render bullets** per section. Each fact carries when it was said: the first
+   and last `message_timestamp` of its source messages (`kg_node_evidence`), shown
+   to the renderer as `said: …`; each bullet carries the latest date of its
+   sources, shown to the distiller and the summary writer as `(last said …)`.
+   All three are told that when facts about the same ongoing arrangement
+   disagree, the most recently said one is current (2026-10-05: a friend's card
+   led with a Thursday call that had moved to Mondays). Not `Node.first_observed`:
+   for nodes minted by the legacy chat import it is the import date.
+   Chunked `entity_cards::bullet_renderer` fuses
    near-duplicate facts and returns each bullet's `source_fact_ids`. When a
    section exceeds its cap, `entity_cards::section_distiller` does the final
    salience cut (pick/fuse to ≤ cap). `_mark_section_drops` records facts the
@@ -225,13 +236,13 @@ drains), `runner: function`, `function_name: entity_card_refresh`. Dispatches vi
 - **Orphan deactivation** (`_ORPHAN_SQL`): active cards whose `entity_node_id` no
   longer resolves (merge losers) get `is_active = 0`.
 
-**User-self double-gating** (commit 4bbe5b0e): `build_card` already skips the
-user's own entity via `_is_user_self_entity` — but that helper reads a scope-gated
-resource and silently returns `False` outside a room context, so the nightly run
-was wasting a rebuild slot on the user's node (which updates daily). The refresh
-subscriber adds a second gate: it filters the stale list against the canonical
-primary-user name (`get_required_primary_user_name`) before picking the top
-`max_rebuilds`.
+**User-self double-gating** (commit 4bbe5b0e): `build_card` skips the user's own
+entity via `_is_user_self_entity`, which matches the label against the canonical
+primary-user name (`get_required_primary_user_name`) and raises when it is not
+configured. Until 2026-10-05 it called `get_resource` positionally, which raised
+TypeError on every build; the error was logged at DEBUG and the check returned
+`False`. The refresh subscriber also filters the stale list against the same name
+before picking the top `max_rebuilds`.
 
 ## Card-worthiness gate
 

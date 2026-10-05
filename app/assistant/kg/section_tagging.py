@@ -179,7 +179,7 @@ def count_tagged_nodes(session: Session, namespace: Optional[str] = None) -> int
 
 # Bump this when section_distiller / bullet_renderer prompt changes
 # meaningfully so previously-dropped facts get reconsidered.
-CARD_BUILDER_VERSION = "v1"
+CARD_BUILDER_VERSION = "v2"  # v2 (2026-10-05): facts carry when they were said
 
 
 def node_content_hash(node: Node) -> str:

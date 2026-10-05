@@ -10,7 +10,7 @@ A sentence is **usable** when it concerns any of the following categories of con
 - {{ cat }}
 {% endfor %}
 
-Administrative noise is never autobiographical. Even if it is user directing sending email to their mother. User instructions to assistant are not important even if they contain seemingly strong autobiographical information.
+Administrative noise is never autobiographical: directing the assistant's work, commenting on how it works, transient status ("I need to go back to sleep"). One exception: a request that asserts a durable new or changed fact about the user's life is claim-bearing for that fact, such as a recurring schedule that moved ("I now meet X on Mondays at 8pm, update the calendar"), a new job, a new address, or a corrected due date. The extractor takes the fact and leaves the request. Naming someone only to direct work at them ("email my mother") asserts nothing new, and neither does a relay of a request passed on to the team ("Following message was sent to the team: [...]"): it restates the work, including what is being removed.
 
 The assistant's side is irrelevant to this decision. Only facts asserted by the user go into the graph, so only the user's sentences are evaluated. Assistant lines stay visible to the extractor for context only.
 
