@@ -31,6 +31,7 @@ from app.assistant.database.kg_pipeline_models import (
     KGWindowExtraction,
     KGWindowMessage,
 )
+from app.assistant.kg import failure_ledger
 from app.assistant.kg.proposal_writer import write_one_proposal_group
 from app.assistant.utils.logging_config import get_logger
 from app.models.db_manager import get_db_manager
@@ -41,12 +42,14 @@ WRITER_VERSION = "kg_pipeline_v1"
 EXTRACTOR_AGENT_NAME = "knowledge_graph_add::fact_extractor"
 
 MAX_ENRICHMENTS_PER_CYCLE = 60
+LEDGER_KIND = "kg_enrichment"
 
 
 class WriteProposalsStep:
     name = "write_proposals"
 
     def _claim_pending_enrichment_ids(self, limit: int) -> List[str]:
+        set_aside = failure_ledger.set_aside_ids(LEDGER_KIND)
         with get_db_manager().read_session() as session:
             written_ids = (
                 session.query(ClaimProposalEvidence.enrichment_id)
@@ -55,17 +58,15 @@ class WriteProposalsStep:
                 .subquery()
                 .select()
             )
-            rows = (
-                session.query(KGWindowEnrichment.id)
-                .filter(~KGWindowEnrichment.id.in_(written_ids))
-                .order_by(KGWindowEnrichment.created_at.asc())
-                .limit(limit)
-                .all()
-            )
+            query = session.query(KGWindowEnrichment.id).filter(~KGWindowEnrichment.id.in_(written_ids))
+            if set_aside:
+                query = query.filter(~KGWindowEnrichment.id.in_(set_aside))
+            rows = query.order_by(KGWindowEnrichment.created_at.asc()).limit(limit).all()
             return [rid for (rid,) in rows]
 
     def pending_count(self) -> int:
         from sqlalchemy import func as sqlfunc
+        set_aside = failure_ledger.set_aside_ids(LEDGER_KIND)
         with get_db_manager().read_session() as session:
             written_ids = (
                 session.query(ClaimProposalEvidence.enrichment_id)
@@ -74,11 +75,10 @@ class WriteProposalsStep:
                 .subquery()
                 .select()
             )
-            return int(
-                session.query(sqlfunc.count(KGWindowEnrichment.id))
-                .filter(~KGWindowEnrichment.id.in_(written_ids))
-                .scalar() or 0
-            )
+            query = session.query(sqlfunc.count(KGWindowEnrichment.id)).filter(~KGWindowEnrichment.id.in_(written_ids))
+            if set_aside:
+                query = query.filter(~KGWindowEnrichment.id.in_(set_aside))
+            return int(query.scalar() or 0)
 
     def _load_enrichment_with_anchor(self, enrichment_id: str) -> Optional[Dict[str, Any]]:
         with get_db_manager().read_session() as session:
@@ -235,15 +235,20 @@ class WriteProposalsStep:
             return 0
         written = 0
         for enr_id in enrichment_ids:
-            payload = self._load_enrichment_with_anchor(enr_id)
-            if payload is None:
-                continue
+            # Any failure stops the run (owner, 2026-10-05; it used to log and
+            # move on): the enrichment stays pending, three failed runs set it
+            # aside for review.
             try:
+                payload = self._load_enrichment_with_anchor(enr_id)
+                if payload is None:
+                    raise LookupError(f"[kg_pipeline.write_proposals] enrichment {enr_id}: its extraction or window "
+                                      f"is missing")
                 if self._persist_proposal(payload):
                     written += 1
             except Exception as exc:
-                logger.exception("[kg_pipeline.write_proposals] failed for enrichment %s: %s",
-                                 enr_id, exc)
+                failure_ledger.record_failure(LEDGER_KIND, enr_id, exc)
+                raise
+            failure_ledger.clear(LEDGER_KIND, enr_id)
         if written:
             logger.info("[kg_pipeline.write_proposals] wrote %d proposals", written)
         return written

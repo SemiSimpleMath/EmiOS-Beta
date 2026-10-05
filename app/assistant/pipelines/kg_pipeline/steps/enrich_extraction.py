@@ -11,6 +11,13 @@ kg_window_enrichment:
 
 After this stage each enrichment row maps 1:1 to a future claim_proposal,
 so Stage 4 becomes purely deterministic DB writes.
+
+Any failure stops the run (owner, 2026-10-05): every component of an
+extraction is enriched before any row is written, and all its rows are
+written in one transaction, so a failure leaves the extraction pending
+whole (until then rows were written per component, and a later failure
+left the extraction half enriched and no longer pending). A State/Event the
+enricher leaves out gets one targeted correction, then the run stops.
 """
 from __future__ import annotations
 
@@ -18,6 +25,7 @@ import json as _json
 from typing import Any, Dict, List, Optional
 
 from app.assistant.database.db_handler import UnifiedLog2026
+from app.assistant.kg import failure_ledger
 from app.assistant.database.kg_pipeline_models import (
     KGResolvedMessage,
     KGWindow,
@@ -37,34 +45,39 @@ ENRICHER_AGENT_NAME = "knowledge_graph_add::meta_data_add"
 ENRICHER_VERSION = "kg_pipeline_v1"
 
 MAX_EXTRACTIONS_PER_CYCLE = 30
+LEDGER_KIND = "kg_extraction"
 
 
 class EnrichExtractionStep:
     name = "enrich_extraction"
 
     def _claim_pending_extraction_ids(self, limit: int) -> List[str]:
+        set_aside = failure_ledger.set_aside_ids(LEDGER_KIND)
         with get_db_manager().read_session() as session:
             enriched_ids = session.query(KGWindowEnrichment.window_extraction_id).distinct().subquery().select()
-            rows = (
+            query = (
                 session.query(KGWindowExtraction.id)
                 .filter(KGWindowExtraction.verdict == "extracted")
                 .filter(~KGWindowExtraction.id.in_(enriched_ids))
-                .order_by(KGWindowExtraction.created_at.asc())
-                .limit(limit)
-                .all()
             )
+            if set_aside:
+                query = query.filter(~KGWindowExtraction.id.in_(set_aside))
+            rows = query.order_by(KGWindowExtraction.created_at.asc()).limit(limit).all()
             return [rid for (rid,) in rows]
 
     def pending_count(self) -> int:
         from sqlalchemy import func as sqlfunc
+        set_aside = failure_ledger.set_aside_ids(LEDGER_KIND)
         with get_db_manager().read_session() as session:
             enriched_ids = session.query(KGWindowEnrichment.window_extraction_id).distinct().subquery().select()
-            return int(
+            query = (
                 session.query(sqlfunc.count(KGWindowExtraction.id))
                 .filter(KGWindowExtraction.verdict == "extracted")
                 .filter(~KGWindowExtraction.id.in_(enriched_ids))
-                .scalar() or 0
             )
+            if set_aside:
+                query = query.filter(~KGWindowExtraction.id.in_(set_aside))
+            return int(query.scalar() or 0)
 
     def _load_extraction(self, extraction_id: str) -> Optional[Dict[str, Any]]:
         """Return {extraction, window, resolved_window_text} or None."""
@@ -134,8 +147,8 @@ class EnrichExtractionStep:
         Scoped to State + Event only (2026-05-12). Entity/Concept/Property
         pass through unchanged — they don't need this enrichment. Goals get
         valid_currently from goal_status deterministically (no LLM call).
-        Returns enriched nodes merged with originals. Error-safe: returns
-        originals on failure.
+        Returns enriched nodes merged with originals. Any failure raises; a
+        State/Event the enricher leaves out gets one targeted correction.
         """
         if not nodes:
             return nodes
@@ -167,8 +180,11 @@ class EnrichExtractionStep:
                 raise RuntimeError(
                     f"[kg_pipeline.enrich] could not create agent {ENRICHER_AGENT_NAME!r}"
                 )
+            scope = load_scope_for_source(
+                kind="pipeline", source_id="kg_pipeline", actor_id="enrich_extraction",
+            )
 
-            if agent is not None:
+            def ask(targets: List[Dict]) -> None:
                 node_payloads = [
                     {
                         "temp_id": n.get("temp_id"),
@@ -177,32 +193,38 @@ class EnrichExtractionStep:
                         "category": n.get("category"),
                         "sentence": n.get("sentence"),
                     }
-                    for n in agent_targets
+                    for n in targets
                 ]
-
-                sentences = [n.get("sentence") or "" for n in agent_targets]
+                sentences = [n.get("sentence") or "" for n in targets]
                 combined_sentence = " | ".join(dict.fromkeys(s for s in sentences if s))
                 if not combined_sentence:
                     edge_sents = [e.get("sentence") or "" for e in (edges or [])]
                     combined_sentence = " | ".join(dict.fromkeys(s for s in edge_sents if s))
-
                 agent_input = {
                     "nodes": _json.dumps(node_payloads, ensure_ascii=True),
                     "resolved_sentence": combined_sentence,
                     "resolved_window": resolved_window,
                     "message_timestamp": message_timestamp,
                 }
-                scope = load_scope_for_source(
-                    kind="pipeline", source_id="kg_pipeline", actor_id="enrich_extraction",
-                )
-
                 resp = agent.action_handler(Message(agent_input=agent_input, scope_context=scope))
-                data = resp.data if resp and hasattr(resp, "data") else {}
-
-                meta_nodes = data.get("Nodes") or [] if isinstance(data, dict) else []
-                for mn in meta_nodes:
+                data = resp.data if resp and hasattr(resp, "data") else None
+                if not isinstance(data, dict):
+                    raise RuntimeError(f"[kg_pipeline.enrich] the enricher returned no answer: {data!r}")
+                for mn in data.get("Nodes") or []:
                     if isinstance(mn, dict) and mn.get("temp_id"):
                         meta_by_temp[str(mn["temp_id"])] = mn
+
+            ask(agent_targets)
+            missing = [n for n in agent_targets if str(n["temp_id"]) not in meta_by_temp]
+            if missing:
+                # One targeted correction: ask again for exactly the nodes left out.
+                ask(missing)
+                missing = [n for n in agent_targets if str(n["temp_id"]) not in meta_by_temp]
+                if missing:
+                    raise ValueError(
+                        f"[kg_pipeline.enrich] the enricher left out {[n['temp_id'] for n in missing]} "
+                        f"after one correction"
+                    )
 
         # Goal nodes: deterministic valid_currently from goal_status. No LLM.
         # Goals carry their lifecycle on goal_status (active|completed|abandoned|dormant).
@@ -250,23 +272,42 @@ class EnrichExtractionStep:
             merged.append(combined)
         return merged
 
-    def _persist_enrichment(
-        self,
-        extraction_id: str,
-        component_index: int,
-        enriched_nodes: List[Dict],
-        enriched_edges: List[Dict],
-    ) -> None:
-        get_db_manager().write(
-            KGWindowEnrichment(
-                window_extraction_id=extraction_id,
-                component_index=component_index,
-                enriched_nodes=enriched_nodes,
-                enriched_edges=enriched_edges,
-                enricher_version=ENRICHER_VERSION,
-            ),
-            op="enrich.persist_enrichment",
-        )
+    def _persist_enrichments(self, extraction_id: str, rows: List[tuple]) -> None:
+        """All of one extraction's enrichment rows, (component_index, nodes, edges), in one transaction."""
+        with get_db_manager().transaction(op="enrich.persist_enrichment") as session:
+            for component_index, enriched_nodes, enriched_edges in rows:
+                session.add(KGWindowEnrichment(
+                    window_extraction_id=extraction_id,
+                    component_index=component_index,
+                    enriched_nodes=enriched_nodes,
+                    enriched_edges=enriched_edges,
+                    enricher_version=ENRICHER_VERSION,
+                ))
+
+    def _enrich_one(self, extraction_id: str) -> int:
+        data = self._load_extraction(extraction_id)
+        if data is None:
+            raise LookupError(f"[kg_pipeline.enrich] extraction {extraction_id} or its window is missing")
+        all_nodes = data["nodes"]
+        all_edges = data["edges"]
+        if not all_nodes and not all_edges:
+            # Empty extraction — write a single empty enrichment row to mark done
+            self._persist_enrichments(extraction_id, [(0, [], [])])
+            return 1
+        rows = []
+        for idx, (component_nodes, component_edges) in enumerate(
+            split_into_connected_components(all_nodes, all_edges)
+        ):
+            if not component_nodes and not component_edges:
+                continue
+            enriched = self._call_meta_data_add(
+                component_nodes, component_edges,
+                resolved_window=data["resolved_window"],
+                message_timestamp=data["message_timestamp"],
+            )
+            rows.append((idx, enriched, component_edges))
+        self._persist_enrichments(extraction_id, rows)
+        return len(rows)
 
     def run_one_cycle(self, ctx) -> int:
         extraction_ids = self._claim_pending_extraction_ids(MAX_EXTRACTIONS_PER_CYCLE)
@@ -275,30 +316,12 @@ class EnrichExtractionStep:
 
         components_written = 0
         for extraction_id in extraction_ids:
-            data = self._load_extraction(extraction_id)
-            if data is None:
-                continue
-            all_nodes = data["nodes"]
-            all_edges = data["edges"]
-
-            if not all_nodes and not all_edges:
-                # Empty extraction — write a single empty enrichment row to mark done
-                self._persist_enrichment(extraction_id, 0, [], [])
-                components_written += 1
-                continue
-
-            for idx, (component_nodes, component_edges) in enumerate(
-                split_into_connected_components(all_nodes, all_edges)
-            ):
-                if not component_nodes and not component_edges:
-                    continue
-                enriched = self._call_meta_data_add(
-                    component_nodes, component_edges,
-                    resolved_window=data["resolved_window"],
-                    message_timestamp=data["message_timestamp"],
-                )
-                self._persist_enrichment(extraction_id, idx, enriched, component_edges)
-                components_written += 1
+            try:
+                components_written += self._enrich_one(extraction_id)
+            except Exception as exc:
+                failure_ledger.record_failure(LEDGER_KIND, extraction_id, exc)
+                raise
+            failure_ledger.clear(LEDGER_KIND, extraction_id)
 
         if components_written:
             logger.info(

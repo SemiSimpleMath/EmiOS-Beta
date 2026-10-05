@@ -259,8 +259,10 @@ class ResolveMessagesStep:
             agent_input["previous_context"] = ctx_block
 
         result = agent.action_handler(Message(agent_input=agent_input, scope_context=scope))
-        data = result.data if result and hasattr(result, "data") else {}
-        return data if isinstance(data, dict) else {}
+        data = result.data if result and hasattr(result, "data") else None
+        if not isinstance(data, dict):
+            raise RuntimeError(f"[kg_pipeline.resolve] the resolver returned no answer: {data!r}")
+        return data
 
     def _write_batch(self, new: List[Dict], resolver_data: Dict) -> int:
         written = 0
@@ -274,8 +276,12 @@ class ResolveMessagesStep:
                 elif hasattr(entry, "resolved_text"):
                     resolved_text = (str(entry.resolved_text or "").strip() or None)
                 if resolved_text is None:
-                    # Resolver silent — fall back to raw_text so downstream sees a value.
-                    resolved_text = m["raw_text"]
+                    # The batch is one transaction: nothing is written, the
+                    # messages stay unresolved, and the run stops (2026-10-05;
+                    # the raw text used to be written as resolved).
+                    raise ValueError(
+                        f"[kg_pipeline.resolve] the resolver returned no text for message {m['unified_log_id']}"
+                    )
 
                 session.add(
                     KGResolvedMessage(

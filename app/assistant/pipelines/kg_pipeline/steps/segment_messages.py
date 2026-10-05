@@ -167,7 +167,12 @@ class SegmentMessagesStep:
             "analysis_window_size": len(messages),
         }
         result = agent.action_handler(Message(agent_input=agent_input))
-        return result.data if result and hasattr(result, "data") else {}
+        data = result.data if result and hasattr(result, "data") else None
+        if hasattr(data, "model_dump"):
+            data = data.model_dump()
+        if not isinstance(data, dict):
+            raise RuntimeError(f"[kg_pipeline.segment] the segmenter returned no answer: {data!r}")
+        return data
 
     def _collapse_to_windows(self, messages: List[Dict], data: Dict) -> List[Dict]:
         """Convert per-message bounds output into a list of windows with members."""
@@ -261,13 +266,19 @@ class SegmentMessagesStep:
             "[kg_pipeline.segment] segmenting day=%s msgs=%d unresolved_today=%d",
             next_day, ready_count, unresolved_today,
         )
-        try:
-            data = self._call_segmenter(msgs)
-        except Exception as exc:
-            logger.exception("[kg_pipeline.segment] agent failed: %s", exc)
-            return 0
+        # A failure raises and the runner halts the pipeline (2026-10-05: it
+        # used to log and return 0, so the same paid call repeated every poll
+        # and the run never ended).
+        data = self._call_segmenter(msgs)
 
         windows = self._collapse_to_windows(msgs, data)
+        covered = {mid for w in windows for mid in w["member_ids"]}
+        missing = [m["id"] for m in msgs if m["id"] not in covered]
+        if missing:
+            raise ValueError(
+                f"[kg_pipeline.segment] the segmenter left {len(missing)} of {len(msgs)} messages out of every "
+                f"window: {missing}"
+            )
         analysis_summary = data.get("analysis_summary") if isinstance(data, dict) else ""
         written = self._persist_windows(msgs, windows, analysis_summary or "")
         logger.info("[kg_pipeline.segment] day=%s wrote %d windows from %d messages",

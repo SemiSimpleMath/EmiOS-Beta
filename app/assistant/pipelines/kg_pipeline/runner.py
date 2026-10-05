@@ -62,8 +62,10 @@ class PipelineRunResult:
 
 
 def _is_database_locked(exc: BaseException) -> bool:
+    """Only SQLite's lock errors are transient. Until 2026-10-05 every sqlite3.OperationalError counted as a lock and
+    was retried forever (a missing table or column looped instead of halting)."""
     msg = str(exc).lower()
-    return "database is locked" in msg or isinstance(exc, sqlite3.OperationalError)
+    return "database is locked" in msg or "database table is locked" in msg
 
 
 # Quota / rate-limit detection — match by exception class name + message
@@ -280,13 +282,8 @@ class KGPipelineRunner:
             fn = getattr(step, "pending_count", None)
             if not callable(fn):
                 continue
-            try:
-                total += int(fn() or 0)
-            except Exception as exc:
-                logger.warning(
-                    "[kg_pipeline] pending_count failed for step=%s: %s",
-                    getattr(step, "name", "?"), exc,
-                )
+            # A failed count raises: read as 0 it let a run end "completed" with work pending.
+            total += int(fn() or 0)
         return total
 
     def _monitor_loop(

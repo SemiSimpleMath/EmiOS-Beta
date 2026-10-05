@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.assistant.database.db_handler import UnifiedLog2026
+from app.assistant.kg import failure_ledger
 from app.assistant.database.kg_pipeline_models import (
     KGResolvedMessage,
     KGWindow,
@@ -35,32 +36,31 @@ EXTRACTOR_VERSION = "kg_pipeline_v1"
 CRITIC_VERSION = "kg_pipeline_v2"
 
 MAX_SEGMENTS_PER_CYCLE = 60
+LEDGER_KIND = "kg_window"
 
 
 class CritiqueAndExtractStep:
     name = "critique_and_extract"
 
     def _claim_pending_window_ids(self, limit: int) -> List[str]:
+        set_aside = failure_ledger.set_aside_ids(LEDGER_KIND)
         with get_db_manager().read_session() as session:
             extracted_ids = session.query(KGWindowExtraction.window_id).subquery().select()
-            rows = (
-                session.query(KGWindow.id)
-                .filter(~KGWindow.id.in_(extracted_ids))
-                .order_by(KGWindow.start_timestamp.asc(), KGWindow.id.asc())
-                .limit(limit)
-                .all()
-            )
+            query = session.query(KGWindow.id).filter(~KGWindow.id.in_(extracted_ids))
+            if set_aside:
+                query = query.filter(~KGWindow.id.in_(set_aside))
+            rows = query.order_by(KGWindow.start_timestamp.asc(), KGWindow.id.asc()).limit(limit).all()
             return [rid for (rid,) in rows]
 
     def pending_count(self) -> int:
         from sqlalchemy import func as sqlfunc
+        set_aside = failure_ledger.set_aside_ids(LEDGER_KIND)
         with get_db_manager().read_session() as session:
             extracted_ids = session.query(KGWindowExtraction.window_id).subquery().select()
-            return int(
-                session.query(sqlfunc.count(KGWindow.id))
-                .filter(~KGWindow.id.in_(extracted_ids))
-                .scalar() or 0
-            )
+            query = session.query(sqlfunc.count(KGWindow.id)).filter(~KGWindow.id.in_(extracted_ids))
+            if set_aside:
+                query = query.filter(~KGWindow.id.in_(set_aside))
+            return int(query.scalar() or 0)
 
     def _load_window_lines(self, window_id: str) -> Optional[Dict[str, Any]]:
         """Return {user_lines, context_lines, user_text, full_conversation,
@@ -124,49 +124,39 @@ class CritiqueAndExtractStep:
               "kept_indices": [int, ...], # 0-based indices into user_lines
               "reason": str,              # overall_reason from v2
             }
-        On any failure → defaults to accept-all (every user line extractable)
-        so the extractor still runs, matching v1's fail-open behaviour.
+        A failure raises (2026-10-05: it used to accept every user line, so an
+        outage extracted and promoted whole windows the critic never saw).
         """
         from app.assistant.ServiceLocator.service_locator import DI
 
         context_block = "\n".join(context_lines) if context_lines else "(no assistant context)"
         indexed_block = "\n".join(f"[{i}] {line}" for i, line in enumerate(user_lines)) \
             if user_lines else "(no user lines)"
-        all_indices = list(range(len(user_lines)))
 
-        try:
-            agent = DI.agent_factory.create_agent(WINDOW_CRITIC_AGENT_NAME)
-            if not agent:
-                return {"extractable": True, "kept_indices": all_indices,
-                        "reason": "critic agent unavailable"}
-            scope = load_scope_for_source(
-                kind="pipeline", source_id="kg_pipeline", actor_id="critique_and_extract",
-            )
-            agent_input = {"context_lines": context_block, "indexed_user_lines": indexed_block}
-            result = agent.action_handler(Message(agent_input=agent_input, scope_context=scope))
-            data = result.data if result and hasattr(result, "data") else {}
-            if not isinstance(data, dict):
-                return {"extractable": True, "kept_indices": all_indices,
-                        "reason": "critic returned non-dict; defaulting accept"}
-            raw_lines = data.get("extractable_lines") or []
-            kept: List[int] = []
-            for item in raw_lines:
-                if not isinstance(item, dict):
-                    continue
-                idx = item.get("user_message_index")
-                if isinstance(idx, int) and 0 <= idx < len(user_lines) and idx not in kept:
-                    kept.append(idx)
-            kept.sort()
-            return {
-                "extractable": len(kept) > 0,
-                "kept_indices": kept,
-                "reason": str(data.get("overall_reason", ""))[:240],
-            }
-        except Exception as exc:
-            logger.warning("[kg_pipeline.critique] window_critic failed (%s: %s); accepting",
-                           type(exc).__name__, exc)
-            return {"extractable": True, "kept_indices": all_indices,
-                    "reason": f"critic error: {type(exc).__name__}"}
+        agent = DI.agent_factory.create_agent(WINDOW_CRITIC_AGENT_NAME)
+        if not agent:
+            raise RuntimeError(f"Failed to create agent: {WINDOW_CRITIC_AGENT_NAME}")
+        scope = load_scope_for_source(
+            kind="pipeline", source_id="kg_pipeline", actor_id="critique_and_extract",
+        )
+        agent_input = {"context_lines": context_block, "indexed_user_lines": indexed_block}
+        result = agent.action_handler(Message(agent_input=agent_input, scope_context=scope))
+        data = result.data if result and hasattr(result, "data") else None
+        if not isinstance(data, dict):
+            raise RuntimeError(f"[kg_pipeline.critique] the window critic returned no answer: {data!r}")
+        kept: List[int] = []
+        for item in data.get("extractable_lines") or []:
+            idx = item.get("user_message_index") if isinstance(item, dict) else None
+            if not isinstance(idx, int) or not 0 <= idx < len(user_lines):
+                raise ValueError(f"[kg_pipeline.critique] the window critic named no user line: {item!r}")
+            if idx not in kept:
+                kept.append(idx)
+        kept.sort()
+        return {
+            "extractable": len(kept) > 0,
+            "kept_indices": kept,
+            "reason": str(data.get("overall_reason", ""))[:240],
+        }
 
     def _call_fact_extractor(self, payload: Dict[str, Any]) -> Tuple[List[Dict], List[Dict]]:
         from app.assistant.ServiceLocator.service_locator import DI
@@ -209,53 +199,49 @@ class CritiqueAndExtractStep:
 
         processed = 0
         for window_id in window_ids:
-            payload = self._load_window_lines(window_id)
-            if payload is None:
-                self._persist_extraction(window_id, "skipped", "no usable user content", None, None)
-                processed += 1
-                continue
-
-            user_lines = payload["user_lines"]
-            if user_lines and all("(unknown)" in line for line in user_lines):
-                self._persist_extraction(
-                    window_id, "skipped",
-                    "all user lines have (unknown) referents", None, None,
-                )
-                processed += 1
-                continue
-
-            verdict = self._call_window_critic(payload["user_lines"], payload["context_lines"])
-            if not verdict.get("extractable", True):
-                self._persist_extraction(
-                    window_id, "rejected",
-                    verdict.get("reason", "critic rejected"), None, None,
-                )
-                processed += 1
-                continue
-
-            # v2 line-item filter: only the lines the critic marked extractable
-            # become the extraction surface. full_conversation stays unchanged
-            # so anaphora/discourse remain coherent for the extractor.
-            kept_indices = verdict.get("kept_indices") or list(range(len(payload["user_lines"])))
-            kept_user_lines = [payload["user_lines"][i] for i in kept_indices
-                               if 0 <= i < len(payload["user_lines"])]
-            payload["user_text"] = "\n".join(kept_user_lines)
-
             try:
-                nodes, edges = self._call_fact_extractor(payload)
+                processed += self._process_window(window_id)
             except Exception as exc:
-                logger.exception("[kg_pipeline.extract] fact_extractor failed for %s", window_id)
-                self._persist_extraction(
-                    window_id, "error",
-                    f"{type(exc).__name__}: {str(exc)[:200]}", None, None,
-                )
-                processed += 1
-                continue
-
-            if not nodes and not edges:
-                self._persist_extraction(window_id, "extracted", "empty extraction", [], [])
-            else:
-                self._persist_extraction(window_id, "extracted", "", nodes, edges)
-            processed += 1
-
+                # The window stays pending (no extraction row) and the run
+                # stops; three failed runs set it aside for review.
+                failure_ledger.record_failure(LEDGER_KIND, window_id, exc)
+                raise
+            failure_ledger.clear(LEDGER_KIND, window_id)
         return processed
+
+    def _process_window(self, window_id: str) -> int:
+        """Critique and extract one window; returns 1 (its verdict row was written). Raises on any failure, writing
+        no row, so the window stays pending (2026-10-05: an extractor failure used to be written as a permanent
+        verdict='error' row, so the window was never retried)."""
+        payload = self._load_window_lines(window_id)
+        if payload is None:
+            self._persist_extraction(window_id, "skipped", "no usable user content", None, None)
+            return 1
+
+        user_lines = payload["user_lines"]
+        if user_lines and all("(unknown)" in line for line in user_lines):
+            self._persist_extraction(
+                window_id, "skipped",
+                "all user lines have (unknown) referents", None, None,
+            )
+            return 1
+
+        verdict = self._call_window_critic(payload["user_lines"], payload["context_lines"])
+        if not verdict["extractable"]:
+            self._persist_extraction(
+                window_id, "rejected",
+                verdict.get("reason", "critic rejected"), None, None,
+            )
+            return 1
+
+        # v2 line-item filter: only the lines the critic marked extractable
+        # become the extraction surface. full_conversation stays unchanged
+        # so anaphora/discourse remain coherent for the extractor.
+        payload["user_text"] = "\n".join(payload["user_lines"][i] for i in verdict["kept_indices"])
+
+        nodes, edges = self._call_fact_extractor(payload)
+        if not nodes and not edges:
+            self._persist_extraction(window_id, "extracted", "empty extraction", [], [])
+        else:
+            self._persist_extraction(window_id, "extracted", "", nodes, edges)
+        return 1
