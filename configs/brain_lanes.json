@@ -1,5 +1,5 @@
 {
   "_doc": "Which of dayflow's intake lanes take their work from the brain's list (docs/design/brain_delegates_work_2026-10-04.md, section 5: cut over one lane at a time, behind a switch). mode: off (the steward handles the lane, as before), dry_run (the list-item intake node logs what it would do and does nothing), live (work is made from the list, and the lane stops reaching the steward). calendar.from_day: the first day (local, the day boundary's date) whose calendar is the brain's; earlier days stay the steward's. concern.since: UTC ISO time from which concern entries are the brain's to delegate; entries made before stay as they are. Read on every planning tick and brain pass.",
-  "calendar": {"mode": "off", "from_day": null},
-  "concern": {"mode": "off", "since": null}
+  "calendar": {"mode": "dry_run", "from_day": "2026-10-05"},
+  "concern": {"mode": "dry_run", "since": "2026-10-05T16:31:58+00:00"}
 }
