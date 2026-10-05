@@ -39,6 +39,7 @@ What to output:
 Provenance per item (CRITICAL — this is how the system resolves conflicts):
 - For every item, record `source` (where this item came from / what last asserted it) and `updated_at_local` (the local time when that source last asserted it).
 - Source examples: 'google_calendar' (recurring or one-off Google event), 'user_chat', 'concern:<short concern title>', 'ticket:<id>', 'inferred'.
+- 'inferred' is for what telemetry (AFK, activity segments, desktop activity) shows has happened or is happening, and its `updated_at_local` is the time of that telemetry. A future item is never inferred: it comes from the calendar, the user's words or a ticket. An inferred item with no telemetry behind it is removed, even when the previous daily context carries it.
 - When two signals contradict on the same item, prefer the NEWER `updated_at_local`. Then set `source` and `updated_at_local` on the emitted item to the newer signal — not to the older one being overridden.
 - If an item is unchanged from prior daily context, keep its existing source and updated_at_local (do not bump updated_at_local just because you re-emitted the item).
 

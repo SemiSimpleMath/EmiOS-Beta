@@ -215,3 +215,25 @@ def test_slot_keys_stay_unique_across_midnight():
     labels = [s['label'] for s in slots]
     keys = [s['slot'] for s in slots]
     assert labels.count('11:00 PM') == 2 and len(set(keys)) == len(keys)
+
+
+def test_the_writer_judges_the_approved_beliefs_in_batches(connect, day_inputs, monkeypatch):
+    """2026-10-05: one call judging all 45 left a belief out in 2 of 2 live answers; at most BATCH per call."""
+    many = [{'belief_key': f'b{n:02d}', 'statement': f'Belief {n}.', 'status': 'active', 'calendar': 'approved'}
+            for n in range(23)]
+    monkeypatch.setattr(drs, '_read_belief_entries', lambda: many)
+    monkeypatch.setattr(drs, '_belief_vectors', lambda: {e['belief_key']: [1.0, float(n)] for n, e in enumerate(many)})
+    monkeypatch.setattr(drs, 'RELATED_MIN', 2.0)       # nothing related: each call shows only its own batch
+    asked = []
+
+    def write(agent_input):
+        keys = [line.split(']')[0].removeprefix('- [belief:') for line in agent_input['beliefs_block'].splitlines()
+                if line.startswith('- [belief:')]
+        asked.append(keys)
+        return {'judgments': [{'belief_key': k, 'why': 'test', 'applies_today': k == 'b07', 'times': ['all day']}
+                              for k in keys]}
+    monkeypatch.setattr(drs, '_write', write)
+    drs.run_day_pass(datetime(2026, 1, 1, 18, tzinfo=timezone.utc), connect=connect)
+    assert [len(a) for a in asked] == [10, 10, 3] and sorted(sum(asked, [])) == [e['belief_key'] for e in many]
+    assert [f['belief_key'] for f in day_plan.load_plan('2026-01-01', connect=connect)['flags']] == ['b07']
+

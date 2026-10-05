@@ -51,6 +51,8 @@ _BELIEFS_PATH = _get_resources_dir() / "kg_derived" / "resource_user_beliefs.jso
 _MIN_REGEN_INTERVAL_SECONDS = 3600
 _BACKDROP_MIN_HOURS = 4  # calendar items longer than this are backdrops, not slots
 
+BATCH = 10           # approved beliefs per writer call; on 2026-10-05 a call judging all 45 left one out in 2 of 2
+                     # live answers (and in 5 of 30 replays), each time a different one
 RELATED_MAX = 5      # nearest beliefs shown beside each approved one
 RELATED_MIN = 0.65   # least cosine similarity; measured 2026-10-03: trash night drew its holiday rule, pickup
                      # day and timing beliefs and nothing else, the night AC its morning setpoint and the
@@ -289,6 +291,25 @@ def _place(placements: List[Dict[str, Any]], slots: List[dict], statements: Dict
               "lines": [line for _, line in sorted(timed[s["slot"]], key=lambda t: t[0])]} for s in slots], flags)
 
 
+def _judge(batch: List[dict], related: Dict[str, List[Dict[str, str]]], base: Dict[str, Any], conditions: set,
+           step) -> List[Dict[str, Any]]:
+    """One writer call for a batch of approved beliefs (each with its related ones), against the day's facts and
+    schedule; one correction, then a loud failure."""
+    keys = {e["belief_key"] for e in batch}
+    agent_input = {**base, "beliefs_block": _render_belief_block(
+        [{**e, "related": related[e["belief_key"]]} for e in batch])}
+    data = _write(agent_input)
+    problems = _problems(data, keys, conditions)
+    if problems:
+        logger.warning("[day_pass] invalid judgments, one correction: %s", problems)
+        step("day_pass", "answer refused, one correction", problems=problems)
+        data = _write({**agent_input, "correction": "; ".join(problems)})
+        problems = _problems(data, keys, conditions)
+        if problems:
+            raise ValueError(f"routine writer judgments still invalid after one correction: {problems}")
+    return data.get("judgments") or []
+
+
 def run_day_pass(now_utc: Optional[datetime] = None, *, connect=None) -> Dict[str, Any]:
     """Write today's plan when it is missing or its inputs changed (at most hourly). `connect` is the
     plan store: a test seam."""
@@ -324,19 +345,16 @@ def run_day_pass(now_utc: Optional[datetime] = None, *, connect=None) -> Dict[st
     conditions = {r["belief_key"] for found in related.values() for r in found} - set(given)
     # The day is the planned day (the boundary day); the clock is shown apart, so before the boundary hour the
     # header does not name the next calendar day's weekday beside this day's date (until 2026-10-05 it did).
-    agent_input = {
+    base = {
         "day_facts": _day_facts(day), "now_local": f"{now_local:%A, %B} {now_local.day}, {now_local.strftime('%I:%M %p').lstrip('0')}",
-        "daily_context": daily_context_block, "beliefs_block": beliefs_block}
-    data = _write(agent_input)
-    problems = _problems(data, set(given), conditions)
+        "daily_context": daily_context_block}
     from app.assistant.subconscious.brain_trace import step
-    if problems:
-        logger.warning("[day_pass] invalid placements, one correction: %s", problems)
-        step("day_pass", "answer refused, one correction", problems=problems)
-        data = _write({**agent_input, "correction": "; ".join(problems)})
-        problems = _problems(data, set(given), conditions)
-        if problems:
-            raise ValueError(f"routine writer placements still invalid after one correction: {problems}")
+    ordered = sorted(pool, key=lambda e: str(e["belief_key"]))
+    judgments: List[Dict[str, Any]] = []
+    for i in range(0, len(ordered), BATCH):
+        batch = ordered[i:i + BATCH]
+        judgments += _judge(batch, related, base, conditions, step)
+    data = {"judgments": judgments}
     placements = _placements(data)
     plan_slots, flags = _place(placements, slots, given, related)
     step("day_pass", "placed", day=day, approved=sorted(given),
