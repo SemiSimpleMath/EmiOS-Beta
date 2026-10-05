@@ -566,6 +566,29 @@ No model stands between the list and the schedule, so "due on the first business
 is the first business day". What really happens still returns as evidence: "submitted the timesheets" in chat
 becomes the tracker's milestone, which the brain reads as something that happened.
 
+**The record refeeds by design** (owner, 2026-10-05: "the record refeeds so it can edit it based on evidence"):
+each tracker run reads its last schedule back as the baseline and edits it from new evidence. So an item, once
+in, is treated as established, and the guard belongs at entry. On 2026-10-05 "Monthly timesheets 3:00 PM -
+5:00 PM", source "inferred", entered with nothing behind it while the tracker read the plan, and stayed all day.
+
+**Provenance is an id, checked by code** (owner, 2026-10-05: "provenance is a chat item, belief, what brain said").
+Today `source` is free text (`user_chat` names no message, `inferred` no telemetry). Every item in either layer
+carries the id of what it rests on:
+
+| Where it came from | Its provenance | Layer |
+|---|---|---|
+| Google Calendar | `calendar_item_id` (already carried) | record |
+| Chat | the message id | record |
+| A ticket reply | the ticket id (already carried) | record |
+| Telemetry | the AFK or activity segment it rests on | record |
+| A belief or the brain's decision | the list entry id (`cal:<day>:<belief_key>`, which names the belief; a concern entry's id names its concern) | schedule |
+
+Code resolves each id before an item enters: an item whose provenance does not resolve to a real event, message,
+ticket, segment or list entry is refused, so an item citing nothing cannot enter at all. The prompt rule of
+2026-10-05 (an inferred item rests on telemetry; a future item is never inferred) is the interim guard until then.
+Beliefs and the brain's decisions keep entering only through the code join into the schedule, never through the
+tracker, so the record's provenance stays calendar, chat, ticket and telemetry.
+
 **The day theme moves to the brain** (owner, 2026-10-05: "brain is better for the day theme"). "What is
 dominating the day" is interpretation, the brain's job; the tracker keeps the records. Each reader of the theme
 (the master chat gate, the steward while it lives, the architect, cron tickets, vibe check, the entertainment
