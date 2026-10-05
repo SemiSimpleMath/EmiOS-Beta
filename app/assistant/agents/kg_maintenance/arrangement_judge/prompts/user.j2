@@ -1,0 +1,25 @@
+Today: {{ agent_input.today }}
+
+## The open State
+[{{ agent_input.older.node_id }}] {{ agent_input.older.label }} ({{ agent_input.older.node_type }}{% if agent_input.older.category %}, {{ agent_input.older.category }}{% endif %})
+Statement: {{ agent_input.older.sentence or "(none)" }}
+Said: {{ agent_input.older.said }}
+Involves: {{ agent_input.older.participants | join(", ") }}
+Evidence (what was said, with the date):
+{% for ev in agent_input.older.evidence %}
+- [{{ ev.date or "undated" }}] {{ ev.text }}
+{% endfor %}
+
+## Later statements that share a person or thing with it
+{% for n in agent_input.newer %}
+### [{{ n.node_id }}] {{ n.label }} ({{ n.node_type }}{% if n.category %}, {{ n.category }}{% endif %}{% if n.end_date %}, ended {{ n.end_date }}{% endif %})
+Statement: {{ n.sentence or "(none)" }}
+Said: {{ n.said }}
+Involves: {{ n.participants | join(", ") }}
+Evidence:
+{% for ev in n.evidence %}
+- [{{ ev.date or "undated" }}] {{ ev.text }}
+{% endfor %}
+{% endfor %}
+
+Is the open State still current, or did one of the later statements replace it?

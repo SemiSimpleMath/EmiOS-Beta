@@ -292,7 +292,7 @@ Helper module `app/assistant/kg_maintenance/verdict_store.py` exposes:
 Maintenance-pipeline step order (`kg_maintenance_pipeline/pipeline.py`,
 run Mon 02:00): `lifecycle_gc` → `orphan_scan` →
 `context_embedding_backfill` → `duplicate_scan` → `pagerank` →
-`missing_dates_scan` → `edge_canon_curation` → `role_succession_scan` →
+`missing_dates_scan` → `edge_canon_curation` → `arrangement_scan` → `role_succession_scan` →
 `date_lint_scan` → `disambiguation_scan` → `investigate_findings`
 (final pass, caps at 20 investigations/run). `lifecycle_gc` and
 `edge_canon_curation` landed in the 2026-07-08 KG-core audit (deletion
@@ -305,6 +305,7 @@ lifecycle + predicate canon curation). The old
 | `step_orphan_scan` | maintenance pipeline step | `orphan_node` | Cheap structural scan |
 | `step_duplicate_scan` | maintenance pipeline step | `duplicate_node` | Three-tier candidate gen + LLM confirm; consults `kg_node_verdict` to skip already-decided pairs. Drained by `kg_dup_cluster_drain`, not the backlog drain |
 | `step_missing_dates_scan` | maintenance pipeline step | `state_missing_dates` | State/Event nodes missing one or both dates, scored by connected-entity pagerank |
+| `step_arrangement_scan` | maintenance pipeline step | (arrangement supersession, 2026-10-05) | Pairs each open State with later-said States/Events sharing a participant (not the owner; said dates from the source messages), ranked by sentence similarity; `kg_maintenance::arrangement_judge` says supersedes / both_true / same_statement / unrelated / unsure. Supersedes becomes an `arrangement_supersession` finding born investigated / needs_user_review (Accept closes the State and adds `succeeded_by`); a State is re-judged only when a new later statement appears. ≤100 per run, freshest changes first |
 | `step_role_succession_scan` | maintenance pipeline step | (diachronic disambiguation) | Judges role-reference entities for referent changes before the disambiguation scan |
 | `step_date_lint_scan` | maintenance pipeline step | date-quality findings | Lints date intervals (e.g. inverted start/end) |
 | `step_disambiguation_scan` | maintenance pipeline step | (Disambiguation drain) | Retires a marker whose label is back to one referent (re-points every parked edge to it, rebinds its evidence, deletes it; added 2026-10-05), then a temporal drain re-points mentions parked at split labels |

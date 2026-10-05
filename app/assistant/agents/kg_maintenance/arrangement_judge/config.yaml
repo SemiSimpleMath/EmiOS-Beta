@@ -1,0 +1,23 @@
+name: kg_maintenance::arrangement_judge
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  model_tier: "smart"
+
+# Pure judgment: one open State and the later statements that share a
+# participant with it in, a verdict on whether a later one replaced it out.
+# No tools.
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+accept_auto_skills: false
+
+user_context_items:
+  - agent_input
+
+required_context_items:
+  - agent_input
+strict_template: true
+
+system_context_items: []

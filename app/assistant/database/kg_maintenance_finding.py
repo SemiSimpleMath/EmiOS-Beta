@@ -49,6 +49,13 @@ finding_type values:
                            stay attached (legitimate waiting state).
                            Raised by step_disambiguation_scan.
 
+  "arrangement_supersession" — step_arrangement_scan (2026-10-05): an open
+                           State (primary) was replaced by a later statement
+                           sharing a participant (secondary). Born investigated,
+                           needs_user_review; on Accept the executor closes the
+                           State and links it succeeded_by its successor. A
+                           rejected row is the judge's cooldown stamp.
+
   Historical (not produced today):
     "suspect_node" — per-node LLM quality scan, sunsetted 2026-04-27. Existing
                      rows of this type may still exist in DB and remain valid;

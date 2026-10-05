@@ -60,7 +60,7 @@ REPLAY_AGENTS = frozenset({
     "dayflow_cron_tickets", "daily_context_tracker",
     "health_status_inference", "label", "email_parser", "subconscious::answer_matcher",
     "knowledge_graph_add::fact_extractor", "knowledge_graph_add::entity_resolver", "knowledge_graph_add::node_merger",
-    "kg_maintenance::succession_judge", "kg_maintenance::identity_sentence_writer",
+    "kg_maintenance::succession_judge", "kg_maintenance::arrangement_judge", "kg_maintenance::identity_sentence_writer",
     "kg_maintenance::duplicate_cluster_resolver", "kg_maintenance::duplicate_detector",
     "kg_finding_cluster_resolver", "wiki_consistency_critic",
 })

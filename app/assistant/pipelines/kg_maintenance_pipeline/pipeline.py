@@ -131,6 +131,11 @@ class KGMaintenancePipeline:
         _run_step("edge_canon_curation", lambda: (
             __import__("app.assistant.pipelines.kg_maintenance_pipeline.step_edge_canon_curation", fromlist=["run"]).run(ctx)
         ))
+        # Arrangement supersession (2026-10-05): an open State replaced by a
+        # later statement sharing a participant becomes a review finding.
+        _run_step("arrangement_scan", lambda: (
+            __import__("app.assistant.pipelines.kg_maintenance_pipeline.step_arrangement_scan", fromlist=["run"]).run(ctx)
+        ))
         # Diachronic disambiguation: judge role-reference entities for
         # referent changes BEFORE the disambiguation scan, whose temporal
         # drain re-points mentions parked at already-split labels.
