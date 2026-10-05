@@ -255,10 +255,14 @@ def register_kg_embedding_sync() -> None:
                 if sentence:
                     cm.store_node_identity_embedding(nid, sentence, embed_text(sentence))
         except Exception as e:
+            # The commit already happened: raise so the caller's run stops
+            # (owner, 2026-10-05: any failed call in the KG stops processing);
+            # the hourly diff sync heals the vectors.
             logger.error(
                 "[embedding_sync] post-commit embed failed (%d item(s)) — "
-                "hourly diff heals: %s", len(items), e,
+                "hourly diff heals; the caller stops: %s", len(items), e,
             )
+            raise
 
     def _discard(session):
         session.info.pop(_SESSION_QUEUE_KEY, None)

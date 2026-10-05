@@ -198,9 +198,15 @@ def _refuse_if_locked(obj: Any, op: str) -> None:
 
 # Chroma cleanup for removed nodes lives in node_merge (shared by every
 # merge/delete path). Here it runs AFTER the SQLite commit — Chroma is not
-# transactional with the DB — and the boolean outcome is reported in the
-# tool result instead of pretending it worked.
-_delete_chroma_vectors = delete_node_chroma_vectors
+# transactional with the DB — so a failure raises naming the committed
+# revision: the caller stops, and the hourly diff sync removes the vectors.
+def _delete_chroma_vectors(node_id: str, *, committed: str) -> None:
+    try:
+        delete_node_chroma_vectors(node_id)
+    except Exception as exc:
+        raise RuntimeError(
+            f"{committed} was committed, but removing node {node_id}'s Chroma vectors failed: {exc}"
+        ) from exc
 
 
 def _write_revision_log(
@@ -523,7 +529,7 @@ class KGMutatorTool(BaseTool):
 
         # Post-commit: Chroma cleanup (best-effort by necessity; failures are
         # logged at ERROR and reported in the result, never hidden).
-        chroma_cleaned = _delete_chroma_vectors(fold_id)
+        _delete_chroma_vectors(fold_id, committed=f"merge_nodes (revision_log_id={rid})")
 
         return self.publish_result(ToolResult(
             result_type="kg_merge_nodes",
@@ -534,7 +540,7 @@ class KGMutatorTool(BaseTool):
                 f"migrated {len(tag_migration['migrated_ids'])} section tag(s); "
                 f"superseded {verdicts_superseded} verdict(s); "
                 f"aliases now {new_aliases}. "
-                f"Chroma embeddings {'removed' if chroma_cleaned else 'CLEANUP FAILED — ghost vectors remain'}. "
+                f"Chroma embeddings removed. "
                 f"revision_log_id={rid}"
             ),
             data={
@@ -547,7 +553,6 @@ class KGMutatorTool(BaseTool):
                 "verdicts_superseded": verdicts_superseded,
                 "filled_fields": sorted(filled_fields),
                 "new_aliases": new_aliases,
-                "chroma_cleaned": chroma_cleaned,
                 "survivor_warning": survivor_warning,
             },
         ))
@@ -1135,13 +1140,13 @@ class KGMutatorTool(BaseTool):
 
         # Post-commit: Chroma cleanup (best-effort by necessity; failures are
         # logged at ERROR and reported in the result, never hidden).
-        chroma_cleaned = _delete_chroma_vectors(node_id)
+        _delete_chroma_vectors(node_id, committed=f"delete_node (revision_log_id={rid})")
 
         return self.publish_result(ToolResult(
             result_type="kg_delete_node",
             content=(
                 f"Deleted node {label!r} ({node_id[:8]}) and {edge_count} edge(s). "
-                f"Chroma embeddings {'removed' if chroma_cleaned else 'CLEANUP FAILED — ghost vectors remain'}. "
+                f"Chroma embeddings removed. "
                 f"revision_log_id={rid}"
             ),
             data={
@@ -1149,7 +1154,6 @@ class KGMutatorTool(BaseTool):
                 "revision_log_id": rid,
                 "deleted_node_id": node_id,
                 "edges_deleted": edge_count,
-                "chroma_cleaned": chroma_cleaned,
             },
         ))
 

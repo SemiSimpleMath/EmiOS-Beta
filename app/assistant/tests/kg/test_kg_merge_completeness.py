@@ -320,7 +320,6 @@ def test_merge_cleans_fold_chroma_vectors(chroma):
     assert result.data.get("ok") is True, result.content
     assert chroma.deleted == [fold]
     assert chroma.deleted_context == [fold]
-    assert result.data["chroma_cleaned"] is True
 
 
 def test_merge_dry_run_changes_nothing(chroma):

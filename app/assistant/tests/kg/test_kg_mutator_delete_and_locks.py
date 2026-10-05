@@ -158,7 +158,20 @@ def test_delete_node_removes_edges_logs_and_cleans_chroma(chroma):
 
     assert chroma.deleted == [a]
     assert chroma.deleted_context == [a]
-    assert result.data.get("chroma_cleaned") is True
+
+
+def test_a_failed_chroma_cleanup_after_the_commit_stops_and_names_the_commit(monkeypatch):
+    """2026-10-05: a failed cleanup used to be reported as 'CLEANUP FAILED' in a success result; now the caller stops,
+    told the deletion was committed (the hourly diff sync removes the vectors)."""
+    import app.assistant.kg.chroma.chroma_embedding_manager as cem
+
+    def down():
+        raise RuntimeError("chroma down")
+    monkeypatch.setattr(cem, "get_chroma_manager", down)
+    a = _mk_node("Alpha")
+    result = _call("kg_delete_node", node_id=a, reason="x")
+    assert "delete_node (revision_log_id=" in result.content and "was committed" in result.content
+    assert "chroma down" in result.content and not _node_exists(a)
 
 
 def test_delete_node_dry_run_changes_nothing(chroma):

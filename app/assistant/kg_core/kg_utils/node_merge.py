@@ -496,27 +496,20 @@ def supersede_verdicts_for_node(session: Session, node_id: str, *, reason: str) 
     return count
 
 
-def delete_node_chroma_vectors(node_id: str) -> bool:
+def delete_node_chroma_vectors(node_id: str) -> None:
     """
     Remove a node's label + context + identity embeddings from Chroma.
-    Best-effort by necessity — Chroma is not transactional with SQLite — so
-    failures are logged at ERROR (ghost vectors feed the duplicate scan
-    false candidates until swept) and reported via the return value, never
-    raised.
+    A failure raises (owner, 2026-10-05: any failed call in the KG stops
+    processing). Chroma is not transactional with SQLite: a caller that has
+    already committed reports the commit with the error, and the hourly diff
+    sync removes the ghost vectors (until then they feed the duplicate scan
+    false candidates).
     """
-    try:
-        from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
-        cm = get_chroma_manager()
-        cm.delete_node_embedding(node_id)
-        cm.delete_node_context_embedding(node_id)
-        cm.delete_node_identity_embedding(node_id)
-        return True
-    except Exception as exc:
-        logger.error(
-            "[node_merge] Chroma cleanup failed for node %s — ghost vectors "
-            "remain in the label/context collections: %s", node_id, exc,
-        )
-        return False
+    from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
+    cm = get_chroma_manager()
+    cm.delete_node_embedding(node_id)
+    cm.delete_node_context_embedding(node_id)
+    cm.delete_node_identity_embedding(node_id)
 
 
 def record_merge(

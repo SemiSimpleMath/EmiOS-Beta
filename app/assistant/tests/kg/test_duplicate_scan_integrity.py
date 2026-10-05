@@ -267,7 +267,17 @@ def test_category_update_resets_stamp_only():
     assert all(v.superseded_at is None for v in _active_verdicts(nid))
 
 
-def test_merge_resets_survivor_stamp():
+def _fake_chroma(monkeypatch):
+    """A merge removes the folded node's Chroma vectors and, since 2026-10-05, raises when it cannot; tests never open
+    the real index."""
+    import app.assistant.kg.chroma.chroma_embedding_manager as cem
+    fake = SimpleNamespace(delete_node_embedding=lambda nid: None, delete_node_context_embedding=lambda nid: None,
+                           delete_node_identity_embedding=lambda nid: None)
+    monkeypatch.setattr(cem, "get_chroma_manager", lambda: fake)
+
+
+def test_merge_resets_survivor_stamp(monkeypatch):
+    _fake_chroma(monkeypatch)
     keep = _mk_node("Keeper", stamped=True)
     fold = _mk_node("Folder")
 
@@ -277,8 +287,9 @@ def test_merge_resets_survivor_stamp():
     assert _node_field(keep, "last_dupe_scanned_at") is None
 
 
-def test_merge_nodes_in_session_resets_winner_stamp():
+def test_merge_nodes_in_session_resets_winner_stamp(monkeypatch):
     from app.assistant.kg_core.kg_utils.node_merge import merge_nodes_in_session
+    _fake_chroma(monkeypatch)
 
     winner = _mk_node("Winner", stamped=True)
     loser = _mk_node("Loser")
