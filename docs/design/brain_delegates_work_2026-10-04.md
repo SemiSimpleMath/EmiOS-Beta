@@ -534,6 +534,44 @@ the steward) before anything is planned.
    when no lane uses it; its capability section has moved to the architect by then (it is needed from the
    first lane on).
 
+## 6. The day's record and the day's schedule, without loops (owner, 2026-10-05)
+
+**The loop found on 2026-10-05.** The day pass writer placed the monthly timesheet beliefs on Monday, October 5
+(the 3rd business day). The daily context tracker read the day plan (under "Routine (day-specific)") and, at
+9:48 AM, wrote into its day theme "monthly timesheets are due by 5 PM", then at 10:06 "on this first business
+day of the month"; nothing else in its prompt mentioned either. It carries its previous output forward, so the
+sentence stayed all day, and the writer, which read the day theme, cited it over the computed date facts. The
+same theme reached the master chat gate, the steward, the architect and the brain's situation. Fixed that day:
+the tracker no longer reads the plan, the writer no longer reads the theme (bug list, 2026-10-05).
+
+**The rule.** No reader takes back, as evidence, something it produced itself, and no model interprets the
+brain's decisions into statements about the day.
+
+**Two layers:**
+
+1. **The day's record: evidence only** (`resource_expected_calendar`, unchanged in name and meaning). The
+   tracker starts from Google Calendar and adjusts it from chat, tickets and the AFK and desktop telemetry: the
+   quick trip to the store, the sick child picked up early. Every item carries its source. The tracker never
+   reads the brain's plan or list. Its milestones and current status are records too. The brain reads this layer
+   (the situation, the day pass, day_tasks) to know what is actually happening.
+2. **The day's schedule: the record plus the brain's list, joined by code** (a new resource). The calendar
+   beliefs that affect the day come from day_tasks' list entries, the brain's decision, not from the day plan's
+   placements, which are what it decides on. Code adds each open entry at its time, tagged with its entry id
+   (`cal:<day>:<belief_key>`), its words as written. Readers that want the general schedule of the day (chat,
+   daily insights, dayflow) move to it one at a time, each deliberately; `resource_expected_calendar` keeps its
+   meaning (owner, 2026-10-05: "new resource").
+
+The brain never reads layer 2: it has its list directly, so its own decisions never come back to it as facts.
+No model stands between the list and the schedule, so "due on the first business day" cannot harden into "today
+is the first business day". What really happens still returns as evidence: "submitted the timesheets" in chat
+becomes the tracker's milestone, which the brain reads as something that happened.
+
+**The day theme moves to the brain** (owner, 2026-10-05: "brain is better for the day theme"). "What is
+dominating the day" is interpretation, the brain's job; the tracker keeps the records. Each reader of the theme
+(the master chat gate, the steward while it lives, the architect, cron tickets, vibe check, the entertainment
+advisor, the conversation starter, the Slack room scope, daily insights, the brain's situation) is moved or
+dropped deliberately. A design comes before the code: where the brain writes it, and when.
+
 ## Risks
 
 - **One decider is one point of failure.** A wrong decision by the brain now shapes everything downstream. The
