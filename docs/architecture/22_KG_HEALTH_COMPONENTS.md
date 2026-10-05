@@ -307,7 +307,7 @@ lifecycle + predicate canon curation). The old
 | `step_missing_dates_scan` | maintenance pipeline step | `state_missing_dates` | State/Event nodes missing one or both dates, scored by connected-entity pagerank |
 | `step_role_succession_scan` | maintenance pipeline step | (diachronic disambiguation) | Judges role-reference entities for referent changes before the disambiguation scan |
 | `step_date_lint_scan` | maintenance pipeline step | date-quality findings | Lints date intervals (e.g. inverted start/end) |
-| `step_disambiguation_scan` | maintenance pipeline step | (Disambiguation drain) | Temporal drain that re-points mentions parked at split labels |
+| `step_disambiguation_scan` | maintenance pipeline step | (Disambiguation drain) | Retires a marker whose label is back to one referent (re-points every parked edge to it, rebinds its evidence, deletes it; added 2026-10-05), then a temporal drain re-points mentions parked at split labels |
 | `step_state_decay` | daily routine | `state_auto_closed` | Closes stale States, writes finding with `initial_status='executed'` so it skips the investigator |
 | `wiki_consistency_critic` | wiki-pipeline agent | `wiki_contradiction` | Bypasses `upsert_finding` — writes rich `evidence_json` directly |
 | `wiki_connection_investigator` | `kg_wiki_inference` routine | `synthetic_fact_proposal` | Investigator handles duplicate-check; promotion path is `synthetic_fact_review` |

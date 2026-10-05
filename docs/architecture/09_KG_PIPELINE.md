@@ -206,7 +206,7 @@ This is the structural fix for the 2026-05-02 "database is locked" cascade. Each
 
 For entity-like nodes (Entity/Concept/Goal), `_resolve_entity_like` returns a *tier*, and each tier is treated differently:
 
-- **`disambiguation`** — a `Disambiguation` node exists at this label (known-ambiguous referent). Bind to the Disambiguation node itself, beating any exact hit; edges land there until the maintenance investigator re-points them. See `app/assistant/kg/disambiguation.py`.
+- **`disambiguation`** — a `Disambiguation` node exists at this label (known-ambiguous referent). Bind to the Disambiguation node itself, beating any exact hit; edges land there until the maintenance investigator re-points them. When the label is back to one referent, the weekly `disambiguation_scan` retires the marker (re-points its edges to that node and deletes it). See `app/assistant/kg/disambiguation.py`.
 - **`label`** — exact case-insensitive label match. Closed-form identity, *except* a same-label bind to a well-connected person (`category == person`, ≥ `_PERSON_CONFIRM_MIN_EDGES = 5` edges) is the "two-namesakes" trap → routed through `node_merger` confirmation instead of binding silently.
 - **`mention_map`** — a form `node_merger` previously CONFIRMED, recorded durably and self-revoking on ambiguity (`app/assistant/kg/mention_map.py`). Closed-form.
 - **`alias`** — NOT closed-form (aliases accrete from bound mention labels, so a generic label like "House" can capture every house). Routed through `node_merger` with the alias hit + semantic near-matches as candidates.
