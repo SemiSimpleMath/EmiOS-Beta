@@ -533,8 +533,11 @@ def _filter_candidates_by_label_or_similarity(
          embedding unavailable) → DROP — strong evidence of unrelated
          instances, save the LLM call.
 
-    Failure-isolated: chroma/embedder down → degrade to label-only
-    (matches old behavior), log warning.
+    A failure (embedder or Chroma down) raises and the proposal stays
+    pending (2026-10-05; it used to degrade to label-only, so a same-meaning
+    State with another label never reached the merger and a twin was
+    minted). A candidate with no stored context vector is embedded from its
+    own sentence here rather than dropped.
 
     Args:
         scored: candidate list as returned by
@@ -564,61 +567,45 @@ def _filter_candidates_by_label_or_similarity(
         return same_label
 
     # Tier 2: embedding similarity for different-label candidates
-    try:
-        from app.assistant.embeddings.embedder import embed_text
-        from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
-        import numpy as np
-    except Exception as exc:
-        logger.warning(
-            "[promoter] embedding similarity unavailable for label-relax filter: %s "
-            "(falling back to strict label-only)", exc,
-        )
+    from app.assistant.embeddings.embedder import embed_text
+    from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
+    import numpy as np
+
+    new_emb = np.array(embed_text(new_sentence), dtype=float)
+    new_n = float(np.linalg.norm(new_emb))
+    if new_n == 0.0:
         return same_label
-
-    try:
-        new_emb = np.array(embed_text(new_sentence), dtype=float)
-        new_n = float(np.linalg.norm(new_emb))
-        if new_n == 0.0:
-            return same_label
-        cm = get_chroma_manager()
-        cand_ids = [s["node"].id for s in diff_label]
-        result = cm.node_context_collection.get(
-            ids=cand_ids, include=["embeddings"]
+    cm = get_chroma_manager()
+    cand_ids = [s["node"].id for s in diff_label]
+    result = cm.node_context_collection.get(
+        ids=cand_ids, include=["embeddings"]
+    )
+    emb_by_id: Dict[str, list] = {}
+    raw_embs = result.get("embeddings")
+    for cid, emb in zip(result.get("ids") or [], raw_embs if raw_embs is not None else []):
+        if emb is not None and len(emb) > 0:
+            emb_by_id[cid] = emb
+    kept_diff = []
+    for s in diff_label:
+        cand_emb = emb_by_id.get(s["node"].id)
+        if cand_emb is None:
+            # No stored context vector yet: embed the candidate's own
+            # sentence (or label) here, so it is compared, not dropped.
+            cand_emb = embed_text(getattr(s["node"], "original_sentence", None) or s["node"].label or "")
+        cand_v = np.array(cand_emb, dtype=float)
+        cand_n = float(np.linalg.norm(cand_v))
+        if cand_n == 0.0:
+            continue
+        sim = float(np.dot(new_emb, cand_v) / (new_n * cand_n))
+        if sim >= _LABEL_SIMILARITY_THRESHOLD:
+            kept_diff.append(s)
+    if kept_diff:
+        logger.info(
+            "[promoter] label-relax kept %d diff-label candidate(s) via "
+            "embedding similarity (threshold=%.2f)",
+            len(kept_diff), _LABEL_SIMILARITY_THRESHOLD,
         )
-        emb_by_id: Dict[str, list] = {}
-        for cid, emb in zip(result.get("ids") or [], result.get("embeddings") or []):
-            if emb is not None and len(emb) > 0:
-                emb_by_id[cid] = emb
-        kept_diff = []
-        for s in diff_label:
-            cand_emb = emb_by_id.get(s["node"].id)
-            if cand_emb is None:
-                continue  # no embedding → can't compare → drop (conservative)
-            cand_v = np.array(cand_emb, dtype=float)
-            cand_n = float(np.linalg.norm(cand_v))
-            if cand_n == 0.0:
-                continue
-            sim = float(np.dot(new_emb, cand_v) / (new_n * cand_n))
-            if sim >= _LABEL_SIMILARITY_THRESHOLD:
-                kept_diff.append(s)
-        if kept_diff:
-            logger.info(
-                "[promoter] label-relax kept %d diff-label candidate(s) via "
-                "embedding similarity (threshold=%.2f)",
-                len(kept_diff), _LABEL_SIMILARITY_THRESHOLD,
-            )
-        return same_label + kept_diff
-    except Exception as exc:
-        logger.warning(
-            "[promoter] label-relax embedding lookup failed: %s "
-            "(falling back to strict label-only)", exc,
-        )
-        return same_label
-
-
-# Back-compat alias for the old name; deprecate in a follow-up.
-def _filter_candidates_by_label_equality(scored, new_label):
-    return _filter_candidates_by_label_or_similarity(scored, new_label, None)
+    return same_label + kept_diff
 
 
 def _filter_candidates_by_min_jaccard(
@@ -817,38 +804,32 @@ def _filter_event_candidates_by_date(
 def _first_window_id_for_node(session, node_id: str) -> Optional[str]:
     """Return the earliest window_id recorded on kg_node_evidence for this node,
     or None if the node has no evidence rows."""
-    try:
-        from sqlalchemy import text as sql_text
-        row = session.execute(
-            sql_text(
-                "SELECT window_id FROM kg_node_evidence "
-                "WHERE node_id = :nid AND window_id IS NOT NULL "
-                "ORDER BY created_at ASC LIMIT 1"
-            ),
-            {"nid": node_id},
-        ).fetchone()
-        return row[0] if row else None
-    except Exception:
-        return None
+    from sqlalchemy import text as sql_text
+    row = session.execute(
+        sql_text(
+            "SELECT window_id FROM kg_node_evidence "
+            "WHERE node_id = :nid AND window_id IS NOT NULL "
+            "ORDER BY created_at ASC LIMIT 1"
+        ),
+        {"nid": node_id},
+    ).fetchone()
+    return row[0] if row else None
 
 
 def _first_window_id_for_proposal(session, proposal_id: str) -> Optional[str]:
     """Earliest window_id on claim_proposal_evidence for the given proposal.
     Used as the proposal's ``source window`` for same-window merge logic.
     Orders by created_at (always set) rather than observed_at (nullable)."""
-    try:
-        from sqlalchemy import text as sql_text
-        row = session.execute(
-            sql_text(
-                "SELECT window_id FROM claim_proposal_evidence "
-                "WHERE proposal_id = :pid AND window_id IS NOT NULL "
-                "ORDER BY created_at ASC LIMIT 1"
-            ),
-            {"pid": proposal_id},
-        ).fetchone()
-        return row[0] if row else None
-    except Exception:
-        return None
+    from sqlalchemy import text as sql_text
+    row = session.execute(
+        sql_text(
+            "SELECT window_id FROM claim_proposal_evidence "
+            "WHERE proposal_id = :pid AND window_id IS NOT NULL "
+            "ORDER BY created_at ASC LIMIT 1"
+        ),
+        {"pid": proposal_id},
+    ).fetchone()
+    return row[0] if row else None
 
 
 def _resolved_window_text(session, window_id: str, max_chars: int = 600) -> Optional[str]:
@@ -867,35 +848,32 @@ def _resolved_window_text(session, window_id: str, max_chars: int = 600) -> Opti
     """
     if not window_id:
         return None
-    try:
-        from sqlalchemy import text as sql_text
-        rows = session.execute(
-            sql_text(
-                "SELECT ul.role, ul.speaker_name, "
-                "       COALESCE(rm.resolved_text, ul.message) AS text "
-                "FROM kg_window_message wm "
-                "JOIN unified_log_2026 ul ON ul.id = wm.unified_log_id "
-                "LEFT JOIN kg_resolved_message rm ON rm.unified_log_id = wm.unified_log_id "
-                "WHERE wm.window_id = :w "
-                "ORDER BY wm.item_order"
-            ),
-            {"w": window_id},
-        ).fetchall()
-        if not rows:
-            return None
-        lines: list[str] = []
-        for role, speaker, txt in rows:
-            t = (txt or "").strip()
-            if not t:
-                continue
-            who = (speaker or role or "user").strip() or "user"
-            lines.append(f"{who}: {t}")
-        if not lines:
-            return None
-        out = "\n".join(lines)
-        return out if len(out) <= max_chars else out[:max_chars] + "…"
-    except Exception:
+    from sqlalchemy import text as sql_text
+    rows = session.execute(
+        sql_text(
+            "SELECT ul.role, ul.speaker_name, "
+            "       COALESCE(rm.resolved_text, ul.message) AS text "
+            "FROM kg_window_message wm "
+            "JOIN unified_log_2026 ul ON ul.id = wm.unified_log_id "
+            "LEFT JOIN kg_resolved_message rm ON rm.unified_log_id = wm.unified_log_id "
+            "WHERE wm.window_id = :w "
+            "ORDER BY wm.item_order"
+        ),
+        {"w": window_id},
+    ).fetchall()
+    if not rows:
         return None
+    lines: list[str] = []
+    for role, speaker, txt in rows:
+        t = (txt or "").strip()
+        if not t:
+            continue
+        who = (speaker or role or "user").strip() or "user"
+        lines.append(f"{who}: {t}")
+    if not lines:
+        return None
+    out = "\n".join(lines)
+    return out if len(out) <= max_chars else out[:max_chars] + "…"
 
 
 def _node_window_text(session, node_id: str, max_chars: int = 600) -> Optional[str]:
@@ -911,28 +889,25 @@ def _node_window_text(session, node_id: str, max_chars: int = 600) -> Optional[s
     window_id is present (legacy rows from before the resolver was wired).
     Returns None if no evidence row exists.
     """
-    try:
-        from sqlalchemy import text as sql_text
-        row = session.execute(
-            sql_text(
-                "SELECT source_text, window_id FROM kg_node_evidence "
-                "WHERE node_id = :nid "
-                "ORDER BY created_at ASC LIMIT 1"
-            ),
-            {"nid": node_id},
-        ).fetchone()
-        if not row:
-            return None
-        source_text, window_id = row
-        resolved = _resolved_window_text(session, window_id, max_chars=max_chars) if window_id else None
-        if resolved:
-            return resolved
-        if not source_text:
-            return None
-        txt = str(source_text)
-        return txt if len(txt) <= max_chars else txt[:max_chars] + "…"
-    except Exception:
+    from sqlalchemy import text as sql_text
+    row = session.execute(
+        sql_text(
+            "SELECT source_text, window_id FROM kg_node_evidence "
+            "WHERE node_id = :nid "
+            "ORDER BY created_at ASC LIMIT 1"
+        ),
+        {"nid": node_id},
+    ).fetchone()
+    if not row:
         return None
+    source_text, window_id = row
+    resolved = _resolved_window_text(session, window_id, max_chars=max_chars) if window_id else None
+    if resolved:
+        return resolved
+    if not source_text:
+        return None
+    txt = str(source_text)
+    return txt if len(txt) <= max_chars else txt[:max_chars] + "…"
 
 
 def _proposal_window_text(session, proposal_id: str, max_chars: int = 600) -> Optional[str]:
@@ -941,28 +916,25 @@ def _proposal_window_text(session, proposal_id: str, max_chars: int = 600) -> Op
 
     Falls back to the raw `claim_proposal_evidence.raw_text` snapshot when
     no window_id is recorded for the proposal."""
-    try:
-        from sqlalchemy import text as sql_text
-        row = session.execute(
-            sql_text(
-                "SELECT raw_text, window_id FROM claim_proposal_evidence "
-                "WHERE proposal_id = :pid "
-                "ORDER BY created_at ASC LIMIT 1"
-            ),
-            {"pid": proposal_id},
-        ).fetchone()
-        if not row:
-            return None
-        raw_text, window_id = row
-        resolved = _resolved_window_text(session, window_id, max_chars=max_chars) if window_id else None
-        if resolved:
-            return resolved
-        if not raw_text:
-            return None
-        txt = str(raw_text)
-        return txt if len(txt) <= max_chars else txt[:max_chars] + "…"
-    except Exception:
+    from sqlalchemy import text as sql_text
+    row = session.execute(
+        sql_text(
+            "SELECT raw_text, window_id FROM claim_proposal_evidence "
+            "WHERE proposal_id = :pid "
+            "ORDER BY created_at ASC LIMIT 1"
+        ),
+        {"pid": proposal_id},
+    ).fetchone()
+    if not row:
         return None
+    raw_text, window_id = row
+    resolved = _resolved_window_text(session, window_id, max_chars=max_chars) if window_id else None
+    if resolved:
+        return resolved
+    if not raw_text:
+        return None
+    txt = str(raw_text)
+    return txt if len(txt) <= max_chars else txt[:max_chars] + "…"
 
 
 def _participant_labels(session, node_id: str, limit: int = 6) -> List[str]:
@@ -994,17 +966,12 @@ def _window_end_ts(session, window_id: Optional[str]) -> Optional[str]:
     """End timestamp of a conversation window, for LLM time reasoning."""
     if not window_id:
         return None
-    try:
-        from sqlalchemy import text as sql_text
-        row = session.execute(
-            sql_text("SELECT end_timestamp FROM kg_window WHERE id = :w"),
-            {"w": window_id},
-        ).fetchone()
-        if row and row[0]:
-            return str(row[0])
-    except Exception:
-        pass
-    return None
+    from sqlalchemy import text as sql_text
+    row = session.execute(
+        sql_text("SELECT end_timestamp FROM kg_window WHERE id = :w"),
+        {"w": window_id},
+    ).fetchone()
+    return str(row[0]) if row and row[0] else None
 
 
 def _call_node_merger_for_state_match(
@@ -1128,6 +1095,7 @@ def _get_participant_kg_ids(session, node_id: str) -> Set[str]:
 # ---------------------------------------------------------------------------
 # Node / edge creation
 # ---------------------------------------------------------------------------
+
 
 def _create_kg_node_from_proposal(
     session, proposal_node: ClaimProposalNode, proposal_id: str,
@@ -1300,24 +1268,16 @@ def _embed_and_store_node(node_id: str, label: str, sentence: str) -> None:
     event-driven label writer (the hourly reconciler is the backstop). The
     chokepoint does not do context vectors, so this remains the one
     context-at-mint writer. (`label` is retained in the signature for the
-    callers; it is no longer written from here.)
+    callers; it is no longer written from here.) A failure raises: the
+    proposal's apply rolls back and the run stops (2026-10-05; it used to
+    warn, leaving the node invisible to the next proposals' semantic tier).
     """
-    try:
-        from app.assistant.embeddings.embedder import embed_text
-        from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
-    except Exception as exc:
-        logger.warning("[promoter] embedding modules unavailable: %s", exc)
-        return
-    try:
-        cm = get_chroma_manager()
-        if sentence and str(sentence).strip():
-            cm.store_node_context_embedding(node_id, sentence, embed_text(sentence))
-    except Exception as exc:
-        logger.warning(
-            "[promoter] failed to embed/store node %s: %s "
-            "(the periodic backfill step is the safety net)",
-            node_id[:8] if node_id else "?", exc,
-        )
+    from app.assistant.embeddings.embedder import embed_text
+    from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
+
+    cm = get_chroma_manager()
+    if sentence and str(sentence).strip():
+        cm.store_node_context_embedding(node_id, sentence, embed_text(sentence))
 
 
 def _estimate_state_ttl(
@@ -2475,6 +2435,7 @@ def _prepare_proposal_plan(proposal_id: str) -> Optional[_PromoterPlan]:
 # Core: apply one proposal's prepared plan
 # ---------------------------------------------------------------------------
 
+
 def _evaluate_and_apply(
     session, proposal: ClaimProposal, plan: _PromoterPlan, *, commit: bool,
 ) -> _ProposalDecision:
@@ -2549,22 +2510,16 @@ def _evaluate_and_apply(
                     # Identity phase 5: the node_merger confirmed this
                     # mention form → record it durably so the next mention
                     # binds closed-form. mint refuses contested forms
-                    # (sink, not error).
-                    try:
-                        from app.assistant.kg.mention_map import mint_mention
-                        mint_mention(
-                            session,
-                            label=pn.label,
-                            node_type=pn.node_type,
-                            node_id=prepared.matched_node_id,
-                            minted_by="node_merger:confirm",
-                            source_proposal_id=proposal.id,
-                        )
-                    except Exception as exc:
-                        logger.error(
-                            "[promoter] mention-map mint failed for %r: %s",
-                            pn.label, exc,
-                        )
+                    # (sink, not error); a failed write raises.
+                    from app.assistant.kg.mention_map import mint_mention
+                    mint_mention(
+                        session,
+                        label=pn.label,
+                        node_type=pn.node_type,
+                        node_id=prepared.matched_node_id,
+                        minted_by="node_merger:confirm",
+                        source_proposal_id=proposal.id,
+                    )
             dec.node_outcomes.append(_NodeOutcome(
                 pn.id, "matched_existing", prepared.matched_node_id,
                 f"{pn.node_type} {pn.label!r} matched {prepared.matched_node_id[:8]}",
@@ -2922,6 +2877,7 @@ def _evaluate_and_apply(
 # Entry point
 # ---------------------------------------------------------------------------
 
+
 def run_promoter(*, limit: int = 100, commit: bool = False) -> Dict[str, Any]:
     """Iterate pending proposals, evaluate each, optionally apply.
 
@@ -2929,7 +2885,15 @@ def run_promoter(*, limit: int = 100, commit: bool = False) -> Dict[str, Any]:
     → short db_manager.transaction to apply. The writer slot is never
     held across an LLM call. See `_prepare_proposal_plan` for the
     contract; see db_manager.py for why this matters.
+
+    The first failed proposal stops the run (owner, 2026-10-05: any failed
+    call in the KG stops processing): it stays pending, the failure is
+    counted in the KG failure ledger (a proposal failing in three runs is
+    set aside for review and skipped), and the exception propagates so the
+    routine records the failure. Proposals already applied keep their own
+    transactions.
     """
+    from app.assistant.kg import failure_ledger
     # Gate via the UI-controlled subsystem flag. See /dev/subsystems
     # to toggle. Default is enabled.
     from app.assistant.utils.subsystem_flags import is_subsystem_enabled
@@ -2947,7 +2911,6 @@ def run_promoter(*, limit: int = 100, commit: bool = False) -> Dict[str, Any]:
         "contradicted": 0,
         "held": 0,
         "findings_raised": 0,
-        "errors": 0,
         "nodes_matched": 0,
         "nodes_created": 0,
         "edges_created": 0,
@@ -2957,16 +2920,12 @@ def run_promoter(*, limit: int = 100, commit: bool = False) -> Dict[str, Any]:
     samples: List[Dict[str, Any]] = []
 
     # Pull pending ids in a tiny read session — no write lock acquired.
+    set_aside = failure_ledger.set_aside_ids("kg_proposal")
     with get_db_manager().read_session() as session:
-        pending_ids = [
-            p.id for p in (
-                session.query(ClaimProposal)
-                .filter(ClaimProposal.status == "pending")
-                .order_by(ClaimProposal.created_at.asc())
-                .limit(limit)
-                .all()
-            )
-        ]
+        query = session.query(ClaimProposal).filter(ClaimProposal.status == "pending")
+        if set_aside:
+            query = query.filter(~ClaimProposal.id.in_(set_aside))
+        pending_ids = [p.id for p in query.order_by(ClaimProposal.created_at.asc()).limit(limit).all()]
 
     for pid in pending_ids:
         try:
@@ -2997,11 +2956,9 @@ def run_promoter(*, limit: int = 100, commit: bool = False) -> Dict[str, Any]:
                 sp = session.begin_nested()
                 try:
                     dec = _evaluate_and_apply(session, p, plan, commit=commit)
-                except Exception as inner:
+                except Exception:
                     sp.rollback()
-                    stats["errors"] += 1
-                    logger.exception("[promoter] proposal %s threw during apply: %s", pid, inner)
-                    continue
+                    raise
 
                 stats["evaluated"] += 1
                 for no in dec.node_outcomes:
@@ -3057,20 +3014,16 @@ def run_promoter(*, limit: int = 100, commit: bool = False) -> Dict[str, Any]:
             if commit and dec.followup_findings:
                 from app.assistant.kg_maintenance.store import upsert_finding
                 for payload in dec.followup_findings:
-                    try:
-                        _, created = upsert_finding(
-                            **payload, pipeline_run_id=None,
-                        )
-                        if created:
-                            stats["findings_raised"] += 1
-                    except Exception:
-                        logger.exception(
-                            "[promoter] failed to write %s finding for "
-                            "proposal %s", payload.get("finding_type"), pid,
-                        )
-        except Exception:
-            stats["errors"] += 1
-            logger.exception("[promoter] outer handler on proposal %s", pid)
+                    _, created = upsert_finding(
+                        **payload, pipeline_run_id=None,
+                    )
+                    if created:
+                        stats["findings_raised"] += 1
+        except Exception as exc:
+            logger.exception("[promoter] proposal %s failed; the run stops", pid)
+            failure_ledger.record_failure("kg_proposal", pid, exc)
+            raise
+        failure_ledger.clear("kg_proposal", pid)
 
     # Tagging is NOT done here. Per the post-claim-proposal pipeline:
     # promote (NULL importance) → importance rater fills it in → section

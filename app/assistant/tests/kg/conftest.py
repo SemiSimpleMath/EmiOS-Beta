@@ -88,3 +88,13 @@ def kg_clean_db(monkeypatch):
     finally:
         session.close()
     yield
+
+
+@pytest.fixture(autouse=True)
+def _no_promoter_context_embedding(monkeypatch):
+    """The promoter embeds each new node's context vector into Chroma at mint; since 2026-10-05 a failure there stops
+    the proposal (it used to be swallowed, which is how these tests passed against the USE_TEST_DB Chroma guard).
+    Chroma is never opened from tests: stub the context write. test_promoter_fails_loud pins that it raises."""
+    import app.assistant.kg.proposal_promoter as pp
+    monkeypatch.setattr(pp, "_embed_and_store_node", lambda *a, **k: None)
+

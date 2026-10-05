@@ -116,3 +116,57 @@ def test_an_exact_label_bind_to_a_locked_person_needs_no_confirmation():
     finally:
         s.close()
 
+
+def test_a_failed_context_embedding_at_mint_raises(monkeypatch):
+    """The new node's context vector failing to store stops the proposal (it used to warn, leaving the node invisible
+    to the next proposals' semantic tier). The conftest stubs this helper; the original is exercised here."""
+    monkeypatch.undo()  # drop the conftest stub: exercise the real helper
+    import app.assistant.kg.chroma.chroma_embedding_manager as cem
+
+    def boom():
+        raise RuntimeError("chroma down")
+    monkeypatch.setattr(cem, "get_chroma_manager", boom)
+    with pytest.raises(RuntimeError, match="chroma down"):
+        P._embed_and_store_node("n1", "Sam", "Sam has a call on Mondays.")
+
+
+def test_the_promoter_run_stops_at_the_first_failed_proposal_and_counts_it(monkeypatch):
+    """Owner, 2026-10-05: any failed call in the KG stops processing. The failed proposal stays pending, the rest are
+    not touched this run, and the failure is counted in the ledger (three failed runs set it aside)."""
+    from datetime import datetime, timezone
+    from app.assistant.database.claim_proposals import ClaimProposal
+    from app.assistant.kg import failure_ledger
+    monkeypatch.setattr("app.assistant.utils.subsystem_flags.is_subsystem_enabled", lambda name: True)
+    t0 = datetime(2026, 10, 5, tzinfo=timezone.utc)
+    s = get_session()
+    try:
+        failure_ledger._ensure(s)
+        s.query(failure_ledger.KGItemFailure).delete()
+        s.query(ClaimProposal).delete()
+        ids = []
+        for i in range(2):
+            pid = str(uuid.uuid4())
+            ids.append(pid)
+            s.add(ClaimProposal(id=pid, status="pending", claim_type="durable",
+                                created_at=datetime(2026, 10, 5, i, tzinfo=timezone.utc),
+                                first_observed_at=t0, last_observed_at=t0))
+        s.commit()
+    finally:
+        s.close()
+    prepared = []
+
+    def plan(pid):
+        prepared.append(pid)
+        raise RuntimeError("Connection error.")
+    monkeypatch.setattr(P, "_prepare_proposal_plan", plan)
+    with pytest.raises(RuntimeError, match="Connection error"):
+        P.run_promoter(limit=10, commit=True)
+    assert prepared == [ids[0]], "the run stops at the first failure"
+    s = get_session()
+    try:
+        assert {p.status for p in s.query(ClaimProposal).all()} == {"pending"}
+        row = s.get(failure_ledger.KGItemFailure, ("kg_proposal", ids[0]))
+        assert row.failures == 1 and "Connection error" in row.last_error
+    finally:
+        s.close()
+

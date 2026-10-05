@@ -416,10 +416,10 @@ class TestDesiredDecisionTree:
         """
         try:
             from app.assistant.kg.proposal_promoter import (
-                _filter_candidates_by_label_equality,
+                _filter_candidates_by_label_or_similarity,
             )
         except ImportError:
-            pytest.fail("_filter_candidates_by_label_equality not implemented")
+            pytest.fail("_filter_candidates_by_label_or_similarity not implemented")
 
         scored = [
             {"node": _StubNode(id="diff-label", label="Performance Role"),
@@ -427,7 +427,7 @@ class TestDesiredDecisionTree:
             {"node": _StubNode(id="same-label", label="Performance"),
              "overlap": 1, "jaccard": 0.5},
         ]
-        out = _filter_candidates_by_label_equality(scored, new_label="Performance")
+        out = _filter_candidates_by_label_or_similarity(scored, "Performance", None)
         assert {s["node"].id for s in out} == {"same-label"}
 
     # ---- LLM invocation: when ALL gates pass + label same ----
