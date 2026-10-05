@@ -9,4 +9,5 @@ user_context_items:
   - entity_descriptor
   - candidate_facts
   - section_list
+  - correction
 system_context_items: []

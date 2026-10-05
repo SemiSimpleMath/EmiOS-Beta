@@ -15,3 +15,10 @@
 Return one TaggedFact per fact_id above. Use 'reject' for facts that
 belong on the wiki (closed states, past events that aren't definitional,
 abandoned goals).
+{% if correction %}
+
+## Correct your previous answer
+
+Your previous answer was incomplete: {{ correction }}
+Answer again in full with this fixed.
+{% endif %}

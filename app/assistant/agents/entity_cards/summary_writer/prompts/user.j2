@@ -17,3 +17,10 @@ Lead with the most defining facts. Present tense. Skip aliases and
 contact info.
 
 Return JSON: { "summary": "..." }
+{% if correction %}
+
+## Correct your previous answer
+
+Your previous answer was incomplete: {{ correction }}
+Answer again in full with this fixed.
+{% endif %}

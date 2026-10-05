@@ -18,3 +18,10 @@ states. List the fused `fact_id`s in each bullet's `source_fact_ids`.
 
 Return JSON:
 { "bullets": [ { "bullet_text": "...", "source_fact_ids": ["f1","f2"] }, ... ] }
+{% if correction %}
+
+## Correct your previous answer
+
+Your previous answer was incomplete: {{ correction }}
+Answer again in full with this fixed.
+{% endif %}

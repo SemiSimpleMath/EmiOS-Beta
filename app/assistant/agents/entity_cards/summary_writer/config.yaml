@@ -9,5 +9,6 @@ user_context_items:
   - entity_descriptor
   - alias_line
   - card_bullets
+  - correction
 system_context_items:
   - resource_user_data

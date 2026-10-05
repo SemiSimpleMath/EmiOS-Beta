@@ -8,6 +8,7 @@ user_context_items:
   - node_label
   - node_type
   - edge_list
+  - correction
 system_context_items:
   - resource_user_data
 type: agent

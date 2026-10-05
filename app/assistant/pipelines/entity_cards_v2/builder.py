@@ -1,20 +1,16 @@
-"""Entity Cards v2 builder + incremental refresh.
+"""Entity Cards v2 builder.
 
-Three entry points:
+One entry point:
 
     build_card(entity_node_id)
         Full rebuild for one entity. Walks the KG neighborhood, applies
         the NOW filter, runs section_tagger to classify each surviving
         fact, runs bullet_renderer per fact, persists sections + bullets.
 
-    refresh_card_for_changed_node(changed_node_id)
-        Incremental refresh: find every bullet whose source_node_ids
-        contains changed_node_id, re-render only those bullets.
-
-    rebuild_all_group_a()
-        Iterate every Group A entity (PageRank-thresholded), call
-        build_card() per entity. Used post-pipeline-batch to refresh
-        cards in bulk.
+A failed call (LLM, DB) raises out of build_card before the persist phase:
+nothing is written and an existing card stays stale for the next run. A
+well-formed but incomplete answer gets one targeted correction, then raises
+(owner, 2026-10-05: any failed call in the KG stops processing).
 
 Design: see docs/architecture/12_ENTITY_CARDS_V2_DESIGN.md.
 """
@@ -77,8 +73,11 @@ from app.assistant.importance.consumers import (
 
 # --- Public entry points ----------------------------------------------------
 
-def build_card(entity_node_id: str) -> Dict[str, Any]:
+def build_card(entity_node_id: str, *, activate_new: bool = True) -> Dict[str, Any]:
     """Full rebuild for one entity. Idempotent.
+
+    `activate_new=False` writes a card that does not exist yet as inactive:
+    the nightly refresh activates it only after card_critic judges it.
 
     Walks the KG neighborhood, applies the NOW filter, runs section_tagger
     to classify facts, runs bullet_renderer (chunked) per section, runs
@@ -236,10 +235,7 @@ def build_card(entity_node_id: str) -> Dict[str, Any]:
         # distiller can pick by id and we can union the source nodes/edges.
         renderer_bullets: List[Dict[str, Any]] = []
         for i, rb in enumerate(rendered_bullets):
-            fact_ids = rb.get('source_fact_ids') or []
-            source_facts = [fact_by_id[fid] for fid in fact_ids if fid in fact_by_id]
-            if not source_facts:
-                continue
+            source_facts = [fact_by_id[fid] for fid in rb['source_fact_ids']]
             node_ids: List[str] = []
             edge_ids: List[str] = []
             for sf in source_facts:
@@ -261,29 +257,21 @@ def build_card(entity_node_id: str) -> Dict[str, Any]:
                 'last_said': _latest([sf.get('said') for sf in source_facts]),
             })
 
-        # Stage 3: distillation — only when section exceeds its cap
+        # Stage 3: distillation — only when section exceeds its cap. A failed
+        # distiller aborts the build: keeping the uncapped renderer output used
+        # to persist an over-cap section as a fresh build.
         cap = bullet_cap_for_section(section_name)
         if len(renderer_bullets) > cap:
-            try:
-                distilled = _run_section_distiller(entity, section_name, renderer_bullets, cap)
-            except Exception as e:
-                logger.warning(
-                    "section_distiller failed for %s: %s (keeping renderer output)",
-                    section_name, e,
-                )
-                distilled = None
+            distilled = _run_section_distiller(entity, section_name, renderer_bullets, cap)
         else:
             distilled = None
 
-        if distilled:
+        if distilled is not None:
             # Distiller picked + possibly fused; map source_bullet_ids → renderer bullets
             rb_by_id = {b['bullet_id']: b for b in renderer_bullets}
             persisted = []
             for db in distilled:
-                src_ids = db.get('source_bullet_ids') or []
-                source_rbs = [rb_by_id[bid] for bid in src_ids if bid in rb_by_id]
-                if not source_rbs:
-                    continue
+                source_rbs = [rb_by_id[bid] for bid in db['source_bullet_ids']]
                 node_ids = []
                 edge_ids = []
                 tiers = []
@@ -296,7 +284,7 @@ def build_card(entity_node_id: str) -> Dict[str, Any]:
                             edge_ids.append(eid)
                     tiers.append(srb['confidence_tier'])
                 tier_rank = {'inferred': 0, 'provisional': 1, 'confirmed': 2, 'axiom': 3}
-                worst_tier = min(tiers, key=lambda t: tier_rank.get(t, 1)) if tiers else 'provisional'
+                worst_tier = min(tiers, key=lambda t: tier_rank.get(t, 1))
                 persisted.append({
                     'bullet_text': db['bullet_text'],
                     'source_node_ids': node_ids,
@@ -329,15 +317,13 @@ def build_card(entity_node_id: str) -> Dict[str, Any]:
     if alias_text:
         section_intros[ALIAS] = alias_text
 
-    # 6. Build summary (LLM) AFTER bullets — uses bullets + alias, NOT contact
+    # 6. Build summary (LLM) AFTER bullets — uses bullets + alias, NOT contact.
+    # A card with no summary is a failed build: _build_summary_section raises.
     summary_text = _build_summary_section(entity, section_bullets, alias_text)
-    if summary_text:
-        section_intros[SUMMARY] = summary_text
+    section_intros[SUMMARY] = summary_text
 
     # 7. Build level_0 (deterministic head, depends on summary)
-    level_0_text = _build_level_0(entity, summary_text)
-    if level_0_text:
-        section_intros[LEVEL_0] = level_0_text
+    section_intros[LEVEL_0] = _build_level_0(summary_text)
 
     # 8. Persist — the build's only transaction. All LLM work happened above
     # with no session open; this block holds the global writer slot and must
@@ -347,117 +333,9 @@ def build_card(entity_node_id: str) -> Dict[str, Any]:
             _mark_section_drops(session, tags, persisted, section_name, fact_by_id)
         result = _persist_card(
             session, entity, section_template, section_bullets, section_intros,
+            activate_new=activate_new,
         )
     return {'status': 'ok', **result}
-
-
-def refresh_card_for_changed_node(changed_node_id: str) -> Dict[str, Any]:
-    """Incremental refresh: find bullets sourced from this node, re-render them.
-
-    Session discipline: one read session snapshots the affected bullets,
-    the re-render LLM calls run with no connection open, and the deletes +
-    text updates land in one short db_manager transaction.
-
-    Returns: summary dict with bullet counts.
-    """
-    db_manager = get_db_manager()
-
-    # Read phase: snapshot everything the re-renders need.
-    with db_manager.read_session() as session:
-        rows = session.query(EntityCardBulletSourceNode).filter(
-            EntityCardBulletSourceNode.node_id == changed_node_id
-        ).all()
-        if not rows:
-            return {'status': 'noop', 'reason': 'no bullets reference this node'}
-
-        bullet_ids = [r.bullet_id for r in rows]
-        affected = session.query(EntityCardBullet).filter(
-            EntityCardBullet.id.in_(bullet_ids)
-        ).all()
-
-        to_delete: List[str] = []
-        to_render: List[Dict[str, Any]] = []
-        for bullet in affected:
-            sources = _hydrate_sources(session, bullet)
-            # Re-evaluate the NOW filter on the source nodes
-            if not _any_source_admits(sources):
-                # Source state has moved out of NOW (state closed, etc.)
-                to_delete.append(bullet.id)
-                continue
-            entity = session.get(Node, _get_entity_id_for_section(session, bullet.section_id))
-            if entity is None:
-                continue
-            section = session.get(EntityCardSection, bullet.section_id)
-            to_render.append({
-                'bullet_id': bullet.id,
-                'old_text': bullet.bullet_text,
-                'entity': entity,  # detached below; plain column reads only
-                'section_name': section.section_name,
-                'facts': [_fact_from_sources(sources)],
-            })
-
-    # LLM phase — no session open. Re-render each surviving bullet from
-    # current source state. The renderer is section-batched and returns a
-    # list of {bullet_text, source_fact_ids} dicts; for a single-fact
-    # refresh we expect at most one entry.
-    updates: List[tuple] = []  # (bullet_id, new_text, new_source_hash)
-    for item in to_render:
-        try:
-            rendered = _run_bullet_renderer(item['entity'], item['section_name'], item['facts'])
-        except Exception as e:
-            logger.warning("re-render failed for bullet %s: %s", item['bullet_id'], e)
-            continue
-        new_text = (rendered[0].get('bullet_text') or '').strip() if rendered else ''
-        if new_text and new_text != item['old_text']:
-            updates.append((item['bullet_id'], new_text, _compute_hash(item['facts'][0])))
-
-    n_updated = 0
-    n_deleted = 0
-    if to_delete or updates:
-        with db_manager.transaction(op="entity_cards.refresh_card") as session:
-            for bid in to_delete:
-                bullet = session.get(EntityCardBullet, bid)
-                if bullet is not None:
-                    session.delete(bullet)
-                    n_deleted += 1
-            for bid, new_text, new_hash in updates:
-                bullet = session.get(EntityCardBullet, bid)
-                if bullet is None:
-                    continue
-                bullet.bullet_text = new_text
-                bullet.source_hash = new_hash
-                bullet.generated_at = utc_now()
-                n_updated += 1
-
-    return {'status': 'ok', 'updated': n_updated, 'deleted': n_deleted}
-
-
-def rebuild_all_group_a() -> Dict[str, Any]:
-    """Iterate Group A entities (PageRank-thresholded), build card for each.
-
-    Used after a pipeline batch completes — the card subscriber drains
-    pending refreshes in bulk. Per-entity errors don't abort the run.
-    """
-    # Reuse the existing Group A logic from the v1 pipeline
-    from app.assistant.pipelines.entity_cards.kg_entity_card_pipeline.kg_entity_card_pipeline import (
-        _get_group_a_ids,
-    )
-    group_a = _get_group_a_ids()
-    logger.info("[entity_cards_v2] rebuild_all_group_a: %d entities", len(group_a))
-
-    n_built = n_skipped = n_errored = 0
-    for nid in group_a:
-        try:
-            result = build_card(nid)
-            if result.get('status') == 'ok':
-                n_built += 1
-            else:
-                n_skipped += 1
-        except Exception as e:
-            logger.exception("build_card failed for %s: %s", nid, e)
-            n_errored += 1
-
-    return {'built': n_built, 'skipped': n_skipped, 'errored': n_errored}
 
 
 # --- Implementation: candidate fact collection ------------------------------
@@ -525,9 +403,10 @@ def _prefilter_facts(
 
     Wiki parity (description_creator._prefilter_edges). Below threshold,
     pass through unchanged. Above threshold, batch the facts and ask
-    kg_maintenance::edge_filter to pick the informative ones. On any
-    per-batch failure, keep all facts in that batch (fail open — better
-    to over-include than to silently lose signal).
+    kg_maintenance::edge_filter to pick the informative ones. A failed
+    batch raises out of the build (until 2026-10-05 it kept every fact and
+    the card was persisted as a fresh build); a batch answer with no or
+    out-of-range keep_indices gets one correction, then raises.
     """
     if len(facts) <= _CARD_PREFILTER_THRESHOLD:
         return facts
@@ -539,11 +418,7 @@ def _prefilter_facts(
     from app.assistant.ServiceLocator.service_locator import DI
     agent = DI.agent_factory.create_agent("kg_maintenance::edge_filter")
     if agent is None:
-        logger.warning(
-            "[card_prefilter] kg_maintenance::edge_filter not available — "
-            "skipping prefilter for %s", entity_label,
-        )
-        return facts
+        raise RuntimeError("agent kg_maintenance::edge_filter not available")
 
     keep_global: set[int] = set()
     index_batches = _chunk(list(range(len(facts))), _CARD_PREFILTER_BATCH_SIZE)
@@ -552,28 +427,17 @@ def _prefilter_facts(
             _format_fact_oneliner(facts[global_i], local_i)
             for local_i, global_i in enumerate(global_indices, 1)
         ]
-        try:
-            response = agent.action_handler(Message(
-                agent_input={
-                    "node_label": entity_label,
-                    "node_type": entity_type,
-                    "edge_list": "\n".join(lines),
-                },
-                scope_context=_scope(),
-            ))
-            data = response.data if response and hasattr(response, "data") else None
-            if hasattr(data, "model_dump"):
-                data = data.model_dump()
-            data = data or {}
-            for local_idx in data.get("keep_indices", []):
-                if isinstance(local_idx, int) and 1 <= local_idx <= len(global_indices):
-                    keep_global.add(global_indices[local_idx - 1])
-        except Exception:
-            logger.debug(
-                "[card_prefilter] batch %d failed for %s — keeping all facts in batch",
-                batch_num, entity_label, exc_info=True,
-            )
-            keep_global.update(global_indices)
+        data = _ask_with_one_correction(
+            agent, f"edge_filter batch {batch_num} for {entity_label!r}",
+            {
+                "node_label": entity_label,
+                "node_type": entity_type,
+                "edge_list": "\n".join(lines),
+            },
+            lambda d: _keep_indices_problems(d, len(global_indices)),
+        )
+        for local_idx in data["keep_indices"]:
+            keep_global.add(global_indices[local_idx - 1])
 
     filtered = [facts[i] for i in sorted(keep_global)]
     logger.info(
@@ -582,6 +446,46 @@ def _prefilter_facts(
         (1 - len(filtered) / len(facts)) * 100 if facts else 0,
     )
     return filtered
+
+
+def _keep_indices_problems(data: Dict[str, Any], n_lines: int) -> List[str]:
+    keep = data.get("keep_indices") or []
+    if not keep:
+        return [f"keep_indices is empty: list the numbers of the edges to keep (1 to {n_lines})"]
+    stray = [i for i in keep if not isinstance(i, int) or not 1 <= i <= n_lines]
+    if stray:
+        return [f"keep_indices {stray} are not edge numbers in the list (1 to {n_lines})"]
+    return []
+
+
+def _ask(agent: Any, what: str, agent_input: Dict[str, Any]) -> Dict[str, Any]:
+    """One agent call; an answer without structured data raises."""
+    result = agent.action_handler(Message(agent_input=agent_input, scope_context=_scope()))
+    data = getattr(result, 'data', None)
+    if hasattr(data, 'model_dump'):
+        data = data.model_dump()
+    if not isinstance(data, dict):
+        raise RuntimeError(f"{what}: the agent returned no structured answer ({type(data).__name__})")
+    return data
+
+
+def _ask_with_one_correction(
+    agent: Any, what: str, agent_input: Dict[str, Any], problems_of,
+) -> Dict[str, Any]:
+    """A well-formed but incomplete answer gets ONE targeted correction (the
+    agent's `correction` prompt slot); still incomplete -> raise. `correction`
+    is always passed: agent_input lands on the agent's blackboard, so a
+    reused agent would otherwise carry the previous call's correction."""
+    data = _ask(agent, what, {**agent_input, "correction": ""})
+    problems = problems_of(data)
+    if not problems:
+        return data
+    logger.warning("[entity_cards_v2] %s incomplete, one correction: %s", what, "; ".join(problems))
+    data = _ask(agent, what, {**agent_input, "correction": "; ".join(problems)})
+    problems = problems_of(data)
+    if problems:
+        raise RuntimeError(f"{what}: still incomplete after one correction: {'; '.join(problems)}")
+    return data
 
 
 def _is_user_self_entity(entity: Node) -> bool:
@@ -1131,19 +1035,21 @@ def _run_section_tagger(
         "candidate_facts": "\n\n".join(fact_lines),
     }
 
-    result = agent.action_handler(Message(agent_input=agent_input, scope_context=_scope()))
-    data = result.data if result and hasattr(result, 'data') else {}
-    if hasattr(data, 'model_dump'):
-        data = data.model_dump()
-    if not isinstance(data, dict):
-        return []
-    out = []
-    for tf in (data.get('tagged_facts') or []):
-        if isinstance(tf, dict):
-            out.append(tf)
-        elif hasattr(tf, 'model_dump'):
-            out.append(tf.model_dump())
-    return out
+    # Every fact must be tagged: an untagged fact would silently leave the card.
+    fact_ids = [f['fact_id'] for f in facts]
+    data = _ask_with_one_correction(
+        agent, f"section_tagger for {entity.label!r}", agent_input,
+        lambda d: _tagger_problems(d, fact_ids),
+    )
+    return [tf for tf in data['tagged_facts'] if isinstance(tf, dict)]
+
+
+def _tagger_problems(data: Dict[str, Any], fact_ids: List[str]) -> List[str]:
+    tagged = {tf.get('fact_id') for tf in (data.get('tagged_facts') or []) if isinstance(tf, dict)}
+    missing = [fid for fid in fact_ids if fid not in tagged]
+    if missing:
+        return [f"fact_ids {missing} have no tagged_facts entry: tag every fact (or 'reject' it)"]
+    return []
 
 
 # --- Implementation: bullet_renderer LLM call -------------------------------
@@ -1186,24 +1092,30 @@ def _run_bullet_renderer(
         "source_facts": "\n\n".join(fact_blocks),
     }
 
-    result = agent.action_handler(Message(agent_input=agent_input, scope_context=_scope()))
-    data = result.data if result and hasattr(result, 'data') else {}
-    if hasattr(data, 'model_dump'):
-        data = data.model_dump()
-    if not isinstance(data, dict):
-        return []
-    out = []
-    for rb in (data.get('bullets') or []):
-        if hasattr(rb, 'model_dump'):
-            rb = rb.model_dump()
-        if not isinstance(rb, dict):
+    # Dropping a fact is the renderer's call; a bullet with no text or citing
+    # no input fact is an incomplete answer.
+    fact_ids = {f['fact_id'] for f in source_facts}
+    data = _ask_with_one_correction(
+        agent, f"bullet_renderer for {entity.label!r} / {section_name}", agent_input,
+        lambda d: _sourced_bullet_problems(d, 'source_fact_ids', fact_ids),
+    )
+    return [
+        {'bullet_text': rb['bullet_text'].strip(), 'source_fact_ids': rb['source_fact_ids']}
+        for rb in (data.get('bullets') or [])
+    ]
+
+
+def _sourced_bullet_problems(data: Dict[str, Any], source_key: str, known_ids: set) -> List[str]:
+    """Each bullet needs text and a non-empty `source_key` naming only input ids."""
+    problems = []
+    for i, b in enumerate(data.get('bullets') or [], 1):
+        if not isinstance(b, dict) or not (b.get('bullet_text') or '').strip():
+            problems.append(f"bullet {i} has no bullet_text")
             continue
-        text = (rb.get('bullet_text') or '').strip()
-        fids = rb.get('source_fact_ids') or []
-        if not text or not fids:
-            continue
-        out.append({'bullet_text': text, 'source_fact_ids': fids})
-    return out
+        ids = b.get(source_key) or []
+        if not ids or any(x not in known_ids for x in ids):
+            problems.append(f"bullet {i} {source_key} {ids} must name input ids only, at least one")
+    return problems
 
 
 # --- Implementation: persistence --------------------------------------------
@@ -1213,8 +1125,11 @@ def _persist_card(
     section_template: List[tuple],
     section_bullets: Dict[str, List[Dict[str, Any]]],
     section_intros: Dict[str, str],
+    *,
+    activate_new: bool,
 ) -> Dict[str, Any]:
     """Atomic write: delete existing card content, insert new content.
+    A card created here is active only when `activate_new`.
 
     Runs inside the caller's db_manager transaction — the caller's context
     commits (or rolls back) the whole card write.
@@ -1231,7 +1146,7 @@ def _persist_card(
             id=str(uuid.uuid4()),
             entity_node_id=entity.id,
             entity_type=entity.node_type,
-            is_active=True,
+            is_active=activate_new,
         )
         session.add(card)
         session.flush()
@@ -1328,24 +1243,26 @@ def _run_section_distiller(
         "max_bullets": str(max_bullets),
         "candidate_bullets": bullet_block,
     }
-    result = agent.action_handler(Message(agent_input=agent_input, scope_context=_scope()))
-    data = result.data if result and hasattr(result, 'data') else {}
-    if hasattr(data, 'model_dump'):
-        data = data.model_dump()
-    if not isinstance(data, dict):
-        return []
-    out = []
-    for db in (data.get('bullets') or []):
-        if hasattr(db, 'model_dump'):
-            db = db.model_dump()
-        if not isinstance(db, dict):
-            continue
-        text = (db.get('bullet_text') or '').strip()
-        src_ids = db.get('source_bullet_ids') or []
-        if not text or not src_ids:
-            continue
-        out.append({'bullet_text': text, 'source_bullet_ids': src_ids})
-    return out
+    bullet_ids = {rb['bullet_id'] for rb in renderer_bullets}
+    data = _ask_with_one_correction(
+        agent, f"section_distiller for {entity.label!r} / {section_name}", agent_input,
+        lambda d: _distiller_problems(d, bullet_ids, max_bullets),
+    )
+    return [
+        {'bullet_text': db['bullet_text'].strip(), 'source_bullet_ids': db['source_bullet_ids']}
+        for db in data['bullets']
+    ]
+
+
+def _distiller_problems(data: Dict[str, Any], bullet_ids: set, max_bullets: int) -> List[str]:
+    """The distiller exists to cut the section to its cap: no bullets, or more
+    than the cap, is incomplete."""
+    n = len(data.get('bullets') or [])
+    if n == 0:
+        return [f"no bullets: return the most identity-defining bullets, at most {max_bullets}"]
+    if n > max_bullets:
+        return [f"{n} bullets returned, more than max_bullets {max_bullets}"]
+    return _sourced_bullet_problems(data, 'source_bullet_ids', bullet_ids)
 
 
 # --- Deterministic + summary section builders -------------------------------
@@ -1377,21 +1294,25 @@ def _build_summary_section(
     entity: Node,
     section_bullets: Dict[str, List[Dict[str, Any]]],
     alias_text: Optional[str],
-) -> Optional[str]:
+) -> str:
     """LLM-condense all rendered bullets (and aliases) into a 2-3 sentence summary.
 
     Contact info is intentionally excluded — summaries don't quote
     phone numbers / emails.
+
+    A card with no summary is a failed build, so every miss raises: nothing to
+    summarize, no agent, a failed call, or an empty summary after one
+    correction. Returning None used to persist a summary-less card stamped
+    freshly built, its level_0 cut from the wiki-derived description.
     """
     if not section_bullets and not alias_text:
-        return None
+        raise RuntimeError(f"card for {entity.label!r}: no bullets or aliases survived to summarize")
 
     from app.assistant.ServiceLocator.service_locator import DI
 
     agent = DI.agent_factory.create_agent("entity_cards::summary_writer")
     if agent is None:
-        logger.warning("entity_cards::summary_writer not available — skipping summary")
-        return None
+        raise RuntimeError("agent entity_cards::summary_writer not available")
 
     section_blocks: List[str] = []
     for section_name, bullets in section_bullets.items():
@@ -1407,35 +1328,19 @@ def _build_summary_section(
         "card_bullets": "\n".join(section_blocks) if section_blocks else "(no bullets)",
     }
 
-    # A summary_writer failure aborts the build (no swallow): returning None here
-    # let the persist phase replace the card with a summary-less version and stamp
-    # it freshly built.
-    result = agent.action_handler(Message(agent_input=agent_input, scope_context=_scope()))
-
-    data = result.data if result and hasattr(result, 'data') else {}
-    if hasattr(data, 'model_dump'):
-        data = data.model_dump()
-    if not isinstance(data, dict):
-        return None
-    return (data.get('summary') or '').strip() or None
+    data = _ask_with_one_correction(
+        agent, f"summary_writer for {entity.label!r}", agent_input,
+        lambda d: [] if (d.get('summary') or '').strip() else ["the summary is empty: write the 2-3 sentence summary"],
+    )
+    return data['summary'].strip()
 
 
-def _build_level_0(entity: Node, summary_text: Optional[str]) -> Optional[str]:
-    """Level 0 = the absolute minimal tagline. Deterministic head from summary.
-
-    Takes the first sentence of the summary. If no summary, falls back
-    to the entity descriptor.
-    """
-    if summary_text:
-        # First sentence (terminated by . ! or ?). Keep it short.
-        for sep in ('. ', '! ', '? '):
-            if sep in summary_text:
-                return summary_text.split(sep, 1)[0].strip() + sep.strip()
-        return summary_text.strip()
-    # Fallback
-    if entity.description:
-        return entity.description[:200].strip()
-    return None
+def _build_level_0(summary_text: str) -> str:
+    """Level 0 = the absolute minimal tagline: the first sentence of the summary."""
+    for sep in ('. ', '! ', '? '):
+        if sep in summary_text:
+            return summary_text.split(sep, 1)[0].strip() + sep.strip()
+    return summary_text.strip()
 
 
 # --- Helpers ----------------------------------------------------------------
@@ -1449,54 +1354,3 @@ def _compute_hash(payload: Any) -> str:
     """Stable content hash of source facts. Used for bullet drift detection."""
     s = json.dumps(payload, sort_keys=True, default=str)
     return hashlib.sha256(s.encode('utf-8')).hexdigest()[:16]
-
-
-def _hydrate_sources(session: Session, bullet: EntityCardBullet) -> List[Node]:
-    return [n for n in (session.get(Node, nid) for nid in bullet.source_node_ids) if n is not None]
-
-
-def _any_source_admits(nodes: List[Node]) -> bool:
-    for n in nodes:
-        if is_now_admissible(n.node_type, n.end_date, n.category,
-                             n.goal_status, n.locked_by_user_at,
-                             valid_currently=getattr(n, "valid_currently", None)):
-            return True
-    return False
-
-
-def _get_entity_id_for_section(session: Session, section_id: str) -> Optional[str]:
-    s = session.get(EntityCardSection, section_id)
-    if s is None:
-        return None
-    card = session.get(EntityCardV2, s.card_id)
-    return card.entity_node_id if card else None
-
-
-def _fact_from_sources(nodes: List[Node]) -> Dict[str, Any]:
-    """Reconstruct a minimal fact dict from current node state for re-render.
-
-    Synthesizes a fact_id ('f1') because the bullet_renderer prompt
-    references it ('fact_id={f['fact_id']}'). For incremental refresh we
-    only feed one fact, so a single sentinel id suffices.
-    """
-    n = nodes[0]
-    return {
-        'fact_id': 'f1',
-        'source_node_ids': [x.id for x in nodes],
-        'source_edge_ids': [],
-        'object_label': n.label,
-        'object_type': n.node_type,
-        'object_category': n.category,
-        'edge_type': '(refresh)',
-        'edge_sentence': None,
-        'object_sentence': n.original_sentence,
-        'direction': 'outgoing',
-        'confidence_tier': n.confidence_tier or 'provisional',
-        'temporal': {
-            'start_date': str(n.start_date) if n.start_date else None,
-            'end_date': str(n.end_date) if n.end_date else None,
-            'start_date_prose': n.start_date_prose,
-            'end_date_prose': n.end_date_prose,
-            'valid_during': n.valid_during,
-        },
-    }

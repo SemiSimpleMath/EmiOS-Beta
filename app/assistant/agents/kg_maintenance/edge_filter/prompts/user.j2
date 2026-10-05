@@ -5,3 +5,10 @@ Select which edges are worth keeping for description generation.
 {{ edge_list }}
 
 Return the indices of edges to KEEP in the `keep_indices` field.
+{% if correction %}
+
+## Correct your previous answer
+
+Your previous answer was incomplete: {{ correction }}
+Answer again in full with this fixed.
+{% endif %}

@@ -9,5 +9,6 @@ user_context_items:
   - entity_descriptor
   - section_name
   - source_facts
+  - correction
 system_context_items:
   - resource_user_data

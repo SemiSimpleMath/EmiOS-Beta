@@ -25,3 +25,10 @@ Return JSON:
 { "bullets": [ { "bullet_text": "...", "source_bullet_ids": ["b1","b2"] }, ... ] }
 
 Every kept input bullet_id must appear in exactly one output bullet.
+{% if correction %}
+
+## Correct your previous answer
+
+Your previous answer was incomplete: {{ correction }}
+Answer again in full with this fixed.
+{% endif %}
