@@ -55,7 +55,8 @@ def _gather(conn, chat="I'll start the report at 5", refs=None):
         return {"day": DAY, "now": now.isoformat(),
                 "items": D.offered(DAY, D.with_current(DAY, every, connect=conn), now),
                 "placed_ids": [L.calendar_id(DAY, it["belief_key"], it["time"]) for it in every],
-                "situation": situation(chat), "refs": refs or {"M1": NOW.isoformat()}, "correction": None}
+                "situation": situation(chat), "matters": [], "refs": refs or {"M1": NOW.isoformat()},
+                "correction": None}
     return gather
 
 
@@ -194,7 +195,7 @@ def test_the_prompts_carry_the_rules_the_two_groups_and_the_labelled_situation()
     s["chat"][0]["ref"] = "M1"
     s["concerns"][0]["ref"] = "C1"
     user = _ENV.get_template("subconscious/day_tasks/prompts/user.j2").render(
-        agent_input={"day": DAY, "items": items, "situation": s, "correction": None})
+        agent_input={"day": DAY, "items": items, "situation": s, "matters": [], "correction": None})
     new_part, listed_part = user.split("### Already on the list", 1)
     assert "[I1] All day: The owner sometimes starts the weekly report on Sunday." in new_part
     assert "    read with: The owner likes it quiet." in new_part
@@ -204,3 +205,46 @@ def test_the_prompts_carry_the_rules_the_two_groups_and_the_labelled_situation()
     assert "- [C1] Sleep is poor (severity: medium); record last changed" in user
     assert "The owner is away from the keyboard, since 07:18 AM (42 minutes)." in user
     assert NOW.isoformat() not in user, "every time in the prompt is local"
+
+
+def test_the_brain_s_view_concerns_in_full_with_their_entries_and_today_s_decisions(tmp_path, monkeypatch):
+    """day_tasks reads what the brain knows: each open concern's whole record and its entries on the list, and what
+    the brain read and decided today; a concern's entry and a brain decision are facts a change can cite."""
+    from app.assistant.dayflow_orchestrator.work_context import _ENV
+    from app.assistant.subconscious import concern_planner, concern_store
+    conn = sqlite_file(tmp_path / "d.db")
+    L.apply_concern("c-dinner", [{"action": "new", "what": "the owner knows the family eats out tonight",
+                                  "who_acts": "", "assistant_part": "tell the owner the table is at 6", "when": "5:30 PM",
+                                  "why": "He asked."}], cause="plan", at=NOW + timedelta(minutes=3), connect=conn)
+    monkeypatch.setattr(concern_store, "load_register", lambda: {"active": [{"concern_id": "c-dinner"}], "addressing": []})
+    monkeypatch.setattr(concern_planner, "concern_text", lambda c, b: f"THE WHOLE RECORD of {c['concern_id']} ({b})")
+    s = situation(concerns=[{"concern_id": "c-dinner", "bucket": "active", "title": "Dinner out tonight",
+                             "severity": "low", "changed_at": NOW.isoformat()}])
+    D.with_concerns(s, connect=conn)
+    with conn(True) as c:
+        D.ensure_schema(conn)
+        from app.assistant.subconscious import brain_inbox, brain_step
+        brain_inbox.ensure_schema(conn)
+        brain_step.ensure_schema(conn)
+        c.execute("INSERT INTO brain_events (source, source_ref, occurred_at, room_id, speaker, text, received_at) "
+                  "VALUES ('chat', 'message:9', ?, 'master_room', 'Owner', 'we are eating out tonight', ?)",
+                  (NOW.isoformat(), NOW.isoformat()))
+        c.execute("INSERT INTO brain_matters (created_at, event_ids, concern_ids, status, decisions) VALUES (?,?,?,?,?)",
+                  ((NOW + timedelta(minutes=2)).isoformat(), "[1]", "[]", "applied",
+                   '{"events": {"message:9": {"decision": "tracked_as_new", "reason": "Dinner plans changed."}}, '
+                   '"concern_updates": [], "new_concerns": [{"title": "Dinner out tonight"}]}'))
+    matters = D.matters_today(DAY, NOW + timedelta(minutes=5), connect=conn)
+    refs = D.label_refs(s, matters)
+    assert refs["E1"] == (NOW + timedelta(minutes=3)).isoformat() and refs["B1"] == (NOW + timedelta(minutes=2)).isoformat()
+    items = _new_items()
+    items[1]["current"] = {"decision": "needed", "assistant_part": "tell the owner dinner is starting", "when": "6:00 PM",
+                           "why": "w", "decided_at": NOW.isoformat()}
+    drop = {"decisions": [GOOD["decisions"][0], GOOD["decisions"][2],
+                          _d("I2", "not_needed", why="E1 covers it: the family eats out.", new_since=["E1"])]}
+    assert D.problems(drop, items, refs) == [], "a concern's newer entry licenses the change"
+    user = _ENV.get_template("subconscious/day_tasks/prompts/user.j2").render(
+        agent_input={"day": DAY, "items": items, "situation": s, "matters": matters, "correction": None})
+    assert "### [C1] Dinner out tonight" in user and "THE WHOLE RECORD of c-dinner (active)" in user
+    assert "- [E1] the owner knows the family eats out tonight (the assistant: tell the owner the table is at 6), 5:30 PM; open" in user
+    assert "- chat at" in user and ": we are eating out tonight" in user
+    assert "the brain: tracked as new: Dinner plans changed." in user and "- raised a concern: Dinner out tonight" in user

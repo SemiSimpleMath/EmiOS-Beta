@@ -72,14 +72,20 @@ def run_brain() -> Dict[str, Any]:
     from app.assistant.subconscious.brain_stories import run_stories
     with trace(stage="stories"):
         stories = run_stories()
-    # Last, and shadow only: the day's tasks, what the brain would decide for today's calendar, recorded and
-    # compared, never handed to dayflow (subconscious/day_tasks.py; docs/design/brain_delegates_work_2026-10-04.md).
+    # Last, and shadow only: the brain's list (docs/design/brain_delegates_work_2026-10-04.md). The concern side
+    # first (subconscious/concern_list_shadow.py), then the day's tasks (subconscious/day_tasks.py), which read the
+    # concern entries made in this pass. Both are attempted; a failure of the first is raised after the second.
+    from app.assistant.subconscious.concern_list_shadow import run_concern_shadow
     from app.assistant.subconscious.day_tasks import run_day_tasks
+    concern_failure = None
+    try:
+        listed = run_concern_shadow(shadow_jobs)
+    except Exception as exc:
+        concern_failure = exc
     with trace(stage="day_tasks"):
         decided = run_day_tasks()
-    # And the brain's list for each concern planned this wake, shadow only (subconscious/concern_list_shadow.py).
-    from app.assistant.subconscious.concern_list_shadow import run_concern_shadow
-    listed = run_concern_shadow(shadow_jobs)
+    if concern_failure is not None:
+        raise concern_failure
     return {**gate, **{f"brain_{k}": v for k, v in brain.items()}, **briefs, **plans, **handoffs, **day, **occurrences,
             **stories, **decided, **listed,
             "next_wake_at": min(due) if due else None}

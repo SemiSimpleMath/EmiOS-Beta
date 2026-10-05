@@ -68,7 +68,18 @@ The calendar ahead:
 
 ## Open concerns
 {% for c in s.concerns -%}
+{% if c.text is defined -%}
+### {% if c.ref is defined %}[{{ c.ref }}] {% endif %}{{ c.title }} (record last changed {{ c.changed_at | local_time }})
+{{ c.text }}
+On the brain's list for this concern:
+{% for e in c.entries -%}
+- {% if e.ref is defined %}[{{ e.ref }}] {% endif %}{{ e.what }}{% if e.assistant_part and e.assistant_part != e.what %} (the assistant: {{ e.assistant_part }}){% endif %}{% if e.when_local %}, {{ e.when_local }}{% endif %}; {{ e.status }}, decided {{ e.updated_at | local_time }}
+{% else -%}
+(nothing)
+{% endfor %}
+{% else -%}
 - {% if c.ref is defined %}[{{ c.ref }}] {% endif %}{{ c.title }}{% if c.severity %} (severity: {{ c.severity }}){% endif %}; record last changed {{ c.changed_at | local_time }}
+{% endif -%}
 {% else -%}
 (none)
 {% endfor %}

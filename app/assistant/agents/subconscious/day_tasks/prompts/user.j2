@@ -1,7 +1,8 @@
 {#- The day's tasks input (subconscious/day_tasks.py). Expects agent_input: day, items [{label, time, statement,
     related: [statement], current: the item's entry on the brain's list {decision, assistant_part, when, why,
     decided_at (UTC ISO)}, or None}], situation (subconscious/situation.py, rendered by shared/brain/situation.j2;
-    its citable facts carry `ref` labels), correction. Times are shown local. -#}
+    its concerns carry their whole record and their entries; its citable facts carry `ref` labels), matters (what
+    the brain decided today, day_tasks.matters_today, each with `ref`), correction. Times are shown local. -#}
 {%- set A = agent_input -%}
 {%- macro item(it) %}
 [{{ it.label }}] {{ "All day" if it.time == "all day" else "At " ~ it.time }}: {{ it.statement }}
@@ -23,6 +24,23 @@
 (none)
 {% endfor %}
 {% with s = A.situation %}{% include 'shared/brain/situation.j2' %}{% endwith %}
+
+## What the brain read and decided today
+{% for m in A.matters -%}
+### [{{ m.ref }}] {{ m.at | local_time }}
+{% for e in m.events -%}
+- {{ e.source }} at {{ e.at | local_time }}: {{ e.text }}
+  the brain: {{ e.decision | replace("_", " ") }}: {{ e.reason }}
+{% endfor -%}
+{% for n in m.notes -%}
+- note on a concern: {{ n.note }}
+{% endfor -%}
+{% for n in m.new_concerns -%}
+- raised a concern: {{ n.title }}
+{% endfor %}
+{% else -%}
+(nothing yet today)
+{% endfor %}
 {% if A.correction %}
 ## Your previous answer was refused
 {{ A.correction }}

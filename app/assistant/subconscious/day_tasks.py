@@ -20,7 +20,14 @@ fact it read that is newer than the entry (a chat message, work, a reminder sent
 input). Until then every run re-decided the whole day and code compared the text: of 43 changes on 2026-10-05
 morning about 30 were rewordings, dropped and restored covers, or "the assistant" become "assistant", and about 6
 were re-judgments with nothing new. A placement done elsewhere, or a clock-time one more than an hour past, is not
-offered again. Code checks the answer (one correction round) and records the run in `brain_day_decisions` (the
+offered again.
+
+It reads what the brain knows, not a part of it (owner, 2026-10-04: it "sees less than brain"): besides the
+situation, every open concern in full as the brain's agents read it (its record, brief, attempts and journal,
+concern_planner.concern_text) with the concern's own entries on the list, and what the brain read and decided today
+(brain_matters: each event with the brain's decision and reason, the notes it wrote, the concerns it raised). A
+concern's entry is a fact a change can cite: the concern side runs first in the brain's pass, so an entry it makes
+("we're eating out tonight") reaches the day's tasks in the same pass. Code checks the answer (one correction round) and records the run in `brain_day_decisions` (the
 table keeps the name it was created with). Nothing is handed to dayflow: the steward goes on handling the calendar, and
 `compare(day)` sets the brain's decisions beside what dayflow did with the same beliefs, for the owner to judge.
 """
@@ -103,10 +110,49 @@ def offered(day: str, items: List[Dict[str, Any]], now_utc: datetime) -> List[Di
     return [{**it, "label": f"I{i}"} for i, it in enumerate(still, 1)]
 
 
-def label_refs(situation: Dict[str, Any]) -> Dict[str, str]:
-    """Labels the facts a change can cite, in place (each gets `ref`, shown by shared/brain/situation.j2): today's
-    chat messages M1.., work W1.. (in motion, then ended), reminders sent R1.., open concerns C1... Returns label ->
-    when it happened (UTC ISO): for work, when it last changed; for a concern, when its record last changed."""
+def with_concerns(situation: Dict[str, Any], *, connect=None) -> None:
+    """Each open concern of the situation, in place, with its whole record as the brain's agents read it (`text`,
+    concern_planner.concern_text) and its entries on the brain's list (`entries`)."""
+    from app.assistant.subconscious import brain_list
+    from app.assistant.subconscious.concern_planner import concern_text
+    from app.assistant.subconscious.concern_store import load_register
+    register = load_register()
+    by_id = {c["concern_id"]: c for b in ("active", "addressing") for c in register.get(b) or []}
+    for c in situation["concerns"]:
+        c["text"] = concern_text(by_id[c["concern_id"]], c["bucket"])
+        c["entries"] = [{k: e[k] for k in ("id", "what", "decision", "assistant_part", "when_local", "status",
+                                           "updated_at")}
+                        for e in brain_list.entries(concern_id=c["concern_id"], connect=connect)]
+
+
+def matters_today(day: str, now_utc: datetime, *, connect=None) -> List[Dict[str, Any]]:
+    """What the brain read and decided today (brain_matters, applied): when, each event in its own words with the
+    brain's decision and reason, the notes it wrote on concerns, the concerns it raised."""
+    from app.assistant.pipelines.context import day_window_local
+    connect = connect or _connect
+    start = day_window_local(day)[0].astimezone(timezone.utc).isoformat()
+    with connect(False) as c:
+        rows = c.execute("SELECT created_at, decisions FROM brain_matters WHERE status = 'applied' AND created_at >= ? "
+                         "AND created_at <= ? ORDER BY id", (start, now_utc.isoformat())).fetchall()
+        out = []
+        for r in rows:
+            d = json.loads(r["decisions"])
+            events = []
+            for ref, decided in d["events"].items():
+                e = c.execute("SELECT source, occurred_at, text FROM brain_events WHERE source_ref = ?", (ref,)).fetchone()
+                events.append({"source": e["source"], "at": e["occurred_at"], "text": e["text"],
+                               "decision": decided["decision"], "reason": decided["reason"]})
+            out.append({"at": r["created_at"], "events": events, "notes": d.get("concern_updates") or [],
+                        "new_concerns": d.get("new_concerns") or []})
+    return out
+
+
+def label_refs(situation: Dict[str, Any], matters: List[Dict[str, Any]] = ()) -> Dict[str, str]:
+    """Labels the facts a change can cite, in place (each gets `ref`, shown by shared/brain/situation.j2 and the
+    day's tasks prompt): today's chat messages M1.., work W1.. (in motion, then ended), reminders sent R1.., open
+    concerns C1.., the concerns' entries on the list E1.., what the brain decided today B1... Returns label -> when
+    it happened (UTC ISO): for work, when it last changed; for a concern, when its record last changed; for an
+    entry, when it was last decided."""
     from app.assistant.subconscious import work_links
     changed = {r["id"]: r["updated_at"] for r in work_links._rows()}
     refs: Dict[str, str] = {}
@@ -120,6 +166,8 @@ def label_refs(situation: Dict[str, Any]) -> Dict[str, str]:
     mark([*situation["work"]["in_motion"], *situation["work"]["ended"]], "W", lambda w: changed[w["work_id"]])
     mark(situation["reminders"].get("records") or [], "R", lambda r: r["timestamp"])
     mark(situation["concerns"], "C", lambda c: c["changed_at"])
+    mark([e for c in situation["concerns"] for e in c.get("entries") or []], "E", lambda e: e["updated_at"])
+    mark(list(matters), "B", lambda m: m["at"])
     return refs
 
 
@@ -195,9 +243,11 @@ def gather(now_utc: datetime, *, plan_connect=None) -> Optional[Dict[str, Any]]:
     every = placements(plan)
     # Shadow: the situation leaves out calendar-made work, which is the steward's (module docstring).
     s = situation.gather(now_utc, calendar_work=False)
+    with_concerns(s)
+    matters = matters_today(day, now_utc)
     return {"day": day, "now": now_utc.isoformat(), "items": offered(day, with_current(day, every), now_utc),
             "placed_ids": [brain_list.calendar_id(day, it["belief_key"], it["time"]) for it in every],
-            "situation": s, "refs": label_refs(s), "correction": None}
+            "situation": s, "matters": matters, "refs": label_refs(s, matters), "correction": None}
 
 
 def run_day_tasks(*, now_utc: Optional[datetime] = None, connect=None,

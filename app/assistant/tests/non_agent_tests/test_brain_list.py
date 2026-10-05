@@ -67,7 +67,7 @@ def test_the_days_tasks_see_each_placements_entry_and_entries_are_not_a_change_o
     seen = D.with_current("2026-03-10", ITEMS, connect=conn)
     assert seen[0]["current"]["when"] == "9:00 PM" and seen[1]["current"]["decision"] == "not_needed"
     from app.assistant.tests.non_agent_tests.test_day_tasks import situation
-    base = {"day": "2026-03-10", "now": NOW.isoformat(), "situation": situation()}
+    base = {"day": "2026-03-10", "now": NOW.isoformat(), "situation": situation(), "matters": []}
     assert D.fingerprint({**base, "items": ITEMS}) == D.fingerprint({**base, "items": seen})
     from app.assistant.dayflow_orchestrator.work_context import _ENV
     user = _ENV.get_template("subconscious/day_tasks/prompts/user.j2").render(

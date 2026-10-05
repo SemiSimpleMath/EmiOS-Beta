@@ -18,7 +18,7 @@ class Decision(BaseModel):
                                           "also covers. Every other decision leaves it empty; a covered item names the "
                                           "item that covers it in why.")
     why: str = Field(description="Why, in one or two sentences. For an item another task covers, name that item.")
-    new_since: List[str] = Field(description="Only for an item already on the list: the labels (M, W, R, C) of what "
+    new_since: List[str] = Field(description="Only for an item already on the list: the labels (M, W, R, C, E, B) of what "
                                              "you read that is new since its entry was decided and changes it. Empty "
                                              "for an item not yet on the list.")
 

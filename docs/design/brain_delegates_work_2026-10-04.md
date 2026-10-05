@@ -190,6 +190,17 @@ an hour past is not offered again; an entry is cancelled only when its placement
 gone from day_tasks (an entry is the assistant's own task). Three runs on the live inputs against a copy of the day's
 42 entries: no list change in any (one decision restated with the same meaning, kept).
 
+**The brain's view of the day (built 2026-10-05, build step 3b in part, shadow, needs a restart).** day_tasks reads,
+besides the situation, every open concern in full as the brain's agents read it (`concern_planner.concern_text`:
+record, brief, attempts, journal) with the concern's entries on the list, and what the brain read and decided today
+(`day_tasks.matters_today`: each event in its words with the brain's decision and reason, notes, concerns raised). A
+concern's entry (E1..) and a brain decision (B1..) are facts a change can cite. In the brain's pass the concern side
+now runs before day_tasks, so an entry it makes reaches day_tasks in the same pass; a concern-side failure is raised
+after day_tasks has run. Live, 13 open concerns: about 39,000 input tokens a call (from 11,000). Three runs against a
+copy of the day's list: no change; once the fence refused a re-judgment with nothing new and the corrected answer kept
+everything. Not built from 3b: entries tracking their work's status (it needs live delegation), calendar entries keyed
+by belief and day (it changes stored ids: the owner's go), and the merge into `concern_tasks` (at cutover).
+
 ### What day_tasks reads: the brain's view of the day
 
 The owner's worry (2026-10-04): it "sees less than brain". It is the brain deciding, so it sees what the brain
@@ -432,6 +443,11 @@ which is when the reports arrive.
 | Morning review | which beliefs go on the calendar | also what the assistant does with each |
 
 ### The steward retires
+
+Retiring means unwiring, not deleting (owner, 2026-10-04: keep the agent "for a while because its prompt and schema
+are valuable to have for reference"). When no lane uses it, the steward leaves the planning tick's state map, and
+`agents/dayflow_orchestrator/strategic_planner_wo/` (config, prompts, form) and its prep and persist nodes stay on disk,
+unwired, as `work_repair` did after 2026-09-16.
 
 Each of the steward's jobs (`strategic_planner_wo`, `prompts/system.j2`) has a new home:
 

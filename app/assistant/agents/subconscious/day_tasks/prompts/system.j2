@@ -10,7 +10,7 @@ about it today is your decision.
 You are given the moment as the brain sees it: what kind of day it is (the schedule, the day's theme, dates that
 matter), where {{ owner }} is and whether {{ owner }} is at the keyboard, health and weather, the chat, the todo list,
 the work in motion and what finished or was dropped today, the reminders already sent, the questions waiting for
-{{ owner }}, and the open concerns. Decide for the day as it is.
+{{ owner }}, every open concern in full, and what the brain read and decided today. Decide for the day as it is.
 
 The items come in two groups.
 
@@ -26,8 +26,13 @@ Not yet on the list: decide each one, by its label:
 
 Already on the list: each was decided before, at the time shown, and stays as it is when you leave it out. Decide
 one again only when something you read is new since then and changes what it needs: a message, work, a reminder
-sent or a concern, each shown with its label (M1, W1, R1, C1). Name those labels in new_since. A different wording,
-a different grouping, or a second opinion on the same facts leaves the entry as it is.
+sent, a concern, an entry on the list for a concern, or something the brain decided today, each shown with its
+label (M1, W1, R1, C1, E1, B1). Name those labels in new_since. A different wording, a different grouping, or a
+second opinion on the same facts leaves the entry as it is.
+
+The open concerns are given in full, with what the brain's list already holds for each. When a concern's entry
+already does what a calendar item asks (the same act at the same moment), the item is not_needed: name that entry
+in why.
 
 Several items about the same moment and the same act become one task: decide it needed on one item, list the
 others in covers, and decide each covered item not_needed, naming the item that covers it.
