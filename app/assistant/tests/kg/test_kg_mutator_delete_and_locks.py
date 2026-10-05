@@ -324,3 +324,31 @@ def test_tool_wrappers_point_at_audited_mutator():
     assert delete_node_cls() is KGMutatorTool
     assert delete_edge_cls() is KGMutatorTool
     assert create_edge_cls() is KGMutatorTool
+
+
+def test_a_merge_into_a_locked_node_moves_facts_but_changes_none_of_its_fields(chroma):
+    """A locked node is an axiom (owner, 2026-10-05): a twin merged into it hands over its edges, never its field
+    values or aliases."""
+    keep = _mk_node("Keep", locked=True)
+    fold = _mk_node("Fold")
+    other = _mk_node("Other")
+    _mk_edge(fold, other, rel="knows")
+    for i in range(2):
+        _mk_edge(keep, _mk_node(f"Known {i}"), rel="knows")
+    session = get_session()
+    try:
+        f = session.query(Node).filter(Node.id == fold).one()
+        f.description, f.aliases = "a wrong description", ["Foldy"]
+        session.commit()
+    finally:
+        session.close()
+    r = _call("kg_merge_nodes", keep_id=keep, fold_id=fold, reason="x")
+    assert "Merged" in r.content
+    session = get_session()
+    try:
+        k = session.query(Node).filter(Node.id == keep).one()
+        assert k.description is None and not k.aliases, "no field or alias of the locked node changes"
+        assert session.query(Edge).filter(Edge.source_id == keep, Edge.target_id == other).count() == 1
+    finally:
+        session.close()
+

@@ -381,9 +381,13 @@ class KGMutatorTool(BaseTool):
                 "start_date_confidence", "end_date_confidence",
                 "start_date_prose", "end_date_prose",
             )
+            # A user-locked keep node is an axiom (owner, 2026-10-05: its facts
+            # "cannot be changed"): it gains the fold's edges and dependent rows,
+            # never its field values or aliases.
+            keep_locked = keep.locked_by_user_at is not None
             filled_fields: Dict[str, Any] = {}
             for f in _FILL_FIELDS:
-                if _empty(getattr(keep, f, None)) and not _empty(getattr(fold, f, None)):
+                if not keep_locked and _empty(getattr(keep, f, None)) and not _empty(getattr(fold, f, None)):
                     filled_fields[f] = getattr(fold, f)
 
             in_edges_to_rewrite: List[Edge] = []
@@ -422,10 +426,12 @@ class KGMutatorTool(BaseTool):
             # Build the after preview: aliases unioned, edges rewritten,
             # NULL scalars filled from fold.
             new_aliases = list(dict.fromkeys(
-                list(keep.aliases or []) + [fold.label] + list(fold.aliases or [])
+                list(keep.aliases or []) + ([] if keep_locked else [fold.label] + list(fold.aliases or []))
             ))
-            # Drop the keep node's own label out of its aliases if it slipped in.
-            new_aliases = [a for a in new_aliases if a and a != keep.label]
+            # Drop the keep node's own label out of its aliases if it slipped in
+            # (left alone on a locked keep node).
+            if not keep_locked:
+                new_aliases = [a for a in new_aliases if a and a != keep.label]
 
             filled_preview = {
                 k: (_iso(v) if k in _DATE_FIELDS else v) for k, v in filled_fields.items()

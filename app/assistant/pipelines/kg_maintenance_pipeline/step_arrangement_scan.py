@@ -122,16 +122,18 @@ def gather(session, *, now) -> List[Dict[str, Any]]:
 
     said = _said(session, set(parts))
     # Judged before: an open finding keeps the State out; any finding records the later statements it was judged
-    # against, and the State is judged again only when a later statement outside them appears.
+    # against, and the State is judged again only when a later statement outside them appears. The open State is
+    # read from evidence.older_id: upsert_finding stores a node pair sorted by id, so primary_node_id can be
+    # either node.
     open_finding: Set[str] = set()
     judged_against: Dict[str, Set[str]] = {}
-    for primary, status, evidence in (
-            session.query(KGMaintenanceFinding.primary_node_id, KGMaintenanceFinding.status,
-                          KGMaintenanceFinding.evidence_json)
+    for status, evidence in (
+            session.query(KGMaintenanceFinding.status, KGMaintenanceFinding.evidence_json)
             .filter(KGMaintenanceFinding.finding_type == FINDING_TYPE).all()):
+        older_id = (evidence or {})["older_id"]
         if status in ("pending", "investigated", "approved", "executing"):
-            open_finding.add(primary)
-        judged_against.setdefault(primary, set()).update((evidence or {}).get("judged_against") or [])
+            open_finding.add(older_id)
+        judged_against.setdefault(older_id, set()).update(evidence.get("judged_against") or [])
     open_states = [
         n for n in claims.values()
         if n.node_type == "State" and n.end_date is None and getattr(n, "valid_currently", None) is not False
@@ -227,7 +229,8 @@ def run(ctx: PipelineContext) -> dict:
                 confidence=CONFIDENCE_MAP.get(conf, 0.5),
                 priority="high" if conf == "high" else "medium",
                 agent_name="arrangement_scan",
-                evidence={"older": older, "newer": newer, "change_date": verdict["change_date"][:10],
+                evidence={"older_id": older["node_id"], "older": older, "newer": newer,
+                          "change_date": verdict["change_date"][:10],
                           "change_date_basis": verdict.get("change_date_basis"), "judge_confidence": conf,
                           "judged_against": judged},
                 pipeline_run_id=ctx.run_id,
@@ -244,7 +247,7 @@ def run(ctx: PipelineContext) -> dict:
                 confidence=CONFIDENCE_MAP.get(conf, 0.5),
                 priority="low",
                 agent_name="arrangement_scan",
-                evidence={"older": older["node_id"], "judged_against": judged, "verdict": v},
+                evidence={"older_id": older["node_id"], "judged_against": judged, "verdict": v},
                 pipeline_run_id=ctx.run_id,
                 initial_status="rejected",
             )

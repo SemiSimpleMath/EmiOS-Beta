@@ -109,7 +109,9 @@ def test_a_supersedes_verdict_becomes_a_finding_for_review_naming_the_calls(monk
     assert out["supersession_findings"] == 1 and out["cooled"] == out["candidates"] - 1
     s = get_session()
     try:
-        f = s.query(KGMaintenanceFinding).filter_by(primary_node_id=w.thursday, secondary_node_id=w.monday).one()
+        [f] = [f for f in s.query(KGMaintenanceFinding).filter_by(status="investigated").all()
+               if f.evidence_json["older_id"] == w.thursday]
+        assert {f.primary_node_id, f.secondary_node_id} == {w.thursday, w.monday}, "the pair, stored sorted by id"
         rec = f.investigation_report_json["recommendation"]
         assert f.status == "investigated" and f.investigation_report_json["disposition"] == "needs_user_review"
         assert f"kg_close_state(node_id={w.thursday!r}, end_date='2026-03-03'" in rec

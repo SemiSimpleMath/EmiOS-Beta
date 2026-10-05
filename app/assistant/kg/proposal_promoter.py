@@ -182,7 +182,15 @@ def _needs_person_confirm(session, node: Node) -> bool:
     """True when an exact-label bind to this node is risky enough to need
     node_merger confirmation: a person-category node with substantial
     edges (audit P2.3 fix 3 — the two-Alexes collision). A wrong bind
-    merges two people's lives; a duplicate is fixable by the dup scan."""
+    merges two people's lives; a duplicate is fixable by the dup scan.
+
+    A user-locked node is the one referent of its label (owner, 2026-10-05:
+    "there can be no other [owner] nodes and no other [wife] nodes"), so an exact
+    label bind to it needs no confirmation. Until then every mention of the
+    owner went through node_merger, and a failed call during the 2026-06-27
+    outage minted a second owner node."""
+    if node.locked_by_user_at is not None:
+        return False
     if (node.category or "").strip().lower() != "person":
         return False
     edge_count = (

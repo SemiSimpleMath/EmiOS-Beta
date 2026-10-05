@@ -91,3 +91,28 @@ def test_a_property_label_collision_mints_no_marker():
         s.rollback()
     finally:
         s.close()
+
+
+def test_an_exact_label_bind_to_a_locked_person_needs_no_confirmation():
+    """Owner, 2026-10-05: "there can be no other [owner] nodes" — a locked person is the one referent of its label, so
+    a mention binds without a node_merger call (a failed call minted the owner's twin on 2026-06-27)."""
+    from app.assistant.kg.db.knowledge_graph_db_sqlite import Edge
+    from datetime import datetime, timezone
+    s = get_session()
+    try:
+        locked = Node(id=str(uuid.uuid4()), label="Sam", node_type="Entity", category="person",
+                      locked_by_user_at=datetime(2026, 5, 10, tzinfo=timezone.utc))
+        unlocked = Node(id=str(uuid.uuid4()), label="Pat", node_type="Entity", category="person")
+        s.add_all([locked, unlocked])
+        for n in (locked, unlocked):
+            for _ in range(P._PERSON_CONFIRM_MIN_EDGES):
+                other = Node(id=str(uuid.uuid4()), label="x", node_type="State")
+                s.add(other)
+                s.add(Edge(id=str(uuid.uuid4()), source_id=n.id, target_id=other.id, relationship_type="has_state"))
+        s.flush()
+        assert P._needs_person_confirm(s, locked) is False
+        assert P._needs_person_confirm(s, unlocked) is True, "an unlocked well-connected person still needs it"
+        s.rollback()
+    finally:
+        s.close()
+
