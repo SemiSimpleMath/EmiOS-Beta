@@ -1,11 +1,12 @@
-{#- The day's tasks input (subconscious/day_tasks.py). Expects agent_input: day, items [{label, time, statement,
+{#- The day's tasks input (subconscious/day_tasks.py). Expects agent_input: day, items [{label, times, statement,
     related: [statement], current: the item's entry on the brain's list {decision, assistant_part, when, why,
     decided_at (UTC ISO)}, or None}], situation (subconscious/situation.py, rendered by shared/brain/situation.j2;
     its concerns carry their whole record and their entries; its citable facts carry `ref` labels), matters (what
     the brain decided today, day_tasks.matters_today, each with `ref`), correction. Times are shown local. -#}
 {%- set A = agent_input -%}
 {%- macro item(it) %}
-[{{ it.label }}] {{ "All day" if it.time == "all day" else "At " ~ it.time }}: {{ it.statement }}
+{%- set clock = it.times | reject("equalto", "all day") | list %}
+[{{ it.label }}] {% if "all day" in it.times %}All day{% if clock %}, and at {{ clock | join(" and ") }}{% endif %}{% else %}At {{ clock | join(" and ") }}{% endif %}: {{ it.statement }}
 {%- for r in it.related %}
     read with: {{ r }}
 {%- endfor %}
@@ -20,6 +21,7 @@
 ### Already on the list (each stays as it is unless something new since it was decided changes it)
 {% for it in A["items"] if it.current %}{{ item(it) }}
     on the list since {{ it.current.decided_at | local_time }}: {% if it.current.decision == "needed" %}needed: {{ it.current.assistant_part }}, {{ it.current.when }}{% else %}{{ it.current.decision | replace("_", " ") }}: {{ it.current.why }}{% endif %}
+{% if it.current.work is defined and it.current.work %}{% with w = it.current.work, pad = "    " %}{% include 'shared/brain/entry_work.j2' %}{% endwith %}{% endif -%}
 {% else %}
 (none)
 {% endfor %}

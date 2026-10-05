@@ -201,6 +201,28 @@ copy of the day's list: no change; once the fence refused a re-judgment with not
 everything. Not built from 3b: entries tracking their work's status (it needs live delegation), calendar entries keyed
 by belief and day (it changes stored ids: the owner's go), and the merge into `concern_tasks` (at cutover).
 
+**The cutover machinery (built 2026-10-05, behind switches that start off, needs a restart).**
+- Calendar entries are keyed by belief and day (`cal:<day>:<belief>`; owner's go): one item per belief per day with
+  every time the plan places it, so a moved placement changes its entry instead of cancelling one and making
+  another. Today's shadow rows kept their old ids; the next run cancels them and makes the new ones.
+- `subconscious::concern_tasks` replaces the concern decider and the shadow list decider (removed): inside the
+  concern planner it reads the concern, what was looked up and the concern's entries, and answers act now, hold or
+  no action with only the changes to its entries; the rest are kept. The plan keeps its shape (`todo` = the open
+  entries). Replayed on Ring (the 3:31 repeat changes nothing, both runs), Canvas and Reflections (tell, ask and
+  remind the owner; no homework, no submission for the son).
+- The architect's prompt has a section on goals from the brain's list (plan to every constraint, the source wins
+  over the entry, the same outcome another way, revise the objective with the reason when it cannot be reached) and
+  the steward's capability and safety section as a shared partial (`shared/work/capability_limits.j2`; the steward's
+  prompt renders byte-identical). A new goal answered with no steps and no ending gets one correction and is then an
+  error (it would come back every tick).
+- The list-item intake node (`dayflow_orchestrator/brain_list_intake.py`, `control_nodes/brain_list_intake_node.py`,
+  between the steward's persist node and the architect) acts on the list's changes per lane in
+  `configs/brain_lanes.json` (off, dry_run, live), recorded in `brain_list_deliveries`. A live calendar lane stops
+  `belief_occurrences` handing that day to the steward; a live concern lane stops `concern_handoff`. The brain pokes
+  dayflow when the list changed and a lane is live.
+- The deciders see each entry's work live from the work store by its entry id (`brain_list_intake.work_of`: status,
+  why it ended, each task's outcome in the finalizer's words). No status is copied onto the entry.
+
 ### What day_tasks reads: the brain's view of the day
 
 The owner's worry (2026-10-04): it "sees less than brain". It is the brain deciding, so it sees what the brain

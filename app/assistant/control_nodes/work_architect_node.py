@@ -266,6 +266,18 @@ class WorkArchitectNode(ControlNode):
                         task = render_view("architect_task", mode="create", objective=objective)
                         result = agent.action_handler(Message(task=task, information=why, scope_context=scope))
                         data = getattr(result, "data", {}) or {}
+                        # A new goal is planned or ended, never left empty: an empty one comes back every tick
+                        # (2026-10-05: on goals other work already covered, the architect answered "keep the
+                        # existing task" with no steps and no ending). One correction, then it is an error.
+                        if not (data.get("nodes") or data.get("end_goal")):
+                            correction = render_view("architect_empty_create",
+                                                     summary=str(data.get("architect_summary") or "").strip())
+                            result = agent.action_handler(Message(task=task + correction, information=why,
+                                                                  scope_context=scope))
+                            data = getattr(result, "data", {}) or {}
+                            if not (data.get("nodes") or data.get("end_goal")):
+                                raise ValueError(f"architect planned no steps and did not end {work_id}, after one "
+                                                 f"correction: {data.get('architect_summary')!r}")
                         # A goal can be moot or need rewording before anything is planned. Until 2026-10-04 only
                         # the re-plan branch passed these on: a task-less goal the architect ended ("its useful
                         # moment has passed") stayed active and was decomposed again every tick, from 10-02 on.

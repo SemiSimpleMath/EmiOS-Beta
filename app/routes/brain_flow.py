@@ -43,10 +43,6 @@ NODES: List[Dict[str, Any]] = [
      "role": "Shadow only: decides what each placement on today's calendar needs (who acts, the assistant's part, "
              "when, or nothing and why), reading the brain's situation (schedule, presence, health, chat, todos, "
              "work, reminders), and records it beside what dayflow did. Nothing is handed over yet."},
-    {"id": "concern_list", "title": "Concern list (shadow)", "col": 5, "row": 2,
-     "agents": ["subconscious::concern_list_decider"],
-     "role": "Shadow only: after the planner, keeps the concern's entries on the brain's list (keep, modify or "
-             "cancel by id, add what is missing), each naming who acts, the assistant's part and when."},
     {"id": "door", "title": "Concern door", "col": 2, "row": 2, "agents": ["subconscious::concern_door"],
      "role": "Every new concern enters here: a new matter, the same as an open or a closed concern, or the "
              "same as another candidate. Code assigns ids and folds a duplicate into the concern it matches."},
@@ -60,9 +56,10 @@ NODES: List[Dict[str, Any]] = [
      "role": "A concern whose record changed gets its brief written again: what it is, what is known, what "
              "was tried, what the owner wants."},
     {"id": "plan", "title": "Concern planner", "col": 5, "row": 1,
-     "agents": ["subconscious::concern_planner", "subconscious::concern_decider"],
-     "role": "For a matter concern with a new brief: a read-only planner looks things up with tools, then a "
-             "decider writes act now, hold until a date, or no action, with the things that should be done."},
+     "agents": ["subconscious::concern_planner", "subconscious::concern_tasks"],
+     "role": "For a matter concern with a new brief: a read-only planner looks things up with tools, then "
+             "concern_tasks decides act now, hold until a date, or no action, and changes the concern's entries "
+             "on the brain's list (new, modified or cancelled by id; the rest kept)."},
     {"id": "handoff", "title": "Handoffs", "col": 6, "row": 1, "agents": [],
      "role": "Code hands dayflow a concern whose plan says act now, and each placement on today's "
              "calendar at its time, as intake the steward must answer."},
@@ -78,7 +75,6 @@ EDGES = [
     ("plan", "handoff", ""), ("day_pass", "handoff", "today's calendar"), ("handoff", "steward", ""),
     ("steward", "gate", "work outcomes come back as events"), ("concerns", "stories", ""),
     ("day_pass", "day_tasks", "shadow: recorded, not handed over"),
-    ("plan", "concern_list", "shadow: recorded, not handed over"),
 ]
 AGENT_NODE = {a: n["id"] for n in NODES for a in n["agents"]}
 

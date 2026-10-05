@@ -41,6 +41,6 @@ def test_the_concern_record_shows_the_account_without_the_verdict():
 
 
 def test_the_decider_weighs_an_unanswered_question_against_what_matters_and_the_date():
-    text = _ENV.get_template("subconscious/concern_decider/prompts/system.j2").render(**RES)
+    text = _ENV.get_template("subconscious/concern_tasks/prompts/system.j2").render(**RES)
     assert "When an earlier question to Sam went unanswered, decide from how much the concern matters" in text
     assert "a minor one is let go" in text

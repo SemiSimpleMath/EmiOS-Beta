@@ -45,7 +45,7 @@ _start_lock = threading.Lock()
 
 def run_brain() -> Dict[str, Any]:
     """One pass: gate, brain step, briefs, the concern planner, handoffs, the day pass and its occurrences,
-    the stories, and the shadow list (the day's tasks and each planned concern's entries)."""
+    the stories, and the day's tasks."""
     from app.assistant.subconscious.brain_step import run_brain_step
     from app.assistant.subconscious.concern_brief import run_briefs
     from app.assistant.subconscious.concern_handoff import run_handoffs
@@ -57,8 +57,7 @@ def run_brain() -> Dict[str, Any]:
     gate = run_gate()
     brain = run_brain_step()
     briefs = run_briefs()
-    shadow_jobs: list = []        # concerns planned this wake, for the brain's shadow list (below)
-    plans = concern_planner.run_planners(shadow=shadow_jobs)
+    plans = concern_planner.run_planners()
     handoffs = run_handoffs()
     register, now = load_register(), datetime.now(timezone.utc)
     due = [t for t in (gate["next_ready_at"], concern_planner.next_hold_at(register, now)) if t is not None]
@@ -72,22 +71,21 @@ def run_brain() -> Dict[str, Any]:
     from app.assistant.subconscious.brain_stories import run_stories
     with trace(stage="stories"):
         stories = run_stories()
-    # Last, and shadow only: the brain's list (docs/design/brain_delegates_work_2026-10-04.md). The concern side
-    # first (subconscious/concern_list_shadow.py), then the day's tasks (subconscious/day_tasks.py), which read the
-    # concern entries made in this pass. Both are attempted; a failure of the first is raised after the second.
-    from app.assistant.subconscious.concern_list_shadow import run_concern_shadow
+    # Last: the day's tasks (subconscious/day_tasks.py; docs/design/brain_delegates_work_2026-10-04.md), which read
+    # the concern entries the planner made earlier in this pass.
     from app.assistant.subconscious.day_tasks import run_day_tasks
-    concern_failure = None
-    try:
-        listed = run_concern_shadow(shadow_jobs)
-    except Exception as exc:
-        concern_failure = exc
     with trace(stage="day_tasks"):
         decided = run_day_tasks()
-    if concern_failure is not None:
-        raise concern_failure
+    # A live lane takes its work from the list: the planning tick makes it, so the tick is asked to run when the
+    # list changed (dayflow_orchestrator/brain_list_intake.py).
+    from app.assistant.dayflow_orchestrator.brain_list_intake import lanes
+    config = lanes()
+    if (plans.get("plans_written") or decided.get("day_list_changes")) and "live" in (
+            config["calendar"]["mode"], config["concern"]["mode"]):
+        from app.assistant.subconscious.concern_handoff import _poke_dayflow
+        _poke_dayflow()
     return {**gate, **{f"brain_{k}": v for k, v in brain.items()}, **briefs, **plans, **handoffs, **day, **occurrences,
-            **stories, **decided, **listed,
+            **stories, **decided,
             "next_wake_at": min(due) if due else None}
 
 

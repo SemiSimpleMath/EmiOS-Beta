@@ -13,7 +13,9 @@ concerns"). Until then each placed belief got a standing concern through the con
 became each occurrence's task; the door merged beliefs about different acts and the rule misdescribed them.
 
 Each placement is handed over once (its item id); one more than an hour past is not handed over, and an
-"all day" one is handed over while the day lasts. The day runs from its boundary hour to the next day's
+"all day" one is handed over while the day lasts. A day whose calendar is the brain's (the calendar lane live in
+configs/brain_lanes.json, dayflow_orchestrator/brain_list_intake.py) is not handed to the steward at all: the day's
+tasks decide it and the list-item intake node makes its work. The day runs from its boundary hour to the next day's
 (pipelines/context.day_window_local), so a time before the boundary hour is after midnight.
 """
 from __future__ import annotations
@@ -93,6 +95,9 @@ def run_occurrence_handoffs(*, now_utc: Optional[datetime] = None, plan_connect=
     from app.assistant.utils.time_utils import get_local_timezone
     now = now_utc or datetime.now(timezone.utc)
     day = boundary_date_local_str(now.astimezone(get_local_timezone()))
+    from app.assistant.dayflow_orchestrator.brain_list_intake import calendar_live
+    if calendar_live(day):
+        return {"occurrences_handed": 0, "occurrences": "the brain's list"}
     plan = day_plan.load_plan(day, connect=plan_connect)
     if plan is None:
         return {"occurrences_handed": 0}

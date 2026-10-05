@@ -7,8 +7,9 @@ the assistant's part and when, and a status. Nothing is handed to dayflow yet: t
 delegate, recorded beside what dayflow actually does.
 
 Every change is recorded with its cause, so a changed decision reads as what it would be when live: entry X
-created, modified (before, after, why), or cancelled. Calendar entries are keyed by code to their placement
-(`cal:<day>:<belief_key>:<time>`); concern entries get an id when first created and are then changed by it.
+created, modified (before, after, why), or cancelled. Calendar entries are keyed by code to their belief and day
+(`cal:<day>:<belief_key>`; until 2026-10-05 also the time, so a placement the day pass moved was cancelled and made
+again), the times being a field; concern entries get an id when first created and are then changed by it.
 
 Tables in emi.db (subconscious/db.py):
     brain_list_entries  one row per entry, its current state.
@@ -61,8 +62,8 @@ def ensure_schema(connect=None) -> None:
             c.execute(statement)
 
 
-def calendar_id(day: str, belief_key: str, time: str) -> str:
-    return f"cal:{day}:{belief_key}:{'-'.join(time.lower().split())}"
+def calendar_id(day: str, belief_key: str) -> str:
+    return f"cal:{day}:{belief_key}"
 
 
 def _row(r) -> Dict[str, Any]:
@@ -80,7 +81,8 @@ def entries(*, day: Optional[str] = None, concern_id: Optional[str] = None, incl
     if not include_cancelled:
         where += " AND status != 'cancelled'"
     with connect(False) as c:
-        rows = c.execute(f"SELECT * FROM brain_list_entries WHERE {where} ORDER BY created_at, id", args).fetchall()
+        # rowid, not id: entries made in one change share created_at, and a concern entry's id is random.
+        rows = c.execute(f"SELECT * FROM brain_list_entries WHERE {where} ORDER BY created_at, rowid", args).fetchall()
     return [_row(r) for r in rows]
 
 
@@ -152,7 +154,7 @@ def apply_calendar(day: str, items: List[Dict[str, Any]], decisions: List[Dict[s
     ensure_schema(connect)
     when = at.isoformat()
     by_label = {it["label"]: it for it in items}
-    ids = {label: calendar_id(day, it["belief_key"], it["time"]) for label, it in by_label.items()}
+    ids = {label: calendar_id(day, it["belief_key"]) for label, it in by_label.items()}
     counts = {"created": 0, "modified": 0, "unchanged": 0, "kept": len(items) - len(decisions), "cancelled": 0}
     with connect(True) as c:
         for d in decisions:
@@ -160,7 +162,7 @@ def apply_calendar(day: str, items: List[Dict[str, Any]], decisions: List[Dict[s
             needed = d["decision"] == "needed"
             result = upsert(c, {
                 "id": ids[d["item"]], "kind": "calendar", "day": day, "belief_key": it["belief_key"],
-                "placement_time": it["time"], "concern_id": None,
+                "placement_time": ", ".join(it["times"]), "concern_id": None,
                 "what": d["assistant_part"] if needed else it["statement"], "decision": d["decision"],
                 "who_acts": "", "assistant_part": d["assistant_part"], "when_local": d["when"],
                 "covers": [ids[x] for x in d.get("covers") or []], "why": d["why"]}, cause=cause, at=when)
@@ -193,7 +195,7 @@ def apply_concern(concern_id: str, actions: List[Dict[str, Any]], *, cause: str,
                 entry_id = a["entry"] if a["action"] == "modify" else f"con:{uuid.uuid4().hex[:10]}"
                 result = upsert(c, {
                     "id": entry_id, "kind": "concern", "day": None, "belief_key": None, "placement_time": None,
-                    "concern_id": concern_id, "what": a["what"], "decision": "needed", "who_acts": a["who_acts"],
+                    "concern_id": concern_id, "what": a["what"], "decision": "needed", "who_acts": "",
                     "assistant_part": a["assistant_part"], "when_local": a["when"], "covers": [], "why": a["why"]},
                     cause=cause, at=when)
                 counts[result] += 1

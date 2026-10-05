@@ -1,0 +1,8 @@
+{#- A concern's entries on the brain's list (brain_list.entries), as the concern's tasks agent and its planner read
+    them, each with the work made from it (`work`, or None). Expects `entries`. Times local. -#}
+{% for e in entries -%}
+- [{{ e.id }}] {{ e.what }} | the assistant: {{ e.assistant_part }} | when: {{ e.when_local }} | {{ e.status }}, decided {{ e.updated_at | local_time }}
+{% if e.work is defined and e.work %}{% with w = e.work, pad = "  " %}{% include 'shared/brain/entry_work.j2' %}{% endwith %}{% endif -%}
+{% else -%}
+(nothing yet)
+{% endfor %}

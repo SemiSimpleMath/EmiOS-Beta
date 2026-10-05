@@ -74,6 +74,7 @@ The calendar ahead:
 On the brain's list for this concern:
 {% for e in c.entries -%}
 - {% if e.ref is defined %}[{{ e.ref }}] {% endif %}{{ e.what }}{% if e.assistant_part and e.assistant_part != e.what %} (the assistant: {{ e.assistant_part }}){% endif %}{% if e.when_local %}, {{ e.when_local }}{% endif %}; {{ e.status }}, decided {{ e.updated_at | local_time }}
+{% if e.work is defined and e.work %}{% with w = e.work, pad = "  " %}{% include 'shared/brain/entry_work.j2' %}{% endwith %}{% endif -%}
 {% else -%}
 (nothing)
 {% endfor %}

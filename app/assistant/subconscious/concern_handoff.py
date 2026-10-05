@@ -29,6 +29,10 @@ Today's calendar is not handed over through concerns: each placement goes to day
 (subconscious/belief_occurrences.py). Until 2026-10-03 a placed belief got a standing concern whose
 occurrences were handed over here, with the concern's single rule as their task.
 
+When the concern lane is live (configs/brain_lanes.json), nothing is handed to the steward: concern_tasks keeps
+the concern's entries on the brain's list and the list-item intake node makes their work
+(dayflow_orchestrator/brain_list_intake.py).
+
 One handoff per version of the plan (one per brief version): the item id is
 `concern_handoff:<concern id>:<brief basis>`. Not `concern:…`: the steward cites the item id in
 `based_on`, where `concern:` means a concern reference, and the first handoffs (2026-09-30) put the item
@@ -120,6 +124,9 @@ def run_handoffs(*, register_connect=None, now_utc: Optional[datetime] = None,
                  poke: Callable[[], None] = None) -> Dict[str, Any]:
     """Hand every open concern whose current plan says act_now to dayflow, once per plan version. The
     keyword arguments after `now_utc` are test seams."""
+    from app.assistant.dayflow_orchestrator.brain_list_intake import concern_live
+    if concern_live():
+        return {"handed_over": 0, "handoff_skipped": 0, "handoffs": "the brain's list"}
     from app.assistant.subconscious import concern_brief
     from app.assistant.subconscious.brain_trace import step
     from app.assistant.subconscious.concern_store import load_register

@@ -1,6 +1,6 @@
 name: concern_planner_manager
 class_name: MultiAgentManager
-description: "Works out what one matter concern needs now (docs/design/day_items_have_owners_2026-10-02.md, the reasoning layer). A read-only planner looks things up: the concern's own record, the email threads and calendar entries it names, reminders and to-dos, the work done for it, pods, the knowledge graph. The decider then writes the decision (act now, hold until a date, no action) and the things that should be done, as bullet points under the concern. It changes nothing; consumers read the bullets and decide how."
+description: "Works out what one matter concern needs now (docs/design/day_items_have_owners_2026-10-02.md, the reasoning layer). A read-only planner looks things up: the concern's own record, the email threads and calendar entries it names, reminders and to-dos, the work done for it, pods, the knowledge graph. Then subconscious::concern_tasks writes the decision (act now, hold until a date, no action) and changes the concern's entries on the brain's list. It changes nothing in the world; dayflow carries the entries out."
 max_cycles: 16
 
 role_bindings:
@@ -11,7 +11,7 @@ agents:
     class: Delegator
   - name: subconscious::concern_planner
     class: Planner
-  - name: subconscious::concern_decider
+  - name: subconscious::concern_tasks
     class: Agent
 
 control_nodes:
@@ -79,7 +79,7 @@ flow_config:
     "subconscious::concern_planner": "tool_caller"
     "tool_result_handler": "tool_return_router"
     "tool_return_router": "subconscious::concern_planner"
-    "subconscious::concern_planner_return_control": "subconscious::concern_decider"
-    "subconscious::concern_decider": "manager_exit_node"
+    "subconscious::concern_planner_return_control": "subconscious::concern_tasks"
+    "subconscious::concern_tasks": "manager_exit_node"
     "graceful_exit": "graceful_exit_control_node"
-    "graceful_exit_control_node": "subconscious::concern_decider"
+    "graceful_exit_control_node": "subconscious::concern_tasks"

@@ -2,10 +2,11 @@
 
 Pins: it runs for an open matter concern whose brief is current and has no plan made from that brief, or
 whose plan's hold has passed; never for a standing concern or before the brief; a plan that failed on this
-brief waits for a change. The decider's answer is checked (act_now lists things to do, hold has a future
-time, only act_now lists things) and stored against the brief it was made from; a brief that changed
-meanwhile refuses it. The bullets reach every reader of the concern. The brief decides readiness only for a
-standing concern. Scratch register; the manager call is a fake. Invented data only.
+brief waits for a change. concern_tasks reads the concern and its entries on the brain's list and answers only
+the changes; the answer is checked (act_now changes an entry, only act_now adds or modifies, changes name entries
+on the list, hold has a future time) and stored against the brief it was made from, its changes applied to the
+list; a brief that changed meanwhile refuses it. The plan's todo is the open entries, and reaches every reader of
+the concern. Scratch register and list; the manager call is a fake. Invented data only.
 """
 from __future__ import annotations
 
@@ -14,8 +15,9 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 import app.assistant.tests.test_setup  # noqa: F401
-from app.assistant.subconscious import concern_brief, concern_planner, persist
+from app.assistant.subconscious import brain_list, concern_brief, concern_planner, persist
 from app.assistant.tests.concern_store_helpers import ScratchRegister
+from belief_engine.intake.store import sqlite_file
 
 NOW = datetime.now(timezone.utc)
 EMPTY = {"active": [], "addressing": [], "resolved": [], "dormant": []}
@@ -36,6 +38,10 @@ def _briefed(concern, bucket="active"):
 
 def _later(hours):
     return (NOW + timedelta(hours=hours)).astimezone().strftime("%Y-%m-%d %H:%M")
+
+
+def _new(what, part="tell the owner", when="now", why="It moved."):
+    return {"entry": "new", "action": "new", "what": what, "assistant_part": part, "when": when, "why": why}
 
 
 def test_it_plans_a_briefed_matter_concern_once_per_brief():
@@ -66,31 +72,49 @@ def test_a_passed_hold_is_planned_again_and_wakes_the_brain():
     assert len(concern_planner.stale(register, NOW + timedelta(hours=2))) == 1
 
 
+CANCEL_A = {"entry": "con:a", "action": "cancel", "what": "", "assistant_part": "", "when": "", "why": "settled"}
+
+
 @pytest.mark.parametrize("answer,problem", [
-    ({"decision": "act_now", "todo": [], "why": "w"}, "needs at least one thing"),
-    ({"decision": "no_action", "todo": ["x"], "why": "w"}, "only act_now does"),
-    ({"decision": "hold", "todo": [], "why": "w", "hold_until": "2020-01-01 09:00"}, "future local"),
-    ({"decision": "act_now", "todo": ["x"], "why": ""}, "why is empty"),
-    ({"decision": "maybe", "todo": [], "why": "w"}, "is not one of"),
+    ({"decision": "act_now", "entries": [], "why": "w"}, "needs at least one new or modified entry"),
+    ({"decision": "no_action", "entries": [_new("x")], "why": "w"}, "only act_now does"),
+    ({"decision": "hold", "entries": [], "why": "w", "hold_until": "2020-01-01 09:00"}, "future local"),
+    ({"decision": "act_now", "entries": [_new("x")], "why": ""}, "why is empty"),
+    ({"decision": "maybe", "entries": [], "why": "w"}, "is not one of"),
+    ({"decision": "act_now", "entries": [{**_new("x"), "entry": "con:zz", "action": "modify"}], "why": "w"},
+     "'con:zz' is not an entry on the list"),
+    ({"decision": "act_now", "entries": [{**_new("x"), "entry": "con:a"}], "why": "w"}, 'written as entry "new"'),
+    ({"decision": "act_now", "entries": [{**_new("x"), "when": ""}], "why": "w"}, "new names when"),
+    ({"decision": "no_action", "entries": [CANCEL_A, CANCEL_A], "why": "w"}, "changed more than once"),
 ])
-def test_the_deciders_answer_is_checked(answer, problem):
-    assert any(problem in p for p in concern_planner.problems(answer, NOW))
+def test_the_answer_is_checked(answer, problem):
+    assert any(problem in p for p in concern_planner.problems(answer, NOW, ["con:a"]))
+    cancel = {"decision": "no_action", "why": "w", "entries": [CANCEL_A]}
+    assert concern_planner.problems(cancel, NOW, ["con:a"]) == [], "a cancel comes with any decision"
 
 
-def test_a_plan_is_stored_against_its_brief_and_its_bullets_reach_the_readers(tmp_path):
+def test_a_plan_is_stored_against_its_brief_its_entries_go_on_the_list_and_reach_the_readers(tmp_path):
     reg = ScratchRegister(tmp_path).write({**EMPTY, "active": [_briefed(_matter())]})
+    lst = sqlite_file(tmp_path / "list.db")
     seen = []
 
     def invoke(task, information):
-        seen.append(task)
-        return {"decision": "act_now", "todo": ["The caterer's order moves to the 16th or is cancelled",
-                                                "The eight guests know the new date"], "why": "It moved."}
-    assert concern_planner.run_planners(invoke=invoke, register_connect=reg.connect) == {"plans_written": 1, "plans_failed": 0}
-    assert "Book club meeting" in seen[0] and "Food ordered for the 9th." in seen[0]
+        seen.append((task, information))
+        return {"decision": "act_now", "why": "It moved.", "entries": [
+            _new("The caterer's order moves to the 16th or is cancelled", "ask the owner whether to move it"),
+            _new("The eight guests know the new date by September 9", "email the guests with the owner's go")]}
+    assert concern_planner.run_planners(invoke=invoke, register_connect=reg.connect, list_connect=lst) == \
+        {"plans_written": 1, "plans_failed": 0}
+    assert "Book club meeting" in seen[0][0] and "Food ordered for the 9th." in seen[0][0]
+    assert seen[0][1] == "(nothing yet)", "the decider reads the concern's entries now"
     [c] = reg.read()["active"]
-    assert c["plan"]["todo"][1] == "The eight guests know the new date" and c["plan"]["basis"] == c["brief"]["basis"]
+    assert c["plan"]["todo"][1] == "The eight guests know the new date by September 9"
+    assert c["plan"]["basis"] == c["brief"]["basis"]
+    entries = brain_list.entries(concern_id="c-club", connect=lst)
+    assert [e["what"] for e in entries] == c["plan"]["todo"] and all(e["id"].startswith("con:") for e in entries)
     assert concern_brief.stale(reg.read(), NOW) == [], "storing the plan does not make the brief stale"
-    assert concern_planner.run_planners(invoke=invoke, register_connect=reg.connect)["plans_written"] == 0
+    assert concern_planner.run_planners(invoke=invoke, register_connect=reg.connect,
+                                        list_connect=lst)["plans_written"] == 0
     from app.assistant.subconscious.concern_handoff import _brief_text
     text = _brief_text(c, "active")
     assert "things that should be done:\n    - The caterer's order moves to the 16th or is cancelled" in text
@@ -101,12 +125,32 @@ def test_a_hold_is_stored_with_its_time_and_an_invalid_answer_is_recorded(tmp_pa
 
     def invoke(task, information):
         if "c-a" in task:
-            return {"decision": "hold", "todo": [], "why": "The caterer answers by Friday.", "hold_until": _later(48)}
-        return {"decision": "act_now", "todo": [], "why": "w"}
-    assert concern_planner.run_planners(invoke=invoke, register_connect=reg.connect) == {"plans_written": 1, "plans_failed": 1}
+            return {"decision": "hold", "entries": [], "why": "The caterer answers by Friday.", "hold_until": _later(48)}
+        return {"decision": "act_now", "entries": [], "why": "w"}
+    lst = sqlite_file(tmp_path / "list.db")
+    assert concern_planner.run_planners(invoke=invoke, register_connect=reg.connect, list_connect=lst) == \
+        {"plans_written": 1, "plans_failed": 1}
     a, b = reg.read()["active"]
     assert a["plan"]["decision"] == "hold" and a["plan"]["hold_until_utc"]
-    assert "needs at least one thing" in b["plan_error"]["error"] and "plan" not in b
+    assert "needs at least one new or modified entry" in b["plan_error"]["error"] and "plan" not in b
+
+
+def test_a_changed_plan_keeps_modifies_and_cancels_entries_by_id(tmp_path):
+    lst = sqlite_file(tmp_path / "list.db")
+    brain_list.apply_concern("c-club", [_new("The guests know the date is the 9th"), _new("The food is ordered")],
+                             cause="first", at=NOW, connect=lst)
+    guests, food = brain_list.entries(concern_id="c-club", connect=lst)
+    seen = []
+    answer = {"decision": "act_now", "why": "It moved to the 16th.", "entries": [
+        {"entry": guests["id"], "action": "modify", "what": "The guests know the date is the 16th",
+         "assistant_part": "email the guests with the owner's go", "when": "now", "why": "The date moved."}]}
+    plan, changes = concern_planner.write_plan(_briefed(_matter()), "active", list_connect=lst,
+                                               invoke=lambda t, i: seen.append(i) or answer)
+    assert f"[{guests['id']}] The guests know the date is the 9th" in seen[0]
+    assert plan["todo"] == ["The guests know the date is the 16th", "The food is ordered"], "the food entry is kept"
+    brain_list.apply_concern("c-club", changes, cause="second", at=NOW, connect=lst)
+    assert [c["change"] for c in brain_list.changes(guests["id"], connect=lst)] == ["created", "modified"]
+    assert [c["change"] for c in brain_list.changes(food["id"], connect=lst)] == ["created"]
 
 
 def test_a_plan_for_a_brief_that_changed_meanwhile_is_refused(tmp_path):

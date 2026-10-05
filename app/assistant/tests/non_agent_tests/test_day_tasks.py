@@ -54,7 +54,7 @@ def _gather(conn, chat="I'll start the report at 5", refs=None):
         every = D.placements(_plan())
         return {"day": DAY, "now": now.isoformat(),
                 "items": D.offered(DAY, D.with_current(DAY, every, connect=conn), now),
-                "placed_ids": [L.calendar_id(DAY, it["belief_key"], it["time"]) for it in every],
+                "placed_ids": [L.calendar_id(DAY, it["belief_key"]) for it in every],
                 "situation": situation(chat), "matters": [], "refs": refs or {"M1": NOW.isoformat()},
                 "correction": None}
     return gather
@@ -77,8 +77,11 @@ def _new_items():
 
 def test_each_placement_is_offered_once_in_the_plans_order():
     items = D.placements(_plan())
-    assert [(i["label"], i["belief_key"], i["time"]) for i in items] == [
-        ("I1", "B1", "all day"), ("I2", "B2", "6:00 PM"), ("I3", "B3", "9:00 PM")]
+    assert [(i["label"], i["belief_key"], i["times"]) for i in items] == [
+        ("I1", "B1", ["all day"]), ("I2", "B2", ["6:00 PM"]), ("I3", "B3", ["9:00 PM"])]
+    twice = {"flags": [], "slots": [{"lines": [_plan()["slots"][0]["lines"][1]]},
+                                    {"lines": [{**_plan()["slots"][0]["lines"][1], "time": "9:30 PM"}]}]}
+    assert [(i["belief_key"], i["times"]) for i in D.placements(twice)] == [("B3", ["9:00 PM", "9:30 PM"])],         "one item per belief, with every time the plan places it"
     assert items[0]["related"] == ["The owner likes it quiet."]
 
 

@@ -63,17 +63,17 @@ def ensure_schema(connect=None) -> None:
 # ── what the decision reads ────────────────────────────────────────────────
 
 def placements(plan: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """The day's placements, once each (belief and time), labelled I1, I2... in the plan's order."""
-    seen, out = set(), []
+    """The day's placements, one per belief with every time the plan places it ("all day" or clock times, in the
+    plan's order), labelled I1, I2... in the plan's order. One entry per belief per day (2026-10-05): a placement the
+    day pass moves changes the entry's times instead of cancelling one entry and making another."""
+    by_belief: Dict[str, Dict[str, Any]] = {}
     for line in [*plan["flags"], *(line for s in plan["slots"] for line in s["lines"])]:
-        key = (line["belief_key"], line["time"])
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append({"label": f"I{len(out) + 1}", "belief_key": line["belief_key"], "time": line["time"],
-                    "statement": line["statement"],
-                    "related": [r["statement"] for r in line.get("related") or []]})
-    return out
+        it = by_belief.setdefault(line["belief_key"], {
+            "belief_key": line["belief_key"], "times": [], "statement": line["statement"],
+            "related": [r["statement"] for r in line.get("related") or []]})
+        if line["time"] not in it["times"]:
+            it["times"].append(line["time"])
+    return [{"label": f"I{i}", **it} for i, it in enumerate(by_belief.values(), 1)]
 
 
 def fingerprint(inputs: Dict[str, Any]) -> str:
@@ -94,19 +94,31 @@ def with_current(day: str, items: List[Dict[str, Any]], *, connect=None) -> List
     now_on = {e["id"]: e for e in brain_list.entries(day=day, connect=connect)}
     out = []
     for it in items:
-        e = now_on.get(brain_list.calendar_id(day, it["belief_key"], it["time"]))
+        e = now_on.get(brain_list.calendar_id(day, it["belief_key"]))
         out.append({**it, "current": None if e is None else {
             "decision": e["decision"], "assistant_part": e["assistant_part"], "when": e["when_local"],
             "why": e["why"], "decided_at": e["updated_at"]}})
     return out
 
 
+def with_work(day: str, items: List[Dict[str, Any]]) -> None:
+    """Each listed item's entry, in place, with the work made from it, read live from the work store by the entry id
+    (`current.work`, or None): what dayflow did with it, in the finalizer's own words."""
+    from app.assistant.dayflow_orchestrator.brain_list_intake import work_of
+    from app.assistant.subconscious import brain_list
+    ids = {it["label"]: brain_list.calendar_id(day, it["belief_key"]) for it in items if it["current"]}
+    work = work_of(list(ids.values()))
+    for it in items:
+        if it["current"]:
+            it["current"]["work"] = work.get(ids[it["label"]])
+
+
 def offered(day: str, items: List[Dict[str, Any]], now_utc: datetime) -> List[Dict[str, Any]]:
-    """The placements still open to a decision, labelled I1, I2... again: not one done elsewhere, not a clock-time
-    one more than an hour past (subconscious/belief_occurrences.passed, the handoff's own rule)."""
+    """The placements still open to a decision, labelled I1, I2... again: not one done elsewhere, not one whose every
+    time is a clock time more than an hour past (subconscious/belief_occurrences.passed, the handoff's own rule)."""
     from app.assistant.subconscious.belief_occurrences import passed
     still = [it for it in items if not ((it["current"] or {}).get("decision") == "done_elsewhere"
-                                        or passed(day, it["time"], now_utc))]
+                                        or all(passed(day, t, now_utc) for t in it["times"]))]
     return [{**it, "label": f"I{i}"} for i, it in enumerate(still, 1)]
 
 
@@ -123,6 +135,11 @@ def with_concerns(situation: Dict[str, Any], *, connect=None) -> None:
         c["entries"] = [{k: e[k] for k in ("id", "what", "decision", "assistant_part", "when_local", "status",
                                            "updated_at")}
                         for e in brain_list.entries(concern_id=c["concern_id"], connect=connect)]
+    from app.assistant.dayflow_orchestrator.brain_list_intake import work_of
+    work = work_of([e["id"] for c in situation["concerns"] for e in c["entries"]])
+    for c in situation["concerns"]:
+        for e in c["entries"]:
+            e["work"] = work.get(e["id"])
 
 
 def matters_today(day: str, now_utc: datetime, *, connect=None) -> List[Dict[str, Any]]:
@@ -245,8 +262,10 @@ def gather(now_utc: datetime, *, plan_connect=None) -> Optional[Dict[str, Any]]:
     s = situation.gather(now_utc, calendar_work=False)
     with_concerns(s)
     matters = matters_today(day, now_utc)
-    return {"day": day, "now": now_utc.isoformat(), "items": offered(day, with_current(day, every), now_utc),
-            "placed_ids": [brain_list.calendar_id(day, it["belief_key"], it["time"]) for it in every],
+    items = offered(day, with_current(day, every), now_utc)
+    with_work(day, items)
+    return {"day": day, "now": now_utc.isoformat(), "items": items,
+            "placed_ids": [brain_list.calendar_id(day, it["belief_key"]) for it in every],
             "situation": s, "matters": matters, "refs": label_refs(s, matters), "correction": None}
 
 

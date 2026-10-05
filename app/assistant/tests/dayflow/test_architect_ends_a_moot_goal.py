@@ -78,3 +78,45 @@ def test_the_create_branch_can_reword_the_goal():
     goal = after.nodes[after.goal_node_id]
     assert "Saturday" in (goal.content or goal.title)
     assert any(after.is_work_unit(n) for n in after.nodes.values())
+
+
+class _Answers(_Architect):
+    """Answers in turn, the last one repeated."""
+    def __init__(self, answers, calls):
+        super().__init__(None, calls)
+        self._answers = list(answers)
+
+    def action_handler(self, message):
+        self._data = self._answers.pop(0) if len(self._answers) > 1 else self._answers[0]
+        return super().action_handler(message)
+
+
+def _tick_answers(answers):
+    calls = []
+    bb = FakeBlackboard({"task": "Dayflow cadence tick", "information": ""})
+    with patch.object(DI.agent_factory, "create_agent", return_value=_Answers(answers, calls)), \
+            patch("app.assistant.control_nodes.work_architect_node._deliver_ending"):
+        WorkArchitectNode(name="work_architect_node", blackboard=bb,
+                          agent_registry={}, tool_registry={}).action_handler(message=None)
+    return calls
+
+
+def test_a_new_goal_left_empty_gets_one_correction_and_is_never_left_empty():
+    store = _store()
+    wo = store.apply("create_work_object", {
+        "title": "Set the AC to 70 at 9 PM", "goal_content": "Set the AC to 70 (when: 9:00 PM)",
+        "satisfied_when_kind": "all_owned_children_done"})
+    empty = {"architect_summary": "the existing set_ac_70 task already does this", "nodes": [],
+             "revise_objective": None, "end_goal": None}
+    end = {**empty, "end_goal": {"status": "abandoned", "reason": "work_x already sets the AC at 9 PM"}}
+    calls = _tick_answers([empty, end])
+    assert len(calls) == 2 and "PLANNED NO STEPS AND DID NOT END THE GOAL" in calls[1]
+    assert "the existing set_ac_70 task already does this" in calls[1]
+    assert store.load(wo.id).status == "abandoned"
+    stuck = store.apply("create_work_object", {
+        "title": "Remind about the fair", "goal_content": "Remind the owner about the fair",
+        "satisfied_when_kind": "all_owned_children_done"})
+    calls = _tick_answers([empty])
+    assert len(calls) == 2, "one correction, then the error is logged; nothing is written"
+    assert store.load(stuck.id).status == "active" and not any(
+        store.load(stuck.id).is_work_unit(n) for n in store.load(stuck.id).nodes.values())

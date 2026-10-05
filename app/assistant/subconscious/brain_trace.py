@@ -47,10 +47,9 @@ logger = get_logger(__name__)
 TRACED_AGENTS = frozenset({
     "subconscious::gate", "subconscious::brain", "subconscious::concern_door", "subconscious::brief",
     "subconscious::noticer", "dayflow_orchestrator::strategic_planner_wo",
-    "subconscious::concern_planner", "subconscious::concern_decider",
+    "subconscious::concern_planner", "subconscious::concern_tasks",
     "dayflow_routine_writer",   # the day pass
     "subconscious::day_tasks",     # the day's tasks, shadow only (subconscious/day_tasks.py)
-    "subconscious::concern_list_decider",   # each concern's list, shadow only (subconscious/concern_list_shadow.py)
     "subconscious::story_matter", "subconscious::story_concern", "subconscious::story_day",
 })
 
