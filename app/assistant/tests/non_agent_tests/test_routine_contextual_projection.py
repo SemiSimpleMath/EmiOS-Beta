@@ -36,7 +36,6 @@ def test_projection_preserves_conditions_and_identity():
 @pytest.mark.parametrize('field,value',[
     ('current_status','Glasses already packed'),
     ('milestones',[{'description':'Reminder already delivered'}]),
-    ('day_theme','Lesson cancelled'),
 ])
 def test_changed_context_invalidates_projection(field,value):
     old=drs._routine_inputs_fingerprint('2026-01-01',[],'beliefs',daily_context={})
@@ -54,12 +53,24 @@ def test_empty_authoritative_calendar_clears_stale_daily_schedule(tmp_path, monk
 
 # ── the day pass: placements, caching, validation ─────────────────────────────────────────────────────
 
+def _judged(placements):
+    """The writer's answer for these placements: every approved belief judged, applying at its placed times; a
+    placement of any other key is judged as applying."""
+    keys = ['lesson.glasses', 'coffee.morning'] + [p['belief_key'] for p in placements
+                                                   if p['belief_key'] not in ('lesson.glasses', 'coffee.morning')]
+    judgments = []
+    for key in dict.fromkeys(keys):
+        times = [p['time'] for p in placements if p['belief_key'] == key]
+        judgments.append({'belief_key': key, 'why': 'test', 'applies_today': bool(times), 'times': times})
+    return {'judgments': judgments}
+
+
 def _writer_for(calls, placements=None):
     """A writer that places the glasses belief before a lesson and the coffee belief all day."""
     def write(agent_input):
         calls.append('write')
-        return {'placements': placements if placements is not None else [
-            {'belief_key': 'lesson.glasses', 'time': '4:30 PM'}, {'belief_key': 'coffee.morning', 'time': 'all day'}]}
+        return _judged(placements if placements is not None else [
+            {'belief_key': 'lesson.glasses', 'time': '4:30 PM'}, {'belief_key': 'coffee.morning', 'time': 'all day'}])
     return write
 
 
@@ -150,8 +161,8 @@ def test_a_placement_before_the_grid_has_passed_and_is_not_stored(connect, day_i
 
 def test_an_invalid_answer_gets_one_correction(connect, day_inputs, monkeypatch):
     seen = []
-    answers = iter([{'placements': [{'belief_key': 'lesson.glasses', 'time': 'evening'}]},
-                    {'placements': [{'belief_key': 'lesson.glasses', 'time': '6:00 PM'}]}])
+    answers = iter([_judged([{'belief_key': 'lesson.glasses', 'time': 'evening'}]),
+                    _judged([{'belief_key': 'lesson.glasses', 'time': '6:00 PM'}])])
 
     def write(agent_input):
         seen.append(agent_input.get('correction'))
@@ -185,10 +196,13 @@ def test_the_writer_is_shown_the_schedule_as_a_list(connect, day_inputs, monkeyp
 
     def write(agent_input):
         seen.append(agent_input)
-        return {'placements': []}
+        return _judged([])
     monkeypatch.setattr(drs, '_write', write)
+    context['day_theme'] = 'Monthly timesheets are due on this first business day.'
     drs.run_day_pass(datetime(2026, 1, 1, 13, 30, tzinfo=tz).astimezone(timezone.utc), connect=connect)
     assert "Today's schedule:\n  Lesson 5:00 PM - 6:00 PM" in seen[0]['daily_context']
+    assert 'Monthly timesheets' not in seen[0]['daily_context'], "the tracker's summary is not a fact for the writer"
+    assert seen[0]['day_facts']['business_day_number'] == 1 and seen[0]['day_facts']['weekday'] == 'Thursday'
     assert '[slot' not in seen[0]['daily_context'] and '(open)' not in seen[0]['daily_context']
 
 

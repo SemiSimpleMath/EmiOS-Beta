@@ -8,9 +8,8 @@ allowed_tools: []
 except_tools: []
 
 user_context_items:
-  - date_time
-  - day_of_week
-  - boundary_date_local
+  - day_facts
+  - now_local
   - daily_context
   - beliefs_block
   - correction

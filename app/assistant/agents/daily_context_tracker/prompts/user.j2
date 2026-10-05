@@ -25,11 +25,6 @@
 - **Family:** {% for person in resource_user_data.important_people %}{{ person.name }} ({{ person.relationship }}){% if not loop.last %}, {% endif %}{% endfor %}
 {%- endif %}
 {%- endif %}
-{%- if resource_dayflow_routine %}
-
-## Routine (day-specific)
-{{ resource_dayflow_routine }}
-{%- endif %}
 
 ########## PREVIOUS DAILY CONTEXT ##########
 *Previous daily context for today. Use it as continuity memory while producing a complete fresh output from current signals + this context.*

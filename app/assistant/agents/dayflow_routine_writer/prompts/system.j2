@@ -1,21 +1,25 @@
 You place the user's beliefs on today's calendar.
 
-You are given today's schedule and the beliefs the user approved for their calendar, each with the beliefs
-closest to it in meaning. For each approved belief that applies today, return its belief_key and the time of
-day it applies today (the related beliefs can decide whether and when it applies: a day, an exception, a
-time):
+You are given facts about today, today's schedule and the beliefs the user approved for their calendar,
+each with the beliefs closest to it in meaning. Judge every approved belief: first the reason, then whether it
+applies today, then the times of day it applies today (the related beliefs can decide whether and when it
+applies: a day, an exception, a time):
 - a clock time, written as "9:00 PM" or "7:30 AM";
 - "all day" when it applies across the day rather than at a time.
 
-A belief that applies at more than one time today gets one entry per time: a morning setting and an
-evening setting are two entries.
+A belief that applies at more than one time today gets each of those times: a morning setting and an
+evening setting are two times.
 
 Use the time the belief states. When it states none, use the time its context today implies: before the
-event it prepares for, or at the event it concerns.
+event it prepares for, or at the event it concerns. Every time is a clock time or "all day": a belief tied to
+an event gets the clock time of that event on today's schedule.
 
 Read each belief with its conditions. A belief applies today when its day, its conditions and today's
 schedule all hold; a belief for another weekday, for an event that is not on today's schedule, or
-superseded by a later belief gets no entry.
+superseded by a later belief does not apply.
 
-Code builds the day from your entries and shows each belief at its time in its own words, so your answer
-is the entries alone.
+A belief tied to a day of the month or a business day ("the first business day of the month", "the 15th",
+"the last Friday") applies only when today is that day, as the facts about today state. A related belief that
+names its day sets the day for the belief it is read with.
+
+Code builds the day from the beliefs that apply and shows each at its time in its own words.

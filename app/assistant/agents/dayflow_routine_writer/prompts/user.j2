@@ -1,10 +1,20 @@
+{%- macro nth(n) -%}
+{{ n }}{% if n % 100 in (11, 12, 13) %}th{% elif n % 10 == 1 %}st{% elif n % 10 == 2 %}nd{% elif n % 10 == 3 %}rd{% else %}th{% endif %}
+{%- endmacro -%}
+{%- set f = day_facts -%}
 ########## TODAY ##########
-**Current Time:** {{ date_time }} ({{ day_of_week }}, {{ boundary_date_local }})
+**The day being planned:** {{ f.weekday }}, {{ f.date }} ({{ f.iso }})
+- day {{ f.day_of_month }} of {{ f.days_in_month }} in {{ f.month }}
+- the {{ nth(f.weekday_number) }} {{ f.weekday }} of {{ f.month }}{% if f.weekday_is_last %}, and the last{% endif %}
+{% if f.business_day_number %}- business day {{ f.business_day_number }} of {{ f.business_days_in_month }} in {{ f.month }}, counting Monday to Friday (the first is {{ f.first_business_day }}; the last is {{ f.last_business_day }})
+{% else %}- not a business day, counting Monday to Friday (the first business day of {{ f.month }} is {{ f.first_business_day }}; the last is {{ f.last_business_day }})
+{% endif %}
+**Now:** {{ now_local }}
 
 {{ daily_context }}
 
 ########## BELIEFS ##########
-**Beliefs approved for the calendar, each with the beliefs closest to it in meaning (decide which apply on {{ day_of_week }}):**
+**Beliefs approved for the calendar, each with the beliefs closest to it in meaning (decide which apply on {{ f.weekday }}, {{ f.date }}):**
 {{ beliefs_block }}
 {% if correction %}
 ########## CORRECTION ##########

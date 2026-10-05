@@ -1,8 +1,8 @@
 """The brain's list (docs/design/brain_delegates_work_2026-10-04.md, section 1).
 
 Pins: a calendar entry is keyed by code to its belief and day and changed in place, a changed decision recorded as
-modified (before, after, cause) and a changed reason alone as no change; an entry left undecided is kept and one
-whose placement left the plan is cancelled; covers become entry ids; the day's tasks see each placement's current
+modified (before, after, cause) and a changed reason alone as no change; an entry left undecided is kept, and so is one
+whose placement left the plan (only a decision ends an entry); covers become entry ids; the day's tasks see each placement's current
 entry, and the entries do not count as a change of input. The concern side's prompt carries its rules and the
 concern's entries by id (the planner's handling is pinned in test_concern_planner.py). Scratch database; fake agents.
 """
@@ -17,7 +17,6 @@ from belief_engine.intake.store import sqlite_file
 NOW = datetime(2026, 3, 10, 15, 0, tzinfo=timezone.utc)
 ITEMS = [{"label": "I1", "belief_key": "B3", "times": ["9:00 PM"], "statement": "The owner wants the AC at 70 at 9 PM."},
          {"label": "I2", "belief_key": "B4", "times": ["9:00 PM"], "statement": "The AC runs cool at night."}]
-PLACED = [L.calendar_id("2026-03-10", "B3"), L.calendar_id("2026-03-10", "B4")]
 
 
 def _decision(when="9:00 PM", why="A standing wish."):
@@ -29,14 +28,14 @@ def _decision(when="9:00 PM", why="A standing wish."):
 
 def test_a_changed_decision_is_a_modification_of_the_same_entry(tmp_path):
     conn = sqlite_file(tmp_path / "l.db")
-    assert L.apply_calendar("2026-03-10", ITEMS, _decision(), placed_ids=PLACED, cause="run 1", at=NOW,
-                            connect=conn) == {"created": 2, "modified": 0, "unchanged": 0, "kept": 0, "cancelled": 0}
-    assert L.apply_calendar("2026-03-10", ITEMS, _decision(why="Still a standing wish."), placed_ids=PLACED,
+    assert L.apply_calendar("2026-03-10", ITEMS, _decision(), cause="run 1", at=NOW,
+                            connect=conn) == {"created": 2, "modified": 0, "unchanged": 0, "kept": 0}
+    assert L.apply_calendar("2026-03-10", ITEMS, _decision(why="Still a standing wish."),
                             cause="run 2", at=NOW, connect=conn)["unchanged"] == 2, "a changed reason alone is no change"
     later = NOW + timedelta(minutes=5)
     assert L.apply_calendar("2026-03-10", ITEMS, _decision("8:30 PM", "The owner asked for 8:30 today.")[:1],
-                            placed_ids=PLACED, cause="run 3", at=later, connect=conn) == \
-        {"created": 0, "modified": 1, "unchanged": 0, "kept": 1, "cancelled": 0}, "the undecided entry is kept"
+                            cause="run 3", at=later, connect=conn) == \
+        {"created": 0, "modified": 1, "unchanged": 0, "kept": 1}, "the undecided entry is kept"
     ac = L.calendar_id("2026-03-10", "B3")
     [entry] = [e for e in L.entries(day="2026-03-10", connect=conn) if e["id"] == ac]
     assert (entry["when_local"], entry["status"], entry["covers"]) == \
@@ -47,21 +46,20 @@ def test_a_changed_decision_is_a_modification_of_the_same_entry(tmp_path):
     assert history[1]["cause"] == "run 3"
 
 
-def test_a_placement_dropped_from_the_day_is_cancelled(tmp_path):
+def test_a_placement_dropped_from_the_day_keeps_its_entry(tmp_path):
+    """The day pass re-places the day as its inputs change; a belief that drops out of one run and returns in the
+    next is not the brain's decision to stop its work (2026-10-05)."""
     conn = sqlite_file(tmp_path / "l.db")
-    L.apply_calendar("2026-03-10", ITEMS, _decision(), placed_ids=PLACED, cause="run 1", at=NOW, connect=conn)
-    assert L.apply_calendar("2026-03-10", ITEMS, [], placed_ids=PLACED, cause="run 2", at=NOW,
-                            connect=conn)["cancelled"] == 0, "an entry left undecided while still placed is kept"
-    assert L.apply_calendar("2026-03-10", ITEMS[:1], [], placed_ids=PLACED[:1], cause="run 3", at=NOW,
-                            connect=conn)["cancelled"] == 1
-    gone = L.calendar_id("2026-03-10", "B4")
-    assert [e["id"] for e in L.entries(day="2026-03-10", connect=conn)] == [L.calendar_id("2026-03-10", "B3")]
-    assert L.changes(gone, connect=conn)[-1]["change"] == "cancelled"
+    L.apply_calendar("2026-03-10", ITEMS, _decision(), cause="run 1", at=NOW, connect=conn)
+    assert L.apply_calendar("2026-03-10", ITEMS[:1], [], cause="run 2", at=NOW, connect=conn) == \
+        {"created": 0, "modified": 0, "unchanged": 0, "kept": 1}
+    assert [e["id"] for e in L.entries(day="2026-03-10", connect=conn)] == \
+        [L.calendar_id("2026-03-10", "B3"), L.calendar_id("2026-03-10", "B4")]
 
 
 def test_the_days_tasks_see_each_placements_entry_and_entries_are_not_a_change_of_input(tmp_path):
     conn = sqlite_file(tmp_path / "l.db")
-    L.apply_calendar("2026-03-10", ITEMS, _decision(), placed_ids=PLACED, cause="run 1", at=NOW, connect=conn)
+    L.apply_calendar("2026-03-10", ITEMS, _decision(), cause="run 1", at=NOW, connect=conn)
     seen = D.with_current("2026-03-10", ITEMS, connect=conn)
     assert seen[0]["current"]["when"] == "9:00 PM" and seen[1]["current"]["decision"] == "not_needed"
     from app.assistant.tests.non_agent_tests.test_day_tasks import situation

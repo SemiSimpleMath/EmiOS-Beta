@@ -3,14 +3,15 @@ from typing import List
 from pydantic import BaseModel, Field
 
 
-class Placement(BaseModel):
+class Judgment(BaseModel):
     belief_key: str = Field(description="The belief's key: what follows 'belief:' in its [belief:...] marker, "
                                         "e.g. B10.")
-    time: str = Field(description="When it applies today: a clock time such as '9:00 PM' or '7:30 AM', "
-                                  "or 'all day'.")
+    why: str = Field(description="Whether today meets the belief's day, conditions and schedule, as the facts "
+                                 "about today and the schedule state.")
+    applies_today: bool = Field(description="True when the reason above says the belief applies today.")
+    times: List[str] = Field(description="When it applies today: clock times such as '9:00 PM' or '7:30 AM', "
+                                         "or ['all day']; empty when it does not apply.")
 
 
 class AgentForm(BaseModel):
-    placements: List[Placement] = Field(
-        description="One entry per belief that applies today, per time it applies; none for a belief that "
-                    "does not apply today.")
+    judgments: List[Judgment] = Field(description="One judgment per approved belief.")

@@ -38,8 +38,7 @@ def _decide(lst, decision="needed", when="9:00 PM", day=DAY, at=NOW, belief="B3"
     item = {"label": "I1", "belief_key": belief, "times": ["9:00 PM"], "statement": "The owner wants the AC at 70."}
     d = {"item": "I1", "decision": decision, "assistant_part": "set the AC to 70" if decision == "needed" else "",
          "when": when if decision == "needed" else "", "covers": [], "why": "A standing wish.", "new_since": []}
-    return L.apply_calendar(day, [item], [d], placed_ids=[L.calendar_id(day, belief)], cause="test", at=at,
-                            connect=lst)
+    return L.apply_calendar(day, [item], [d], cause="test", at=at, connect=lst)
 
 
 def _deliver(scratch, config=LIVE, at=NOW):
@@ -85,8 +84,9 @@ def test_not_needed_or_cancelled_ends_the_work_with_the_brains_reason(scratch):
     assert instruction["reason"] == "The brain: A standing wish." and instruction["from"] == "brain"
     _decide(lst, belief="B4")
     [other] = _deliver(scratch)["created"]
-    L.apply_calendar(DAY, [], [], placed_ids=[L.calendar_id(DAY, "B3")], cause="dropped", at=NOW, connect=lst)
-    assert _deliver(scratch)["ended"] == [other], "a placement dropped from the plan cancels its entry and its work"
+    with lst(True) as c:
+        L.cancel(c, L.calendar_id(DAY, "B4"), reason="the owner is away tonight", cause="decided", at=NOW)
+    assert _deliver(scratch)["ended"] == [other], "a cancelled entry ends its work"
 
 
 def test_a_change_after_the_work_ended_is_recorded_only(scratch):

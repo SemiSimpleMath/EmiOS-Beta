@@ -419,8 +419,11 @@ Where care is needed:
    6 PM heads-up went out would send it twice.
 3. **Changes that are not changes.** A changed reason alone is no change (`brain_list.upsert`), so it does not wake
    the architect.
-4. **A placement the day pass drops** is a question to day_tasks, not a cancel: a re-run of the day pass that
-   leaves a belief out would otherwise end its work in the middle of it.
+4. **A placement the day pass drops** is not a cancel: a re-run of the day pass that leaves a belief out would
+   otherwise end its work in the middle of it. The entry is kept as it is (`brain_list.apply_calendar`); only a
+   decision ends an entry. Until 2026-10-05 the code cancelled it, against this note: the clock-in reminder was in
+   2 of 9 runs that day. A dropped placement is not offered to day_tasks again, so its entry stands until the
+   belief returns to the plan or its work ends.
 5. **Timing.** A modification or cancel takes effect between steps; a step already running finishes first
    (`EXECUTION_OWNERSHIP.md`).
 
@@ -573,3 +576,5 @@ the steward) before anything is planned.
 5. The calendar lane cut over behind a switch, the list-item intake node creating its work objects; then concern
    handoffs, with cancel and modify by entry id; then pod and camera intake into the brain's inbox. The steward
    retires.
+6. The day's schedule as a new resource, joined by code from the record and the brain's list (section 6); its
+   readers moved one at a time. Then the day theme moves to the brain, by its own design.

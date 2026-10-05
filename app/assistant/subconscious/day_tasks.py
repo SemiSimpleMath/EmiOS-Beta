@@ -265,7 +265,6 @@ def gather(now_utc: datetime, *, plan_connect=None) -> Optional[Dict[str, Any]]:
     items = offered(day, with_current(day, every), now_utc)
     with_work(day, items)
     return {"day": day, "now": now_utc.isoformat(), "items": items,
-            "placed_ids": [brain_list.calendar_id(day, it["belief_key"]) for it in every],
             "situation": s, "matters": matters, "refs": label_refs(s, matters), "correction": None}
 
 
@@ -303,8 +302,7 @@ def run_day_tasks(*, now_utc: Optional[datetime] = None, connect=None,
                    json.dumps(data["decisions"], ensure_ascii=False)))
     from app.assistant.subconscious import brain_list
     changed = brain_list.apply_calendar(inputs["day"], inputs["items"], data["decisions"],
-                                        placed_ids=inputs["placed_ids"], cause=f"day's tasks {now.isoformat()}",
-                                        at=now, connect=connect)
+                                        cause=f"day's tasks {now.isoformat()}", at=now, connect=connect)
     step("day_tasks", "decided (shadow)", subject=inputs["day"], items=len(labels), decided=len(data["decisions"]),
          list_changes=changed, decisions=data["decisions"])
     logger.info("[day_tasks] %s: %d placement(s) offered, %d decided; list %s (shadow; nothing handed to dayflow)",

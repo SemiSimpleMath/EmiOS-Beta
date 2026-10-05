@@ -54,7 +54,6 @@ def _gather(conn, chat="I'll start the report at 5", refs=None):
         every = D.placements(_plan())
         return {"day": DAY, "now": now.isoformat(),
                 "items": D.offered(DAY, D.with_current(DAY, every, connect=conn), now),
-                "placed_ids": [L.calendar_id(DAY, it["belief_key"]) for it in every],
                 "situation": situation(chat), "matters": [], "refs": refs or {"M1": NOW.isoformat()},
                 "correction": None}
     return gather
@@ -130,13 +129,13 @@ def test_a_run_decides_the_new_keeps_the_rest_and_changes_only_on_something_newe
     call = lambda answer: (lambda payload: calls.append(payload) or answer)
     out = D.run_day_tasks(now_utc=NOW, connect=conn, gather_inputs=_gather(conn), call=call(GOOD))
     assert out == {"day_tasks": "decided", "day_items": 3, "day_decided": 3,
-                   "day_list_changes": {"created": 3, "modified": 0, "unchanged": 0, "kept": 0, "cancelled": 0}}
+                   "day_list_changes": {"created": 3, "modified": 0, "unchanged": 0, "kept": 0}}
     assert D.run_day_tasks(now_utc=NOW, connect=conn, gather_inputs=_gather(conn), call=call(GOOD)) == \
         {"day_tasks": "unchanged"}, "nothing read has changed: no call"
     later = NOW + timedelta(minutes=10)
     out = D.run_day_tasks(now_utc=later, connect=conn, gather_inputs=_gather(conn, "dinner is at 6 as usual"),
                           call=call({"decisions": []}))
-    assert out["day_list_changes"] == {"created": 0, "modified": 0, "unchanged": 0, "kept": 3, "cancelled": 0}
+    assert out["day_list_changes"] == {"created": 0, "modified": 0, "unchanged": 0, "kept": 3}
     assert calls[-1]["items"][2]["current"]["when"] == "9:00 PM", "the decider sees each entry it would keep"
     move = {"decisions": [_d("I3", "needed", "set the AC to 70", "8:30 PM", new_since=["M1"],
                              why="The owner asked for 8:30 today.")]}

@@ -2,9 +2,9 @@
 
 Moved from the dayflow pipeline's routine stage into the brain (docs/design/brain_owns_the_day_2026-10-01.md,
 step 1): one place reasons about the day. The beliefs it places are the ones the owner approved for the calendar
-(the morning review, /beliefs/review; `calendar = 'approved'` in the export); dayflow_routine_writer says, for
-each that applies today, the time of day it applies (a belief once per time; "all day" for one tied to no
-time). Code builds the day from those
+(the morning review, /beliefs/review; `calendar = 'approved'` in the export); dayflow_routine_writer judges each
+one, the reason first, then whether it applies today and the times of day it applies ("all day" for one tied to no
+time), given computed facts about the day (`_day_facts`: day of the month, business day). Code builds the day from those
 placements: a deterministic hour grid from today's calendar (one slot per local hour, each calendar item in
 the hour it starts; long umbrella blocks such as "Work Hours" are backdrops, not slots), each placed belief
 in the slot of its time, in its own words. Stored as data (subconscious/day_plan.py), rendered by every
@@ -33,9 +33,10 @@ embeddings (for `_related`).
 """
 from __future__ import annotations
 
+import calendar
 import hashlib
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.assistant.utils.logging_config import get_logger
@@ -103,11 +104,13 @@ def _item_line(item: dict) -> str:
 
 
 def _format_daily_context(ctx_data: Dict[str, Any], items: List[dict], backdrops: List[dict]) -> str:
+    """The day's facts: backdrops, schedule, current status, milestones. Not the tracker's day theme: it is a
+    summary, and until 2026-10-05 the tracker read this plan, so a placement came back as a stated fact ("monthly
+    timesheets are due by 5 PM on this first business day of the month", on the 3rd business day) and the writer
+    cited it over the date facts."""
     if not ctx_data:
         return "(no daily context available yet)"
     parts: List[str] = []
-    if ctx_data.get("day_theme"):
-        parts.append(f"Day theme: {ctx_data['day_theme']}")
     if backdrops:
         parts.append("\n".join(["Today's backdrops (long blocks that frame the day):"]
                                 + [_item_line(item) for item in backdrops]))
@@ -171,11 +174,31 @@ def _routine_inputs_fingerprint(boundary_date_local: str, expected_schedule: lis
     """The exact decision inputs, excluding wall-clock/scaffold rendering and generated timestamps. The beliefs
     block is the approved beliefs with their related ones, as the writer reads them."""
     context = daily_context or {}
-    payload = {"projection_version": 5, "day": boundary_date_local,
+    payload = {"projection_version": 6, "day": boundary_date_local,
                "schedule": expected_schedule, "beliefs": beliefs_block,
-               "day_theme": context.get("day_theme"), "current_status": context.get("current_status"),
-               "milestones": context.get("milestones")}
+               "current_status": context.get("current_status"), "milestones": context.get("milestones")}
     return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def _day_facts(day: str) -> Dict[str, Any]:
+    """The planned day's place in its month, computed, so a belief tied to a day of the month or a business day is
+    judged against facts rather than the writer's arithmetic (2026-10-05: on Monday the 5th the monthly timesheets
+    "first business day of the month" were placed in 6 of 9 runs). Business days are Monday to Friday; holidays are
+    not known here."""
+    d = date.fromisoformat(day)
+    last = calendar.monthrange(d.year, d.month)[1]
+    days = [date(d.year, d.month, n) for n in range(1, last + 1)]
+    business = [x for x in days if x.weekday() < 5]
+    same_weekday = [x for x in days if x.weekday() == d.weekday()]
+
+    def text(x: date) -> str:
+        return f"{x:%A}, {x:%B} {x.day}"
+    return {"weekday": f"{d:%A}", "date": f"{d:%B} {d.day}, {d.year}", "iso": day, "month": f"{d:%B}",
+            "day_of_month": d.day, "days_in_month": last,
+            "weekday_number": same_weekday.index(d) + 1, "weekday_is_last": same_weekday[-1] == d,
+            "business_day_number": business.index(d) + 1 if d in business else None,
+            "business_days_in_month": len(business),
+            "first_business_day": text(business[0]), "last_business_day": text(business[-1])}
 
 
 def _write(agent_input: Dict[str, Any]) -> Dict[str, Any]:
@@ -202,21 +225,40 @@ def _clock_hour_minute(text: str) -> Optional[Tuple[int, int]]:
 
 
 def _problems(data: Dict[str, Any], belief_keys: set, conditions: set = frozenset()) -> List[str]:
-    """What is wrong with the writer's placements: a key that is not an approved belief (a related belief is read
+    """What is wrong with the writer's judgments: a key that is not an approved belief (a related belief is read
     beside the one it relates to and is never an entry of its own: on 2026-10-03 the condition "keeps the
-    bedroom fan running continuously" was placed for all day and handed over as work), or a time that is
-    neither a clock time nor 'all day'."""
+    bedroom fan running continuously" was placed for all day and handed over as work), an approved belief judged
+    twice or not at all, a belief that applies with no time, or a time that is neither a clock time nor 'all day'."""
     out = []
-    for p in data.get("placements") or []:
-        key, when = str(p.get("belief_key") or ""), str(p.get("time") or "")
+    judged = [str(j.get("belief_key") or "") for j in data.get("judgments") or []]
+    for j in data.get("judgments") or []:
+        key = str(j.get("belief_key") or "")
         if key not in belief_keys:
             bare = key.removeprefix("belief:")
             out.append(f"{key!r}: write the key alone, as {bare!r}" if bare in belief_keys
                        else f"{key!r} is read beside the approved beliefs, not an entry: leave it out"
                        if key in conditions else f"{key!r} is not one of the beliefs given")
-        if when.strip().lower() != "all day" and _clock_hour_minute(when) is None:
-            out.append(f"{key}: time {when!r} is not a clock time like '9:00 PM', or 'all day'")
+        if not j.get("applies_today"):
+            continue
+        if not j.get("times"):
+            out.append(f"{key}: it applies today, so give the time it applies, or 'all day'")
+        for when in j.get("times") or []:
+            if str(when).strip().lower() != "all day" and _clock_hour_minute(when) is None:
+                out.append(f"{key}: time {when!r} is not a clock time like '9:00 PM', or 'all day'")
+    for key in sorted(belief_keys):
+        if judged.count(key) != 1:
+            out.append(f"{key}: judge each approved belief once" if judged.count(key) else
+                       f"{key}: no judgment; judge every approved belief")
     return out
+
+
+def _placements(data: Dict[str, Any]) -> List[Dict[str, str]]:
+    """The beliefs judged to apply today, one placement per time. Until 2026-10-05 the writer returned placements
+    alone and listed beliefs its own reason said did not apply (the monthly timesheets on the 3rd business day,
+    "business day 3, so this does not apply", placed all day): 13 of 30 replays; judged reason first, 6 of 30, and
+    1 of 30 without the day theme."""
+    return [{"belief_key": j["belief_key"], "time": t}
+            for j in data.get("judgments") or [] if j.get("applies_today") for t in j.get("times") or []]
 
 
 def _place(placements: List[Dict[str, Any]], slots: List[dict], statements: Dict[str, str],
@@ -280,9 +322,11 @@ def run_day_pass(now_utc: Optional[datetime] = None, *, connect=None) -> Dict[st
     daily_context_block = _format_daily_context(ctx_data, specific, backdrops)
     given = {e["belief_key"]: e["statement"] for e in pool}
     conditions = {r["belief_key"] for found in related.values() for r in found} - set(given)
+    # The day is the planned day (the boundary day); the clock is shown apart, so before the boundary hour the
+    # header does not name the next calendar day's weekday beside this day's date (until 2026-10-05 it did).
     agent_input = {
-        "date_time": now_local.strftime("%Y-%m-%d %H:%M"), "day_of_week": now_local.strftime("%A"),
-        "boundary_date_local": day, "daily_context": daily_context_block, "beliefs_block": beliefs_block}
+        "day_facts": _day_facts(day), "now_local": f"{now_local:%A, %B} {now_local.day}, {now_local.strftime('%I:%M %p').lstrip('0')}",
+        "daily_context": daily_context_block, "beliefs_block": beliefs_block}
     data = _write(agent_input)
     problems = _problems(data, set(given), conditions)
     from app.assistant.subconscious.brain_trace import step
@@ -293,10 +337,11 @@ def run_day_pass(now_utc: Optional[datetime] = None, *, connect=None) -> Dict[st
         problems = _problems(data, set(given), conditions)
         if problems:
             raise ValueError(f"routine writer placements still invalid after one correction: {problems}")
-    plan_slots, flags = _place(data.get("placements") or [], slots, given, related)
+    placements = _placements(data)
+    plan_slots, flags = _place(placements, slots, given, related)
     step("day_pass", "placed", day=day, approved=sorted(given),
          related={k: [r["belief_key"] for r in v] for k, v in related.items()},
-         placements=data.get("placements") or [])
+         placements=placements, judgments=data.get("judgments") or [])
     day_plan.save_plan({
         "day": day, "generated_at_utc": now_utc.isoformat(), "inputs_fingerprint": fingerprint,
         "selected_belief_keys": sorted(given),                # the beliefs approved for the calendar

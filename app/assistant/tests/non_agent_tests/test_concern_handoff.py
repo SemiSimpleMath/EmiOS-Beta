@@ -40,6 +40,14 @@ def _work_store(monkeypatch):
     monkeypatch.setattr(work_links, "progress", lambda work_id: PROGRESS[work_id])
 
 
+@pytest.fixture(autouse=True)
+def _lanes_off(monkeypatch):
+    """The steward's path: both lanes off, whatever configs/brain_lanes.json says today."""
+    from app.assistant.dayflow_orchestrator import brain_list_intake
+    monkeypatch.setattr(brain_list_intake, "lanes", lambda: {"calendar": {"mode": "off", "from_day": None},
+                                                             "concern": {"mode": "off", "since": None}})
+
+
 def _with_brief(reg, readiness_by_id):
     """Each concern gets a current brief and a plan made from it: decision, things to do, why, hold."""
     register = reg.read()
@@ -175,3 +183,15 @@ def test_the_steward_sees_every_earlier_attempt_with_the_owners_replies(tmp_path
             "      judgments of its steps:") in text
     assert 'task "Ask" (' in text and "The owner will bake on Sunday." in text
     assert 'said: "I will, Sunday"' in text
+
+
+def test_with_the_concern_lane_live_the_list_delegates_and_nothing_is_handed_over(tmp_path, monkeypatch):
+    from app.assistant.dayflow_orchestrator import brain_list_intake
+    monkeypatch.setattr(brain_list_intake, "lanes", lambda: {"calendar": {"mode": "off", "from_day": None},
+                                                             "concern": {"mode": "live", "since": "2026-03-10T00:00:00+00:00"}})
+    reg = ScratchRegister(tmp_path).write({"active": [{"concern_id": "c-bake", "title": "PTSA bake sale",
+                                                       "done_when": "cookies delivered", "notes": "n", "evidence": []}],
+                                           "addressing": [], "resolved": [], "dormant": []})
+    _ready(reg, decision="act_now", task="Move the bake-sale plans to Monday", why="The sale moved.")
+    out, written, pokes = _run(reg)
+    assert out == {"handed_over": 0, "handoff_skipped": 0, "handoffs": "the brain's list"} and written == []
