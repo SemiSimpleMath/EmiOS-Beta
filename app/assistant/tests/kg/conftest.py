@@ -39,6 +39,7 @@ import app.assistant.database.kg_node_verdict         # noqa: F401  KGNodeVerdic
 import app.assistant.database.kg_maintenance_finding  # noqa: F401  KGMaintenanceFinding
 import app.assistant.database.kg_mention_map          # noqa: F401  KGMentionMap
 import app.assistant.database.db_handler              # noqa: F401  UnifiedLog2026 + others
+import app.assistant.kg.failure_ledger                # noqa: F401  KGItemFailure
 
 from app.models.base import Base, get_session
 
@@ -74,13 +75,14 @@ def kg_clean_db(monkeypatch):
     from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
     from app.assistant.database.kg_mention_map import KGMentionMap
     from app.assistant.kg.db.knowledge_graph_db_sqlite import Edge, Node
+    from app.assistant.kg.failure_ledger import KGItemFailure
 
     session = get_session()
     try:
         for tbl in (
             KGNodeEvidence, KGEdgeEvidence,
             ClaimProposalEdge, ClaimProposalEvidence, ClaimProposalNode, ClaimProposal,
-            KGNodeVerdict, KGMaintenanceFinding, KGMentionMap,
+            KGNodeVerdict, KGMaintenanceFinding, KGMentionMap, KGItemFailure,
             Edge, Node,
         ):
             session.query(tbl).delete()

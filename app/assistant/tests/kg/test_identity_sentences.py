@@ -102,12 +102,21 @@ def test_hash_tracks_structure_not_prose():
 # ── refresh ──────────────────────────────────────────────────────────────
 
 
+@pytest.fixture(autouse=True)
+def _primary_user(monkeypatch):
+    monkeypatch.setenv("PRIMARY_USER", "Sam")
+
+
 class _FakeChroma:
     def __init__(self):
         self.stored = {}
+        self.context = {}
 
     def store_node_identity_embedding(self, node_id, sentence, embedding):
         self.stored[node_id] = sentence
+
+    def store_node_context_embedding(self, node_id, text, embedding):
+        self.context[node_id] = text
 
 
 def _run_refresh(monkeypatch, sentences_by_label, max_per_run=50,
@@ -325,6 +334,123 @@ def test_undefinable_stamps_hash_raises_finding_and_does_not_retry(monkeypatch):
         assert count == 1
     finally:
         session.close()
+
+
+# ── a failed call stops the run (owner, 2026-10-05) ─────────────────────
+
+
+def _node_row(nid):
+    session = get_session()
+    try:
+        n = session.get(Node, nid)
+        return n.identity_sentence, n.identity_inputs_hash
+    finally:
+        session.close()
+
+
+def _ledger_failures(kind, item_id):
+    from app.assistant.kg.failure_ledger import KGItemFailure
+    session = get_session()
+    try:
+        row = session.get(KGItemFailure, (kind, item_id))
+        return row.failures if row else 0
+    finally:
+        session.close()
+
+
+def test_writer_failure_stops_the_run_and_stamps_nothing(monkeypatch):
+    import app.assistant.kg_core.kg_utils.identity_sentence as mod
+
+    nid = _mk_node("Broken Node")
+
+    def fake_generate(inputs, *, source_window=None):
+        raise RuntimeError("LLM down")
+
+    monkeypatch.setattr(mod, "generate_identity_sentence", fake_generate)
+    with pytest.raises(RuntimeError, match="LLM down"):
+        mod.run_identity_sentence_refresh(max_per_run=5)
+    assert _node_row(nid) == (None, None)
+    assert _ledger_failures(mod.FAILURE_KIND, nid) == 1
+
+
+def test_failed_window_read_never_stamps_undefinable(monkeypatch):
+    import app.assistant.kg_core.kg_utils.identity_sentence as mod
+    from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
+
+    nid = _mk_node("Needs Window")
+    monkeypatch.setattr(mod, "generate_identity_sentence",
+                        lambda inputs, *, source_window=None:
+                        {"sentence": None, "definable": False, "basis": "no anchors"})
+
+    def broken_window(node_id):
+        raise RuntimeError("db locked")
+
+    monkeypatch.setattr(mod, "_source_window_text", broken_window)
+    with pytest.raises(RuntimeError, match="db locked"):
+        mod.run_identity_sentence_refresh(max_per_run=5)
+    assert _node_row(nid) == (None, None)
+    session = get_session()
+    try:
+        assert session.query(KGMaintenanceFinding).filter_by(
+            finding_type="undefinable_node").count() == 0
+    finally:
+        session.close()
+
+
+def test_chroma_failure_after_commit_raises(monkeypatch):
+    import app.assistant.kg_core.kg_utils.identity_sentence as mod
+
+    nid = _mk_node("Embed Me")
+
+    class _BrokenChroma(_FakeChroma):
+        def store_node_identity_embedding(self, node_id, sentence, embedding):
+            raise RuntimeError("chroma down")
+
+    monkeypatch.setattr(mod, "generate_identity_sentence",
+                        lambda inputs, *, source_window=None:
+                        {"sentence": "Embed me.", "definable": True, "basis": "t"})
+    monkeypatch.setattr(mod, "_source_window_text", lambda n: None)
+    import app.assistant.kg.chroma.chroma_embedding_manager as cem
+    monkeypatch.setattr(cem, "get_chroma_manager", lambda: _BrokenChroma())
+    import app.assistant.embeddings.embedder as embedder_mod
+    monkeypatch.setattr(embedder_mod, "embed_text", lambda text: [0.1])
+
+    with pytest.raises(RuntimeError, match="chroma down"):
+        mod.run_identity_sentence_refresh(max_per_run=5)
+    assert _node_row(nid)[0] == "Embed me."  # committed; the embedding sync heals Chroma
+
+
+def test_missing_primary_user_name_raises(monkeypatch):
+    import app.assistant.kg_core.kg_utils.identity_sentence as mod
+
+    _mk_node("Any Node")
+
+    def unconfigured():
+        raise RuntimeError("Primary user name is required but not configured.")
+
+    monkeypatch.setattr("app.assistant.utils.identity_names.get_required_primary_user_name", unconfigured)
+    monkeypatch.setattr(mod, "generate_identity_sentence",
+                        lambda inputs, *, source_window=None: pytest.fail("writer must not run"))
+    with pytest.raises(RuntimeError, match="Primary user name"):
+        mod.run_identity_sentence_refresh(max_per_run=5)
+
+
+def test_definable_without_sentence_gets_one_correction(monkeypatch):
+    import app.assistant.kg_core.kg_utils.identity_sentence as mod
+    import app.assistant.routine_handlers.subconscious as sub
+
+    answers = [{"definable": True, "identity_sentence": "", "basis": "x"},
+               {"definable": True, "identity_sentence": "", "basis": "x"}]
+    seen = []
+
+    def fake_agent(**kwargs):
+        seen.append(dict(kwargs["context"]))
+        return answers.pop(0)
+
+    monkeypatch.setattr(sub, "_run_subconscious_agent", fake_agent)
+    with pytest.raises(RuntimeError, match="after one correction"):
+        mod.generate_identity_sentence({"label": "Thing", "edges": []})
+    assert seen[0]["correction"] is None and "no identity_sentence" in seen[1]["correction"]
 
 
 # ── semantic tier reads the identity collection ──────────────────────────

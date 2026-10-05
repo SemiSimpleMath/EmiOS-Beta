@@ -36,6 +36,7 @@ MAX_FOLD_PER_NODE = 80
 MAX_DIGEST_CHARS = 2000
 
 AGENT_NAME = "kg_maintenance::evidence_digester"
+FAILURE_KIND = "kg_evidence_digest"
 
 
 def _row_ts(ev):
@@ -46,25 +47,31 @@ def run_evidence_digestion(*, max_nodes_per_run: int = 5) -> Dict[str, Any]:
     """Nightly compaction pass: digest the heaviest-evidenced nodes.
 
     Candidates = nodes whose live row count >= DIGEST_THRESHOLD, heaviest
-    first, capped per run. One LLM call per node. A failed call skips the
-    node (no partial writes); the next run retries it naturally.
+    first, capped per run. One LLM call per node. A failed call stops the
+    run with nothing written for that node (the rest stay pending for the
+    next run); a node that keeps failing is set aside for review.
     """
     from sqlalchemy import func
 
     from app.assistant.database.kg_chat_projection import KGNodeEvidence
+    from app.assistant.kg import failure_ledger
     from app.assistant.kg.db.knowledge_graph_db_sqlite import Node
     from app.models.db_manager import get_db_manager
     from app.assistant.utils.time_utils import utc_now
 
     digested_nodes = 0
     rows_folded = 0
-    failed = 0
+    set_aside = failure_ledger.set_aside_ids(FAILURE_KIND)
 
     with get_db_manager().read_session() as session:
-        candidates = (
+        q = (
             session.query(KGNodeEvidence.node_id, func.count().label("cnt"))
             .filter(KGNodeEvidence.digested_at.is_(None))
-            .group_by(KGNodeEvidence.node_id)
+        )
+        if set_aside:
+            q = q.filter(KGNodeEvidence.node_id.notin_(list(set_aside)))
+        candidates = (
+            q.group_by(KGNodeEvidence.node_id)
             .having(func.count() >= DIGEST_THRESHOLD)
             .order_by(func.count().desc())
             .limit(max(1, max_nodes_per_run))
@@ -113,16 +120,10 @@ def run_evidence_digestion(*, max_nodes_per_run: int = 5) -> Dict[str, Any]:
     for item in work:
         try:
             digest = _generate_digest(item)
-        except Exception as e:
-            logger.error("[evidence_digestion] digester failed for %r: %s",
-                         item["label"], e)
-            failed += 1
-            continue
-        if not digest:
-            logger.error("[evidence_digestion] digester returned empty digest "
-                         "for %r — skipping (no writes)", item["label"])
-            failed += 1
-            continue
+        except Exception as exc:
+            failure_ledger.record_failure(FAILURE_KIND, item["node_id"], exc, label=item["label"])
+            raise
+        failure_ledger.clear(FAILURE_KIND, item["node_id"])
 
         n_folded = len(item["tail_ids"])
         with get_db_manager().transaction(op="evidence_digestion") as s:
@@ -150,26 +151,37 @@ def run_evidence_digestion(*, max_nodes_per_run: int = 5) -> Dict[str, Any]:
         "candidates": len(work),
         "digested_nodes": digested_nodes,
         "rows_folded": rows_folded,
-        "failed": failed,
     }
 
 
 def _generate_digest(item: Dict[str, Any]) -> str:
-    """One LLM call: fold the tail rows into a consolidated chronicle."""
+    """One LLM call: fold the tail rows into a consolidated chronicle. A
+    failed call raises; an empty digest gets one correction, then raises."""
     from app.assistant.routine_handlers.subconscious import _run_subconscious_agent
 
-    result = _run_subconscious_agent(
-        handler_label="evidence_digester",
-        agent_name=AGENT_NAME,
-        context={
-            "label": item["label"],
-            "node_type": item["node_type"],
-            "identity_sentence": item["identity_sentence"],
-            "rows": item["rows"],
-        },
-        scope_id=AGENT_NAME,
-        actor_id="evidence_digestion",
-    )
-    if not isinstance(result, dict):
-        return ""
-    return str(result.get("digest") or "").strip()[:MAX_DIGEST_CHARS]
+    context = {
+        "label": item["label"],
+        "node_type": item["node_type"],
+        "identity_sentence": item["identity_sentence"],
+        "rows": item["rows"],
+        # Always present: strict_template raises on undefined variables.
+        "correction": None,
+    }
+
+    def ask() -> str:
+        result = _run_subconscious_agent(
+            handler_label="evidence_digester",
+            agent_name=AGENT_NAME,
+            context=context,
+            scope_id=AGENT_NAME,
+            actor_id="evidence_digestion",
+        )
+        return str(result.get("digest") or "").strip()[:MAX_DIGEST_CHARS]
+
+    digest = ask()
+    if not digest:
+        context["correction"] = "Your previous answer had an empty digest: write the consolidated digest of the rows."
+        digest = ask()
+        if not digest:
+            raise RuntimeError(f"evidence_digester: empty digest for {item['label']!r} after one correction")
+    return digest

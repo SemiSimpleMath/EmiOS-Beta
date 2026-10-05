@@ -257,21 +257,20 @@ def run(ctx: PipelineContext) -> dict:
     dis_list = [(n, l) for n, l in dis_list if n not in retired]
 
     # Phase 1: deterministic temporal drain (own write transaction per node).
+    # A failed DB call stops the run; the rest stays parked for the next run.
     drained = 0
     for node_id, label in dis_list:
         try:
             with get_db_manager().transaction(op="disambiguation_temporal_drain") as s:
                 result = temporal_drain(s, node_id, label)
-            if result["repointed"]:
-                drained += len(result["repointed"])
-                logger.info(
-                    "[disambiguation_scan] temporal drain re-pointed %d edge(s) "
-                    "parked at %r", len(result["repointed"]), label,
-                )
         except Exception:
-            logger.error(
-                "[disambiguation_scan] temporal drain failed for %r", label,
-                exc_info=True,
+            logger.error("[disambiguation_scan] temporal drain failed for %r", label, exc_info=True)
+            raise
+        if result["repointed"]:
+            drained += len(result["repointed"])
+            logger.info(
+                "[disambiguation_scan] temporal drain re-pointed %d edge(s) "
+                "parked at %r", len(result["repointed"]), label,
             )
 
     # Phase 2: anything still parked raises a backlog finding.

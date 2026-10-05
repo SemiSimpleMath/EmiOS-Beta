@@ -1,14 +1,10 @@
 """
-Step: execute_findings
-
-Automatically executes pending maintenance findings that have safe,
-well-defined actions:
+Executors for approved maintenance findings (run from the /kg-maintenance UI,
+never autopilot):
 
   - orphan_node  → delete (if node still has zero edges)
   - duplicate_node → merge (reroute edges, merge fields, delete loser)
-
-Manual-only path (executor present but not in AUTO_EXECUTE_TYPES, so the
-pipeline never runs them autopilot — only the UI's "execute" button does):
+  - event_series_link → link a per-occurrence Event to its parent Entity
 
   - wiki_contradiction with investigation_report_json.proposed_action.op
     == "split_state" → undo a wrong-merge by creating N new State/Event
@@ -27,7 +23,8 @@ Suspect-node findings are NOT auto-executed — they require human review
 or a redesigned evaluation pipeline.
 
 Each finding is processed in its own transaction.  On failure the finding
-is marked ``execute_error`` and the step continues to the next one.
+is marked ``execute_error`` (retryable); a batch execution stops at the
+first failure.
 """
 from __future__ import annotations
 
@@ -37,13 +34,10 @@ from typing import Any, Optional
 
 from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
 from app.assistant.database.kg_revision_log import KGRevisionLog
-from app.assistant.pipelines.context import PipelineContext
 from app.assistant.utils.logging_config import get_logger
 from app.models.base import get_session
 
 logger = get_logger(__name__)
-
-AUTO_EXECUTE_TYPES = {"orphan_node", "duplicate_node"}
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +99,8 @@ def _execute_duplicate(finding: dict) -> dict:
 
     The LLM agent (kg_maintenance::node_data_merger) intelligently combines
     aliases, tags, descriptions, dates, and semantic fields.  The DB session
-    is closed before the LLM call and reopened for the write phase.
+    is closed before the LLM call and reopened for the write phase. A failed
+    merger call raises before anything is written.
 
     Returns a result dict.
     """
@@ -114,10 +109,7 @@ def _execute_duplicate(finding: dict) -> dict:
         merge_nodes_in_session,
         snapshot_node,
     )
-    from app.assistant.pipelines.kg_shared import (
-        apply_node_data_merger_result,
-        merge_node_fields_into_existing,
-    )
+    from app.assistant.pipelines.kg_shared import apply_node_data_merger_result
     from app.assistant.pipelines.kg_shared.merge_utils import node_to_merge_dict
 
     node_a_id = finding["primary_node_id"]
@@ -170,12 +162,9 @@ def _execute_duplicate(finding: dict) -> dict:
 
         winner_pre_snapshot = snapshot_node(winner_node)
 
-        if merged_fields:
-            apply_node_data_merger_result(winner_node, merged_fields)
-            if merged_fields.get("merged_description"):
-                winner_node.description = merged_fields["merged_description"]
-        else:
-            merge_node_fields_into_existing(winner_node, loser_data)
+        apply_node_data_merger_result(winner_node, merged_fields)
+        if merged_fields.get("merged_description"):
+            winner_node.description = merged_fields["merged_description"]
         session.flush()
 
         merge_log_id = merge_nodes_in_session(
@@ -183,7 +172,7 @@ def _execute_duplicate(finding: dict) -> dict:
             loser_node=loser_node,
             winner_node=winner_node,
             merge_actor="kg_maintenance::_execute_duplicate",
-            notes=f"merge_method={'LLM' if merged_fields else 'field-copy'}",
+            notes="merge_method=LLM",
             winner_pre_snapshot=winner_pre_snapshot,
         )
 
@@ -202,62 +191,56 @@ def _execute_duplicate(finding: dict) -> dict:
         session.close()
 
     # Chroma cleanup for the loser happens inside merge_nodes_in_session.
-    merge_method = "LLM" if merged_fields else "field-copy"
     return {
         "executed": True,
         "detail": (
-            f"Merged '{loser_label}' into '{winner_label}' ({merge_method}). "
+            f"Merged '{loser_label}' into '{winner_label}' (LLM). "
             f"Edges rerouted: {edges_rerouted}, dropped (conflict): {edges_dropped}. "
             f"Merge log id: {merge_log_id[:8]}."
         ),
     }
 
 
-def _llm_merge_fields(winner_data: dict, loser_data: dict) -> Optional[dict]:
+def _llm_merge_fields(winner_data: dict, loser_data: dict) -> dict:
     """
     Call kg_maintenance::node_data_merger to intelligently merge fields.
-    Returns the agent's merged field dict, or None on failure (caller falls
-    back to simple field-copy merge).
+    Returns the agent's merged field dict. A failed or empty answer raises:
+    the merge does not happen and the finding stays retryable (execute_error).
     """
     import json
     from app.assistant.scope.loader import load_scope_for_source
     from app.assistant.ServiceLocator.service_locator import DI
     from app.assistant.utils.pydantic_classes import Message
 
-    try:
-        agent = DI.agent_factory.create_agent("kg_maintenance::node_data_merger")
-        if agent is None:
-            logger.error("[execute_findings] Failed to create kg_maintenance::node_data_merger agent")
-            return None
+    agent = DI.agent_factory.create_agent("kg_maintenance::node_data_merger")
+    if agent is None:
+        raise RuntimeError("[execute_findings] could not create kg_maintenance::node_data_merger")
 
-        scope_context = load_scope_for_source(kind="pipeline", source_id="kg_maintenance_pipeline", actor_id="kg_maintenance_executor")
+    scope_context = load_scope_for_source(kind="pipeline", source_id="kg_maintenance_pipeline", actor_id="kg_maintenance_executor")
 
-        response = agent.action_handler(
-            Message(
-                agent_input={
-                    "existing_node_data": json.dumps(winner_data, ensure_ascii=True, default=str),
-                    "new_node_data": json.dumps(loser_data, ensure_ascii=True, default=str),
-                },
-                scope_context=scope_context,
-            )
+    response = agent.action_handler(
+        Message(
+            agent_input={
+                "existing_node_data": json.dumps(winner_data, ensure_ascii=True, default=str),
+                "new_node_data": json.dumps(loser_data, ensure_ascii=True, default=str),
+            },
+            scope_context=scope_context,
         )
+    )
 
-        if response and response.data:
-            logger.info(
-                "[execute_findings] LLM merge for '%s' ← '%s': confidence=%.2f",
-                winner_data.get("label", "?"),
-                loser_data.get("label", "?"),
-                response.data.get("merge_confidence", 0),
-            )
-            return response.data
-
-        logger.error("[execute_findings] node_data_merger returned empty result")
-        return None
-
-    except Exception as exc:
-        logger.error("[execute_findings] LLM merge failed, falling back to field-copy: %s", exc)
-        logger.debug("[execute_findings] LLM merge exception", exc_info=True)
-        return None
+    data = getattr(response, "data", None)
+    if not isinstance(data, dict) or not data:
+        raise RuntimeError(
+            f"[execute_findings] node_data_merger returned no merged fields for "
+            f"{winner_data.get('label')!r} <- {loser_data.get('label')!r}"
+        )
+    logger.info(
+        "[execute_findings] LLM merge for '%s' ← '%s': confidence=%.2f",
+        winner_data.get("label", "?"),
+        loser_data.get("label", "?"),
+        data.get("merge_confidence", 0),
+    )
+    return data
 
 
 def _pick_canonical(node_a, node_b, session) -> tuple:
@@ -882,65 +865,3 @@ def execute_single_finding(finding: dict) -> dict:
     if executor is None:
         return {"executed": False, "detail": f"No executor for finding_type '{ftype}'."}
     return executor(finding)
-
-
-# ---------------------------------------------------------------------------
-# Pipeline step entry point
-# ---------------------------------------------------------------------------
-
-def run(ctx: PipelineContext, *, dry_run: bool = False) -> dict:
-    """
-    Process all pending findings of auto-executable types.
-
-    If ``dry_run`` is True, reports what would happen without mutating.
-
-    Returns {"executed": int, "skipped": int, "errors": int, "details": [...]}.
-    """
-    from app.assistant.kg_maintenance.store import get_findings, set_status
-
-    executed = 0
-    skipped = 0
-    errors = 0
-    details: list[dict] = []
-
-    for ftype in sorted(AUTO_EXECUTE_TYPES):
-        findings = get_findings(status="approved", finding_type=ftype, limit=500)
-        logger.info("[execute_findings] %d pending %s findings", len(findings), ftype)
-
-        for finding in findings:
-            fid = finding["id"]
-
-            if dry_run:
-                details.append({"finding_id": fid, "type": ftype, "dry_run": True, "action": finding.get("suggested_action")})
-                skipped += 1
-                continue
-
-            try:
-                result = execute_single_finding(finding)
-            except Exception as exc:
-                logger.error("[execute_findings] Failed finding_id=%s: %s", fid, exc)
-                logger.debug("[execute_findings] Exception details", exc_info=True)
-                set_status(fid, "execute_error", executed_by="auto_pipeline", execution_notes=str(exc)[:500])
-                errors += 1
-                details.append({"finding_id": fid, "type": ftype, "error": str(exc)[:200]})
-                continue
-
-            if result.get("executed"):
-                set_status(fid, "executed", executed_by="auto_pipeline", execution_notes=result.get("detail", ""))
-                executed += 1
-            else:
-                set_status(fid, "rejected", executed_by="auto_pipeline", execution_notes=result.get("detail", ""))
-                skipped += 1
-
-            details.append({"finding_id": fid, "type": ftype, **result})
-
-    logger.info(
-        "[execute_findings] Done: executed=%d skipped=%d errors=%d",
-        executed, skipped, errors,
-    )
-    return {
-        "executed": executed,
-        "skipped": skipped,
-        "errors": errors,
-        "details": details[:100],
-    }

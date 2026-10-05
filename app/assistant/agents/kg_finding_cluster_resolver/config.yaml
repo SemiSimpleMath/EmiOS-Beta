@@ -9,5 +9,6 @@ except_tools: []
 
 user_context_items:
   - candidate_cluster
+  - correction
 
 type: agent

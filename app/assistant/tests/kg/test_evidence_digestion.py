@@ -160,7 +160,17 @@ def test_chunking_caps_fold_per_run(monkeypatch):
     assert len(_rows(nid, live=True)) == n - MAX_FOLD_PER_NODE + 1
 
 
-def test_failed_digester_writes_nothing(monkeypatch):
+def _ledger_failures(node_id):
+    from app.assistant.kg.failure_ledger import KGItemFailure
+    session = get_session()
+    try:
+        row = session.get(KGItemFailure, (mod.FAILURE_KIND, node_id))
+        return row.failures if row else 0
+    finally:
+        session.close()
+
+
+def test_failed_digester_stops_the_run_and_writes_nothing(monkeypatch):
     nid = _mk_node()
     _mk_evidence(nid, DIGEST_THRESHOLD)
 
@@ -168,19 +178,42 @@ def test_failed_digester_writes_nothing(monkeypatch):
         raise RuntimeError("llm down")
 
     monkeypatch.setattr(mod, "_generate_digest", boom)
-    result = run_evidence_digestion()
+    with pytest.raises(RuntimeError, match="llm down"):
+        run_evidence_digestion()
 
-    assert result["failed"] == 1 and result["digested_nodes"] == 0
     assert len(_rows(nid, live=True)) == DIGEST_THRESHOLD
     assert _rows(nid, action="digest") == []
+    assert _ledger_failures(nid) == 1
 
 
-def test_empty_digest_writes_nothing(monkeypatch):
+def test_set_aside_node_is_skipped(monkeypatch):
+    from app.assistant.kg import failure_ledger
+
     nid = _mk_node()
     _mk_evidence(nid, DIGEST_THRESHOLD)
-    _patch_digester(monkeypatch, "")
+    for _ in range(failure_ledger.SET_ASIDE_AFTER):
+        failure_ledger.record_failure(mod.FAILURE_KIND, nid, RuntimeError("refused"))
+    _patch_digester(monkeypatch)
 
     result = run_evidence_digestion()
+    assert result["candidates"] == 0 and _rows(nid, action="digest") == []
 
-    assert result["failed"] == 1 and result["digested_nodes"] == 0
+
+def test_empty_digest_gets_one_correction_then_raises(monkeypatch):
+    import app.assistant.routine_handlers.subconscious as sub
+
+    nid = _mk_node()
+    _mk_evidence(nid, DIGEST_THRESHOLD)
+    seen = []
+
+    def fake_agent(**kwargs):
+        seen.append(dict(kwargs["context"]))
+        return {"digest": ""}
+
+    monkeypatch.setattr(sub, "_run_subconscious_agent", fake_agent)
+    with pytest.raises(RuntimeError, match="after one correction"):
+        run_evidence_digestion()
+
+    assert [s["correction"] is None for s in seen] == [True, False]
     assert len(_rows(nid, live=True)) == DIGEST_THRESHOLD
+    assert _rows(nid, action="digest") == []

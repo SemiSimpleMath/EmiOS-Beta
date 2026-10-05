@@ -12,6 +12,7 @@ Uses the kg conftest (isolated test DB, fresh tables per test).
 from __future__ import annotations
 
 import uuid
+from types import SimpleNamespace
 
 from sqlalchemy import text as sql_text
 
@@ -131,9 +132,30 @@ def test_reroute_drops_duplicate_edge_with_its_evidence():
         session.close()
 
 
-def test_lifecycle_gc_sweeps_residue():
+class _FakeEdgeCollection:
+    def __init__(self, ids, fail=False):
+        self.ids, self.fail, self.deleted = list(ids), fail, []
+
+    def get(self):
+        if self.fail:
+            raise RuntimeError("chroma down")
+        return {"ids": self.ids}
+
+    def delete(self, ids):
+        self.deleted.extend(ids)
+
+
+def _fake_chroma(monkeypatch, collection):
+    import app.assistant.kg.chroma.chroma_embedding_manager as cem
+    monkeypatch.setattr(cem, "get_chroma_manager", lambda: SimpleNamespace(edge_collection=collection))
+
+
+def test_lifecycle_gc_sweeps_residue(monkeypatch):
     from app.assistant.pipelines.kg_maintenance_pipeline.step_lifecycle_gc import run
 
+    ghost_id = str(uuid.uuid4())
+    collection = _FakeEdgeCollection([ghost_id])
+    _fake_chroma(monkeypatch, collection)
     session = get_session()
     try:
         live = _mk_node(session, "Live Test Node")
@@ -154,12 +176,36 @@ def test_lifecycle_gc_sweeps_residue():
     assert counts["node_evidence_orphans_deleted"] >= 1
     assert counts["edge_evidence_orphans_deleted"] >= 1
     assert counts["dead_verdicts_superseded"] >= 1
+    assert counts["edge_vector_ghosts_removed"] == 1 and collection.deleted == [ghost_id]
 
     # Second run: steady state, nothing left to sweep.
+    collection.ids = []
     again = run()
     assert again["node_evidence_orphans_deleted"] == 0
     assert again["edge_evidence_orphans_deleted"] == 0
     assert again["dead_verdicts_superseded"] == 0
+
+
+def test_lifecycle_gc_chroma_failure_raises_after_sql_commit(monkeypatch):
+    import pytest
+
+    from app.assistant.pipelines.kg_maintenance_pipeline.step_lifecycle_gc import run
+
+    _fake_chroma(monkeypatch, _FakeEdgeCollection([], fail=True))
+    session = get_session()
+    try:
+        _add_node_evidence(session, str(uuid.uuid4()))
+        session.commit()
+    finally:
+        session.close()
+
+    with pytest.raises(RuntimeError, match="chroma down"):
+        run()
+    session = get_session()
+    try:  # the SQL sweep committed before the Chroma sweep failed
+        assert session.execute(sql_text("SELECT COUNT(*) FROM kg_node_evidence")).scalar() == 0
+    finally:
+        session.close()
 
 
 def test_unparseable_dates_route_to_prose_not_none():

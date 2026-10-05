@@ -93,10 +93,12 @@ def run(ctx: PipelineContext = None) -> dict:
             })
 
     # --- Phase 2: call curator agent (no DB session held) ---
+    # Every batch is judged before anything is applied: a failed call stops
+    # the run with nothing written, and an answer that leaves a predicate
+    # without a valid verdict gets one correction, then raises.
     agent = DI.agent_factory.create_agent("me::edge_canon_curator")
     if agent is None:
-        logger.warning("[edge_canon_curation] curator agent unavailable")
-        return {"candidates": len(candidates), "verdicts": 0, "alias_added": 0, "canon_added": 0, "edges_rewritten": 0}
+        raise RuntimeError("[edge_canon_curation] could not create me::edge_canon_curator")
 
     # Same scope pattern as the sibling maintenance steps (duplicate_scan).
     scope = load_scope_for_source(
@@ -105,24 +107,36 @@ def run(ctx: PipelineContext = None) -> dict:
         actor_id="edge_canon_curation",
     )
 
+    def ask(batch_text: str, information: str) -> Dict:
+        result = agent.action_handler(Message(
+            agent_input={"task": batch_text, "information": information},
+            task=batch_text, information=information,
+            scope_context=scope,
+        ))
+        data = getattr(result, "data", None)
+        if hasattr(data, "model_dump"):
+            data = data.model_dump()
+        if not isinstance(data, dict) or not isinstance(data.get("verdicts"), list):
+            raise RuntimeError("[edge_canon_curation] curator returned no verdicts list")
+        return data
+
     all_verdicts: List[Dict] = []
     for i in range(0, len(candidates), BATCH_SIZE):
         batch = candidates[i:i+BATCH_SIZE]
         batch_text = _format_batch_for_agent(batch)
-        try:
-            result = agent.action_handler(Message(
-                agent_input={"task": batch_text, "information": ""},
-                task=batch_text, information="",
-                scope_context=scope,
-            ))
-            data = getattr(result, "data", None) or {}
-            if hasattr(data, "model_dump"):
-                data = data.model_dump()
-            for v in (data.get("verdicts") or []):
-                if isinstance(v, dict):
-                    all_verdicts.append(v)
-        except Exception as exc:
-            logger.warning("[edge_canon_curation] batch %d failed: %s", i // BATCH_SIZE + 1, exc)
+        predicates = {c["predicate"] for c in batch}
+        verdicts, problems = _check_verdicts(ask(batch_text, ""), predicates, set(canon_labels))
+        if problems:
+            verdicts, problems = _check_verdicts(
+                ask(batch_text, "Correct your previous answer: " + "; ".join(problems) + "."),
+                predicates, set(canon_labels),
+            )
+            if problems:
+                raise RuntimeError(
+                    f"[edge_canon_curation] batch {i // BATCH_SIZE + 1} still incomplete after one "
+                    f"correction: {'; '.join(problems)}"
+                )
+        all_verdicts.extend(verdicts)
 
     logger.info("[edge_canon_curation] got %d verdicts", len(all_verdicts))
 
@@ -130,16 +144,41 @@ def run(ctx: PipelineContext = None) -> dict:
     stats = _apply_verdicts(all_verdicts)
 
     # --- Phase 4: reset normalize_predicate DB cache ---
-    try:
-        from app.assistant.kg.predicate_vocabulary import reset_db_alias_cache
-        reset_db_alias_cache()
-    except Exception as exc:
-        logger.warning("[edge_canon_curation] cache reset failed: %s", exc)
+    from app.assistant.kg.predicate_vocabulary import reset_db_alias_cache
+    reset_db_alias_cache()
 
     stats["candidates"] = len(candidates)
     stats["verdicts"] = len(all_verdicts)
     logger.info("[edge_canon_curation] done: %s", stats)
     return stats
+
+
+VERDICTS = {"variant_of", "new_canon", "not_yet"}
+
+
+def _check_verdicts(data: Dict, predicates: set, canons: set) -> tuple[List[Dict], List[str]]:
+    """The batch's verdicts and the problems in them: every predicate needs one
+    verdict, and a variant_of must name an existing canon."""
+    verdicts: Dict[str, Dict] = {}
+    problems: List[str] = []
+    for v in data["verdicts"]:
+        predicate = (v.get("predicate") or "").strip() if isinstance(v, dict) else ""
+        if predicate not in predicates:
+            problems.append(f"predicate {predicate!r} is not one of the input predicates")
+            continue
+        verdict = (v.get("verdict") or "").strip().lower()
+        if verdict not in VERDICTS:
+            problems.append(f"{predicate!r}: verdict {verdict!r} is not one of {sorted(VERDICTS)}")
+            continue
+        if verdict == "variant_of" and (v.get("canonical_target") or "").strip() not in canons:
+            problems.append(f"{predicate!r}: variant_of target {v.get('canonical_target')!r} is not an "
+                            f"existing canonical edge type")
+            continue
+        verdicts[predicate] = v
+    missing = sorted(predicates - set(verdicts))
+    if missing:
+        problems.append(f"no verdict for predicates {missing}")
+    return list(verdicts.values()), problems
 
 
 def _load_canon_labels() -> List[str]:

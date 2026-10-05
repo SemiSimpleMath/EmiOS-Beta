@@ -7,5 +7,6 @@ allowed_tools: []
 except_tools: []
 user_context_items:
   - pairs_batch
+  - correction
 system_context_items: []
 type: agent

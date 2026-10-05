@@ -84,6 +84,15 @@ IDENTITY_TOP_K = 5
 ANCHOR_MIN_EDGE_COUNT = 5  # only Entity anchors with >=N edges can drive a candidate
 TIER4_MAX_PAIRS = 80       # safety cap on pairs Tier 4 emits per run
 
+# Failure-ledger kind for a candidate pair whose detector call failed.
+PAIR_FAILURE_KIND = "kg_duplicate_pair"
+
+TRIAGE_VERDICTS = {"distinct", "uncertain", "defective_sentences"}
+
+
+def _pair_item_id(a: str, b: str) -> str:
+    return f"{min(a, b)}|{max(a, b)}"
+
 
 # ── Phase 1: read node descriptors ────────────────────────────────────────────
 
@@ -415,12 +424,17 @@ def _build_candidate_pairs(
         for pairs sourced from Tier 4. Empty dict for pairs from Tiers 1-3.
         Consumed by _confirm_pairs_with_llm to enrich the LLM brief.
     """
+    from app.assistant.kg import failure_ledger
     from app.assistant.kg_maintenance.verdict_store import load_distinct_pairs
 
     # Bulk-fetch all active 'distinct' verdicts once, locally canonicalized
     # by the store as (a, b) with a < b. Hot path: every Tier 1/2/3 pair
     # checks membership in this set instead of opening a read session.
     distinct_pairs = load_distinct_pairs()
+    # Pairs whose detector call failed in SET_ASIDE_AFTER runs wait for the
+    # owner's review; their nodes stay unstamped so a released pair returns.
+    set_aside = failure_ledger.set_aside_ids(PAIR_FAILURE_KIND)
+    set_aside_node_ids: set[str] = set()
 
     seen_pairs: set[tuple[str, str]] = set()
     candidates: list[tuple[str, str, str]] = []
@@ -437,6 +451,9 @@ def _build_candidate_pairs(
             # arrives now, fold it in so the LLM still gets it.
             if anchor_ctx and key not in pair_anchor_context:
                 pair_anchor_context[key] = anchor_ctx
+            return
+        if _pair_item_id(a, b) in set_aside:
+            set_aside_node_ids.update(key)
             return
         # Per-node scanned-stamp short-circuit. Both sides previously
         # processed by a successful maintenance run → the pair was either
@@ -556,12 +573,9 @@ def _build_candidate_pairs(
     # endpoints are merge candidates. Catches kinship/role placeholders
     # (Jukka's son <-> Peter, Phil's mother <-> Pam) and label variants that
     # share a workplace/school/family relation but whose strings don't match.
-    try:
-        prop_data = _load_anchor_propagation_data(descriptors)
-        for a, b, anchor_ctx in _anchor_propagation_pairs(descriptors, prop_data):
-            _add_pair(a, b, "anchor_propagation", anchor_ctx=anchor_ctx)
-    except Exception as exc:
-        logger.warning("[duplicate_scan] Tier 4 failed: %s", exc, exc_info=True)
+    prop_data = _load_anchor_propagation_data(descriptors)
+    for a, b, anchor_ctx in _anchor_propagation_pairs(descriptors, prop_data):
+        _add_pair(a, b, "anchor_propagation", anchor_ctx=anchor_ctx)
 
     logger.info(
         "[duplicate_scan] Tier 4 (anchor propagation): %d new pairs",
@@ -609,7 +623,12 @@ def _build_candidate_pairs(
             "[duplicate_scan] MAX_PAIRS_PER_RUN cut %d pair(s); %d node(s) "
             "stay unstamped for the next run", len(cut), len(capped_node_ids),
         )
-    return kept, pair_anchor_context, capped_node_ids
+    if set_aside_node_ids:
+        logger.warning(
+            "[duplicate_scan] %d node(s) of set-aside pairs stay unstamped",
+            len(set_aside_node_ids),
+        )
+    return kept, pair_anchor_context, capped_node_ids | set_aside_node_ids
 
 
 def _normalize_identity_sentence(s: str) -> str:
@@ -642,17 +661,12 @@ def _identity_exact_pairs(descriptors: dict[str, dict]) -> list[tuple[str, str]]
 def _identity_similarity_pairs(descriptors: dict[str, dict]) -> list[tuple[str, str]]:
     """Tier 5b: identity-embedding cosine >= IDENTITY_SIM_THRESHOLD,
     same-type, NOT date-separated (the recurring-event guard — see the
-    tunables comment). Failure-isolated: chroma down → empty list."""
+    tunables comment). A failed Chroma read raises: the run stops before
+    any node is stamped as scanned."""
+    from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
     from app.assistant.kg_core.kg_utils.date_compare import dates_separated
 
-    try:
-        import numpy as np
-        from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
-
-        res = get_chroma_manager().node_identity_collection.get(include=["embeddings"])
-    except Exception as exc:
-        logger.warning("[duplicate_scan] Tier 5b unavailable: %s", exc)
-        return []
+    res = get_chroma_manager().node_identity_collection.get(include=["embeddings"])
 
     ids = [str(i) for i in (res.get("ids") or []) if str(i) in descriptors]
     if len(ids) < 2:
@@ -861,28 +875,16 @@ def _triage_filter_pairs(
     the nano's NO (drop), but never its YES (it never emits 'merge').
 
     Pairs are processed in batches of TRIAGE_BATCH_SIZE so the per-call prompt
-    stays under nano's context limit. A batch that fails (context overflow,
-    network error, etc.) is logged and its pairs pass through to the heavy
-    detector unfiltered — only that batch, not the entire set.
+    stays under nano's context limit. A failed batch call stops the run
+    (raise; no node is stamped). A batch answer that leaves pairs without a
+    valid verdict gets one correction naming them, then raises.
     """
     if not pairs:
-        return pairs, set()
-
-    # Sanity-check that the agent is registered before we start batching.
-    try:
-        probe_agent = DI.agent_factory.create_agent("kg_maintenance::duplicate_triage")
-        if probe_agent is None:
-            logger.warning("[duplicate_scan] triage agent unavailable — skipping pre-filter")
-            return pairs, set()
-    except Exception as exc:
-        logger.warning("[duplicate_scan] triage agent create failed: %s — skipping pre-filter", exc)
         return pairs, set()
 
     distinct_indices: set[int] = set()  # global 0-based indices into `pairs`
     distinct_reasons: dict[int, str] = {}  # global idx → triage's reason prose
     defective_indices: set[int] = set()  # identity sentences need regeneration
-    n_batches = (len(pairs) + TRIAGE_BATCH_SIZE - 1) // TRIAGE_BATCH_SIZE
-    n_batches_failed = 0
 
     for batch_start in range(0, len(pairs), TRIAGE_BATCH_SIZE):
         batch = pairs[batch_start:batch_start + TRIAGE_BATCH_SIZE]
@@ -900,48 +902,27 @@ def _triage_filter_pairs(
             for local_idx, (nid_a, nid_b, tier) in enumerate(batch)
         ]
 
-        # Fresh agent instance per batch so blackboard state doesn't carry over.
-        try:
-            batch_agent = DI.agent_factory.create_agent("kg_maintenance::duplicate_triage")
-            if batch_agent is None:
-                logger.warning(
-                    "[duplicate_scan] triage agent failed to instantiate for batch %d-%d — passing batch through",
-                    batch_start + 1, batch_start + len(batch),
-                )
-                n_batches_failed += 1
-                continue
-            response = batch_agent.action_handler(
-                Message(
-                    agent_input={"pairs_batch": json.dumps(batch_briefs, ensure_ascii=False)},
-                    scope_context=scope_context,
-                )
+        pairs_batch = json.dumps(batch_briefs, ensure_ascii=False)
+        verdicts, problems = _triage_batch(pairs_batch, len(batch), scope_context, correction=None)
+        if problems:
+            verdicts, problems = _triage_batch(
+                pairs_batch, len(batch), scope_context,
+                correction="Your previous answer was incomplete: " + "; ".join(problems)
+                + ". Return one verdict for every pair_index.",
             )
-        except Exception as exc:
-            logger.warning(
-                "[duplicate_scan] triage batch %d-%d failed: %s — passing batch through",
-                batch_start + 1, batch_start + len(batch), exc,
-            )
-            n_batches_failed += 1
-            continue
-
-        data = response.data if response and hasattr(response, "data") else {}
-        verdicts_raw = (data.get("pairs") if isinstance(data, dict) else None) or []
-        for v in verdicts_raw:
-            if not isinstance(v, dict):
-                continue
-            try:
-                local_idx_1based = int(v.get("pair_index") or 0)
-            except (TypeError, ValueError):
-                continue
-            verdict = str(v.get("verdict") or "").strip().lower()
-            if verdict == "distinct" and 1 <= local_idx_1based <= len(batch):
-                global_idx = batch_start + (local_idx_1based - 1)
+            if problems:
+                raise RuntimeError(
+                    f"[duplicate_scan] triage batch {batch_start + 1}-{batch_start + len(batch)} "
+                    f"still incomplete after one correction: {'; '.join(problems)}"
+                )
+        for local_idx_1based, (verdict, reason) in verdicts.items():
+            global_idx = batch_start + (local_idx_1based - 1)
+            if verdict == "distinct":
                 distinct_indices.add(global_idx)
-                reason = str(v.get("reason") or "").strip()
                 if reason:
                     distinct_reasons[global_idx] = reason
-            elif verdict == "defective_sentences" and 1 <= local_idx_1based <= len(batch):
-                defective_indices.add(batch_start + (local_idx_1based - 1))
+            elif verdict == "defective_sentences":
+                defective_indices.add(global_idx)
 
     # Defective identity sentences: regenerate rather than judge. The pair
     # is removed from this run (no distinct verdict, no detector call), the
@@ -963,41 +944,30 @@ def _triage_filter_pairs(
         p for i, p in enumerate(pairs)
         if i not in distinct_indices and i not in defective_indices
     ]
-    if n_batches_failed:
-        logger.warning(
-            "[duplicate_scan] %d/%d triage batches failed — their pairs flow through unfiltered",
-            n_batches_failed, n_batches,
-        )
 
     # Persist the triage's distinct verdicts so future maintenance runs
     # short-circuit these same pairs at the `_add_pair` filter instead of
     # paying nano-LLM cost on them every week. Without this, the same
     # ~95-97% of candidate pairs get re-evaluated every run.
     if distinct_indices:
-        try:
-            from app.assistant.kg_maintenance.verdict_store import (
-                record_distinct_pairs_bulk,
-            )
-            # 3-tuples carry the triage's per-pair reason into the verdict's
-            # reasoning column — these are permanent-ish decisions and used
-            # to have no audit trail at all (audit P1.4).
-            distinct_pair_ids = [
-                (pairs[i][0], pairs[i][1], distinct_reasons.get(i))
-                for i in distinct_indices
-            ]
-            record_distinct_pairs_bulk(
-                distinct_pair_ids,
-                decided_by="kg_maintenance::duplicate_triage",
-                memo=(
-                    "nano triage scored as distinct in duplicate_scan; "
-                    "tiers vary across batch"
-                ),
-            )
-        except Exception as exc:
-            logger.warning(
-                "[duplicate_scan] failed to persist %d triage distinct verdicts: %s",
-                len(distinct_indices), exc,
-            )
+        from app.assistant.kg_maintenance.verdict_store import (
+            record_distinct_pairs_bulk,
+        )
+        # 3-tuples carry the triage's per-pair reason into the verdict's
+        # reasoning column — these are permanent-ish decisions and used
+        # to have no audit trail at all (audit P1.4).
+        distinct_pair_ids = [
+            (pairs[i][0], pairs[i][1], distinct_reasons.get(i))
+            for i in distinct_indices
+        ]
+        record_distinct_pairs_bulk(
+            distinct_pair_ids,
+            decided_by="kg_maintenance::duplicate_triage",
+            memo=(
+                "nano triage scored as distinct in duplicate_scan; "
+                "tiers vary across batch"
+            ),
+        )
 
     logger.info(
         "[duplicate_scan] Triage: %d pairs → %d survived (%d dropped as "
@@ -1007,27 +977,60 @@ def _triage_filter_pairs(
     return survivors, defective_node_ids
 
 
+def _triage_batch(
+    pairs_batch: str, batch_len: int, scope_context, *, correction: str | None,
+) -> tuple[dict[int, tuple[str, str]], list[str]]:
+    """One triage call on one batch. Returns ({pair_index: (verdict, reason)},
+    problems); problems name every pair_index without a valid verdict. A
+    failed call raises."""
+    # Fresh agent instance per call so blackboard state doesn't carry over.
+    agent = DI.agent_factory.create_agent("kg_maintenance::duplicate_triage")
+    if agent is None:
+        raise RuntimeError("[duplicate_scan] could not create kg_maintenance::duplicate_triage")
+    agent_input = {"pairs_batch": pairs_batch}
+    if correction:
+        agent_input["correction"] = correction
+    response = agent.action_handler(Message(agent_input=agent_input, scope_context=scope_context))
+    data = getattr(response, "data", None)
+    if not isinstance(data, dict) or not isinstance(data.get("pairs"), list):
+        raise RuntimeError("[duplicate_scan] triage returned no pairs list")
+
+    verdicts: dict[int, tuple[str, str]] = {}
+    problems: list[str] = []
+    for v in data["pairs"]:
+        idx = v.get("pair_index") if isinstance(v, dict) else None
+        if not isinstance(idx, int) or not 1 <= idx <= batch_len:
+            problems.append(f"pair_index {idx!r} is not one of 1-{batch_len}")
+            continue
+        verdict = str(v.get("verdict") or "").strip().lower()
+        if verdict not in TRIAGE_VERDICTS:
+            problems.append(f"pair_index {idx} verdict {verdict!r} is not one of {sorted(TRIAGE_VERDICTS)}")
+            continue
+        if idx in verdicts and verdicts[idx][0] != verdict:
+            problems.append(f"pair_index {idx} has conflicting verdicts")
+            continue
+        verdicts[idx] = (verdict, str(v.get("reason") or "").strip())
+    missing = [i for i in range(1, batch_len + 1) if i not in verdicts]
+    if missing:
+        problems.append(f"no verdict for pair_index {missing}")
+    return verdicts, problems
+
+
 def _null_identity_sentences(node_ids: set[str]) -> None:
     """Null identity_sentence + identity_inputs_hash so the nightly refresh
     regenerates them (triage verdict: the sentences fail to discriminate).
     Preserves updated_at verbatim — a projection reset, not a content change."""
     from sqlalchemy import update as sql_update
 
+    from app.assistant.kg.db.knowledge_graph_db_sqlite import Node
     from app.models.db_manager import get_db_manager
 
-    try:
-        from app.assistant.kg.db.knowledge_graph_db_sqlite import Node
-        with get_db_manager().transaction(op="duplicate_scan.defective_sentences") as s:
-            s.execute(
-                sql_update(Node)
-                .where(Node.id.in_(list(node_ids)))
-                .values(identity_sentence=None, identity_inputs_hash=None,
-                        updated_at=Node.updated_at)
-            )
-    except Exception as exc:
-        logger.error(
-            "[duplicate_scan] failed to null %d defective identity "
-            "sentence(s): %s", len(node_ids), exc,
+    with get_db_manager().transaction(op="duplicate_scan.defective_sentences") as s:
+        s.execute(
+            sql_update(Node)
+            .where(Node.id.in_(list(node_ids)))
+            .values(identity_sentence=None, identity_inputs_hash=None,
+                    updated_at=Node.updated_at)
         )
 
 
@@ -1047,11 +1050,14 @@ def _confirm_pairs_with_llm(
     Returns (merge_actions, failed_node_ids). Each merge_action is tagged
     with its source pair under ``_source_pair`` so _write_findings can drop
     actions naming foreign ids (audit P1.1). failed_node_ids are the nodes
-    of pairs whose detector call errored — they were NOT adjudicated and
-    must not be stamped as scanned (audit P1.2).
+    of defective-sentence pairs — they were NOT adjudicated and must not be
+    stamped as scanned (audit P1.2). A failed triage or detector call
+    raises: the run stops and nothing is stamped.
 
     No DB session is open during this function.
     """
+    from app.assistant.kg import failure_ledger
+
     pair_anchor_context = pair_anchor_context or {}
 
     # Pre-filter cheap: nano-class triage drops obviously-distinct pairs so the
@@ -1142,6 +1148,10 @@ def _confirm_pairs_with_llm(
                 ],
             }
 
+        # A failed call stops the run before any node is stamped; the pair is
+        # counted in the failure ledger so one pair that always fails is set
+        # aside instead of blocking the scan every week.
+        item_id = _pair_item_id(nid_a, nid_b)
         try:
             response = agent.action_handler(
                 Message(
@@ -1152,28 +1162,28 @@ def _confirm_pairs_with_llm(
                     scope_context=scope_context,
                 )
             )
-            if response and response.data:
-                actions = response.data.get("merge_actions") or []
-                for a in actions:
-                    if isinstance(a, dict):
-                        # Provenance for _write_findings' foreign-id check.
-                        a["_source_pair"] = [nid_a, nid_b]
-                merge_actions.extend(actions)
-                logger.info(
-                    "[duplicate_scan] Pair %d/%d '%s' vs '%s' [%s] → %d merge actions",
-                    idx + 1, len(pairs),
-                    desc_a["label"][:30], desc_b["label"][:30],
-                    tier, len(actions),
-                )
-        except Exception:
-            # This pair was NOT adjudicated — keep its nodes unstamped so
-            # the next run retries them instead of permanently skipping.
-            failed_node_ids.update((nid_a, nid_b))
-            logger.warning(
-                "[duplicate_scan] detector call failed for pair %d (%s vs %s) "
-                "— nodes stay unstamped", idx + 1, nid_a[:8], nid_b[:8],
-                exc_info=True,
+            data = getattr(response, "data", None)
+            if not isinstance(data, dict) or not isinstance(data.get("merge_actions"), list):
+                raise RuntimeError("[duplicate_scan] duplicate_detector returned no merge_actions list")
+        except Exception as exc:
+            failure_ledger.record_failure(
+                PAIR_FAILURE_KIND, item_id, exc,
+                label=f"{desc_a['label']} / {desc_b['label']}",
             )
+            raise
+        failure_ledger.clear(PAIR_FAILURE_KIND, item_id)
+        actions = data["merge_actions"]
+        for a in actions:
+            if isinstance(a, dict):
+                # Provenance for _write_findings' foreign-id check.
+                a["_source_pair"] = [nid_a, nid_b]
+        merge_actions.extend(actions)
+        logger.info(
+            "[duplicate_scan] Pair %d/%d '%s' vs '%s' [%s] → %d merge actions",
+            idx + 1, len(pairs),
+            desc_a["label"][:30], desc_b["label"][:30],
+            tier, len(actions),
+        )
 
     return merge_actions, failed_node_ids
 
@@ -1273,8 +1283,7 @@ def run(ctx: PipelineContext) -> dict:
         }
 
     # Phase 3 — LLM confirmation (no session open). Raises (no stamping at
-    # all) when the detector agent can't even be instantiated — previously
-    # that case silently failed every pair and still stamped the graph.
+    # all) on any failed triage or detector call.
     merge_actions, failed_node_ids = _confirm_pairs_with_llm(
         pairs, descriptors, scope_context,
         pair_anchor_context=pair_anchor_context,
@@ -1286,10 +1295,11 @@ def run(ctx: PipelineContext) -> dict:
     # Phase 5 — stamp ADJUDICATED nodes as scanned. This is the watermark
     # that lets the next run's pair generator skip pairs of two already-
     # scanned nodes via `_add_pair`. A node with zero candidate pairs WAS
-    # evaluated by the tier 1-4 generators against every other node, so it
+    # evaluated by the tier 1-5 generators against every other node, so it
     # stamps too. Excluded (audit P1.2): nodes of pairs cut by
-    # MAX_PAIRS_PER_RUN and nodes of pairs whose detector call errored —
-    # stamping those would permanently blind the scanner to them.
+    # MAX_PAIRS_PER_RUN, of set-aside pairs and of defective-sentence
+    # pairs — stamping those would permanently blind the scanner to them.
+    # A failed call never reaches this point.
     excluded = capped_node_ids | failed_node_ids
     stamp_ids = [nid for nid in descriptors.keys() if nid not in excluded]
     n_stamped = _stamp_nodes_scanned(stamp_ids)

@@ -3,7 +3,7 @@
 
 The maintenance pipeline calls goal_outcome_detector DIRECTLY (no manager
 ingress sets scope), and the agent declares system_context_items:
-resource_assistant_data — whose resolution requires a scope_context. Without
+resource_assistant_data â€” whose resolution requires a scope_context. Without
 it the nightly 02:55 run failed loud at prompt construction
 ("scope_context is required for resource resolution"). The fix loads a
 pipeline scope and sets it on the agent's blackboard before action_handler.
@@ -34,15 +34,30 @@ class _FakeBlackboard:
 
 
 class _FakeAgent:
-    def __init__(self):
+    def __init__(self, verdicts=None):
         self.blackboard = _FakeBlackboard()
         self.scope_at_call = "<<never called>>"
+        self.verdicts = list(verdicts or [])
+        self.inputs = []
 
     def action_handler(self, message):
-        # Capture what scope_context was on the blackboard at invocation time —
+        # Capture what scope_context was on the blackboard at invocation time â€”
         # the whole point of the fix is that it's set BEFORE we run.
         self.scope_at_call = self.blackboard.get_state_value("scope_context")
-        return SimpleNamespace(data={"verdicts": []})
+        self.inputs.append(message.agent_input)
+        return SimpleNamespace(data={"verdicts": self.verdicts.pop(0) if self.verdicts else []})
+
+
+def _no_signal(gid):
+    return {"goal_node_id": gid, "outcome": "no_signal", "confidence": 0.0, "reasoning": "nothing"}
+
+
+def _patch(monkeypatch, fake_agent):
+    monkeypatch.setattr(step.DI.agent_factory, "create_agent", lambda name: fake_agent)
+    monkeypatch.setattr(step, "load_scope_for_source", lambda **k: "SENTINEL_SCOPE")
+    monkeypatch.setattr(step, "_fetch_recent_evidence",
+                        lambda label, sentence, cutoff: [{"text": "walked the dogs"}])
+    monkeypatch.setattr(step, "_serialize_for_agent", lambda has_evidence: "payload")
 
 
 def _mk_goal(label):
@@ -58,18 +73,50 @@ def _mk_goal(label):
 
 
 def test_goal_outcome_detect_sets_scope_before_agent(monkeypatch):
-    _mk_goal("Take Dogs Out")
+    gid = _mk_goal("Take Dogs Out")
 
-    fake_agent = _FakeAgent()
-    monkeypatch.setattr(step.DI.agent_factory, "create_agent", lambda name: fake_agent)
-    monkeypatch.setattr(step, "load_scope_for_source", lambda **k: "SENTINEL_SCOPE")
-    # Force non-empty evidence so the run reaches the agent call.
-    monkeypatch.setattr(step, "_fetch_recent_evidence",
-                        lambda label, sentence, cutoff: [{"text": "walked the dogs"}])
-    monkeypatch.setattr(step, "_serialize_for_agent", lambda has_evidence: "payload")
+    fake_agent = _FakeAgent([[_no_signal(gid)]])
+    # Forces non-empty evidence so the run reaches the agent call.
+    _patch(monkeypatch, fake_agent)
 
     ctx = PipelineContext.for_date(pipeline_id="kg_goal_outcome_detect")
-    step.run(ctx)  # previously raised PromptRenderError via the agent
+    result = step.run(ctx)  # previously raised PromptRenderError via the agent
 
     # The agent ran, and scope_context was set on its blackboard beforehand.
     assert fake_agent.scope_at_call == "SENTINEL_SCOPE"
+    assert result["no_signal"] == 1
+
+
+def test_missing_verdict_gets_one_correction_then_raises(monkeypatch):
+    gid = _mk_goal("Learn Finnish")
+    fake_agent = _FakeAgent([[], []])
+    _patch(monkeypatch, fake_agent)
+
+    import pytest
+    with pytest.raises(RuntimeError, match="after one correction"):
+        step.run(PipelineContext.for_date(pipeline_id="kg_goal_outcome_detect"))
+    assert len(fake_agent.inputs) == 2
+    assert fake_agent.inputs[0]["correction"] is None
+    assert gid in fake_agent.inputs[1]["correction"]
+
+
+def test_corrected_answer_is_used(monkeypatch):
+    gid = _mk_goal("Run a marathon")
+    fake_agent = _FakeAgent([[], [_no_signal(gid)]])
+    _patch(monkeypatch, fake_agent)
+
+    result = step.run(PipelineContext.for_date(pipeline_id="kg_goal_outcome_detect"))
+    assert result["no_signal"] == 1 and len(fake_agent.inputs) == 2
+
+
+def test_failed_agent_call_raises(monkeypatch):
+    _mk_goal("Fix the fence")
+
+    class _Boom(_FakeAgent):
+        def action_handler(self, message):
+            raise RuntimeError("LLM down")
+
+    _patch(monkeypatch, _Boom())
+    import pytest
+    with pytest.raises(RuntimeError, match="LLM down"):
+        step.run(PipelineContext.for_date(pipeline_id="kg_goal_outcome_detect"))

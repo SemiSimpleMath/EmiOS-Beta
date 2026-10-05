@@ -52,14 +52,13 @@ class KGMaintenancePipeline:
         force: bool = False,
     ) -> dict:
         """
-        Returns {"run_id": str, "status": "success"|"error",
-                 "steps": {step_name: step_result | {"error": str}},
-                 "failed_steps": [names]  (present when status="error")}.
+        Returns {"run_id": str, "status": "success", "steps": {step_name: step_result}}.
 
-        Each step runs independently; a failure in one step is recorded in the
-        summary and the pipeline continues to the next step. The top-level
-        status makes those recorded failures count at the routine layer
-        (backoff / auto-disable / ticket) instead of reading as success.
+        A failed step stops the run (owner, 2026-10-05: any failed KG call
+        stops processing): the remaining steps do not run, and the step's
+        exception propagates so the routine layer records the run as an error
+        (backoff / auto-disable / ticket). Each step leaves its unfinished
+        work pending for the next run.
 
         skip_steps: list of step names to skip.
         only_steps: if provided, only these steps run (overrides skip_steps).
@@ -83,12 +82,12 @@ class KGMaintenancePipeline:
                 return
             try:
                 result = fn()
-                summary["steps"][name] = result
-                logger.info("[KGMaintenancePipeline] %s: %s", name, result)
-            except Exception as e:
-                logger.error("[KGMaintenancePipeline] %s failed: %s", name, e)
-                logger.debug("[KGMaintenancePipeline] %s failed", name, exc_info=True)
-                summary["steps"][name] = {"error": str(e)[:300]}
+            except Exception:
+                logger.error("[KGMaintenancePipeline] run_id=%s stopped: step %s failed after %s",
+                             ctx.run_id, name, list(summary["steps"]), exc_info=True)
+                raise
+            summary["steps"][name] = result
+            logger.info("[KGMaintenancePipeline] %s: %s", name, result)
 
         # Lifecycle GC first: clear deletion residue (orphaned evidence,
         # dead-active verdicts, edge-vector ghosts) so the scans below read
@@ -156,13 +155,7 @@ class KGMaintenancePipeline:
             _investigate_findings_for_run(ctx.run_id)
         ))
 
-        failed = sorted(
-            name for name, result in summary["steps"].items()
-            if isinstance(result, dict) and "error" in result
-        )
-        summary["status"] = "error" if failed else "success"
-        if failed:
-            summary["failed_steps"] = failed
+        summary["status"] = "success"
         logger.info(
             "[KGMaintenancePipeline] Completed run_id=%s status=%s steps=%s",
             ctx.run_id, summary["status"], list(summary["steps"]),

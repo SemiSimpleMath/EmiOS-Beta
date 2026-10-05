@@ -73,26 +73,23 @@ def run(ctx=None) -> Dict[str, Any]:
             counts["dead_verdicts_superseded"] = r.rowcount or 0
 
     # Chroma edge-vector ghost sweep — outside the SQL transaction (chroma is
-    # not transactional with SQLite; best-effort, the next run retries).
-    try:
-        from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
-        cm = get_chroma_manager()
-        edge_collection = getattr(cm, "edge_collection", None)
-        if edge_collection is not None:
-            chroma_ids = [str(i) for i in (edge_collection.get().get("ids") or [])]
-            if chroma_ids:
-                with get_db_manager().read_session() as s:
-                    live = {
-                        str(r[0]) for r in s.execute(
-                            text("SELECT id FROM kg_edge_metadata")
-                        ).fetchall()
-                    }
-                ghosts = [cid for cid in chroma_ids if cid not in live]
-                for cid in ghosts:
-                    cm.delete_edge_embedding(cid)
-                counts["edge_vector_ghosts_removed"] = len(ghosts)
-    except Exception as exc:
-        logger.error("[lifecycle_gc] chroma edge-ghost sweep failed (next run retries): %s", exc)
+    # not transactional with SQLite). A failed Chroma call raises and stops
+    # the run; the SQL sweep above is committed and the next run retries.
+    from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
+    cm = get_chroma_manager()
+    chroma_ids = [str(i) for i in (cm.edge_collection.get().get("ids") or [])]
+    if chroma_ids:
+        with get_db_manager().read_session() as s:
+            live = {
+                str(r[0]) for r in s.execute(
+                    text("SELECT id FROM kg_edge_metadata")
+                ).fetchall()
+            }
+        ghosts = [cid for cid in chroma_ids if cid not in live]
+        if ghosts:
+            # The collection directly: delete_edge_embedding logs and swallows.
+            cm.edge_collection.delete(ids=ghosts)
+        counts["edge_vector_ghosts_removed"] = len(ghosts)
 
     logger.info("[lifecycle_gc] %s", counts)
     return counts

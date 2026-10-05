@@ -40,6 +40,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.assistant.ServiceLocator.service_locator import DI
+from app.assistant.kg import failure_ledger
 from app.assistant.kg_maintenance.store import get_findings
 from app.assistant.pipelines.context import PipelineContext
 from app.assistant.utils.logging_config import get_logger
@@ -57,6 +58,47 @@ logger = get_logger(__name__)
 # leads of later chunks get rolled into the first chunk's lead in a
 # follow-up sweep (deferred — clusters this large are rare).
 MAX_CLUSTER_SIZE_PER_LLM_CALL = 12
+
+FAILURE_KIND = "kg_finding_cluster"
+
+
+def _problems(data: Any, chunk_ids: set) -> list[str]:
+    """What is missing or malformed in a verdict; empty when it is complete."""
+    if not isinstance(data, dict) or not isinstance(data.get("is_same_root"), bool):
+        return ["is_same_root must be true or false"]
+    if not data["is_same_root"]:
+        return []
+    out = []
+    if data.get("lead_finding_id") not in chunk_ids:
+        out.append(f"lead_finding_id {data.get('lead_finding_id')!r} is not one of the cluster's finding_ids")
+    members = data.get("member_finding_ids")
+    if not isinstance(members, list) or not members:
+        out.append("member_finding_ids is empty")
+    else:
+        foreign = [m for m in members if m not in chunk_ids]
+        if foreign:
+            out.append(f"member_finding_ids {foreign} are not among the cluster's finding_ids")
+    if not str(data.get("root_question") or "").strip():
+        out.append("root_question is empty")
+    return out
+
+
+def _resolve(agent, payload: str, chunk_ids: set) -> dict:
+    """One cluster verdict, complete: an incomplete answer gets one correction
+    naming what is missing, then raises."""
+    def ask(correction):
+        result = agent.action_handler(Message(agent_input={"candidate_cluster": payload,
+                                                           "correction": correction}))
+        return getattr(result, "data", None)
+
+    data = ask(None)
+    problems = _problems(data, chunk_ids)
+    if problems:
+        data = ask("Your previous answer was incomplete: " + "; ".join(problems) + ".")
+        problems = _problems(data, chunk_ids)
+        if problems:
+            raise RuntimeError(f"[cluster_resolve] still incomplete after one correction: {'; '.join(problems)}")
+    return data
 
 
 def run(ctx: PipelineContext, *, max_clusters: int | None = None) -> dict:
@@ -93,6 +135,8 @@ def run(ctx: PipelineContext, *, max_clusters: int | None = None) -> dict:
     processed_clusters = 0
     deferred = 0
 
+    set_aside = failure_ledger.set_aside_ids(FAILURE_KIND)
+    candidates = {pid: f for pid, f in candidates.items() if pid not in set_aside}
     for primary_node_id, findings in candidates.items():
         if max_clusters is not None and processed_clusters >= max_clusters:
             deferred = len(candidates) - processed_clusters
@@ -110,46 +154,25 @@ def run(ctx: PipelineContext, *, max_clusters: int | None = None) -> dict:
                 continue
             examined += 1
 
+            # A failed call stops the run (the cluster stays pending; one that
+            # keeps failing is set aside). A "same root" answer missing its
+            # lead, members or question gets one correction, then raises.
             payload = _serialize_cluster_for_llm(primary_node_id, chunk)
-            agent_input = {"candidate_cluster": payload}
-            try:
-                result = agent.action_handler(Message(agent_input=agent_input))
-            except Exception as e:
-                logger.error(
-                    "[cluster_resolve] agent call failed for primary=%s: %s",
-                    primary_node_id, e, exc_info=True,
-                )
-                continue
-
-            data = getattr(result, "data", None)
-            if not isinstance(data, dict):
-                logger.warning(
-                    "[cluster_resolve] agent returned non-dict for primary=%s: %s",
-                    primary_node_id, type(data).__name__,
-                )
-                continue
-
-            if not data.get("is_same_root"):
-                continue
-
-            lead_id = data.get("lead_finding_id")
-            member_ids = list(data.get("member_finding_ids") or [])
-            root_question = (data.get("root_question") or "").strip()
-            if not lead_id or not member_ids or not root_question:
-                logger.warning(
-                    "[cluster_resolve] agent said is_same_root but lead/members/question missing: %s",
-                    {k: data.get(k) for k in ("lead_finding_id", "member_finding_ids", "root_question")},
-                )
-                continue
-            # Lead must be one of the chunk members; siblings must be a subset.
             chunk_ids = {f["id"] for f in chunk}
-            if lead_id not in chunk_ids:
-                logger.warning(
-                    "[cluster_resolve] lead_finding_id %s not in candidate chunk; skipping",
-                    lead_id,
-                )
+            try:
+                data = _resolve(agent, payload, chunk_ids)
+            except Exception as exc:
+                failure_ledger.record_failure(FAILURE_KIND, primary_node_id, exc,
+                                              label=chunk[0].get("primary_label"))
+                raise
+            failure_ledger.clear(FAILURE_KIND, primary_node_id)
+
+            if not data["is_same_root"]:
                 continue
-            member_ids = [m for m in member_ids if m in chunk_ids]
+
+            lead_id = data["lead_finding_id"]
+            member_ids = list(data["member_finding_ids"])
+            root_question = data["root_question"].strip()
             if lead_id not in member_ids:
                 member_ids.append(lead_id)
             sibling_ids = [m for m in member_ids if m != lead_id]

@@ -833,7 +833,9 @@ def api_bulk_action():
 
 @kg_maintenance_bp.route("/api/execute_approved", methods=["POST"])
 def api_execute_approved():
-    """Execute all findings currently in 'approved' status."""
+    """Execute all findings currently in 'approved' status. The batch stops at
+    the first failed finding (marked execute_error, retryable); the rest stay
+    approved for the next run."""
     try:
         from app.assistant.pipelines.kg_maintenance_pipeline.step_execute_findings import (
             execute_single_finding,
@@ -841,27 +843,28 @@ def api_execute_approved():
 
         approved = get_findings(status="approved", limit=500)
         executed = 0
-        errors = 0
         results: list[dict] = []
 
         for finding in approved:
             fid = finding["id"]
             try:
                 result = execute_single_finding(finding)
-                if result.get("executed"):
-                    set_status(fid, "executed", executed_by="ui_batch", execution_notes=result.get("detail", ""))
-                    executed += 1
-                else:
-                    set_status(fid, "rejected", executed_by="ui_batch", execution_notes=result.get("detail", ""))
-                results.append({"id": fid, **result})
             except Exception as exc:
-                logger.error("[kg_maintenance] execute_approved failed id=%s: %s", fid, exc)
-                logger.debug("[kg_maintenance] exception details", exc_info=True)
+                logger.error("[kg_maintenance] execute_approved stopped at id=%s: %s", fid, exc, exc_info=True)
                 set_status(fid, "execute_error", executed_by="ui_batch", execution_notes=str(exc)[:5000])
-                errors += 1
                 results.append({"id": fid, "executed": False, "detail": str(exc)[:2000]})
+                return jsonify({
+                    "error": f"stopped at finding {fid}: {exc}",
+                    "executed": executed, "errors": 1, "stopped_at": fid, "details": results,
+                }), 500
+            if result.get("executed"):
+                set_status(fid, "executed", executed_by="ui_batch", execution_notes=result.get("detail", ""))
+                executed += 1
+            else:
+                set_status(fid, "rejected", executed_by="ui_batch", execution_notes=result.get("detail", ""))
+            results.append({"id": fid, **result})
 
-        return jsonify({"executed": executed, "errors": errors, "details": results})
+        return jsonify({"executed": executed, "errors": 0, "details": results})
     except Exception:
         logger.debug("[kg_maintenance] execute_approved failed", exc_info=True)
         raise

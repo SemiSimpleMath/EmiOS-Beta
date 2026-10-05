@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from app.assistant.ServiceLocator.service_locator import DI
-from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
+from app.assistant.kg import failure_ledger
 from app.assistant.kg_maintenance.store import upsert_finding
 from app.assistant.pipelines.context import PipelineContext
 from app.assistant.utils.filename_safety import safe_filename
@@ -57,6 +57,7 @@ PER_SUBJECT_SENTENCE_CAP = 5
 DEFAULT_SUBJECT_LIMIT = 10
 FINDING_TYPE = "synthetic_fact_proposal"  # Generic — not wiki-specific
 PRODUCER = "wiki_connection_investigator"
+FAILURE_KIND = "kg_wiki_inference"
 
 
 def run(ctx: PipelineContext, *, subject_limit: Optional[int] = None) -> dict:
@@ -75,7 +76,8 @@ def run(ctx: PipelineContext, *, subject_limit: Optional[int] = None) -> dict:
         logger.info("[wiki_inference] no prose dir at %s; nothing to do", prose_dir)
         return _empty_result()
 
-    subjects = _pick_subjects_to_examine(prose_dir, limit=subject_limit)
+    subjects = _pick_subjects_to_examine(
+        prose_dir, limit=subject_limit, skip_ids=failure_ledger.set_aside_ids(FAILURE_KIND))
     if not subjects:
         logger.info("[wiki_inference] no subjects to examine")
         return _empty_result()
@@ -92,6 +94,9 @@ def run(ctx: PipelineContext, *, subject_limit: Optional[int] = None) -> dict:
     skipped_already_in_kg = 0
     skipped_duplicate_finding = 0
 
+    # A failed call or write stops the run before the page is marked
+    # examined, so it is read again next run; a subject that keeps failing
+    # is set aside for review.
     for subject in subjects:
         subjects_examined += 1
         page_path = prose_dir / f"{safe_filename(subject['label'])}.md"
@@ -111,13 +116,12 @@ def run(ctx: PipelineContext, *, subject_limit: Optional[int] = None) -> dict:
             }
             result = agent.action_handler(Message(agent_input=agent_input))
             data = getattr(result, "data", None)
-            if not isinstance(data, dict):
-                logger.warning(
-                    "[wiki_inference] non-dict from agent for %s: %s",
-                    subject["label"], type(data).__name__,
+            if not isinstance(data, dict) or not isinstance(data.get("sentences"), list):
+                raise RuntimeError(
+                    f"[wiki_inference] wiki_connection_investigator returned no sentences list "
+                    f"for {subject['label']!r}"
                 )
-                continue
-            sentences = list(data.get("sentences") or [])
+            sentences = data["sentences"]
 
             for s in sentences[:PER_SUBJECT_SENTENCE_CAP]:
                 if not isinstance(s, dict):
@@ -144,21 +148,19 @@ def run(ctx: PipelineContext, *, subject_limit: Optional[int] = None) -> dict:
                     skipped_duplicate_finding += 1
                     continue
 
-                if _write_wiki_inferred_finding(
+                _write_wiki_inferred_finding(
                     sentence_text=sentence_text,
                     subject=subject,
                     inference=s,
                     pipeline_run_id=ctx.run_id,
-                ):
-                    emitted += 1
+                )
+                emitted += 1
 
             _write_examined_sidecar(page_path)
-
-        except Exception:
-            logger.error(
-                "[wiki_inference] subject %s crashed (continuing)",
-                subject.get("label"), exc_info=True,
-            )
+        except Exception as exc:
+            failure_ledger.record_failure(FAILURE_KIND, subject["id"], exc, label=subject["label"])
+            raise
+        failure_ledger.clear(FAILURE_KIND, subject["id"])
 
     logger.info(
         "[wiki_inference] subjects=%d findings_written=%d skipped_low_conf=%d skipped_already=%d skipped_dup_finding=%d",
@@ -206,53 +208,43 @@ def _write_examined_sidecar(page_path: Path) -> None:
     """Mark a page as examined so the next run skips it until the page
     is rewritten (page mtime > sidecar.examined_at_epoch)."""
     sidecar = page_path.with_suffix(".wiki_inference.json")
-    try:
-        sidecar.write_text(
-            json.dumps({
-                "examined_at_epoch": page_path.stat().st_mtime,
-                "examined_at_iso": datetime.now(timezone.utc).isoformat(),
-            }),
-            encoding="utf-8",
-        )
-    except Exception as e:
-        logger.warning("[wiki_inference] sidecar write failed for %s: %s", page_path, e)
+    sidecar.write_text(
+        json.dumps({
+            "examined_at_epoch": page_path.stat().st_mtime,
+            "examined_at_iso": datetime.now(timezone.utc).isoformat(),
+        }),
+        encoding="utf-8",
+    )
 
 
 def _read_prose_page(prose_dir: Path, label: str) -> Optional[str]:
     p = prose_dir / f"{safe_filename(label)}.md"
     if not p.exists():
         return None
-    try:
-        return p.read_text(encoding="utf-8", errors="replace")
-    except Exception as e:
-        logger.warning("[wiki_inference] read failed for %s: %s", p, e)
-        return None
+    return p.read_text(encoding="utf-8", errors="replace")
 
 
-def _pick_subjects_to_examine(prose_dir: Path, *, limit: int) -> List[Dict[str, Any]]:
+def _pick_subjects_to_examine(prose_dir: Path, *, limit: int, skip_ids: set) -> List[Dict[str, Any]]:
     """Pick the N subjects whose prose page is freshest AND who haven't
-    been examined since their last page write (sidecar gate)."""
+    been examined since their last page write (sidecar gate). Set-aside
+    subjects (``skip_ids``) wait for the owner's review."""
     from app.assistant.kg.db.knowledge_graph_db_sqlite import Node
 
     candidates: List[tuple[str, float]] = []
-    try:
-        for p in prose_dir.iterdir():
-            if not p.is_file() or p.suffix != ".md":
-                continue
-            label = p.stem
-            sidecar = p.with_suffix(".wiki_inference.json")
-            page_mtime = p.stat().st_mtime
-            if sidecar.exists():
-                try:
-                    last = json.loads(sidecar.read_text(encoding="utf-8")).get("examined_at_epoch", 0)
-                    if last >= page_mtime:
-                        continue
-                except Exception:
-                    pass
-            candidates.append((label, page_mtime))
-    except Exception as e:
-        logger.warning("[wiki_inference] prose dir scan failed: %s", e)
-        return []
+    for p in prose_dir.iterdir():
+        if not p.is_file() or p.suffix != ".md":
+            continue
+        label = p.stem
+        sidecar = p.with_suffix(".wiki_inference.json")
+        page_mtime = p.stat().st_mtime
+        if sidecar.exists():
+            try:
+                last = json.loads(sidecar.read_text(encoding="utf-8")).get("examined_at_epoch", 0)
+                if last >= page_mtime:
+                    continue
+            except ValueError:
+                pass  # a corrupt sidecar: examine the page again, which rewrites it
+        candidates.append((label, page_mtime))
 
     candidates.sort(key=lambda t: t[1], reverse=True)
     candidates = candidates[: limit * 3]
@@ -273,7 +265,7 @@ def _pick_subjects_to_examine(prose_dir: Path, *, limit: int) -> List[Dict[str, 
 
     out: List[Dict[str, Any]] = []
     for label, mtime in candidates:
-        if label in by_label:
+        if label in by_label and by_label[label]["id"] not in skip_ids:
             entry = dict(by_label[label])
             entry["page_mtime"] = mtime
             out.append(entry)
@@ -393,35 +385,19 @@ def _wiki_finding_already_exists(*, primary_node_id: str, sentence_text: str) ->
     h = _canonical_sentence_hash(sentence_text)
     session = get_session()
     try:
-        # SQLite JSON_EXTRACT works on the JSON column; portable enough
-        # within this codebase. Pythonic fallback if not.
+        # SQLite JSON_EXTRACT works on the JSON column (JSON1 is built in).
         from sqlalchemy import text as sql_text
-        try:
-            row = session.execute(
-                sql_text(
-                    "SELECT 1 FROM kg_maintenance_finding "
-                    "WHERE finding_type = :ft "
-                    "  AND primary_node_id = :pid "
-                    "  AND json_extract(evidence_json, '$.sentence_hash') = :h "
-                    "LIMIT 1"
-                ),
-                {"ft": FINDING_TYPE, "pid": primary_node_id, "h": h},
-            ).first()
-            return row is not None
-        except Exception:
-            # JSON-extract may not be available on every SQLite build;
-            # fall back to scanning python-side.
-            rows = (
-                session.query(KGMaintenanceFinding)
-                .filter(KGMaintenanceFinding.finding_type == FINDING_TYPE)
-                .filter(KGMaintenanceFinding.primary_node_id == primary_node_id)
-                .all()
-            )
-            for r in rows:
-                ev = r.evidence_json or {}
-                if isinstance(ev, dict) and ev.get("sentence_hash") == h:
-                    return True
-            return False
+        row = session.execute(
+            sql_text(
+                "SELECT 1 FROM kg_maintenance_finding "
+                "WHERE finding_type = :ft "
+                "  AND primary_node_id = :pid "
+                "  AND json_extract(evidence_json, '$.sentence_hash') = :h "
+                "LIMIT 1"
+            ),
+            {"ft": FINDING_TYPE, "pid": primary_node_id, "h": h},
+        ).first()
+        return row is not None
     finally:
         session.close()
 
@@ -432,12 +408,12 @@ def _write_wiki_inferred_finding(
     subject: Dict[str, Any],
     inference: Dict[str, Any],
     pipeline_run_id: Optional[str],
-) -> bool:
+) -> None:
     """Write one wiki_inferred_fact finding. The maintenance UI surfaces
     these to the user; the user reviews + fills any missing dates +
     explicitly approves before any KG mutation. NEVER auto-applied.
 
-    Returns True on success.
+    A failed write raises: the page is not marked examined.
     """
     confidence_val = inference.get("confidence")
     try:
@@ -479,22 +455,14 @@ def _write_wiki_inferred_finding(
         f"(conf={confidence})"
     )
 
-    try:
-        upsert_finding(
-            finding_type=FINDING_TYPE,
-            primary_node_id=subject["id"],
-            suggested_action="review",
-            reason=reason,
-            confidence=confidence,
-            priority="low",
-            agent_name="wiki_connection_investigator",
-            evidence=evidence,
-            pipeline_run_id=pipeline_run_id,
-        )
-        return True
-    except Exception:
-        logger.error(
-            "[wiki_inference] finding write failed for subject=%s",
-            subject.get("label"), exc_info=True,
-        )
-        return False
+    upsert_finding(
+        finding_type=FINDING_TYPE,
+        primary_node_id=subject["id"],
+        suggested_action="review",
+        reason=reason,
+        confidence=confidence,
+        priority="low",
+        agent_name="wiki_connection_investigator",
+        evidence=evidence,
+        pipeline_run_id=pipeline_run_id,
+    )

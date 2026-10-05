@@ -3,3 +3,7 @@ Triage the following batch of candidate duplicate pairs. For each pair, decide w
 {{ pairs_batch }}
 
 Return one verdict per pair, identified by `pair_index`.
+{% if correction %}
+
+{{ correction }}
+{% endif %}

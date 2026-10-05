@@ -9,3 +9,7 @@ Type: {{ agent_input.node_type }}
 {% endfor %}
 
 Write the consolidated digest of these rows.
+{% if agent_input.correction %}
+
+{{ agent_input.correction }}
+{% endif %}

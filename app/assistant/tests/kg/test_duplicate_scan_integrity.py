@@ -166,14 +166,46 @@ def test_upsert_refuses_duplicate_node_finding_with_dead_ids():
 # ── P1.2: detector failures and the stamp ────────────────────────────────
 
 
-def _fake_factories(monkeypatch, *, detector_agent):
-    """Triage probe returns None (pre-filter skipped); detector uses the
-    given fake. Mirrors DI.agent_factory.create_agent's dispatch-by-name."""
+class _UncertainTriage:
+    """Answers 'uncertain' for every pair it is shown (all pass to the detector)."""
+    def action_handler(self, msg):
+        import json
+        briefs = json.loads(msg.agent_input["pairs_batch"])
+        return SimpleNamespace(data={"pairs": [
+            {"pair_index": b["pair_index"], "verdict": "uncertain", "reason": ""} for b in briefs]})
+
+
+def _fake_factories(monkeypatch, *, detector_agent, triage_agent=None):
+    """Triage passes every pair through unless a triage fake is given;
+    detector uses the given fake. Mirrors DI.agent_factory.create_agent's
+    dispatch-by-name."""
+    triage_agent = triage_agent or _UncertainTriage()
+
     def fake_create(name):
         if "duplicate_triage" in name:
-            return None
+            return triage_agent
         return detector_agent
     monkeypatch.setattr(DI.agent_factory, "create_agent", fake_create)
+
+
+def _descs(*ids):
+    return {n: {"node_id": n, "label": n, "node_type": "Entity",
+                "description": "", "aliases": [], "category": "",
+                "semantic_label": "", "original_sentence": "",
+                "start_date": None, "end_date": None,
+                "edge_sentences": [], "edge_count": 0, "neighborhood": []}
+            for n in ids}
+
+
+def _ledger_failures(item_id):
+    from app.assistant.kg.failure_ledger import KGItemFailure
+    from app.assistant.pipelines.kg_maintenance_pipeline.step_duplicate_scan import PAIR_FAILURE_KIND
+    session = get_session()
+    try:
+        row = session.get(KGItemFailure, (PAIR_FAILURE_KIND, item_id))
+        return row.failures if row else 0
+    finally:
+        session.close()
 
 
 def test_detector_agent_none_aborts_loudly(monkeypatch):
@@ -183,50 +215,140 @@ def test_detector_agent_none_aborts_loudly(monkeypatch):
 
     _fake_factories(monkeypatch, detector_agent=None)
     a, b = _mk_node("A"), _mk_node("B")
-    descriptors = {n: {"node_id": n, "label": n, "node_type": "Entity",
-                       "description": "", "aliases": [], "category": "",
-                       "semantic_label": "", "original_sentence": "",
-                       "start_date": None, "end_date": None,
-                       "edge_sentences": [], "edge_count": 0, "neighborhood": []}
-                   for n in (a, b)}
 
     with pytest.raises(RuntimeError, match="duplicate_detector"):
-        _confirm_pairs_with_llm([(a, b, "tier1")], descriptors, None)
+        _confirm_pairs_with_llm([(a, b, "tier1")], _descs(a, b), None)
 
 
-def test_detector_failure_keeps_nodes_unstamped_and_tags_actions(monkeypatch):
+def test_detector_failure_stops_and_counts_the_pair(monkeypatch):
     from app.assistant.pipelines.kg_maintenance_pipeline.step_duplicate_scan import (
-        _confirm_pairs_with_llm,
+        _confirm_pairs_with_llm, _pair_item_id,
     )
 
     a, b = _mk_node("A"), _mk_node("B")
     c, d = _mk_node("C"), _mk_node("D")
-    descriptors = {n: {"node_id": n, "label": n, "node_type": "Entity",
-                       "description": "", "aliases": [], "category": "",
-                       "semantic_label": "", "original_sentence": "",
-                       "start_date": None, "end_date": None,
-                       "edge_sentences": [], "edge_count": 0, "neighborhood": []}
-                   for n in (a, b, c, d)}
-
     calls = {"n": 0}
 
     class _Detector:
         def action_handler(self, msg):
             calls["n"] += 1
-            if calls["n"] == 1:
-                raise RuntimeError("LLM hiccup")
+            raise RuntimeError("LLM hiccup")
+
+    _fake_factories(monkeypatch, detector_agent=_Detector())
+
+    with pytest.raises(RuntimeError, match="LLM hiccup"):
+        _confirm_pairs_with_llm([(a, b, "tier1"), (c, d, "tier1")], _descs(a, b, c, d), None)
+    assert calls["n"] == 1                        # the second pair never ran
+    assert _ledger_failures(_pair_item_id(a, b)) == 1
+
+
+def test_detector_success_tags_actions_and_clears_the_ledger(monkeypatch):
+    from app.assistant.kg import failure_ledger
+    from app.assistant.pipelines.kg_maintenance_pipeline.step_duplicate_scan import (
+        PAIR_FAILURE_KIND, _confirm_pairs_with_llm, _pair_item_id,
+    )
+
+    c, d = _mk_node("C"), _mk_node("D")
+    failure_ledger.record_failure(PAIR_FAILURE_KIND, _pair_item_id(c, d), RuntimeError("earlier"))
+
+    class _Detector:
+        def action_handler(self, msg):
             return SimpleNamespace(data={"merge_actions": [
                 {"merge": [c, d], "labels": ["C", "D"], "reason": "same"},
             ]})
 
     _fake_factories(monkeypatch, detector_agent=_Detector())
-
-    actions, failed = _confirm_pairs_with_llm(
-        [(a, b, "tier1"), (c, d, "tier1")], descriptors, None,
-    )
-    assert failed == {a, b}                       # errored pair stays unstamped
-    assert len(actions) == 1
+    actions, failed = _confirm_pairs_with_llm([(c, d, "tier1")], _descs(c, d), None)
+    assert failed == set()
     assert actions[0]["_source_pair"] == [c, d]   # provenance tag attached
+    assert _ledger_failures(_pair_item_id(c, d)) == 0
+
+
+def test_failed_triage_batch_stops_the_run(monkeypatch):
+    from app.assistant.pipelines.kg_maintenance_pipeline.step_duplicate_scan import (
+        _confirm_pairs_with_llm,
+    )
+
+    class _BrokenTriage:
+        def action_handler(self, msg):
+            raise RuntimeError("context_length_exceeded")
+
+    a, b = _mk_node("A"), _mk_node("B")
+    _fake_factories(monkeypatch, detector_agent=None, triage_agent=_BrokenTriage())
+    with pytest.raises(RuntimeError, match="context_length_exceeded"):
+        _confirm_pairs_with_llm([(a, b, "tier1")], _descs(a, b), None)
+
+
+def test_incomplete_triage_gets_one_correction_then_raises(monkeypatch):
+    from app.assistant.pipelines.kg_maintenance_pipeline.step_duplicate_scan import (
+        _confirm_pairs_with_llm,
+    )
+
+    seen = []
+
+    class _HalfTriage:
+        def action_handler(self, msg):
+            seen.append(dict(msg.agent_input))
+            return SimpleNamespace(data={"pairs": [
+                {"pair_index": 1, "verdict": "distinct", "reason": "different"}]})
+
+    a, b, c, d = (_mk_node(x) for x in "ABCD")
+    _fake_factories(monkeypatch, detector_agent=None, triage_agent=_HalfTriage())
+    with pytest.raises(RuntimeError, match="after one correction"):
+        _confirm_pairs_with_llm([(a, b, "tier1"), (c, d, "tier1")], _descs(a, b, c, d), None)
+    assert "correction" not in seen[0]
+    assert "no verdict for pair_index [2]" in seen[1]["correction"]
+    assert load_distinct_pairs() == set()         # nothing recorded from the broken batch
+
+
+def test_set_aside_pair_is_skipped_and_its_nodes_stay_unstamped(monkeypatch):
+    from app.assistant.kg import failure_ledger
+    from app.assistant.pipelines.kg_maintenance_pipeline import step_duplicate_scan as scan
+
+    a, b = _mk_node("Same Name"), _mk_node("Same Name")
+    for _ in range(failure_ledger.SET_ASIDE_AFTER):
+        failure_ledger.record_failure(scan.PAIR_FAILURE_KIND, scan._pair_item_id(a, b), RuntimeError("refused"))
+    monkeypatch.setattr(scan, "_embedding_similarity_pairs", lambda ids: [])
+    monkeypatch.setattr(scan, "_identity_similarity_pairs", lambda descs: [])
+
+    descs = _descs(a, b)
+    for d in descs.values():
+        d["label"] = "Same Name"                  # a Tier 1 pair
+    pairs, _ctx, unstamped = scan._build_candidate_pairs(descs, {a, b})
+    assert pairs == [] and unstamped == {a, b}
+
+
+def test_tier5b_chroma_failure_raises(monkeypatch):
+    from app.assistant.pipelines.kg_maintenance_pipeline import step_duplicate_scan as scan
+
+    class _Broken:
+        @property
+        def node_identity_collection(self):
+            raise RuntimeError("chroma down")
+
+    import app.assistant.kg.chroma.chroma_embedding_manager as cem
+    monkeypatch.setattr(cem, "get_chroma_manager", lambda: _Broken())
+    with pytest.raises(RuntimeError, match="chroma down"):
+        scan._identity_similarity_pairs(_descs("a", "b"))
+
+
+def test_run_stamps_nothing_when_a_call_fails(monkeypatch):
+    from app.assistant.pipelines.kg_maintenance_pipeline import step_duplicate_scan as scan
+
+    a, b = _mk_node("Twin"), _mk_node("Twin")
+    monkeypatch.setattr(scan, "_embedding_similarity_pairs", lambda ids: [])
+    monkeypatch.setattr(scan, "_identity_similarity_pairs", lambda descs: [])
+    monkeypatch.setattr(scan, "load_scope_for_source", lambda **k: None)
+
+    class _Detector:
+        def action_handler(self, msg):
+            raise RuntimeError("LLM down")
+
+    _fake_factories(monkeypatch, detector_agent=_Detector())
+    with pytest.raises(RuntimeError, match="LLM down"):
+        scan.run(SimpleNamespace(run_id="r1", pipeline_id="kg_maintenance_pipeline"))
+    assert _node_field(a, "last_dupe_scanned_at") is None
+    assert _node_field(b, "last_dupe_scanned_at") is None
 
 
 def test_rename_resets_stamp_and_supersedes_verdicts():

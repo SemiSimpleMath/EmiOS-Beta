@@ -106,26 +106,22 @@ def run(ctx: PipelineContext) -> dict:
     """Returns {"scanned": int, "candidates": int, "new_findings": int}."""
     from app.assistant.kg.db.knowledge_graph_db import Edge, Node
 
-    primary_user_name = ""
     primary_user_id: Optional[str] = None
-    try:
-        primary_user_name = get_required_primary_user_name()
-    except Exception as exc:
-        logger.warning("[missing_dates_scan] primary user name unresolved: %s", exc)
+    # Unconfigured raises: worth reads the primary user apart from the rest.
+    primary_user_name = get_required_primary_user_name()
 
     # Read phase — collect candidate state/event nodes + their connected
     # entity pageranks in one short-lived session. Closing before the write
     # phase keeps the per-finding session opens cheap.
     session = get_session()
     try:
-        if primary_user_name:
-            row = (
-                session.query(Node.id)
-                .filter(Node.label == primary_user_name, Node.node_type == "Entity")
-                .first()
-            )
-            if row:
-                primary_user_id = str(row.id)
+        row = (
+            session.query(Node.id)
+            .filter(Node.label == primary_user_name, Node.node_type == "Entity")
+            .first()
+        )
+        if row:
+            primary_user_id = str(row.id)
 
         candidates_q = (
             session.query(Node)

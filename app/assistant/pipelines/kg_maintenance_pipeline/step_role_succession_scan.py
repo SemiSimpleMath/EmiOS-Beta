@@ -15,6 +15,8 @@ impactful — P4.4 conservatism): it lands on /kg-maintenance/needs-input,
 and on Accept the executor performs the split via kg_split_succession.
 'stable'/'unclear' verdicts write a rejected finding as a cooldown stamp
 so the node is re-judged only after COOLDOWN_DAYS (more evidence by then).
+A malformed or incomplete verdict gets one correction, then stops the run
+(never a cooldown stamp).
 
 Splits are lazy: nothing here mutates the graph.
 """
@@ -24,6 +26,7 @@ import re
 from datetime import timedelta
 from typing import Any, Dict, List
 
+from app.assistant.kg import failure_ledger
 from app.assistant.kg_maintenance.store import upsert_finding
 from app.assistant.pipelines.context import PipelineContext
 from app.assistant.utils.logging_config import get_logger
@@ -37,9 +40,11 @@ MAX_JUDGES_PER_RUN = 8
 COOLDOWN_DAYS = 30
 MIN_EVIDENCE = 3
 CONFIDENCE_MAP = {"high": 0.9, "medium": 0.7, "low": 0.4}
+VERDICTS = {"stable", "succession", "unclear"}
+FAILURE_KIND = "kg_role_succession"
 
 
-def _run_judge(agent_input: Dict[str, Any]) -> Dict[str, Any] | None:
+def _run_judge(agent_input: Dict[str, Any]) -> Dict[str, Any]:
     from app.assistant.routine_handlers.subconscious import _run_subconscious_agent
 
     return _run_subconscious_agent(
@@ -49,6 +54,41 @@ def _run_judge(agent_input: Dict[str, Any]) -> Dict[str, Any] | None:
         scope_id="kg_maintenance::succession_judge",
         actor_id="role_succession_scan",
     )
+
+
+def _problems(verdict: Dict[str, Any]) -> List[str]:
+    """What is missing or malformed in a verdict; empty when it is complete."""
+    from datetime import date
+
+    v = str(verdict.get("verdict") or "").strip().lower()
+    out = []
+    if v not in VERDICTS:
+        out.append(f"verdict {v!r} is not one of {sorted(VERDICTS)}")
+    conf = str(verdict.get("confidence") or "").strip().lower()
+    if conf not in CONFIDENCE_MAP:
+        out.append(f"confidence {conf!r} is not one of {sorted(CONFIDENCE_MAP)}")
+    if v == "succession":
+        try:
+            date.fromisoformat(str(verdict.get("split_date") or "")[:10])
+        except ValueError:
+            out.append(f"split_date {verdict.get('split_date')!r} is not an ISO date")
+        if not str(verdict.get("split_basis") or "").strip():
+            out.append("split_basis is empty")
+    return out
+
+
+def _judge(agent_input: Dict[str, Any]) -> Dict[str, Any]:
+    """The judge's verdict, complete: an incomplete answer gets one correction
+    naming what is missing, then raises (fail loud, never a cooldown)."""
+    verdict = _run_judge(agent_input)
+    problems = _problems(verdict)
+    if problems:
+        verdict = _run_judge({**agent_input, "correction": (
+            "Your previous answer was incomplete: " + "; ".join(problems) + ".")})
+        problems = _problems(verdict)
+        if problems:
+            raise ValueError(f"succession_judge: still incomplete after one correction: {'; '.join(problems)}")
+    return verdict
 
 
 def run(ctx: PipelineContext) -> dict:
@@ -61,6 +101,7 @@ def run(ctx: PipelineContext) -> dict:
     from app.assistant.kg_core.kg_utils.date_display import format_node_date
 
     cutoff = utc_now() - timedelta(days=COOLDOWN_DAYS)
+    set_aside = failure_ledger.set_aside_ids(FAILURE_KIND)
 
     # ── Read phase: deterministic candidate gathering ────────────────────
     session = get_session()
@@ -82,7 +123,7 @@ def run(ctx: PipelineContext) -> dict:
         for n in entities:
             if not POSSESSIVE_RE.match(n.label or ""):
                 continue
-            if n.id in recently_judged:
+            if n.id in recently_judged or n.id in set_aside:
                 continue
             if find_disambiguation(session, n.label) is not None:
                 continue  # already split — the park point handles new mentions
@@ -168,15 +209,20 @@ def run(ctx: PipelineContext) -> dict:
     for ji in judge_inputs:
         node_id = ji.pop("node_id")
         label = ji["label"]
-        verdict = _run_judge(ji)
-        if not isinstance(verdict, dict):
-            continue
+        # A failed or incomplete judgment stops the run; the node stays
+        # pending, and one that keeps failing is set aside for review.
+        try:
+            verdict = _judge(ji)
+        except Exception as exc:
+            failure_ledger.record_failure(FAILURE_KIND, node_id, exc, label=label)
+            raise
+        failure_ledger.clear(FAILURE_KIND, node_id)
         judged += 1
-        v = str(verdict.get("verdict") or "").strip().lower()
-        conf = str(verdict.get("confidence") or "low").strip().lower()
+        v = str(verdict.get("verdict")).strip().lower()
+        conf = str(verdict.get("confidence")).strip().lower()
         split_date = str(verdict.get("split_date") or "").strip()
 
-        if v == "succession" and conf in ("high", "medium") and split_date:
+        if v == "succession" and conf in ("high", "medium"):
             fid, created = upsert_finding(
                 finding_type="referent_succession",
                 primary_node_id=node_id,
@@ -208,7 +254,7 @@ def run(ctx: PipelineContext) -> dict:
                 finding_type="referent_succession",
                 primary_node_id=node_id,
                 suggested_action="none",
-                reason=f"succession_judge: {v or 'no verdict'} ({conf}) — "
+                reason=f"succession_judge: {v} ({conf}) — "
                        f"{str(verdict.get('reasoning') or '')[:300]}",
                 confidence=CONFIDENCE_MAP.get(conf, 0.5),
                 priority="low",

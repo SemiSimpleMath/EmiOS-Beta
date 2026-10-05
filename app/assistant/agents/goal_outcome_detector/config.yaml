@@ -9,6 +9,7 @@ except_tools: []
 
 user_context_items:
   - candidate_outcomes
+  - correction
 
 type: agent
 

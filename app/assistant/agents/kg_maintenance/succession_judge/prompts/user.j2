@@ -17,3 +17,7 @@ Era: starts {{ agent_input.start_date or "?" }}, ends {{ agent_input.end_date or
 {% endfor %}
 
 Did this entity's real-world referent change at some point, or does all of this describe one stable referent?
+{% if agent_input.get('correction') %}
+
+{{ agent_input.get('correction') }}
+{% endif %}

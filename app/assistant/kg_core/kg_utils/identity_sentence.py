@@ -27,6 +27,7 @@ logger = get_logger(__name__)
 MAX_EDGES = 12
 MAX_SENTENCE_CHARS = 220
 AGENT_NAME = "kg_maintenance::identity_sentence_writer"
+FAILURE_KIND = "kg_identity_sentence"
 
 
 def gather_identity_inputs(session, node) -> Dict[str, Any]:
@@ -115,6 +116,8 @@ def generate_identity_sentence(
     Deterministic proposes (the facts), LLM decides (selection + phrasing
     — or the honest verdict that no coherent referent exists).
     Returns {"sentence": Optional[str], "definable": bool, "basis": str}.
+    A failed call raises; an answer that says definable but gives no
+    sentence gets one correction, then raises.
     """
     from app.assistant.routine_handlers.subconscious import _run_subconscious_agent
 
@@ -122,18 +125,28 @@ def generate_identity_sentence(
         raise ValueError("identity inputs missing label — refusing to invoke writer")
 
     agent_input = {k: v for k, v in inputs.items() if not k.startswith("_")}
-    # Always present: the template tests this key and strict_template
+    # Always present: the template tests these keys and strict_template
     # raises on undefined variables (prompt guards layer 3).
     agent_input["source_window"] = source_window[:800] if source_window else None
-    result = _run_subconscious_agent(
-        handler_label="identity_sentence_writer",
-        agent_name=AGENT_NAME,
-        context=agent_input,
-        scope_id=AGENT_NAME,
-        actor_id="identity_sentence_refresh",
-    )
-    if not isinstance(result, dict):
-        return {"sentence": None, "definable": False, "basis": "writer returned no data"}
+    agent_input["correction"] = None
+
+    def ask() -> Dict[str, Any]:
+        return _run_subconscious_agent(
+            handler_label="identity_sentence_writer",
+            agent_name=AGENT_NAME,
+            context=agent_input,
+            scope_id=AGENT_NAME,
+            actor_id="identity_sentence_refresh",
+        )
+
+    result = ask()
+    if result.get("definable") and not str(result.get("identity_sentence") or "").strip():
+        agent_input["correction"] = ("Your previous answer said definable=true but gave no identity_sentence: "
+                                     "write the sentence, or answer definable=false.")
+        result = ask()
+        if result.get("definable") and not str(result.get("identity_sentence") or "").strip():
+            raise RuntimeError(f"identity_sentence_writer: definable without a sentence for "
+                               f"{inputs.get('label')!r} after one correction")
     sentence = str(result.get("identity_sentence") or "").strip()[:MAX_SENTENCE_CHARS]
     definable = bool(result.get("definable")) and bool(sentence)
     return {
@@ -172,10 +185,13 @@ def run_identity_sentence_refresh(
     from app.assistant.kg.disambiguation import DISAMBIGUATION_NODE_TYPE
     from app.models.db_manager import get_db_manager
 
+    from app.assistant.kg import failure_ledger
+    from app.assistant.utils.identity_names import get_required_primary_user_name
+
     examined = 0
     generated = 0
-    failed = 0
     skipped_fresh = 0
+    set_aside = failure_ledger.set_aside_ids(FAILURE_KIND)
 
     with get_db_manager().read_session() as session:
         nodes = (
@@ -196,6 +212,8 @@ def run_identity_sentence_refresh(
         for n in nodes:
             if len(work) >= max_per_run:
                 break
+            if n.id in set_aside:
+                continue
             examined += 1
             inputs = gather_identity_inputs(session, n)
             h = identity_inputs_hash(inputs)
@@ -207,11 +225,7 @@ def run_identity_sentence_refresh(
     # The user-self node is the graph's center — its identity is trivially
     # true and needs no derivation (the LLM otherwise writes an awkward
     # relational description of the one person everything anchors TO).
-    try:
-        from app.assistant.utils.identity_names import get_required_primary_user_name
-        primary_user = get_required_primary_user_name().strip().lower()
-    except Exception:
-        primary_user = None
+    primary_user = get_required_primary_user_name().strip().lower()
 
     cm = None
     undefinable = 0
@@ -219,9 +233,12 @@ def run_identity_sentence_refresh(
         sentence = None
         verdict_basis = ""
         label = str(item["inputs"].get("label") or "")
-        if primary_user and label.strip().lower() == primary_user:
+        if label.strip().lower() == primary_user:
             sentence = f"{label}, the primary user of this system."
         else:
+            # A failed writer call or window read stops the run before
+            # anything is stamped; the node stays pending, and one that keeps
+            # failing is set aside for review.
             try:
                 result = generate_identity_sentence(item["inputs"])
                 # Escalation (user directive, 2026-06-12): not definable
@@ -233,13 +250,12 @@ def run_identity_sentence_refresh(
                         result = generate_identity_sentence(
                             item["inputs"], source_window=window_text,
                         )
-                sentence = result["sentence"]
-                verdict_basis = result["basis"]
-            except Exception as e:
-                logger.error("[identity_refresh] writer failed for %r: %s",
-                             label, e)
-                failed += 1
-                continue
+            except Exception as exc:
+                failure_ledger.record_failure(FAILURE_KIND, item["node_id"], exc, label=label)
+                raise
+            failure_ledger.clear(FAILURE_KIND, item["node_id"])
+            sentence = result["sentence"]
+            verdict_basis = result["basis"]
 
         if not sentence:
             # Indefinable even with the source conversation: stamp the hash
@@ -275,23 +291,21 @@ def run_identity_sentence_refresh(
                     updated_at=N.updated_at,  # projection: preserve verbatim
                 )
             )
-        try:
-            if cm is None:
-                cm = get_chroma_manager()
-            cm.store_node_identity_embedding(
-                item["node_id"], sentence, embed_text(sentence),
-            )
-            # The context (aboutness) vector re-anchors on the fresh
-            # identity: definite description head + original observation.
-            from app.assistant.kg.chroma.embedding_sync import compose_context_text
-            ctx_text = compose_context_text(
-                sentence, item["inputs"].get("original_sentence"))
-            if ctx_text:
-                cm.store_node_context_embedding(
-                    item["node_id"], ctx_text, embed_text(ctx_text))
-        except Exception as e:
-            logger.error("[identity_refresh] chroma embed failed for %s: %s "
-                         "(nightly rebuild heals)", item["node_id"][:8], e)
+        # A failed embed or Chroma write stops the run; the sentence is
+        # committed and the hourly embedding sync heals the vectors.
+        if cm is None:
+            cm = get_chroma_manager()
+        cm.store_node_identity_embedding(
+            item["node_id"], sentence, embed_text(sentence),
+        )
+        # The context (aboutness) vector re-anchors on the fresh
+        # identity: definite description head + original observation.
+        from app.assistant.kg.chroma.embedding_sync import compose_context_text
+        ctx_text = compose_context_text(
+            sentence, item["inputs"].get("original_sentence"))
+        if ctx_text:
+            cm.store_node_context_embedding(
+                item["node_id"], ctx_text, embed_text(ctx_text))
         generated += 1
         logger.info("[identity_refresh] %r -> %s",
                     item["inputs"].get("label"), sentence[:90])
@@ -299,7 +313,6 @@ def run_identity_sentence_refresh(
     return {
         "examined": examined,
         "generated": generated,
-        "failed": failed,
         "undefinable": undefinable,
         "skipped_fresh": skipped_fresh,
         "queued": len(work),
@@ -311,13 +324,8 @@ def _source_window_text(node_id: str) -> Optional[str]:
     from app.assistant.kg.proposal_promoter import _node_window_text
     from app.models.db_manager import get_db_manager
 
-    try:
-        with get_db_manager().read_session() as s:
-            return _node_window_text(s, node_id, max_chars=800)
-    except Exception as e:
-        logger.error("[identity_refresh] window fetch failed for %s: %s",
-                     node_id[:8], e)
-        return None
+    with get_db_manager().read_session() as s:
+        return _node_window_text(s, node_id, max_chars=800)
 
 
 def _raise_undefinable_finding(node_id: str, label: str, basis: str) -> None:

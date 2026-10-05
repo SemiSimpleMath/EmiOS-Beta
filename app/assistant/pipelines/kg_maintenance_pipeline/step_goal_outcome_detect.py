@@ -146,30 +146,21 @@ def run(ctx: PipelineContext, *, limit: Optional[int] = None) -> dict:
         kind="pipeline", source_id=ctx.pipeline_id, actor_id="goal_outcome_detector")
     agent.blackboard.update_state_value("scope_context", _scope)
 
+    # A failed call raises (the run stops, every Goal stays as it is). An
+    # answer that leaves a candidate without a valid verdict gets one
+    # correction naming it, then raises.
     payload = _serialize_for_agent(has_evidence)
-    try:
-        result = agent.action_handler(Message(agent_input={"candidate_outcomes": payload}))
-        data = getattr(result, "data", None)
-    except Exception as e:
-        logger.error("[goal_outcome_detect] agent call failed: %s", e, exc_info=True)
-        return {
-            "goals_examined": len(has_evidence),
-            "completed": 0, "abandoned": 0, "no_signal": 0,
-            "skipped_low_confidence": 0,
-            "skipped_no_evidence": skipped_no_evidence,
-        }
-
-    if not isinstance(data, dict):
-        logger.warning("[goal_outcome_detect] non-dict from agent: %s", type(data).__name__)
-        return {
-            "goals_examined": len(has_evidence),
-            "completed": 0, "abandoned": 0, "no_signal": 0,
-            "skipped_low_confidence": 0,
-            "skipped_no_evidence": skipped_no_evidence,
-        }
-
-    verdicts = list(data.get("verdicts") or [])
     by_id = {g["id"]: g for g in has_evidence}
+    verdicts, problems = _ask(agent, payload, by_id, correction=None)
+    if problems:
+        verdicts, problems = _ask(
+            agent, payload, by_id,
+            correction="Your previous answer was incomplete: " + "; ".join(problems)
+            + ". Return one verdict for every candidate goal_node_id.",
+        )
+        if problems:
+            raise RuntimeError(
+                f"[goal_outcome_detect] still incomplete after one correction: {'; '.join(problems)}")
 
     completed_count = 0
     abandoned_count = 0
@@ -177,24 +168,14 @@ def run(ctx: PipelineContext, *, limit: Optional[int] = None) -> dict:
     skipped_low_conf = 0
     to_apply: List[Dict[str, Any]] = []
 
-    for v in verdicts:
-        if not isinstance(v, dict):
-            continue
-        gid = v.get("goal_node_id")
-        if gid not in by_id:
-            continue
-        outcome = (v.get("outcome") or "no_signal").lower()
+    for gid, v in verdicts.items():
+        outcome = v["outcome"]
         if outcome == "no_signal":
             no_signal_count += 1
             continue
-        try:
-            conf = float(v.get("confidence") or 0.0)
-        except (TypeError, ValueError):
-            conf = 0.0
+        conf = v["confidence"]
         if conf < MIN_CONFIDENCE:
             skipped_low_conf += 1
-            continue
-        if outcome not in ("completed", "abandoned"):
             continue
         to_apply.append({
             "goal_node_id": gid,
@@ -228,6 +209,41 @@ def run(ctx: PipelineContext, *, limit: Optional[int] = None) -> dict:
         "skipped_low_confidence": skipped_low_conf,
         "skipped_no_evidence": skipped_no_evidence,
     }
+
+
+OUTCOMES = {"completed", "abandoned", "no_signal"}
+
+
+def _ask(agent, payload: str, by_id: Dict[str, Any], *, correction: Optional[str]):
+    """One detector call. Returns ({goal_id: verdict}, problems); problems name
+    every candidate without a valid verdict and every unknown id."""
+    agent_input = {"candidate_outcomes": payload, "correction": correction}
+    result = agent.action_handler(Message(agent_input=agent_input))
+    data = getattr(result, "data", None)
+    if not isinstance(data, dict) or not isinstance(data.get("verdicts"), list):
+        raise RuntimeError("[goal_outcome_detect] goal_outcome_detector returned no verdicts list")
+
+    verdicts: Dict[str, Dict[str, Any]] = {}
+    problems: List[str] = []
+    for v in data["verdicts"]:
+        gid = v.get("goal_node_id") if isinstance(v, dict) else None
+        if gid not in by_id:
+            problems.append(f"goal_node_id {gid!r} is not a candidate")
+            continue
+        outcome = str(v.get("outcome") or "").strip().lower()
+        if outcome not in OUTCOMES:
+            problems.append(f"goal_node_id {gid} outcome {outcome!r} is not one of {sorted(OUTCOMES)}")
+            continue
+        try:
+            conf = float(v.get("confidence"))
+        except (TypeError, ValueError):
+            problems.append(f"goal_node_id {gid} confidence {v.get('confidence')!r} is not a number")
+            continue
+        verdicts[gid] = {**v, "outcome": outcome, "confidence": conf}
+    missing = [gid for gid in by_id if gid not in verdicts]
+    if missing:
+        problems.append(f"no verdict for goal_node_id {missing}")
+    return verdicts, problems
 
 
 def _empty_result() -> dict:
@@ -285,9 +301,6 @@ def _fetch_recent_evidence(
             }
             for r in rows
         ]
-    except Exception as e:
-        logger.debug("[goal_outcome_detect] evidence query failed: %s", e)
-        return []
     finally:
         session.close()
 

@@ -20,3 +20,7 @@ Era: starts {{ agent_input.start_date or "?" }}, ends {{ agent_input.end_date or
 {% endif %}
 
 Write the identity sentence for this node.
+{% if agent_input.correction %}
+
+{{ agent_input.correction }}
+{% endif %}
