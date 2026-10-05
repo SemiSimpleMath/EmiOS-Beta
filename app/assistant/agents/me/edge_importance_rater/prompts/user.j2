@@ -8,3 +8,10 @@ Rate each of these KG edges 0-10 by importance to the source.
 
 {{ information }}
 {%- endif %}
+{%- if correction_ids %}
+
+## Correct your previous answer
+
+It gave no rating with a numeric 0-10 score for these edges: {{ correction_ids | join(", ") }}.
+Rate exactly the edges above, each under its id verbatim, with a numeric score.
+{%- endif %}

@@ -5,5 +5,9 @@
 ## Nodes to tag
 
 {{ nodes_block }}
+{% if correction_numbers %}
+## Correct your previous answer
 
+It left out these nodes: {{ correction_numbers | join(", ") }}. Return a TaggedNode for each of them, under its number above.
+{% endif %}
 Return one TaggedNode per input number, with `tags` containing one entry per namespace above (sections=[] when the node doesn't fit anywhere in that namespace).

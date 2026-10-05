@@ -55,13 +55,18 @@ def _rated_count(eids):
         s.close()
 
 
+def _rate_every_edge(msg):
+    """Fake rater: one score for each edge id in the batch."""
+    ids = [line[len("id: "):] for line in msg.task.splitlines() if line.startswith("id: ")]
+    return SimpleNamespace(data={"ratings": [{"id": i, "score": 5.0, "reason": "r"} for i in ids]})
+
+
 def test_edge_importance_cap_bounds_run_and_converges(monkeypatch):
     src, tgt = _mk_node("Src"), _mk_node("Tgt")
     eids = [_mk_edge(src, tgt, f"rel_{i}") for i in range(5)]
 
-    # Rater returns no explicit ratings → each batched edge still gets the
-    # default score written, so it becomes rated (drops out of only_unrated).
-    fake_agent = SimpleNamespace(action_handler=lambda msg: SimpleNamespace(data={}))
+    # Each rated edge drops out of the only_unrated selector.
+    fake_agent = SimpleNamespace(action_handler=_rate_every_edge)
     monkeypatch.setattr(DI.agent_factory, "create_agent", lambda name: fake_agent)
 
     def _run():
@@ -81,7 +86,7 @@ def test_edge_importance_cap_bounds_run_and_converges(monkeypatch):
 def test_edge_importance_uncapped_by_default(monkeypatch):
     src, tgt = _mk_node("Src2"), _mk_node("Tgt2")
     eids = [_mk_edge(src, tgt, f"r_{i}") for i in range(4)]
-    fake_agent = SimpleNamespace(action_handler=lambda msg: SimpleNamespace(data={}))
+    fake_agent = SimpleNamespace(action_handler=_rate_every_edge)
     monkeypatch.setattr(DI.agent_factory, "create_agent", lambda name: fake_agent)
 
     scoring.regenerate_edge_importance(

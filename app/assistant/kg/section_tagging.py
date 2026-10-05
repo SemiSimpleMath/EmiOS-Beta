@@ -18,6 +18,7 @@ from typing import Iterable, List, Optional, Sequence
 
 from sqlalchemy.orm import Session
 
+from app.assistant.kg import failure_ledger
 from app.assistant.kg.db.knowledge_graph_db_sqlite import Node, NodeSectionTag
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.time_utils import utc_now
@@ -265,6 +266,8 @@ def tag_is_active_for_build(
 
 _TAGGER_AGENT_NAME = "kg_node_section_tagger"
 _TAG_BATCH_SIZE = 20  # Nodes per LLM call. Keeps each call small + fast.
+# Failure-ledger kind: one item per node (see tag_nodes_by_id).
+SECTION_TAG_KIND = "section_tag"
 
 
 def _format_sections_block(namespace_vocab: list[tuple[str, str]]) -> str:
@@ -278,9 +281,10 @@ def _format_namespaces_block() -> str:
     )
 
 
-def _format_nodes_block(nodes: Sequence[Node]) -> str:
+def _format_nodes_block(numbered: Sequence[tuple[int, Node]]) -> str:
+    """Nodes under their batch numbers; a correction re-sends a subset under the same numbers."""
     lines: list[str] = []
-    for i, n in enumerate(nodes, 1):
+    for i, n in numbered:
         sentence = (n.original_sentence or "").strip()
         if not sentence:
             sentence = n.description or n.label or "(no sentence)"
@@ -290,6 +294,32 @@ def _format_nodes_block(nodes: Sequence[Node]) -> str:
             f"    sentence: {sentence}"
         )
     return "\n".join(lines)
+
+
+def _call_tagger(
+    agent, numbered: Sequence[tuple[int, Node]], correction_numbers: list[int],
+    namespaces_block: str, scope_context,
+) -> dict[int, dict]:
+    """One tagger call over these numbered nodes. Returns each answered number's result."""
+    from app.assistant.utils.pydantic_classes import Message
+
+    # correction_numbers always travels (empty on a first call) so a previous call's list on
+    # the agent's blackboard is overwritten, never inherited.
+    resp = agent.action_handler(Message(
+        agent_input={
+            "nodes_block": _format_nodes_block(numbered),
+            "namespaces_block": namespaces_block,
+            "correction_numbers": correction_numbers,
+        },
+        scope_context=scope_context,
+    ))
+    data = (resp.data if resp is not None and hasattr(resp, "data") else None) or {}
+    wanted = {i for i, _ in numbered}
+    answered: dict[int, dict] = {}
+    for tn in (data.get("results") or []):
+        if isinstance(tn, dict) and tn.get("number") in wanted:
+            answered[tn["number"]] = tn
+    return answered
 
 
 from app.assistant.importance.queries import max_source_entity_importance
@@ -318,11 +348,17 @@ def tag_nodes_by_id(
 
     Pass `importance_threshold=None` to disable the gate entirely.
 
+    A failed call stops the run (owner, 2026-10-05): the batch in hand is not written, later
+    batches stay untagged for the next run, and the exception propagates. An answer that leaves
+    nodes out gets ONE correction call listing exactly their numbers; still incomplete, it
+    raises. Each failure is counted in the failure ledger against the nodes it concerns (the
+    whole batch for a failed call or write, the omitted nodes for an incomplete answer); a node
+    failing in three runs is set aside and backfill_untagged_nodes skips it.
+
     Returns stats dict: {tagged, skipped_type, skipped_empty, skipped_low_importance,
-    contact_bypassed, errors, card_tags_written, wiki_tags_written}.
+    contact_bypassed, marked_processed, card_tags_written, wiki_tags_written}.
     """
     from app.assistant.ServiceLocator.service_locator import DI
-    from app.assistant.utils.pydantic_classes import Message
     from app.models.db_manager import get_db_manager
 
     stats = {
@@ -332,7 +368,6 @@ def tag_nodes_by_id(
         "skipped_low_importance": 0,
         "contact_bypassed": 0,
         "marked_processed": 0,
-        "errors": 0,
         "card_tags_written": 0,
         "wiki_tags_written": 0,
     }
@@ -374,12 +409,9 @@ def tag_nodes_by_id(
     if not taggable:
         return stats
 
-    factory = DI.agent_factory
-    agent = factory.create_agent(_TAGGER_AGENT_NAME)
+    agent = DI.agent_factory.create_agent(_TAGGER_AGENT_NAME)
     if agent is None:
-        stats["errors"] += 1
-        logger.warning("[section_tagging] agent %s not available", _TAGGER_AGENT_NAME)
-        return stats
+        raise RuntimeError(f"[section_tagging] agent {_TAGGER_AGENT_NAME} is unavailable")
 
     namespaces_block = _format_namespaces_block()
 
@@ -388,32 +420,48 @@ def tag_nodes_by_id(
         range(0, len(taggable), _TAG_BATCH_SIZE), start=1,
     ):
         batch = taggable[batch_start : batch_start + _TAG_BATCH_SIZE]
-        nodes_block = _format_nodes_block(batch)
+        numbered = list(enumerate(batch, 1))
+
+        def _record(nodes, exc: BaseException) -> None:
+            for n in nodes:
+                failure_ledger.record_failure(SECTION_TAG_KIND, n.id, exc, label=n.label)
+
         try:
-            resp = agent.action_handler(Message(
-                agent_input={
-                    "nodes_block": nodes_block,
-                    "namespaces_block": namespaces_block,
-                },
-                scope_context=scope_context,
-            ))
-            data = resp.data if resp and hasattr(resp, "data") else {}
+            answered = _call_tagger(agent, numbered, [], namespaces_block, scope_context)
         except Exception as exc:
-            stats["errors"] += 1
-            logger.exception("[section_tagging] tagger raised: %s", exc)
-            continue
+            _record(batch, exc)
+            raise
+
+        omitted = [(i, n) for i, n in numbered if i not in answered]
+        if omitted:
+            logger.warning(
+                "[section_tagging] batch %d/%d left out %d node(s); one correction for them",
+                batch_idx, total_batches, len(omitted),
+            )
+            try:
+                answered.update(_call_tagger(
+                    agent, omitted, [i for i, _ in omitted], namespaces_block, scope_context,
+                ))
+            except Exception as exc:
+                _record([n for _, n in omitted], exc)
+                raise
+            still_omitted = [(i, n) for i, n in omitted if i not in answered]
+            if still_omitted:
+                exc = ValueError(
+                    f"[section_tagging] no result after one correction for {len(still_omitted)} "
+                    f"node(s): {', '.join(n.id for _, n in still_omitted)}"
+                )
+                _record([n for _, n in still_omitted], exc)
+                raise exc
 
         # APPLY: one short write transaction per batch — the next batch's
         # LLM call starts with no session held.
         tagged_ids: set[str] = set()        # got >=1 real card/wiki tag this batch
         gate_skipped_ids: set[str] = set()  # intentionally deferred by importance gate
-        with get_db_manager().transaction(op="section_tagging.apply") as session:
-            for tn in (data.get("results") or []):
-                try:
-                    idx = int(tn.get("number"))
-                    if not (1 <= idx <= len(batch)):
-                        continue
-                    node = batch[idx - 1]
+        try:
+            with get_db_manager().transaction(op="section_tagging.apply") as session:
+                for idx, node in numbered:
+                    tn = answered[idx]
                     card_tags: list[str] = []
                     wiki_tags: list[str] = []
                     for ns in (tn.get("tags") or []):
@@ -452,23 +500,26 @@ def tag_nodes_by_id(
                     stats["tagged"] += 1
                     if n_card or n_wiki:
                         tagged_ids.add(node.id)
-                except Exception as exc:
-                    stats["errors"] += 1
-                    logger.exception("[section_tagging] per-node persist failed: %s", exc)
 
-            # Treadmill fix: any node we sent this batch that got NO real tag — a
-            # reject/empty LLM result, or one the LLM omitted from `results` — and
-            # was not gate-deferred, gets a sentinel row. backfill_untagged_nodes
-            # selects nodes with no tag row, so without this rejected nodes are
-            # re-sent to the LLM on every 30-min routine run forever.
-            for node in batch:
-                if node.id in tagged_ids or node.id in gate_skipped_ids:
-                    continue
-                replace_tags(
-                    session, node.id, NAMESPACE_PROCESSED,
-                    [PROCESSED_SENTINEL], tagger_version=tagger_version,
-                )
-                stats["marked_processed"] += 1
+                # Treadmill fix: a node the tagger answered with NO real tag (a
+                # reject/empty result) and that was not gate-deferred gets a sentinel
+                # row. backfill_untagged_nodes selects nodes with no tag row, so
+                # without this rejected nodes are re-sent to the LLM on every 30-min
+                # routine run forever. Every node here was answered: an omission
+                # raised above and is never recorded as done.
+                for node in batch:
+                    if node.id in tagged_ids or node.id in gate_skipped_ids:
+                        continue
+                    replace_tags(
+                        session, node.id, NAMESPACE_PROCESSED,
+                        [PROCESSED_SENTINEL], tagger_version=tagger_version,
+                    )
+                    stats["marked_processed"] += 1
+        except Exception as exc:
+            _record(batch, exc)
+            raise
+        for node in batch:
+            failure_ledger.clear(SECTION_TAG_KIND, node.id)
         logger.info(
             "[section_tagging] batch %d/%d done — tagged so far: %d",
             batch_idx, total_batches, stats["tagged"],
@@ -476,9 +527,9 @@ def tag_nodes_by_id(
 
     logger.info(
         "[section_tagging] tagged=%d marked_processed=%d skipped_type=%d skipped_empty=%d "
-        "errors=%d card_tags=%d wiki_tags=%d",
+        "card_tags=%d wiki_tags=%d",
         stats["tagged"], stats["marked_processed"], stats["skipped_type"],
-        stats["skipped_empty"], stats["errors"], stats["card_tags_written"],
+        stats["skipped_empty"], stats["card_tags_written"],
         stats["wiki_tags_written"],
     )
     return stats
@@ -505,6 +556,7 @@ def backfill_untagged_nodes(
     from app.models.base import get_session
 
     types_filter = list(only_node_types or _TAGGABLE_NODE_TYPES)
+    set_aside = failure_ledger.set_aside_ids(SECTION_TAG_KIND)
 
     session = get_session()
     try:
@@ -517,6 +569,8 @@ def backfill_untagged_nodes(
             Node.original_sentence != "",
             ~Node.id.in_(tagged_ids_subq.select()),
         )
+        if set_aside:
+            q = q.filter(~Node.id.in_(set_aside))
         if limit is not None:
             q = q.limit(limit)
         node_ids = [row[0] for row in q.all()]

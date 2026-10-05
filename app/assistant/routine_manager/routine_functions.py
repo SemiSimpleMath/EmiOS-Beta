@@ -408,6 +408,9 @@ def _lazy_kg_importance_rater(*, target_date=None, routine=None):
     skipped — derivation is a safe lower bound that improves as the edge
     rater backfills.
 
+    A failed step stops the run (owner, 2026-10-05): its exception escapes so
+    the routine records a failure, and the later steps wait for the next run.
+
     Reads ``spec.batch_size_edges`` for edge rater throughput.
     """
     from app.assistant.importance.scoring import (
@@ -454,13 +457,8 @@ def _lazy_kg_importance_rater(*, target_date=None, routine=None):
     #   promote (NULL imp) → rate → tag → card / wiki dirty-sweep
     # tag_nodes_by_id walks every taggable State/Event/Goal/Property without
     # a tag yet (backfill semantics — idempotent on repeated runs).
-    tag_stats = {}
-    try:
-        from app.assistant.kg.section_tagging import backfill_untagged_nodes
-        tag_stats = backfill_untagged_nodes(scope_context=scope, limit=max_tags)
-    except Exception:
-        logger.exception("[kg_importance_rater] tagging step failed")
-        tag_stats = {"error": "exception"}
+    from app.assistant.kg.section_tagging import backfill_untagged_nodes
+    tag_stats = backfill_untagged_nodes(scope_context=scope, limit=max_tags)
 
     return {
         "edges_rated": edge_status,

@@ -49,11 +49,13 @@ The deprecated LLM Entity rater (`regenerate_importance`) from
 """
 from __future__ import annotations
 
+import math
 import time
 from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
+from app.assistant.kg import failure_ledger
 from app.assistant.kg.db.knowledge_graph_db_sqlite import Edge, Node
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import ScopeContext
@@ -62,10 +64,9 @@ from app.models.db_manager import get_db_manager
 logger = get_logger(__name__)
 
 
-# Default per-edge score when the rater couldn't produce one (LLM omitted
-# the edge from its output). Mid-scale — not "important," not "trivia."
-DEFAULT_EDGE_SCORE = 5.0
 EDGE_RATER_BATCH_SIZE = 50  # ~50 edges per LLM call
+# Failure-ledger kind: one item per edge (see regenerate_edge_importance).
+EDGE_IMPORTANCE_KIND = "edge_importance"
 
 
 # ── Edge scoring (LLM-rated from source's perspective) ─────────────────────
@@ -118,6 +119,39 @@ def _build_edge_block(
         f"EDGE SENTENCE — THIS IS THE ONE WHOSE IMPORTANCE TO THE SOURCE YOU ARE EVALUATING: {edge_sent or '-'}",
     ]
     return "\n".join(lines)
+
+
+def _rate_edges(agent, blocks: Dict[str, str], ids: List[str], correction_ids: List[str], scope) -> Dict[str, float]:
+    """One rater call over these edges. Returns the well-formed ratings among ``ids``.
+
+    A rating is well-formed when its id is one of ``ids`` and its score is a finite number; a
+    score of 0 is a real 0. Anything else leaves that edge missing from the result.
+    """
+    from app.assistant.utils.pydantic_classes import Message
+
+    batch_text = "\n".join(blocks[eid] for eid in ids)
+    # correction_ids always travels (empty on a first call) so a previous call's list on the
+    # agent's blackboard is overwritten, never inherited.
+    result = agent.action_handler(Message(
+        agent_input={"task": batch_text, "information": "", "correction_ids": correction_ids},
+        task=batch_text,
+        information="",
+        scope_context=scope,
+    ))
+    data = getattr(result, "data", None) or {}
+    wanted = set(ids)
+    scored: Dict[str, float] = {}
+    for r in data.get("ratings") or []:
+        if not isinstance(r, dict):
+            continue
+        eid = str(r.get("id") or "").strip()
+        score = r.get("score")
+        if eid not in wanted or isinstance(score, bool) or not isinstance(score, (int, float)):
+            continue
+        if not math.isfinite(score):
+            continue
+        scored[eid] = max(0.0, min(10.0, float(score)))
+    return scored
 
 
 def _write_edge_scores_batch(session: Session, scored: Dict[str, float]) -> None:
@@ -238,12 +272,19 @@ def regenerate_edge_importance(
             so a large backlog (e.g. a bulk re-extraction) converges over
             multiple runs instead of becoming one graph-wide LLM grind.
 
+    A failed call stops the run (owner, 2026-10-05): the batch in hand is not written, later
+    batches stay unrated for the next run, and the exception propagates. An answer that leaves
+    edges unrated or gives a non-numeric score gets ONE correction call listing exactly those
+    edge ids; still incomplete, it raises. Each failure is counted in the failure ledger
+    against the edges it concerns (the whole batch for a failed call or write, the unrated
+    edges for an incomplete answer); an edge failing in three runs is set aside and skipped.
+
     Returns: number of edges scored this run.
     """
     from app.assistant.ServiceLocator.service_locator import DI
-    from app.assistant.utils.pydantic_classes import Message
 
     started = time.time()
+    set_aside = failure_ledger.set_aside_ids(EDGE_IMPORTANCE_KIND)
 
     # Load all nodes once for label/category lookup; avoids per-batch joins.
     with get_db_manager().read_session() as session:
@@ -253,6 +294,8 @@ def regenerate_edge_importance(
         edge_q = session.query(Edge)
         if only_unrated:
             edge_q = edge_q.filter(Edge.importance.is_(None))
+        if set_aside:
+            edge_q = edge_q.filter(~Edge.id.in_(set_aside))
         # Per-run cap: bound the backlog so a bulk re-extraction can't turn one
         # run into a graph-wide LLM grind. With only_unrated (a shrinking
         # selector) the remainder converges over subsequent runs.
@@ -270,77 +313,76 @@ def regenerate_edge_importance(
     scope = scope_context
 
     rated_count = 0
-    failures = 0
+    total_batches = (len(all_edges) + batch_size - 1) // batch_size
 
     for i in range(0, len(all_edges), batch_size):
         batch = all_edges[i : i + batch_size]
-        prompt_lines: List[str] = []
-        batch_ids: List[str] = []
+        blocks: Dict[str, str] = {}
+        labels: Dict[str, str] = {}
         for e in batch:
             block = _build_edge_block(e, node_by_id)
             if block is None:
                 continue
-            prompt_lines.append(block)
-            batch_ids.append(str(e.id))
-        if not prompt_lines:
+            eid = str(e.id)
+            blocks[eid] = block
+            labels[eid] = (f"{node_by_id[str(e.source_id)].label} --{e.relationship_type}--> "
+                           f"{node_by_id[str(e.target_id)].label}")
+        if not blocks:
             continue
-        batch_text = "\n".join(prompt_lines)
+        batch_ids = list(blocks)
+        batch_no = (i // batch_size) + 1
+
+        def _record(ids: List[str], exc: BaseException) -> None:
+            for eid in ids:
+                failure_ledger.record_failure(EDGE_IMPORTANCE_KIND, eid, exc, label=labels[eid])
 
         agent = DI.agent_factory.create_agent("me::edge_importance_rater")
         if agent is None:
-            logger.error("edge importance: agent unavailable")
-            break
+            raise RuntimeError("edge importance: agent me::edge_importance_rater is unavailable")
 
-        msg = Message(
-            agent_input={"task": batch_text, "information": ""},
-            task=batch_text,
-            information="",
-            scope_context=scope,
-        )
         try:
-            result = agent.action_handler(msg)
-            data = getattr(result, "data", None) or {}
-            ratings = data.get("ratings") or []
-            id_set = set(batch_ids)
-            scored: Dict[str, float] = {}
-            for r in ratings:
-                if not isinstance(r, dict):
-                    continue
-                eid = str(r.get("id") or "").strip()
-                if eid not in id_set:
-                    continue
-                try:
-                    score = float(r.get("score") or DEFAULT_EDGE_SCORE)
-                except (TypeError, ValueError):
-                    continue
-                scored[eid] = max(0.0, min(10.0, score))
+            scored = _rate_edges(agent, blocks, batch_ids, [], scope)
+        except Exception as exc:
+            _record(batch_ids, exc)
+            raise
 
-            for eid in batch_ids:
-                scored.setdefault(eid, DEFAULT_EDGE_SCORE)
+        missing = [eid for eid in batch_ids if eid not in scored]
+        if missing:
+            logger.warning(
+                "edge importance: batch %d/%d left %d edge(s) without a well-formed rating; one correction for them",
+                batch_no, total_batches, len(missing),
+            )
+            try:
+                scored.update(_rate_edges(agent, blocks, missing, missing, scope))
+            except Exception as exc:
+                _record(missing, exc)
+                raise
+            still_missing = [eid for eid in missing if eid not in scored]
+            if still_missing:
+                exc = ValueError(
+                    f"edge importance: no well-formed rating after one correction for "
+                    f"{len(still_missing)} edge(s): {', '.join(still_missing)}"
+                )
+                _record(still_missing, exc)
+                raise exc
 
+        try:
             with get_db_manager().transaction(op="me_edge_importance") as session:
                 _write_edge_scores_batch(session, scored)
-            rated_count += len(scored)
+        except Exception as exc:
+            _record(batch_ids, exc)
+            raise
+        for eid in batch_ids:
+            failure_ledger.clear(EDGE_IMPORTANCE_KIND, eid)
+        rated_count += len(scored)
 
-            logger.info(
-                "edge importance: batch %d/%d → %d ratings (running total %d)",
-                (i // batch_size) + 1,
-                (len(all_edges) + batch_size - 1) // batch_size,
-                len(scored),
-                rated_count,
-            )
-        except Exception as e:
-            failures += 1
-            logger.error("edge importance: batch %d failed: %s", (i // batch_size) + 1, e)
-            if failures >= 5:
-                logger.error("edge importance: too many failures, aborting")
-                break
+        logger.info(
+            "edge importance: batch %d/%d → %d ratings (running total %d)",
+            batch_no, total_batches, len(scored), rated_count,
+        )
 
     elapsed = time.time() - started
-    logger.info(
-        "edge importance: rated %d edges in %.1fs (%d failures)",
-        rated_count, elapsed, failures,
-    )
+    logger.info("edge importance: rated %d edges in %.1fs", rated_count, elapsed)
     return rated_count
 
 
@@ -515,29 +557,25 @@ def regenerate_entity_importance(*, only_unrated: bool = True) -> int:
         logger.info("entity importance: no eligible nodes (only_unrated=%s)", only_unrated)
         return 0
 
+    # A failed write raises out of the transaction: nothing of this pass is
+    # committed and the run stops.
     persisted = 0
-    failed = 0
     with get_db_manager().transaction(op="entity_importance_persist") as session:
         for nid, score in updates:
-            try:
-                session.query(Node).filter(Node.id == nid).update(
-                    # updated_at self-reference: importance is a derived
-                    # score; bumping updated_at cascades into wiki + card
-                    # refreshes on no semantic change.
-                    {Node.importance: score, Node.updated_at: Node.updated_at},
-                    synchronize_session=False,
-                )
-                persisted += 1
-            except Exception as e:
-                logger.warning("entity importance: DB write failed for node %s: %s", nid, e)
-                failed += 1
+            session.query(Node).filter(Node.id == nid).update(
+                # updated_at self-reference: importance is a derived
+                # score; bumping updated_at cascades into wiki + card
+                # refreshes on no semantic change.
+                {Node.importance: score, Node.updated_at: Node.updated_at},
+                synchronize_session=False,
+            )
+            persisted += 1
         session.commit()
 
     elapsed = time.time() - started
     logger.info(
-        "entity importance: rated %d Entity/Concept nodes in %.1fs "
-        "(%d failures, only_unrated=%s)",
-        persisted, elapsed, failed, only_unrated,
+        "entity importance: rated %d Entity/Concept nodes in %.1fs (only_unrated=%s)",
+        persisted, elapsed, only_unrated,
     )
     # The lens cache reads node.importance via cache.get_importance_map();
     # without invalidating after a write, lens consumers (me/api.py,
@@ -748,26 +786,21 @@ def regenerate_state_importance(*, only_unrated: bool = True) -> int:
         logger.info("state importance: no eligible nodes (only_unrated=%s)", only_unrated)
         return 0
 
+    # A failed write raises out of the transaction; see regenerate_entity_importance.
     persisted = 0
-    failed = 0
     with get_db_manager().transaction(op="state_importance_persist") as session:
         for nid, score in updates:
-            try:
-                session.query(Node).filter(Node.id == nid).update(
-                    {Node.importance: score, Node.updated_at: Node.updated_at},
-                    synchronize_session=False,
-                )
-                persisted += 1
-            except Exception as e:
-                logger.warning("state importance: DB write failed for node %s: %s", nid, e)
-                failed += 1
+            session.query(Node).filter(Node.id == nid).update(
+                {Node.importance: score, Node.updated_at: Node.updated_at},
+                synchronize_session=False,
+            )
+            persisted += 1
         session.commit()
 
     elapsed = time.time() - started
     logger.info(
-        "state importance: rated %d State/Event/Goal/Property nodes in %.1fs "
-        "(%d failures, only_unrated=%s)",
-        persisted, elapsed, failed, only_unrated,
+        "state importance: rated %d State/Event/Goal/Property nodes in %.1fs (only_unrated=%s)",
+        persisted, elapsed, only_unrated,
     )
     # Drop lens cache; see comment in regenerate_entity_importance.
     from app.assistant.importance.cache import invalidate as _invalidate_cache

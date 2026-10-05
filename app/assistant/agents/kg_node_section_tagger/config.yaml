@@ -10,6 +10,7 @@ except_tools: []
 user_context_items:
   - nodes_block
   - namespaces_block
+  - correction_numbers
 
 system_context_items:
   - resource_user_data
