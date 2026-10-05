@@ -19,7 +19,7 @@ from app.assistant.lib.core_tools.calendar_tool.utils.google_calendar import (
 
 from app.assistant.ServiceLocator.service_locator import DI
 
-from app.assistant.utils.time_utils import local_to_utc, utc_to_local
+from app.assistant.utils.time_utils import local_time_text, local_to_utc, utc_to_local
 from typing import Any, Dict, Optional
 from pathlib import Path
 
@@ -654,7 +654,8 @@ class CalendarTool(BaseTool):
         header = f"Found {event_count} calendar event{'s' if event_count != 1 else ''}"
         if recurring_count > 0:
             header += f" ({recurring_count} recurring)"
-        header += f" from {start_iso} to {end_iso}."
+        # Agents read local time; storage and the API stay UTC (time_utils.local_time_text).
+        header += f" from {local_time_text(start_iso)} to {local_time_text(end_iso)}."
 
         # Deduplicate recurring instances by title — same event repeated
         # across weeks should only appear once in the summary.
@@ -677,7 +678,9 @@ class CalendarTool(BaseTool):
             ]
             line = f"- {title}"
             if start:
-                line += f" @ {start}"
+                # An all-day event is stored at the UTC instant of its local midnight: its day, not a time.
+                line += (f" @ {utc_to_local(start).strftime('%a %m-%d')} (all day)" if ev.get("is_all_day")
+                         else f" @ {local_time_text(start)}")
             if location:
                 line += f"  location={location[:200]}"
             if meeting_link:

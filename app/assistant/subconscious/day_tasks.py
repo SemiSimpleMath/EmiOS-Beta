@@ -1,4 +1,4 @@
-"""The brain decides what today's calendar needs: SHADOW ONLY (2026-10-04).
+"""The day's tasks: the brain decides what today's calendar needs. SHADOW ONLY (2026-10-04).
 
 Design: docs/design/brain_delegates_work_2026-10-04.md. The brain is to decide what work exists and dayflow how;
 today the calendar's placements reach dayflow's steward by code (subconscious/belief_occurrences.py), and the
@@ -7,13 +7,15 @@ when the owner had said "I'll start at 5", the family-time heads-up kept once th
 prompt.
 
 This runs that decision live without acting on it. On each brain wake, when anything it reads has changed, the
-`subconscious::day_decider` agent decides every placement of today's plan (subconscious/day_plan.py): needed (who
-acts, the assistant's part, when), not needed (why), or done elsewhere. It reads the placements with their related
-beliefs, the owner's todo list, today's chat, the work in motion that did not come from the calendar (with where it
-stands), and the open concerns. Code checks that every placement is decided exactly once (one correction round)
-and records the run in `brain_day_decisions`. Nothing is handed to dayflow: the steward goes on handling the
-calendar, and `compare(day)` sets the brain's decisions beside what dayflow did with the same beliefs, for the
-owner to judge.
+`subconscious::day_tasks` agent (named the day decider until 2026-10-04) decides every placement of today's plan
+(subconscious/day_plan.py): needed (who acts, the assistant's part, when), not needed (why), or done elsewhere. It
+reads the placements with their related beliefs and their entries on the brain's list, and the brain's situation
+(subconscious/situation.py): the schedule, presence, location, weather, health, the finished chat, the todo list,
+the work in motion and what finished or was dropped, the reminders sent, the questions waiting, the open concerns.
+In shadow the situation leaves out work made from the calendar: that work is the steward's. Code checks that every
+placement is decided exactly once (one correction round) and records the run in `brain_day_decisions` (the table
+keeps the name it was created with). Nothing is handed to dayflow: the steward goes on handling the calendar, and
+`compare(day)` sets the brain's decisions beside what dayflow did with the same beliefs, for the owner to judge.
 """
 from __future__ import annotations
 
@@ -27,7 +29,7 @@ from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-_AGENT = "subconscious::day_decider"
+_AGENT = "subconscious::day_tasks"
 _DECISIONS = ("needed", "not_needed", "done_elsewhere")
 
 SCHEMA = """CREATE TABLE IF NOT EXISTS brain_day_decisions (
@@ -60,49 +62,14 @@ def placements(plan: Dict[str, Any]) -> List[Dict[str, Any]]:
     return out
 
 
-def todos() -> List[Dict[str, Any]]:
-    """The owner's Google Tasks as the todo sync stored them: title, status, due date."""
-    from app.assistant.event_repository.event_repository import EventRepositoryManager
-    out = []
-    for row in json.loads(EventRepositoryManager().search_events(data_type="todo_task")):
-        data = row["data"] if isinstance(row["data"], dict) else json.loads(row["data"])
-        out.append({"title": data["title"], "status": data.get("status") or "",
-                    "due": str(data.get("due") or "")[:10]})
-    return sorted(out, key=lambda t: t["title"])
-
-
-def chat_today(day: str, now_utc: datetime) -> List[Dict[str, Any]]:
-    """Today's master-room conversation (both sides), oldest first, from the day's boundary to now."""
-    from app.assistant.pipelines.context import day_window_local
-    start_local, _ = day_window_local(day)
-    start = start_local.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    with _connect(False) as c:
-        rows = c.execute("SELECT id, timestamp, role, message FROM unified_log_2026 WHERE room_id = 'master_room' "
-                         "AND source != 'dayflow_item' AND timestamp >= ? AND timestamp <= ? ORDER BY timestamp",
-                         (start, now_utc.strftime("%Y-%m-%d %H:%M:%S.%f"))).fetchall()
-    return [{"id": r["id"], "at": str(r["timestamp"]).replace(" ", "T") + "+00:00",
-             "speaker": "Owner" if r["role"] == "user" else "Assistant", "text": r["message"]} for r in rows]
-
-
-def work_in_motion() -> List[Dict[str, Any]]:
-    """Active work that was not made from a calendar placement, with where it stands."""
-    from app.assistant.subconscious import work_links
-    return [{"work_id": w["work_id"], "objective": w["objective"] or w["title"], "progress": w["progress"]}
-            for w in work_links.active_work() if not w["from_calendar"]]
-
-
-def open_concerns() -> List[Dict[str, Any]]:
-    from app.assistant.subconscious.concern_store import load_register
-    register = load_register()
-    return [{"title": c.get("title"), "severity": c.get("severity")}
-            for b in ("active", "addressing") for c in register.get(b) or []]
-
-
 def fingerprint(inputs: Dict[str, Any]) -> str:
     """What the decision read, minus the clock and minus the list's own entries (they change because of a run, so
-    counting them would make every run trigger the next): a run is repeated only when one of these changed."""
-    read = {k: v for k, v in inputs.items() if k not in ("now", "correction", "items")}
+    counting them would make every run trigger the next): a run is repeated only when one of these changed. The
+    situation counts without what moves with the clock alone (situation.fingerprint_view)."""
+    from app.assistant.subconscious.situation import fingerprint_view
+    read = {k: v for k, v in inputs.items() if k not in ("now", "correction", "items", "situation")}
     read["items"] = [{k: v for k, v in it.items() if k != "current"} for it in inputs["items"]]
+    read["situation"] = fingerprint_view(inputs["situation"])
     return hashlib.sha256(json.dumps(read, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 
@@ -154,8 +121,8 @@ def problems(data: Any, labels: List[str]) -> List[str]:
 
 def _agent_call(payload: Dict[str, Any]) -> Any:
     from app.assistant.routine_handlers.subconscious import _run_subconscious_agent
-    return _run_subconscious_agent(handler_label="day_decision", agent_name=_AGENT, context=payload,
-                                   scope_id="subconscious::day_decider", actor_id="subconscious::day_decider")
+    return _run_subconscious_agent(handler_label="day_tasks", agent_name=_AGENT, context=payload,
+                                   scope_id="subconscious::day_tasks", actor_id="subconscious::day_tasks")
 
 
 def _last_fingerprint(day: str, connect) -> Optional[str]:
@@ -174,14 +141,15 @@ def gather(now_utc: datetime, *, plan_connect=None) -> Optional[Dict[str, Any]]:
     plan = day_plan.load_plan(day, connect=plan_connect)
     if plan is None:
         return None
-    return {"day": day, "now": now_utc.isoformat(), "items": with_current(day, placements(plan)), "todos": todos(),
-            "chat": chat_today(day, now_utc), "work": work_in_motion(), "concerns": open_concerns(),
-            "correction": None}
+    from app.assistant.subconscious import situation
+    # Shadow: the situation leaves out calendar-made work, which is the steward's (module docstring).
+    return {"day": day, "now": now_utc.isoformat(), "items": with_current(day, placements(plan)),
+            "situation": situation.gather(now_utc, calendar_work=False), "correction": None}
 
 
-def run_day_decision(*, now_utc: Optional[datetime] = None, connect=None,
-                     gather_inputs: Callable[[datetime], Optional[Dict[str, Any]]] = None,
-                     call: Callable[[Dict[str, Any]], Any] = None) -> Dict[str, Any]:
+def run_day_tasks(*, now_utc: Optional[datetime] = None, connect=None,
+                  gather_inputs: Callable[[datetime], Optional[Dict[str, Any]]] = None,
+                  call: Callable[[Dict[str, Any]], Any] = None) -> Dict[str, Any]:
     """Decide today's placements when anything read has changed since the last run; record the run. The
     keyword arguments are test seams. Raises when the answer is still invalid after one correction."""
     from app.assistant.subconscious.brain_trace import step
@@ -190,22 +158,22 @@ def run_day_decision(*, now_utc: Optional[datetime] = None, connect=None,
     ensure_schema(connect)
     inputs = (gather_inputs or gather)(now)
     if inputs is None:
-        return {"day_decision": "no plan"}
+        return {"day_tasks": "no plan"}
     if not inputs["items"]:
-        return {"day_decision": "no placements"}
+        return {"day_tasks": "no placements"}
     fp = fingerprint(inputs)
     if fp == _last_fingerprint(inputs["day"], connect):
-        return {"day_decision": "unchanged"}
+        return {"day_tasks": "unchanged"}
     call = call or _agent_call
     labels = [it["label"] for it in inputs["items"]]
     data = call(inputs)
     found = problems(data, labels)
     if found:
-        step("day_decision", "answer refused, one correction", subject=inputs["day"], problems=found)
+        step("day_tasks", "answer refused, one correction", subject=inputs["day"], problems=found)
         data = call({**inputs, "correction": "; ".join(found)})
         found = problems(data, labels)
         if found:
-            raise ValueError(f"day decider answer still invalid after one correction: {found}")
+            raise ValueError(f"day_tasks answer still invalid after one correction: {found}")
     with connect(True) as c:
         c.execute("INSERT INTO brain_day_decisions (day, decided_at_utc, fingerprint, items, decisions) "
                   "VALUES (?,?,?,?,?)",
@@ -213,13 +181,13 @@ def run_day_decision(*, now_utc: Optional[datetime] = None, connect=None,
                    json.dumps(data["decisions"], ensure_ascii=False)))
     from app.assistant.subconscious import brain_list
     changed = brain_list.apply_calendar(inputs["day"], inputs["items"], data["decisions"],
-                                        cause=f"day decision {now.isoformat()}", at=now, connect=connect)
+                                        cause=f"day's tasks {now.isoformat()}", at=now, connect=connect)
     needed = [d for d in data["decisions"] if d["decision"] == "needed"]
-    step("day_decision", "decided (shadow)", subject=inputs["day"], items=len(labels), needed=len(needed),
+    step("day_tasks", "decided (shadow)", subject=inputs["day"], items=len(labels), needed=len(needed),
          list_changes=changed, decisions=data["decisions"])
-    logger.info("[day_decision] %s: %d placement(s), %d needed; list %s (shadow; nothing handed to dayflow)",
+    logger.info("[day_tasks] %s: %d placement(s), %d needed; list %s (shadow; nothing handed to dayflow)",
                 inputs["day"], len(labels), len(needed), changed)
-    return {"day_decision": "decided", "day_items": len(labels), "day_needed": len(needed),
+    return {"day_tasks": "decided", "day_items": len(labels), "day_needed": len(needed),
             "day_list_changes": changed}
 
 

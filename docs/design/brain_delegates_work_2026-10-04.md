@@ -165,6 +165,19 @@ shadow it is shown no calendar-made work, since that work would not exist.
 **Name.** The day decider is renamed `subconscious::day_tasks` (owner, 2026-10-04): it turns the day's calendar
 into the day's tasks, and it is part of the brain, run in the brain's pass with the brain's other agents.
 
+**Built 2026-10-04 (build step 3a, shadow, needs a restart).** `subconscious/situation.py` gathers the situation
+with no model call, through the readers already in use: the resource manager (schedule, day theme and status,
+weather, health), `get_current_presence_status`, the location manager's summary, the key-dates builder, the brain
+step's 30-day calendar, today's finished chat (the gate's quiet rule), the todo sync, `work_links` for work in motion
+and for work that ended in the last 18 hours (the brain's past-work view: the finalizer's prose, never its verdict),
+`scheduled_reminder_history` and the steward's active tickets. `shared/brain/situation.j2` shows it, every time
+local. Only day_tasks reads it so far (in shadow without calendar-made work). Its fingerprint leaves out what moves
+with the clock alone (minutes away, the temperature, the reminder window). Live run 2026-10-04 at 10:47 PM: about
+7,500 tokens of situation, 11,900 input tokens per day_tasks call; the answer valid; it read the 8:30 AC change from
+the schedule and the owner at the keyboard during the wind-down. Found on the way (bug list): the calendar tool
+showed every agent UTC times (fixed); calendar-made work citing only a belief was not recognized (fixed); the
+key-dates builder speaks for the romance proposer. The table `brain_day_decisions` keeps its name.
+
 ### What day_tasks reads: the brain's view of the day
 
 The owner's worry (2026-10-04): it "sees less than brain". It is the brain deciding, so it sees what the brain

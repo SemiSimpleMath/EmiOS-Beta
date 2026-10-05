@@ -38,10 +38,11 @@ NODES: List[Dict[str, Any]] = [
      "agents": ["dayflow_routine_writer"],
      "role": "Places each belief the owner approved for the calendar at its times today, read with the beliefs "
              "closest to it in meaning; code builds the day from the placements and hands each one to dayflow."},
-    {"id": "day_decision", "title": "Day decision (shadow)", "col": 1, "row": 3,
-     "agents": ["subconscious::day_decider"],
+    {"id": "day_tasks", "title": "Day's tasks (shadow)", "col": 1, "row": 3,
+     "agents": ["subconscious::day_tasks"],
      "role": "Shadow only: decides what each placement on today's calendar needs (who acts, the assistant's part, "
-             "when, or nothing and why) and records it beside what dayflow did. Nothing is handed over yet."},
+             "when, or nothing and why), reading the brain's situation (schedule, presence, health, chat, todos, "
+             "work, reminders), and records it beside what dayflow did. Nothing is handed over yet."},
     {"id": "concern_list", "title": "Concern list (shadow)", "col": 5, "row": 2,
      "agents": ["subconscious::concern_list_decider"],
      "role": "Shadow only: after the planner, keeps the concern's entries on the brain's list (keep, modify or "
@@ -76,7 +77,7 @@ EDGES = [
     ("door", "concerns", ""), ("concerns", "brief", ""), ("brief", "plan", ""),
     ("plan", "handoff", ""), ("day_pass", "handoff", "today's calendar"), ("handoff", "steward", ""),
     ("steward", "gate", "work outcomes come back as events"), ("concerns", "stories", ""),
-    ("day_pass", "day_decision", "shadow: recorded, not handed over"),
+    ("day_pass", "day_tasks", "shadow: recorded, not handed over"),
     ("plan", "concern_list", "shadow: recorded, not handed over"),
 ]
 AGENT_NODE = {a: n["id"] for n in NODES for a in n["agents"]}

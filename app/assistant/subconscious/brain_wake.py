@@ -45,7 +45,7 @@ _start_lock = threading.Lock()
 
 def run_brain() -> Dict[str, Any]:
     """One pass: gate, brain step, briefs, the concern planner, handoffs, the day pass and its occurrences,
-    the stories, and the shadow list (the day decision and each planned concern's entries)."""
+    the stories, and the shadow list (the day's tasks and each planned concern's entries)."""
     from app.assistant.subconscious.brain_step import run_brain_step
     from app.assistant.subconscious.concern_brief import run_briefs
     from app.assistant.subconscious.concern_handoff import run_handoffs
@@ -72,11 +72,11 @@ def run_brain() -> Dict[str, Any]:
     from app.assistant.subconscious.brain_stories import run_stories
     with trace(stage="stories"):
         stories = run_stories()
-    # Last, and shadow only: what the brain would decide for today's calendar, recorded and compared, never
-    # handed to dayflow (subconscious/day_decision.py; docs/design/brain_delegates_work_2026-10-04.md).
-    from app.assistant.subconscious.day_decision import run_day_decision
-    with trace(stage="day_decision"):
-        decided = run_day_decision()
+    # Last, and shadow only: the day's tasks, what the brain would decide for today's calendar, recorded and
+    # compared, never handed to dayflow (subconscious/day_tasks.py; docs/design/brain_delegates_work_2026-10-04.md).
+    from app.assistant.subconscious.day_tasks import run_day_tasks
+    with trace(stage="day_tasks"):
+        decided = run_day_tasks()
     # And the brain's list for each concern planned this wake, shadow only (subconscious/concern_list_shadow.py).
     from app.assistant.subconscious.concern_list_shadow import run_concern_shadow
     listed = run_concern_shadow(shadow_jobs)

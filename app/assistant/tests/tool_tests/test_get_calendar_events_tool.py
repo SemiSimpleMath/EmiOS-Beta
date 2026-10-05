@@ -83,10 +83,12 @@ def test_content_includes_event_title_and_time(monkeypatch):
     assert "Friday Night Meats" in content, (
         f"Event title missing from content. content was:\n{content}"
     )
-    # Some timestamp reference should be present for the event.
-    assert "2026-04-24" in content, (
-        f"Event date missing from content. content was:\n{content}"
+    # The event's start, in local time: agents read local time, storage stays UTC.
+    from app.assistant.utils.time_utils import local_time_text
+    assert local_time_text("2026-04-24T20:00:00Z") in content, (
+        f"Event start missing from content. content was:\n{content}"
     )
+    assert "2026-04-24T20:00" not in content, "the UTC instant never reaches an agent"
 
 
 def test_content_surfaces_zoom_link_from_description(monkeypatch):

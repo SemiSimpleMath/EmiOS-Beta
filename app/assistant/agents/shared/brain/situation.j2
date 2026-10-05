@@ -1,0 +1,72 @@
+{#- The brain's situation (subconscious/situation.py): one picture of the moment, the same for every brain decider
+    (docs/design/brain_delegates_work_2026-10-04.md, section 2). Expects `s`; times are shown local. -#}
+## The moment
+Now: {{ s.now | local_time }} ({{ s.weekday }})
+{% set p = s.presence -%}
+{% if p.status_label == "AWAY" -%}
+The owner is away from the keyboard{% if p.start_time_local %}, since {{ p.start_time_local }}{% endif %} ({{ p.duration_minutes | int }} minutes).
+{%- elif p.status_label == "AT_KEYBOARD" -%}
+The owner is at the keyboard{% if p.start_time_local %}, since {{ p.start_time_local }}{% endif %}.
+{%- else -%}
+Whether the owner is at the keyboard is not known right now.
+{%- endif %}
+{%- if p.most_recent_afk %} Last away from {{ p.most_recent_afk.start_local }} to {{ p.most_recent_afk.end_local }}.{% endif %}
+Where the owner is, and expected to be in the next 24 hours:
+{{ s.location }}
+Weather: {% if s.weather.condition %}{{ s.weather.city }}, {{ s.weather.temperature }} F, {{ s.weather.condition }}{% else %}(not known){% endif %}
+Health today: {{ s.health or "(no assessment yet)" }}
+
+## Today
+{% if s.day_theme %}Day theme: {{ s.day_theme }}
+{% endif %}{% if s.current_status %}Status: {{ s.current_status }}
+{% endif %}Today's schedule:
+{% for e in s.calendar_today -%}
+- {{ e.title }} {{ e.start_local }}{% if e.end_local %} - {{ e.end_local }}{% endif %}{% if e.status %} ({{ e.status }}){% endif %}
+{% else -%}
+(nothing on the schedule)
+{% endfor %}
+Dates that matter coming up:
+{{ s.key_dates }}
+
+The calendar ahead:
+{{ s.calendar_ahead }}
+
+## The owner's chat today
+{% for m in s.chat -%}
+[{{ m.at | local_time }}] {{ m.speaker }}: {{ m.text }}
+{% else -%}
+(no finished conversation yet today)
+{% endfor %}
+## The owner's todo list
+{% for t in s.todos -%}
+- {{ t.title }} ({{ t.status }}{% if t.due %}, due {{ t.due }}{% endif %})
+{% else -%}
+(empty)
+{% endfor %}
+## Work the assistant has in motion
+{% for w in s.work.in_motion -%}
+- {{ w.objective or w.title }} (started {{ w.created }})
+{% with p = w.progress, pad = "  " %}{% include 'shared/work/work_progress.j2' %}{% endwith -%}
+{% else -%}
+(none)
+{% endfor %}
+## Work that ended in the last 18 hours
+{% for w in s.work.ended -%}
+{% include 'shared/brain/past_work.j2' %}
+{% else -%}
+(none)
+{% endfor %}
+## Questions and notices waiting for the owner
+{% for t in s.tickets -%}
+- {{ t.title }}{% if t.message %}: {{ t.message }}{% endif %}
+{% else -%}
+(none)
+{% endfor %}
+{% with scheduled_reminder_history = s.reminders %}{% include 'shared/work/scheduled_reminders.j2' %}{% endwith %}
+
+## Open concerns
+{% for c in s.concerns -%}
+- {{ c.title }}{% if c.severity %} (severity: {{ c.severity }}){% endif %}
+{% else -%}
+(none)
+{% endfor %}

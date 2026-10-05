@@ -13,7 +13,7 @@ import pytest
 
 from app.assistant.subconscious import brain_list as L
 from app.assistant.subconscious import concern_list_shadow as S
-from app.assistant.subconscious import day_decision as D
+from app.assistant.subconscious import day_tasks as D
 from belief_engine.intake.store import sqlite_file
 
 NOW = datetime(2026, 3, 10, 15, 0, tzinfo=timezone.utc)
@@ -57,15 +57,16 @@ def test_a_placement_dropped_from_the_day_is_cancelled(tmp_path):
     assert L.changes(gone, connect=conn)[-1]["change"] == "cancelled"
 
 
-def test_the_day_decider_sees_each_placements_entry_and_entries_are_not_a_change_of_input(tmp_path):
+def test_the_days_tasks_see_each_placements_entry_and_entries_are_not_a_change_of_input(tmp_path):
     conn = sqlite_file(tmp_path / "l.db")
     L.apply_calendar("2026-03-10", ITEMS, _decision(), cause="run 1", at=NOW, connect=conn)
     seen = D.with_current("2026-03-10", ITEMS, connect=conn)
     assert seen[0]["current"]["when"] == "9:00 PM" and seen[1]["current"]["decision"] == "not_needed"
-    base = {"day": "2026-03-10", "now": NOW.isoformat(), "todos": [], "chat": [], "work": [], "concerns": []}
+    from app.assistant.tests.non_agent_tests.test_day_tasks import situation
+    base = {"day": "2026-03-10", "now": NOW.isoformat(), "situation": situation()}
     assert D.fingerprint({**base, "items": ITEMS}) == D.fingerprint({**base, "items": seen})
     from app.assistant.dayflow_orchestrator.work_context import _ENV
-    user = _ENV.get_template("subconscious/day_decider/prompts/user.j2").render(
+    user = _ENV.get_template("subconscious/day_tasks/prompts/user.j2").render(
         agent_input={**base, "items": [{**it, "related": []} for it in seen], "correction": None})
     assert "on the list now: needed: the assistant: set the AC to 70, 9:00 PM" in user
     assert "on the list now: not needed: Covered by I1." in user
