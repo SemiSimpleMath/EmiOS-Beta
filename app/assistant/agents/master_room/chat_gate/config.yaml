@@ -4,7 +4,10 @@ name: master_room::chat_gate
 class_name: Agent
 action_required: false
 llm_params:
-  llm_provider: "gemini"
+  # gpt-6-luna since 2026-10-04, kept after a day's trial (owner, 2026-10-05: "its been fine. i have not really
+  # noticed a big change"). Gemini (gemini-3-flash-preview, default thinking) had run this gate to its 65k output
+  # ceiling twice (188 s on 2026-10-04, 184 s on 2026-08-21).
+  llm_provider: "openai"
   model_tier: "mini"
 
 allowed_tools: []

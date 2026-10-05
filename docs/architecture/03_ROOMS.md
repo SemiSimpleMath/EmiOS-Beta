@@ -123,7 +123,7 @@ through those managers).
 | Direct reply        | Yes                       | Yes                                 |
 | Switchboard handoff | Yes                       | Yes                                 |
 | Dayflow delegation  | No                        | Yes                                 |
-| LLM (tier)          | openai / `powerful`       | gemini / `mini` (`gemini-3-flash-preview`, faster) |
+| LLM (tier)          | openai / `mini`           | openai / `mini` (gpt-6-luna since 2026-10-04; Gemini until then) |
 
 (`config.yaml` declares a provider + `model_tier`; the tier names the model and
 reasoning effort per provider in `configs/model_tiers.yaml` (`resolve_tier` in
