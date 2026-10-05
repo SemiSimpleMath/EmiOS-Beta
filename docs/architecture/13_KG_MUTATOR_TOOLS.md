@@ -25,20 +25,25 @@ new method plus a thin wrapper directory.
 
 `KGMutatorTool` backs **twelve** tool names (the module docstring lists
 them): ten KG-mutation ops plus two finding-lifecycle ops
-(`kg_finding_resolve` / `kg_finding_escalate`). Destructive ops refuse
-user-locked rows (`locked_by_user_at`, the axiom layer) — merge, rename,
-update_field, close_state, delete_node, delete_edge, repoint_edge,
-split_succession; additive `create_*` ops are exempt; `kg_set_user_lock`
-is the ONE op allowed to touch a locked row (it's how the user revokes
-the lock — see `_refuse_if_locked` and its absence from `handle_kg_set_user_lock`).
+(`kg_finding_resolve` / `kg_finding_escalate`). A user lock
+(`locked_by_user_at`, the axiom layer) protects a row's EXISTING facts: ops
+that change or remove them refuse it — rename, update_field, close_state,
+delete_node, delete_edge, split_succession, the folded node of a merge, and
+for repoint_edge the edge, the endpoint it leaves and the endpoint that stays.
+Adding facts to a locked node is allowed (owner, 2026-10-05): `create_*`, a
+merge INTO a locked keep node, an edge re-pointed ONTO a locked node (until
+then nothing could drain parked edges onto the owner's locked node).
+`kg_set_user_lock` is the ONE op that changes the lock itself (it's how the
+user revokes it — see `_refuse_if_locked` and its absence from
+`handle_kg_set_user_lock`).
 
 | Tool | Required args | Side effect | Reversibility | Safety rails |
 |---|---|---|---|---|
-| `kg_merge_nodes` | `keep_id`, `fold_id`, `reason` | Rewrite all `fold_id` edges to `keep_id`; union aliases; rebind dependent rows; delete `fold_id` | partial — node identity gone, but `before_json` carries full snapshot incl. all rewritten edges | Refuses `keep.node_type != fold.node_type`; refuses self-merge; refuses when `fold` outranks `keep` (pagerank / edge count) unless `force=true`; refuses locked rows |
+| `kg_merge_nodes` | `keep_id`, `fold_id`, `reason` | Rewrite all `fold_id` edges to `keep_id`; union aliases; rebind dependent rows; delete `fold_id` | partial — node identity gone, but `before_json` carries full snapshot incl. all rewritten edges | Refuses `keep.node_type != fold.node_type`; refuses self-merge; refuses when `fold` outranks `keep` (pagerank / edge count) unless `force=true`; refuses a locked `fold` (a locked `keep` only gains facts) |
 | `kg_rename_label` | `node_id`, `new_label`, `reason` | Set new label; preserve old label as alias | reversible | Refuses if another active node of the same `node_type` already has `new_label` (error message tells the agent to use `kg_merge_nodes` instead); refuses locked rows |
 | `kg_update_node_field` | `node_id`, `field`, `value`, `reason` | Single-field update | reversible | `field` must be in `_ALLOWED_UPDATE_FIELDS` allowlist (description, dates, importance, etc.); list-typed fields (`aliases`, `hash_tags`) require a `list_op` of `set` / `add` / `remove` so partial updates don't clobber; refuses locked rows |
 | `kg_delete_edge` | `edge_id`, `reason` | Single edge removed | reversible (snapshot in `before_json`) | Refuses if the edge or either endpoint node is locked |
-| `kg_repoint_edge` | `edge_id`, `reason`, ≥1 of `new_source_id` / `new_target_id` | Move one endpoint of an existing edge, keeping the row (id, sentence, evidence linkage) intact | reversible | The Disambiguation-attachment drain op. Refuses self-loops, no-op re-points, a re-point that would duplicate an existing `(source,target,rel)` edge, and any locked edge / endpoint (old or new) |
+| `kg_repoint_edge` | `edge_id`, `reason`, ≥1 of `new_source_id` / `new_target_id` | Move one endpoint of an existing edge, keeping the row (id, sentence, evidence linkage) intact | reversible | The Disambiguation-attachment drain op. Refuses self-loops, no-op re-points, a re-point that would duplicate an existing `(source,target,rel)` edge, a locked edge, a locked endpoint it leaves, and a locked endpoint that stays; a locked NEW endpoint is allowed |
 | `kg_split_succession` | `node_id`, `split_date`, `reason` | Era-split a role-reference Entity: close old era at `split_date`, mint same-label successor + a Disambiguation park point, chain `old --succeeded_by--> successor`, optionally repoint era-mismatched edges. Delegates to `kg_core/kg_utils/succession.py:split_succession` | reversible (revision log) | Refuses non-Entity nodes, Disambiguation nodes, locked nodes, already-closed eras, `split_date <= start_date` |
 | `kg_set_user_lock` | `node_id`, `locked` (bool), `reason` | Stamp/clear `locked_by_user_at`; set `confidence_tier` to `axiom` (lock) or `provisional` (unlock) | reversible | The ONLY op permitted on a locked row (unlock is how the user revokes the guarantee — backs the KG Lens lock toggle). Refuses missing node + no-op transitions |
 | `kg_delete_node` | `node_id`, `reason` | Delete node + explicitly delete all connected edges (no DB cascade) | partial — full node + edge snapshots in `before_json` | Refuses locked node, refuses node with any locked edge |

@@ -11,9 +11,10 @@ Two-phase drain:
    same-label era nodes (a diachronic succession split), each parked
    edge whose evidence date falls inside EXACTLY ONE era's
    [start_date, end_date) window is re-pointed to that era — no LLM.
-   Anything else (undated evidence, overlapping/undated eras, locks,
-   would-be duplicates) stays parked: a deterministic miss must sink,
-   not drop.
+   Anything else (undated evidence, overlapping/undated eras, a locked
+   edge or a locked node on its other end, would-be duplicates) stays
+   parked: a deterministic miss must sink, not drop. A locked era is a
+   valid target: it only gains a fact.
 
 2. BACKLOG FINDING: every Disambiguation node still carrying edges gets
    a "disambiguation_backlog" finding for the investigator, who
@@ -88,7 +89,11 @@ def temporal_drain(session, dis_node_id: str, label: str) -> Dict[str, Any]:
         if len(containing) != 1:
             continue  # ambiguous or no era — sink to the investigator
         era = containing[0]
-        if getattr(era, "locked_by_user_at", None) is not None:
+        # A locked era only gains a fact (owner, 2026-10-05); a locked node on
+        # the edge's other end would have its fact changed, so it stays parked.
+        other_id = e.target_id if e.source_id == dis_node_id else e.source_id
+        other = session.query(Node).filter(Node.id == other_id).first()
+        if other is not None and getattr(other, "locked_by_user_at", None) is not None:
             continue
         new_src = era.id if e.source_id == dis_node_id else e.source_id
         new_tgt = era.id if e.target_id == dis_node_id else e.target_id

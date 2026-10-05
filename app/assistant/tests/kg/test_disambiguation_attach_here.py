@@ -334,9 +334,10 @@ def test_repoint_edge_refusals():
         _call("kg_repoint_edge", edge_id=locked_eid, new_target_id=b, reason="x"),
         "user-locked", "kg_repoint_edge",
     )
-    # Locked NEW endpoint.
+    # Locked OLD endpoint: moving the edge off it changes its facts.
+    off_locked = _mk_edge(locked_node, b, rel="knows")
     assert _is_refusal(
-        _call("kg_repoint_edge", edge_id=eid, new_target_id=locked_node, reason="x"),
+        _call("kg_repoint_edge", edge_id=off_locked, new_source_id=a, reason="x"),
         "user-locked",
     )
     # Missing new endpoint node.
@@ -374,6 +375,22 @@ def test_repoint_edge_refusals():
     finally:
         session.close()
     assert _revision_rows("repoint_edge") == []
+
+
+def test_repoint_onto_a_locked_node_is_allowed():
+    """A lock protects a node's existing facts; an edge re-pointed onto it only adds one (owner, 2026-10-05: until
+    then nothing could drain the edges parked on a Disambiguation marker onto the owner's locked node)."""
+    dis = _mk_node("Sam", node_type=DISAMBIGUATION_NODE_TYPE)
+    owner = _mk_node("Sam", locked=True)
+    state = _mk_node("Booked Hotels", node_type="State")
+    eid = _mk_edge(dis, state, rel="has_state")
+    r = _call("kg_repoint_edge", edge_id=eid, new_source_id=owner, reason="drain to the owner")
+    assert "Re-pointed" in r.content
+    session = get_session()
+    try:
+        assert session.get(Edge, eid).source_id == owner
+    finally:
+        session.close()
 
 
 # ── scanners ─────────────────────────────────────────────────────────────

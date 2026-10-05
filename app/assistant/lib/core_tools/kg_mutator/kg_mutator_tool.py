@@ -23,9 +23,12 @@ Common contract:
     touching the KG.
   - Optional ``finding_id`` ties the revision back to its source
     kg_maintenance_finding row.
-  - Destructive ops refuse user-locked rows (``locked_by_user_at``,
-    the axiom layer): merge, rename, update_field, close_state,
-    delete_node, delete_edge. Additive ops (create_*) are exempt.
+  - A user lock (``locked_by_user_at``, the axiom layer) protects a row's
+    existing facts: ops that change or remove them refuse it (rename,
+    update_field, close_state, delete_node, delete_edge, the folded node of
+    a merge, the endpoint an edge is moved off and the edge's other end).
+    Adding facts to a locked node is allowed (owner, 2026-10-05): create_*,
+    a merge INTO a locked node, an edge re-pointed ONTO a locked node.
 
 Errors are surfaced as ToolResult(content="…", data={"ok": False, ...})
 rather than raised exceptions so the caller agent can react.
@@ -315,7 +318,8 @@ class KGMutatorTool(BaseTool):
                     f"node_type mismatch: keep={keep.node_type!r} fold={fold.node_type!r}; "
                     "merging across types is not allowed."
                 )
-            _refuse_if_locked(keep, "kg_merge_nodes")
+            # The keep node only gains facts (edges, aliases, empty fields), so
+            # a lock on it does not refuse; the folded node is deleted.
             _refuse_if_locked(fold, "kg_merge_nodes")
 
             # Edges to rewrite from fold → keep.
@@ -771,9 +775,11 @@ class KGMutatorTool(BaseTool):
         Required: edge_id, reason, and at least one of new_source_id /
         new_target_id.
         Optional: finding_id, dry_run.
-        Refuses: missing edge/node, user-locked edge, user-locked
-        endpoint (old or new), self-loops, and re-points that would
-        duplicate an existing (source, target, relationship_type) edge.
+        Refuses: missing edge/node, user-locked edge, a user-locked endpoint
+        the edge is moved off, a user-locked endpoint that stays (its fact
+        changes), self-loops, and re-points that would duplicate an existing
+        (source, target, relationship_type) edge. A user-locked NEW endpoint
+        is allowed: it only gains a fact.
         """
         edge_id = str(arguments.get("edge_id") or "").strip()
         if not edge_id:
@@ -799,13 +805,16 @@ class KGMutatorTool(BaseTool):
             if final_source == edge.source_id and final_target == edge.target_id:
                 raise ValueError("re-point is a no-op: edge already has these endpoints.")
 
-            # Old AND new endpoints: moving an edge changes those nodes'
-            # facts, so a user lock on any of them refuses the op.
-            involved = {edge.source_id, edge.target_id, final_source, final_target}
-            for node_id in involved:
-                endpoint = session.query(Node).filter(Node.id == node_id).first()
-                if endpoint is None and node_id in (final_source, final_target):
+            # The old endpoints' facts change (one loses the edge, the one that
+            # stays now points elsewhere), so a lock on either refuses. A new
+            # endpoint only gains a fact: a lock on it does not refuse (until
+            # 2026-10-05 it did, so nothing could drain parked edges onto the
+            # owner's locked node).
+            for node_id in (final_source, final_target):
+                if session.query(Node).filter(Node.id == node_id).first() is None:
                     raise ValueError(f"new endpoint {node_id!r} not found")
+            for node_id in (edge.source_id, edge.target_id):
+                endpoint = session.query(Node).filter(Node.id == node_id).first()
                 if endpoint is not None:
                     _refuse_if_locked(endpoint, "kg_repoint_edge")
 

@@ -275,11 +275,13 @@ def test_create_edge_writes_revision_log_and_validates():
 # ── P0.3: locked refusals on the remaining destructive handlers ──────────
 
 
-def test_merge_refuses_locked_keep_or_fold():
+def test_merge_into_a_locked_keep_is_allowed_and_a_locked_fold_refuses(chroma):
+    """A lock protects a node's existing facts: the folded node is deleted (refused when locked); the keep node only
+    gains edges, aliases and empty fields (allowed when locked, owner 2026-10-05)."""
     keep = _mk_node("Keep", locked=True)
     fold = _mk_node("Fold")
     r1 = _call("kg_merge_nodes", keep_id=keep, fold_id=fold, reason="x")
-    assert _is_refusal(r1, "user-locked", "kg_merge_nodes")
+    assert "Merged" in r1.content and not _node_exists(fold) and _node_exists(keep)
 
     keep2 = _mk_node("Keep2")
     fold2 = _mk_node("Fold2", locked=True)
