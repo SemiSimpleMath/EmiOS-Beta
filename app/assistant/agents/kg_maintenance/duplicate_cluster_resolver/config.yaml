@@ -7,6 +7,7 @@ allowed_tools: []
 except_tools: []
 user_context_items:
   - cluster_brief
+  - correction
 system_context_items: []
 type: agent
 

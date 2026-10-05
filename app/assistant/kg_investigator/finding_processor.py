@@ -9,6 +9,11 @@ For each pending finding:
 
 Idempotent: skips findings whose status is not 'pending'.
 
+A failed manager run (an exception, or a run ManagerInvoker returns as
+``manager_aborted``) stops the queue: the finding stays 'pending' for the
+next run and the failure is counted in the KG failure ledger, which sets
+aside a finding that fails in three runs (owner, 2026-10-05).
+
 Wireable to a routine: ``run_pending_findings(limit=N)`` returns a small
 result dict the routine can write to its day file.
 """
@@ -18,18 +23,35 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
+from app.assistant.kg import failure_ledger
 from app.assistant.kg_investigator.finding_brief import build_finding_brief
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.utils.identity_names import PRINCIPAL_USER
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.pydantic_classes import Message, ScopeContext
+from app.assistant.utils.pydantic_classes import Message, ScopeContext, ToolResult
 from app.models.db_manager import get_db_manager
 
 logger = get_logger(__name__)
 
 MANAGER_NAME = "kg_investigation_manager"
 MUTATION_MANAGER_NAME = "kg_mutation_manager"
+LEDGER_KIND = "kg_finding_investigation"
+
+
+class ManagerAborted(RuntimeError):
+    """A manager run ended aborted. ManagerInvoker returns an abort as a
+    ``manager_aborted`` result rather than raising, so callers check for it."""
+
+
+def invoke_manager(manager_name: str, mgr, msg: Message) -> ToolResult:
+    """Run one manager invocation; raise when it fails or aborts."""
+    if mgr is None:
+        raise RuntimeError(f"manager {manager_name} not registered")
+    result = DI.manager_invoker.invoke(mgr, msg)
+    if result.result_type == "manager_aborted":
+        raise ManagerAborted(f"{manager_name} aborted: {result.content}")
+    return result
 
 
 def _investigation_scope() -> ScopeContext:
@@ -153,10 +175,11 @@ def apply_one(finding_id: str) -> Dict[str, Any]:
     apply the proposed_action (or escalate) per the report's decision rules.
 
     Returns ``{"status": "applied" | "no_report" | "wrong_status" |
-    "not_found" | "error", "finding_id": ..., "result_summary": ..., ...}``.
-    The terminal finding-row status (executed / rejected / escalated) is
-    written by the planner via ``kg_finding_resolve`` /
-    ``kg_finding_escalate`` — we don't touch it directly here.
+    "not_found", "finding_id": ..., "result_summary": ..., ...}``; a failed
+    or aborted manager run raises. The terminal finding-row status
+    (executed / rejected / escalated) is written by the planner via
+    ``kg_finding_resolve`` / ``kg_finding_escalate`` — we don't touch it
+    directly here.
     """
     import json
 
@@ -177,12 +200,7 @@ def apply_one(finding_id: str) -> Dict[str, Any]:
     task, information = brief
     mgr = DI.multi_agent_manager_factory.create_manager(MUTATION_MANAGER_NAME)
     msg = Message(task=task, information=information, scope_context=finding_write_scope())
-    try:
-        DI.manager_invoker.invoke(mgr, msg)
-    except Exception as e:
-        logger.error("apply failed for finding %s: %s", finding_id, e)
-        logger.debug("apply exception details", exc_info=True)
-        return {"status": "error", "finding_id": finding_id, "error": str(e)}
+    invoke_manager(MUTATION_MANAGER_NAME, mgr, msg)
 
     # Read back the finding's terminal state so the caller can see what the
     # planner actually did (executed / rejected / escalated / unchanged).
@@ -193,22 +211,18 @@ def apply_one(finding_id: str) -> Dict[str, Any]:
 
     # Pull a result summary from the mutation_manager's final_answer if there is one.
     result_summary: Optional[str] = None
-    try:
-        msgs = mgr.blackboard.get_messages()
-        for m in msgs:
-            sender = str(getattr(m, "sender", "") or "")
-            if sender.endswith("final_answer") and "kg_mutation" in sender:
-                data = getattr(m, "data", None) or {}
-                result_summary = (
-                    data.get("result_summary")
-                    or data.get("final_answer_answer")
-                    or data.get("diagnosis")
-                )
-                if isinstance(result_summary, str):
-                    result_summary = result_summary[:600]
-                break
-    except Exception as e:
-        logger.debug("could not extract final_answer from mutation manager: %s", e)
+    for m in mgr.blackboard.get_messages():
+        sender = str(getattr(m, "sender", "") or "")
+        if sender.endswith("final_answer") and "kg_mutation" in sender:
+            data = getattr(m, "data", None) or {}
+            result_summary = (
+                data.get("result_summary")
+                or data.get("final_answer_answer")
+                or data.get("diagnosis")
+            )
+            if isinstance(result_summary, str):
+                result_summary = result_summary[:600]
+            break
 
     return {
         "status": "applied",
@@ -229,9 +243,11 @@ def _claim_pending_finding_ids(
     touched nodes (high first), date as tie-breaker. Optionally restricted
     to specific finding types (`finding_types`) or with some types excluded
     (`exclude_finding_types`, e.g. ['duplicate_node'] which are resolved by
-    the dedicated kg_dup_cluster_drain cluster path, not the per-pair drain)."""
+    the dedicated kg_dup_cluster_drain cluster path, not the per-pair drain).
+    Findings the failure ledger set aside are skipped."""
     from app.assistant.kg_investigator.finding_priority import order_by_importance
 
+    set_aside = failure_ledger.set_aside_ids(LEDGER_KIND)
     with get_db_manager().read_session() as session:
         q = (
             session.query(
@@ -251,7 +267,7 @@ def _claim_pending_finding_ids(
             q = q.filter(~KGMaintenanceFinding.finding_type.in_(exclude_finding_types))
         rows = q.all()
 
-    candidates = [(r[0], r[1], r[2]) for r in rows]
+    candidates = [(r[0], r[1], r[2]) for r in rows if r[0] not in set_aside]
     claimed = order_by_importance(candidates)[:limit]
 
     # Fairness (audit P3.1): importance-DESC alone starves low-importance
@@ -267,12 +283,7 @@ def _claim_pending_finding_ids(
 
 def _extract_report_from_audit(blackboard) -> Optional[Dict[str, Any]]:
     """Pull the structured report from the kg_investigation::final_answer audit message."""
-    try:
-        msgs = blackboard.get_messages()
-    except Exception as e:
-        logger.warning("could not read blackboard messages: %s", e)
-        return None
-    for m in msgs:
+    for m in blackboard.get_messages():
         sender = str(getattr(m, "sender", "") or "")
         if sender.endswith("final_answer") and "kg_investigation" in sender:
             data = getattr(m, "data", None) or {}
@@ -360,55 +371,12 @@ def _persist_report(*, finding_id: str, report: Dict[str, Any]) -> None:
         f.status = "investigated"
 
 
-MAX_INVESTIGATION_ATTEMPTS = 3
-
-
-def _record_failed_attempt(finding_id: str, *, reason: str) -> int:
-    """Poison-pill quarantine (audit P3.1): count failed investigation
-    attempts in evidence_json. Errors and no-report runs used to leave the
-    row 'pending' with no counter — a crashing high-importance finding
-    re-claimed the drain budget every day forever. Returns the new count;
-    the caller escalates at MAX_INVESTIGATION_ATTEMPTS."""
-    with get_db_manager().transaction(op="finding_processor.failed_attempt") as session:
-        f = (
-            session.query(KGMaintenanceFinding)
-            .filter(KGMaintenanceFinding.id == finding_id)
-            .first()
-        )
-        if f is None:
-            return 0
-        evidence = dict(f.evidence_json or {})
-        attempts = int(evidence.get("investigation_attempts") or 0) + 1
-        evidence["investigation_attempts"] = attempts
-        evidence["last_investigation_error"] = (reason or "")[:300]
-        f.evidence_json = evidence
-    return attempts
-
-
-def _quarantine_if_exhausted(finding_id: str, attempts: int, *, reason: str) -> bool:
-    """Escalate after MAX_INVESTIGATION_ATTEMPTS failed runs. Returns True
-    when the finding was parked."""
-    if attempts < MAX_INVESTIGATION_ATTEMPTS:
-        return False
-    from app.assistant.kg_maintenance.store import set_status
-    set_status(
-        finding_id,
-        "escalated",
-        executed_by="agent:kg_investigation",
-        execution_notes=(
-            f"investigation_failed_repeatedly: {attempts} attempt(s) "
-            f"errored or produced no report; last: {reason[:200]}"
-        ),
-    )
-    logger.warning(
-        "[finding_processor] finding %s escalated after %d failed "
-        "investigation attempts", finding_id, attempts,
-    )
-    return True
-
-
 def investigate_one(finding_id: str) -> Dict[str, Any]:
-    """Investigate a single finding by id. Returns a small result dict."""
+    """Investigate a single finding by id. Returns a small result dict.
+
+    A failed or aborted manager run, or a run that ends without a structured
+    report, raises and leaves the finding 'pending': an outage is never
+    recorded as a verdict or counted toward escalation."""
     brief = build_finding_brief(finding_id)
     if brief is None:
         return {"status": "not_found", "finding_id": finding_id}
@@ -416,25 +384,13 @@ def investigate_one(finding_id: str) -> Dict[str, Any]:
 
     mgr = DI.multi_agent_manager_factory.create_manager(MANAGER_NAME)
     msg = Message(task=task, information=information, scope_context=_investigation_scope())
-    try:
-        DI.manager_invoker.invoke(mgr, msg)
-    except Exception as e:
-        logger.error("investigation failed for finding %s: %s", finding_id, e)
-        logger.debug("investigation exception details", exc_info=True)
-        attempts = _record_failed_attempt(finding_id, reason=str(e))
-        quarantined = _quarantine_if_exhausted(finding_id, attempts, reason=str(e))
-        return {"status": "error", "finding_id": finding_id, "error": str(e),
-                "attempts": attempts, "quarantined": quarantined}
+    invoke_manager(MANAGER_NAME, mgr, msg)
 
     report = _extract_report_from_audit(mgr.blackboard)
     if report is None:
-        logger.warning("no structured report produced for finding %s", finding_id)
-        attempts = _record_failed_attempt(finding_id, reason="no structured report produced")
-        quarantined = _quarantine_if_exhausted(
-            finding_id, attempts, reason="no structured report produced"
+        raise RuntimeError(
+            f"{MANAGER_NAME} finished without a structured report for finding {finding_id}"
         )
-        return {"status": "no_report", "finding_id": finding_id,
-                "attempts": attempts, "quarantined": quarantined}
 
     _persist_report(finding_id=finding_id, report=report)
 
@@ -643,8 +599,11 @@ def investigate_findings(
     """Investigate an explicit list of finding ids — typically returned by a
     producer (wiki critic, etc.) right after it wrote them.
 
-    Skips ids that aren't pending (e.g., already investigated or rejected).
-    Caps total work at ``max_to_investigate`` to keep producer routines bounded.
+    Skips ids that aren't pending (e.g., already investigated or rejected)
+    and ids the failure ledger set aside. Caps total work at
+    ``max_to_investigate`` to keep producer routines bounded. The first
+    finding whose investigation fails stops the run: its failure is counted
+    in the ledger and the exception propagates; the rest stay pending.
     """
     ids = list(dict.fromkeys((fid or "").strip() for fid in (finding_ids or []) if fid))
     if not ids:
@@ -652,14 +611,22 @@ def investigate_findings(
 
     # Filter to ids that are still pending — others (already investigated /
     # rejected / executed) shouldn't be redone.
+    set_aside = failure_ledger.set_aside_ids(LEDGER_KIND)
     with get_db_manager().read_session() as session:
         rows = (
-            session.query(KGMaintenanceFinding.id)
+            session.query(
+                KGMaintenanceFinding.id,
+                KGMaintenanceFinding.finding_type,
+                KGMaintenanceFinding.primary_node_id,
+            )
             .filter(KGMaintenanceFinding.id.in_(ids))
             .filter(KGMaintenanceFinding.status == "pending")
             .all()
         )
-        pending_ids = [r[0] for r in rows]
+        labels = {
+            r[0]: f"{r[1]} finding on node {r[2]}" for r in rows if r[0] not in set_aside
+        }
+    pending_ids = [fid for fid in ids if fid in labels]
 
     if not pending_ids:
         return {"status": "nothing_pending", "processed": 0, "results": []}
@@ -673,24 +640,25 @@ def investigate_findings(
 
     results: List[Dict[str, Any]] = []
     investigated = 0
-    errors = 0
     for fid in pending_ids:
-        r = investigate_one(fid)
+        try:
+            r = investigate_one(fid)
+        except Exception as exc:
+            failure_ledger.record_failure(LEDGER_KIND, fid, exc, label=labels[fid])
+            raise
+        failure_ledger.clear(LEDGER_KIND, fid)
         results.append(r)
         if r.get("status") == "investigated":
             investigated += 1
-        elif r.get("status") in ("error", "no_report"):
-            errors += 1
 
     logger.info(
-        "[finding_processor] processed=%d investigated=%d errors=%d (from %d ids)",
-        len(pending_ids), investigated, errors, len(ids),
+        "[finding_processor] processed=%d investigated=%d (from %d ids)",
+        len(pending_ids), investigated, len(ids),
     )
     return {
         "status": "ok",
         "processed": len(pending_ids),
         "investigated": investigated,
-        "errors": errors,
         "results": results,
     }
 
@@ -705,26 +673,4 @@ def run_pending_findings(
     ids = _claim_pending_finding_ids(limit=limit, finding_types=finding_types)
     if not ids:
         return {"status": "no_pending_findings", "processed": 0, "results": []}
-
-    results: List[Dict[str, Any]] = []
-    investigated = 0
-    errors = 0
-    for fid in ids:
-        r = investigate_one(fid)
-        results.append(r)
-        if r.get("status") == "investigated":
-            investigated += 1
-        elif r.get("status") in ("error", "no_report"):
-            errors += 1
-
-    logger.info(
-        "[finding_processor] processed=%d investigated=%d errors=%d",
-        len(ids), investigated, errors,
-    )
-    return {
-        "status": "ok",
-        "processed": len(ids),
-        "investigated": investigated,
-        "errors": errors,
-        "results": results,
-    }
+    return investigate_findings(ids, max_to_investigate=limit)

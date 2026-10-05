@@ -32,7 +32,10 @@ from app.assistant.kg_maintenance.verdict_store import (
     get_verdicts_for_pair,
     get_verdicts_for_node,
 )
+from app.assistant.utils.pydantic_classes import ToolResult
 from app.models.base import get_session
+
+_COMPLETED = ToolResult(result_type="final_answer", content="done")
 
 
 def _seed_finding(*, primary="X", secondary="Y", finding_type="duplicate_node"):
@@ -92,7 +95,7 @@ def _patch_investigation(report_dict):
             multi_agent_manager_factory=MagicMock(
                 create_manager=MagicMock(return_value=fake_mgr),
             ),
-            manager_invoker=MagicMock(invoke=MagicMock(return_value=None)),
+            manager_invoker=MagicMock(invoke=MagicMock(return_value=_COMPLETED)),
         ),
     )
 
@@ -263,9 +266,9 @@ def test_take_action_true_needs_user_review_does_not_close():
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_no_report_extracted_returns_no_report_status():
-    """If the manager runs but produces no structured report, finding
-    stays at pending and we return early."""
+def test_no_report_extracted_raises_and_leaves_finding_pending():
+    """If the manager runs but produces no structured report, the run is a
+    failure: investigate_one raises and the finding stays pending."""
     fid = _seed_finding()
 
     # Stub _extract_report_from_audit to return None (no report found).
@@ -278,12 +281,12 @@ def test_no_report_extracted_returns_no_report_status():
             multi_agent_manager_factory=MagicMock(
                 create_manager=MagicMock(return_value=fake_mgr),
             ),
-            manager_invoker=MagicMock(invoke=MagicMock(return_value=None)),
+            manager_invoker=MagicMock(invoke=MagicMock(return_value=_COMPLETED)),
         ),
     ):
         from app.assistant.kg_investigator.finding_processor import investigate_one
-        result = investigate_one(fid)
+        with pytest.raises(RuntimeError, match="without a structured report"):
+            investigate_one(fid)
 
-    assert result["status"] == "no_report"
     f = _read_finding(fid)
     assert f.status == "pending"  # untouched

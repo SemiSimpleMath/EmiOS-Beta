@@ -101,9 +101,6 @@ def _build_ground_truth_block(entity_node_id: str, entity_label: str) -> str:
                     if b.bullet_text:
                         key_facts_list.append(b.bullet_text)
         row = (summary_text, key_facts_list) if card is not None else None
-    except Exception as e:
-        logger.warning("Could not read v2 entity card for %s: %s", entity_node_id, e)
-        row = None
     finally:
         session.close()
 
@@ -129,14 +126,11 @@ def _build_ground_truth_block(entity_node_id: str, entity_label: str) -> str:
                     lines.append(f"- {text}")
 
     # If this is the primary user, also pull home city / job from the user resource.
-    try:
-        user_data = DI.resource_manager.get_resource(
-            scope_context=_scope(),
-            resource_id="resource_user_data",
-            required=False,
-        )
-    except Exception:
-        user_data = None
+    user_data = DI.resource_manager.get_resource(
+        scope_context=_scope(),
+        resource_id="resource_user_data",
+        required=False,
+    )
     if isinstance(user_data, dict):
         preferred = str(user_data.get("preferred_name") or "").strip()
         if preferred and preferred.lower() == entity_label.lower():
@@ -293,7 +287,7 @@ def _save_finding(
     except Exception as e:
         logger.error("Failed saving critic finding for %s: %s", entity_label, e)
         session.rollback()
-        return None
+        raise
     finally:
         session.close()
 
@@ -363,15 +357,10 @@ def run_consistency_critic(
 
     investigation_summary: Optional[Dict[str, Any]] = None
     if investigate_immediately and saved_ids:
-        try:
-            from app.assistant.kg_investigator.finding_processor import investigate_findings
-            investigation_summary = investigate_findings(
-                saved_ids, max_to_investigate=max_investigations,
-            )
-        except Exception as e:
-            logger.error("auto-investigation failed for %s: %s", entity_label, e)
-            logger.debug("auto-investigation exception details", exc_info=True)
-            investigation_summary = {"status": "error", "error": str(e)}
+        from app.assistant.kg_investigator.finding_processor import investigate_findings
+        investigation_summary = investigate_findings(
+            saved_ids, max_to_investigate=max_investigations,
+        )
 
     return {
         "status": "ok",

@@ -1,5 +1,9 @@
 Adjudicate this candidate duplicate cluster. Decide which nodes (if any) are genuinely the same thing and should merge, and which must be kept separate.
 
 {{ cluster_brief }}
-
+{% if correction %}
+## Correct your previous answer
+It did not cover the cluster as the contract requires: {{ correction }}
+Answer again, placing every node id above exactly once and using only the ids shown.
+{% endif %}
 Return merge_groups + distinct_node_ids covering every node id above exactly once.

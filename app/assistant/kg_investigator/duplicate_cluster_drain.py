@@ -29,11 +29,13 @@ before anything writes to the real KG.
 """
 from __future__ import annotations
 
+import hashlib
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import or_
 
+from app.assistant.kg import failure_ledger
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.utils.identity_names import PRINCIPAL_USER
@@ -45,8 +47,15 @@ logger = get_logger(__name__)
 
 AGENT_NAME = "kg_maintenance::duplicate_cluster_resolver"
 ACTOR = "kg_maintenance::duplicate_cluster_resolver"
+LEDGER_KIND = "kg_duplicate_cluster"
 
 MAX_NODE_EDGE_SENTENCES = 4
+
+
+def _cluster_key(cluster: Dict[str, Any]) -> str:
+    """Ledger id of a cluster: its node set, so a cluster that gains or loses a
+    node is a new question."""
+    return hashlib.sha1("|".join(cluster["node_ids"]).encode("utf-8")).hexdigest()
 
 
 def _resolver_scope():
@@ -190,8 +199,39 @@ def _serialize_cluster(node_ids: List[str], node_data: Dict[str, Dict[str, Any]]
 
 # ── Resolution ────────────────────────────────────────────────────────────────
 
+def _coverage_problems(data: Dict[str, Any], node_ids: List[str]) -> List[str]:
+    """Where an answer breaks the coverage contract: every node id shown appears
+    exactly once across the merge groups and distinct_node_ids, only those ids,
+    and every merge group names at least one duplicate. Empty when complete."""
+    node_set = set(node_ids)
+    named: List[str] = []
+    problems: List[str] = []
+    for g in (data.get("merge_groups") or []):
+        canon = g.get("canonical_node_id")
+        dups = list(g.get("duplicate_node_ids") or [])
+        if not dups:
+            problems.append(f"the merge group for {canon} names no duplicate_node_ids")
+        named.append(canon)
+        named.extend(dups)
+    named.extend(data.get("distinct_node_ids") or [])
+    unknown = sorted({str(n) for n in named if n not in node_set})
+    if unknown:
+        problems.append(f"not ids of this cluster: {unknown}")
+    repeated = sorted({n for n in named if n in node_set and named.count(n) > 1})
+    if repeated:
+        problems.append(f"placed more than once: {repeated}")
+    missing = [n for n in node_ids if n not in named]
+    if missing:
+        problems.append(f"not placed: {missing}")
+    return problems
+
+
 def resolve_one_cluster(cluster: Dict[str, Any], *, scope_context, dry_run: bool) -> Dict[str, Any]:
-    """Adjudicate one cluster with the LLM; validate coverage; apply unless dry_run."""
+    """Adjudicate one cluster with the LLM; validate coverage; apply unless dry_run.
+
+    A node the answer leaves out is never taken as 'distinct': an incomplete
+    answer gets one correction naming what is missing, and raises if it is
+    still incomplete."""
     node_ids: List[str] = cluster["node_ids"]
     node_data = _load_node_brief_data(node_ids)
     brief = _serialize_cluster(node_ids, node_data)
@@ -199,46 +239,30 @@ def resolve_one_cluster(cluster: Dict[str, Any], *, scope_context, dry_run: bool
     agent = DI.agent_factory.create_agent(AGENT_NAME)
     if agent is None:
         raise RuntimeError(f"could not create agent {AGENT_NAME}")
-    response = agent.action_handler(
-        Message(agent_input={"cluster_brief": brief}, scope_context=scope_context)
-    )
-    data = getattr(response, "data", None) or {}
 
-    node_set = set(node_ids)
-    assigned: set = set()
-    merge_groups: List[Tuple[str, List[str], str]] = []
-
-    for g in (data.get("merge_groups") or []):
-        if not isinstance(g, dict):
-            continue
-        canon = g.get("canonical_node_id")
-        if canon not in node_set or canon in assigned:
-            continue
-        dups = [
-            d for d in (g.get("duplicate_node_ids") or [])
-            if d in node_set and d != canon and d not in assigned
-        ]
-        if not dups:
-            continue
-        merge_groups.append((canon, dups, str(g.get("reason") or "")))
-        assigned.add(canon)
-        assigned.update(dups)
-
-    distinct_ids = [
-        d for d in (data.get("distinct_node_ids") or [])
-        if d in node_set and d not in assigned
-    ]
-    assigned.update(distinct_ids)
-
-    # Coverage: any node the agent failed to mention sinks to 'distinct', never
-    # silently dropped (deterministic-proposes-LLM-decides: a miss must sink).
-    missing = [n for n in node_ids if n not in assigned]
-    if missing:
-        logger.warning(
-            "[dup_cluster] %d node(s) uncovered by agent -> kept distinct: %s",
-            len(missing), missing,
+    def call(agent_input: Dict[str, Any]) -> Dict[str, Any]:
+        response = agent.action_handler(
+            Message(agent_input=agent_input, scope_context=scope_context)
         )
-        distinct_ids.extend(missing)
+        return getattr(response, "data", None) or {}
+
+    payload = {"cluster_brief": brief}
+    data = call(payload)
+    problems = _coverage_problems(data, node_ids)
+    if problems:
+        logger.warning("[dup_cluster] incomplete answer, one correction: %s", problems)
+        data = call({**payload, "correction": "; ".join(problems)})
+        problems = _coverage_problems(data, node_ids)
+        if problems:
+            raise ValueError(
+                f"duplicate cluster answer still incomplete after one correction: {problems}"
+            )
+
+    merge_groups: List[Tuple[str, List[str], str]] = [
+        (g["canonical_node_id"], list(g["duplicate_node_ids"]), str(g.get("reason") or ""))
+        for g in (data.get("merge_groups") or [])
+    ]
+    distinct_ids = list(data.get("distinct_node_ids") or [])
 
     report: Dict[str, Any] = {
         "node_count": len(node_ids),
@@ -267,7 +291,10 @@ def _apply_resolution(
     merge_groups: List[Tuple[str, List[str], str]],
     node_data: Dict[str, Dict[str, Any]],
 ) -> Dict[str, Any]:
-    """Merge true duplicates (revertible), record distinct verdicts, close findings."""
+    """Merge true duplicates (revertible), record distinct verdicts, close findings.
+
+    Every merge group of the cluster commits in one transaction: a failure
+    rolls the whole cluster back and leaves its findings pending."""
     from app.assistant.kg.db.knowledge_graph_db import Node
     from app.assistant.kg_core.kg_utils.node_merge import (
         merge_nodes_in_session,
@@ -283,13 +310,14 @@ def _apply_resolution(
     remap: Dict[str, str] = {}  # loser_id -> surviving winner_id
     merges_done = 0
 
-    for (winner_id, loser_ids, reason) in merge_groups:
-        session = get_session()
-        try:
+    session = get_session()
+    try:
+        for (winner_id, loser_ids, reason) in merge_groups:
             winner = session.query(Node).filter_by(id=winner_id).first()
             if winner is None:
-                logger.warning("[dup_cluster] winner %s vanished; skipping group", winner_id)
-                continue
+                # Closing this group's findings would record its pairs as
+                # distinct, a verdict nobody made.
+                raise RuntimeError(f"merge winner {winner_id} no longer exists")
             for loser_id in loser_ids:
                 loser = session.query(Node).filter_by(id=loser_id).first()
                 if loser is None:
@@ -308,13 +336,13 @@ def _apply_resolution(
                 )
                 remap[loser_id] = winner_id
                 merges_done += 1
-            session.commit()
-        except Exception:
-            session.rollback()
-            logger.error("[dup_cluster] merge group winner=%s failed", winner_id, exc_info=True)
-            raise
-        finally:
-            session.close()
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.error("[dup_cluster] cluster merge failed; rolled back", exc_info=True)
+        raise
+    finally:
+        session.close()
 
     # Close findings: remap endpoints through the merges. A pair that collapsed
     # to one node was a real duplicate -> executed; everything else is distinct.
@@ -352,20 +380,31 @@ def _apply_resolution(
 
 def drain_duplicate_clusters(*, limit: Optional[int] = None, dry_run: bool = True) -> Dict[str, Any]:
     """Resolve up to ``limit`` duplicate clusters (all if None). Dry-run by
-    default — produces the full verdict report without writing to the KG."""
+    default — produces the full verdict report without writing to the KG.
+
+    The first cluster that fails stops the run: its failure is counted in
+    the KG failure ledger (keyed by the cluster's node set; three failed runs
+    set it aside) and the exception propagates; later clusters stay pending."""
     scope = _resolver_scope()
     clusters = build_duplicate_clusters()
     total = len(clusters)
+    set_aside = failure_ledger.set_aside_ids(LEDGER_KIND)
+    clusters = [c for c in clusters if _cluster_key(c) not in set_aside]
     if limit:
         clusters = clusters[:limit]
 
     reports: List[Dict[str, Any]] = []
     for i, cluster in enumerate(clusters):
+        key = _cluster_key(cluster)
         try:
             rep = resolve_one_cluster(cluster, scope_context=scope, dry_run=dry_run)
-        except Exception:
-            logger.error("[dup_cluster] cluster %d failed", i, exc_info=True)
-            continue
+        except Exception as exc:
+            failure_ledger.record_failure(
+                LEDGER_KIND, key, exc,
+                label=f"duplicate cluster of nodes {', '.join(cluster['node_ids'])}",
+            )
+            raise
+        failure_ledger.clear(LEDGER_KIND, key)
         reports.append(rep)
         logger.info(
             "[dup_cluster] cluster %d/%d nodes=%d merge_groups=%d distinct=%d%s",

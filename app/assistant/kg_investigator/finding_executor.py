@@ -21,6 +21,10 @@ catches up findings the dev didn't review).
 After the manager runs, status flips to 'executed' / 'escalated' /
 'dismissed' via the resolution manager's own report. A second sweep
 won't pick up the same row.
+
+A failed or aborted manager run is never a verdict: the claim is released
+(back to 'investigated'), the failure is counted in the KG failure ledger,
+and the exception stops the sweep (owner, 2026-10-05).
 """
 from __future__ import annotations
 
@@ -32,7 +36,8 @@ from sqlalchemy import text as sql_text
 
 from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
 from app.assistant.database.kg_revision_log import KGRevisionLog
-from app.assistant.kg_investigator.finding_processor import finding_write_scope
+from app.assistant.kg import failure_ledger
+from app.assistant.kg_investigator.finding_processor import finding_write_scope, invoke_manager
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message
@@ -42,6 +47,7 @@ from app.models.db_manager import get_db_manager
 logger = get_logger(__name__)
 
 MANAGER_NAME = "kg_resolution_manager"
+LEDGER_KIND = "kg_finding_execution"
 GRACE_WINDOW_HOURS = 24
 
 # A claim ('executing') older than this is assumed orphaned by a process
@@ -59,6 +65,7 @@ def _claim_executable_finding_ids(*, limit: int) -> List[str]:
     - disposition='auto_apply' (not 'needs_user_review' — those wait for the user)
     - investigated_at older than now - 24h (grace expired)
     - superseded_by IS NULL (siblings close via their cluster lead's cascade)
+    - not set aside by the failure ledger
 
     Wedding-vs-backpack ordering: a finding's importance is the max
     importance across its primary node and one-hop neighbors. Date is
@@ -66,6 +73,7 @@ def _claim_executable_finding_ids(*, limit: int) -> List[str]:
     """
     from app.assistant.kg_investigator.finding_priority import order_by_importance
 
+    set_aside = failure_ledger.set_aside_ids(LEDGER_KIND)
     cutoff = utc_now() - timedelta(hours=GRACE_WINDOW_HOURS)
     with get_db_manager().read_session() as session:
         rows = (
@@ -88,6 +96,8 @@ def _claim_executable_finding_ids(*, limit: int) -> List[str]:
     # disposition lives inside the JSON blob — filter in Python.
     eligible: List[tuple] = []  # (fid, primary_node_id, investigated_at)
     for fid, report_json, primary_node_id, investigated_at in rows:
+        if fid in set_aside:
+            continue
         report = report_json
         if isinstance(report, str):
             try:
@@ -338,13 +348,9 @@ def _drift_reason(finding_id: str) -> Optional[str]:
 
 
 def _extract_outcome_from_audit(blackboard) -> Optional[Dict[str, Any]]:
-    """Pull the structured outcome from the kg_resolution::final_answer audit message."""
-    try:
-        msgs = blackboard.get_messages()
-    except Exception as e:
-        logger.warning("could not read blackboard messages: %s", e)
-        return None
-    for m in msgs:
+    """Pull the structured outcome from the kg_resolution::final_answer audit
+    message; None when the run left no such message."""
+    for m in blackboard.get_messages():
         sender = str(getattr(m, "sender", "") or "")
         if sender.endswith("final_answer") and "kg_resolution" in sender:
             data = getattr(m, "data", None) or {}
@@ -353,7 +359,7 @@ def _extract_outcome_from_audit(blackboard) -> Optional[Dict[str, Any]]:
                 "findings_resolved", "open_questions",
                 "final_answer_answer", "result_summary",
             )
-            return {k: data.get(k) for k in keep if data.get(k) is not None} or None
+            return {k: data.get(k) for k in keep if data.get(k) is not None}
     return None
 
 
@@ -371,9 +377,10 @@ def execute_one(finding_id: str) -> Dict[str, Any]:
       escalate as stale_recommendation instead of executing a stale plan.
     - Outcome is decided from kg_revision_log ground truth, not the
       planner's self-report (which stays as telemetry).
+    - A failed or aborted run raises and releases the claim (back to
+      'investigated'), even when it committed some mutations first: an
+      outage is never recorded as 'executed' or 'escalated'.
     """
-    from app.assistant.kg_maintenance.store import set_status
-
     if not _claim_for_execution(finding_id):
         current = _current_status(finding_id)
         return {
@@ -383,10 +390,17 @@ def execute_one(finding_id: str) -> Dict[str, Any]:
         }
 
     try:
-        brief = _build_brief(finding_id)
+        return _execute_claimed(finding_id)
     except Exception:
         _release_claim(finding_id)
         raise
+
+
+def _execute_claimed(finding_id: str) -> Dict[str, Any]:
+    """The body of execute_one once the claim is held."""
+    from app.assistant.kg_maintenance.store import set_status
+
+    brief = _build_brief(finding_id)
     if brief is None:
         # Claimed, but the report carries no recommendation prose — this
         # row can never execute; park it for human review instead of
@@ -410,28 +424,19 @@ def execute_one(finding_id: str) -> Dict[str, Any]:
                 "reason": "stale_recommendation", "drift": drift}
 
     mgr = DI.multi_agent_manager_factory.create_manager(MANAGER_NAME)
-    if mgr is None:
-        _release_claim(finding_id)
-        return {"status": "error", "finding_id": finding_id,
-                "error": f"manager {MANAGER_NAME} not registered"}
-
     msg = Message(
         task=brief["task"],
         information=brief["information"],
         scope_context=finding_write_scope(),
     )
     watermark = utc_now()
-    try:
-        DI.manager_invoker.invoke(mgr, msg)
-    except Exception as e:
-        logger.error("resolution manager invocation failed for finding %s: %s", finding_id, e)
-        logger.debug("resolution manager exception details", exc_info=True)
-        # Release so a later sweep can retry — the claim must not orphan
-        # the row on transient manager/LLM failures.
-        _release_claim(finding_id)
-        return {"status": "error", "finding_id": finding_id, "error": str(e)}
+    invoke_manager(MANAGER_NAME, mgr, msg)
 
-    outcome = _extract_outcome_from_audit(mgr.blackboard) or {}
+    outcome = _extract_outcome_from_audit(mgr.blackboard)
+    if outcome is None:
+        raise RuntimeError(
+            f"{MANAGER_NAME} finished without a final answer for finding {finding_id}"
+        )
     mutations = outcome.get("mutations") or []
     regens = outcome.get("regenerations") or []
     summary = outcome.get("result_summary") or outcome.get("summary") or ""
@@ -548,40 +553,44 @@ def _reclaim_stale_executions() -> int:
 def run_executable_findings(*, limit: int = 5) -> Dict[str, Any]:
     """Pick up auto-apply investigated findings whose 24h grace has expired
     and execute them sequentially. Wired to the kg_finding_executor_drain
-    routine (03:45 daily)."""
+    routine (03:45 daily). The first finding whose execution fails stops
+    the sweep: its failure is counted in the ledger and the exception
+    propagates; the rest stay 'investigated'."""
     _reclaim_stale_executions()
     ids = _claim_executable_finding_ids(limit=limit)
     if not ids:
         return {"status": "no_executable_findings", "processed": 0, "results": []}
 
-    # execute_one() returns one of: "executed", "escalated", "error",
-    # "skipped". Bucket these explicitly so the log reflects reality
-    # instead of marking every escalation as an error.
+    # execute_one() returns "executed", "escalated", "skipped", or the
+    # status a resolution tool set during the run. Bucket these explicitly
+    # so the log reflects reality.
     results: List[Dict[str, Any]] = []
-    executed = escalated = errors = skipped = 0
+    executed = escalated = skipped = 0
     for fid in ids:
-        r = execute_one(fid)
+        try:
+            r = execute_one(fid)
+        except Exception as exc:
+            failure_ledger.record_failure(LEDGER_KIND, fid, exc)
+            raise
+        failure_ledger.clear(LEDGER_KIND, fid)
         results.append(r)
         st = r.get("status")
         if st == "executed":
             executed += 1
         elif st == "escalated":
             escalated += 1
-        elif st == "error":
-            errors += 1
         else:
             skipped += 1
 
     logger.info(
-        "[finding_executor] processed=%d executed=%d escalated=%d errors=%d skipped=%d",
-        len(ids), executed, escalated, errors, skipped,
+        "[finding_executor] processed=%d executed=%d escalated=%d skipped=%d",
+        len(ids), executed, escalated, skipped,
     )
     return {
         "status": "ok",
         "processed": len(ids),
         "executed": executed,
         "escalated": escalated,
-        "errors": errors,
         "skipped": skipped,
         "results": results,
     }

@@ -387,34 +387,29 @@ def _fetch_evidence_messages(session, node_id: str, *, limit: int = 8) -> List[D
     that have no explicit dates: 'when did this become true?' often reduces to
     'when was this first / most recently said?'.
 
-    Wrapped in try/except because some test DBs don't include the chat-side
-    tables (kg_node_evidence / kg_window_message). The brief degrades
-    gracefully — date investigation still works using dated neighbors alone.
+    A failed read raises: a brief missing its evidence would send the
+    investigator to a verdict on less than the graph holds.
     """
     if not node_id:
         return []
-    try:
-        rows = session.execute(
-            sql_text(
-                """
-                SELECT
-                  MIN(u.timestamp) AS first_seen,
-                  MAX(u.timestamp) AS last_seen,
-                  COUNT(DISTINCT u.id) AS n_messages
-                FROM kg_node_evidence ev
-                LEFT JOIN unified_log_2026 u
-                  ON u.id IN (
-                    SELECT m.unified_log_id FROM kg_window_message m
-                    WHERE m.window_id = ev.window_id
-                  )
-                WHERE ev.node_id = :nid
-                """
-            ),
-            {"nid": node_id},
-        ).fetchall()
-    except Exception as e:
-        logger.debug("[date_brief] evidence-window lookup failed (likely missing tables): %s", e)
-        return []
+    rows = session.execute(
+        sql_text(
+            """
+            SELECT
+              MIN(u.timestamp) AS first_seen,
+              MAX(u.timestamp) AS last_seen,
+              COUNT(DISTINCT u.id) AS n_messages
+            FROM kg_node_evidence ev
+            LEFT JOIN unified_log_2026 u
+              ON u.id IN (
+                SELECT m.unified_log_id FROM kg_window_message m
+                WHERE m.window_id = ev.window_id
+              )
+            WHERE ev.node_id = :nid
+            """
+        ),
+        {"nid": node_id},
+    ).fetchall()
     if not rows:
         return []
     r = rows[0]
@@ -437,34 +432,28 @@ def _fetch_node_chat_windows(session, node_id: str, *, limit: int = 4) -> List[D
     distinct occurrences of a recurring event, not duplicates.
 
     Returns a list of {window_id, observed_at, window_summary, transcript}
-    dicts, newest first. Empty list when the node has no evidence rows
-    or the chat tables aren't available (test envs).
+    dicts, newest first. Empty list when the node has no evidence rows.
+    A failed read raises, never a thinner brief.
     """
     if not node_id:
         return []
     out: List[Dict[str, Any]] = []
 
     # Step 1: distinct window_ids for this node, newest first.
-    try:
-        rows = session.execute(
-            sql_text(
-                """
-                SELECT DISTINCT ev.window_id, MIN(ev.message_timestamp) AS first_seen,
-                       MAX(ev.message_timestamp) AS last_seen
-                FROM kg_node_evidence ev
-                WHERE ev.node_id = :nid AND ev.window_id IS NOT NULL
-                GROUP BY ev.window_id
-                ORDER BY last_seen DESC
-                LIMIT :lim
-                """
-            ),
-            {"nid": node_id, "lim": limit},
-        ).fetchall()
-    except Exception as e:
-        logger.debug(
-            "[finding_brief] node_evidence query failed (likely missing tables): %s", e,
-        )
-        return []
+    rows = session.execute(
+        sql_text(
+            """
+            SELECT DISTINCT ev.window_id, MIN(ev.message_timestamp) AS first_seen,
+                   MAX(ev.message_timestamp) AS last_seen
+            FROM kg_node_evidence ev
+            WHERE ev.node_id = :nid AND ev.window_id IS NOT NULL
+            GROUP BY ev.window_id
+            ORDER BY last_seen DESC
+            LIMIT :lim
+            """
+        ),
+        {"nid": node_id, "lim": limit},
+    ).fetchall()
 
     for r in rows:
         m = r._mapping if hasattr(r, "_mapping") else dict(zip(
@@ -474,59 +463,34 @@ def _fetch_node_chat_windows(session, node_id: str, *, limit: int = 4) -> List[D
         if not wid:
             continue
 
-        # Step 2: window summary, if the new pipeline made one.
+        # Step 2: window summary, if the pipeline made one.
         summary = None
-        try:
-            srow = session.execute(
-                sql_text("SELECT summary FROM kg_window WHERE id = :wid"),
-                {"wid": wid},
-            ).fetchone()
-            if srow:
-                summary = srow[0]
-        except Exception:
-            pass
+        srow = session.execute(
+            sql_text("SELECT summary FROM kg_window WHERE id = :wid"),
+            {"wid": wid},
+        ).fetchone()
+        if srow:
+            summary = srow[0]
 
-        # Step 3: original messages — try the new pipeline's window_message
-        # table, fall back to legacy kg_chat_conversation_window_item.
+        # Step 3: original messages.
         transcript: List[str] = []
-        try:
-            mrows = session.execute(
-                sql_text(
-                    """
-                    SELECT u.timestamp, u.role, COALESCE(u.speaker_name, u.role) AS speaker,
-                           u.message
-                    FROM kg_window_message wm
-                    JOIN unified_log_2026 u ON u.id = wm.unified_log_id
-                    WHERE wm.window_id = :wid
-                    ORDER BY wm.item_order ASC
-                    LIMIT 25
-                    """
-                ),
-                {"wid": wid},
-            ).fetchall()
-            for ts, role, speaker, message in mrows:
-                msg = (str(message or "")).replace("\n", " ")[:240]
-                transcript.append(f"[{ts}] {speaker or role}: {msg}")
-        except Exception:
-            # Try legacy table.
-            try:
-                lrows = session.execute(
-                    sql_text(
-                        """
-                        SELECT unified_timestamp, role, speaker_name, text
-                        FROM kg_chat_conversation_window_item
-                        WHERE window_id = :wid
-                        ORDER BY item_order ASC
-                        LIMIT 25
-                        """
-                    ),
-                    {"wid": wid},
-                ).fetchall()
-                for ts, role, speaker, text in lrows:
-                    msg = (str(text or "")).replace("\n", " ")[:240]
-                    transcript.append(f"[{ts}] {speaker or role}: {msg}")
-            except Exception as e:
-                logger.debug("[finding_brief] window transcript fetch failed: %s", e)
+        mrows = session.execute(
+            sql_text(
+                """
+                SELECT u.timestamp, u.role, COALESCE(u.speaker_name, u.role) AS speaker,
+                       u.message
+                FROM kg_window_message wm
+                JOIN unified_log_2026 u ON u.id = wm.unified_log_id
+                WHERE wm.window_id = :wid
+                ORDER BY wm.item_order ASC
+                LIMIT 25
+                """
+            ),
+            {"wid": wid},
+        ).fetchall()
+        for ts, role, speaker, message in mrows:
+            msg = (str(message or "")).replace("\n", " ")[:240]
+            transcript.append(f"[{ts}] {speaker or role}: {msg}")
 
         out.append({
             "window_id": str(wid),

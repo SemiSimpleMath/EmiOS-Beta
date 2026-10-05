@@ -26,54 +26,49 @@ from typing import Iterable, List, Tuple
 from sqlalchemy import bindparam
 from sqlalchemy import text as sql_text
 
-from app.assistant.utils.logging_config import get_logger
 from app.models.db_manager import get_db_manager
-
-logger = get_logger(__name__)
 
 
 def _batch_importance_scores(node_ids: List[str]) -> dict[str, float]:
     """Two queries for the whole candidate set: stored node importance for
     everyone, then MAX(edge.importance)/10 for nodes the rater hasn't
     visited. A node missing from both contributes nothing (caller's .get
-    default scores it 0.0 — no importance signal exists for it)."""
+    default scores it 0.0 — no importance signal exists for it). A failed
+    read raises: scoring every finding 0 would silently reorder the queue."""
     scores: dict[str, float] = {}
     if not node_ids:
         return scores
-    try:
-        with get_db_manager().read_session() as session:
+    with get_db_manager().read_session() as session:
+        rows = session.execute(
+            sql_text(
+                "SELECT id, importance FROM kg_node_metadata "
+                "WHERE id IN :ids"
+            ).bindparams(bindparam("ids", expanding=True)),
+            {"ids": node_ids},
+        ).fetchall()
+        for nid, imp in rows:
+            if imp is not None:
+                scores[str(nid)] = float(imp)
+
+        missing = [nid for nid in node_ids if nid not in scores]
+        if missing:
             rows = session.execute(
                 sql_text(
-                    "SELECT id, importance FROM kg_node_metadata "
-                    "WHERE id IN :ids"
+                    "SELECT nid, MAX(imp) FROM ("
+                    "  SELECT source_id AS nid, importance AS imp "
+                    "  FROM kg_edge_metadata WHERE source_id IN :ids "
+                    "  UNION ALL "
+                    "  SELECT target_id AS nid, importance AS imp "
+                    "  FROM kg_edge_metadata WHERE target_id IN :ids"
+                    ") GROUP BY nid"
                 ).bindparams(bindparam("ids", expanding=True)),
-                {"ids": node_ids},
+                {"ids": missing},
             ).fetchall()
-            for nid, imp in rows:
-                if imp is not None:
-                    scores[str(nid)] = float(imp)
-
-            missing = [nid for nid in node_ids if nid not in scores]
-            if missing:
-                rows = session.execute(
-                    sql_text(
-                        "SELECT nid, MAX(imp) FROM ("
-                        "  SELECT source_id AS nid, importance AS imp "
-                        "  FROM kg_edge_metadata WHERE source_id IN :ids "
-                        "  UNION ALL "
-                        "  SELECT target_id AS nid, importance AS imp "
-                        "  FROM kg_edge_metadata WHERE target_id IN :ids"
-                        ") GROUP BY nid"
-                    ).bindparams(bindparam("ids", expanding=True)),
-                    {"ids": missing},
-                ).fetchall()
-                for nid, mx in rows:
-                    if mx is not None:
-                        # Edge importance is 0-10; scale to the 0-1 range of
-                        # stored node importance for fair comparison.
-                        scores[str(nid)] = float(mx) / 10.0
-    except Exception as e:
-        logger.warning("[finding_priority] batch importance lookup failed: %s", e)
+            for nid, mx in rows:
+                if mx is not None:
+                    # Edge importance is 0-10; scale to the 0-1 range of
+                    # stored node importance for fair comparison.
+                    scores[str(nid)] = float(mx) / 10.0
     return scores
 
 

@@ -35,7 +35,7 @@ from app.assistant.kg_maintenance.verdict_store import (
 )
 from app.assistant.lib.core_tools.kg_mutator.kg_mutator_tool import KGMutatorTool
 from app.assistant.ServiceLocator.service_locator import DI
-from app.assistant.utils.pydantic_classes import ToolMessage
+from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
 from app.models.base import get_session
 
 NOW = datetime(2026, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
@@ -379,7 +379,8 @@ def test_investigate_one_refuses_dead_verdict_ids(monkeypatch):
     fake_mgr = SimpleNamespace(blackboard=SimpleNamespace(get_messages=lambda: []))
     monkeypatch.setattr(DI.multi_agent_manager_factory, "create_manager",
                         lambda name: fake_mgr)
-    monkeypatch.setattr(DI.manager_invoker, "invoke", lambda mgr, msg: None)
+    monkeypatch.setattr(DI.manager_invoker, "invoke",
+                        lambda mgr, msg: ToolResult(result_type="final_answer", content="done"))
     monkeypatch.setattr(finding_processor, "_extract_report_from_audit",
                         lambda bb: report)
 

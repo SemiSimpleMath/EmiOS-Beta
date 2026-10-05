@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+import app.assistant.database.kg_pipeline_models  # noqa: F401  the brief reads kg_window_message
 from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
 from app.assistant.kg.db.knowledge_graph_db_sqlite import Edge, Node
 from app.assistant.kg_investigator.finding_brief import build_finding_brief
