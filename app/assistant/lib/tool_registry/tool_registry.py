@@ -38,6 +38,19 @@ class ToolDescription(str):
         }
 
 
+def _one_line(text) -> str:
+    """Text as one line in a tool card: its whitespace collapsed, every word kept."""
+    return " ".join(str(text or "").split())
+
+
+def _capability_line(description, contract) -> str:
+    """A tool card's capability line: metadata.planner_description when the contract has one, else the
+    whole description; one line, never cut."""
+    meta = contract.get("metadata") if isinstance(contract, dict) else None
+    meta = meta if isinstance(meta, dict) else {}
+    return _one_line(meta.get("planner_description")) or _one_line(description) or "No description available."
+
+
 def get_tool_registry_dir():
     tool_dir = get_app_root() / "assistant" / "lib" / "tools"
     return str(tool_dir)
@@ -764,28 +777,11 @@ class ToolRegistry:
         descriptions / examples / output schemas are reserved for ToolArguments
         when the tool is actually invoked.
 
-        Priority for the capability line:
-          1. metadata.planner_description (explicit short hint in the contract)
-          2. first sentence of description (capped)
-          3. "No description available."
+        The capability line is metadata.planner_description when the contract has one, else the whole
+        description, on one line. Nothing is cut: a description that is too long for a prompt is
+        rewritten at its source, never sliced here (owner rule: no truncation in prompts).
         """
-        meta = contract.get("metadata") if isinstance(contract, dict) else None
-        meta = meta if isinstance(meta, dict) else {}
-        short = str(meta.get("planner_description") or "").strip()
-        if not short:
-            raw = str(description or "").strip()
-            if raw:
-                # First sentence, capped at 140 chars.
-                first_break = len(raw)
-                for sep in (". ", "\n"):
-                    idx = raw.find(sep)
-                    if idx > 0 and idx < first_break:
-                        first_break = idx
-                short = raw[:first_break].strip()
-                if len(short) > 140:
-                    short = short[:137].rstrip() + "..."
-        if not short:
-            short = "No description available."
+        short = _capability_line(description, contract)
 
         inputs = (
             contract.get("inputs")
@@ -820,31 +816,15 @@ class ToolRegistry:
 
     def _format_tool_card_with_hints(self, *, description, contract) -> str:
         """Planner-facing tool card: a minimal capability line + one line per input with its req/opt
-        and a short hint — so the planner picks AND fills the call correctly in one pass. The capability
-        line is metadata.planner_description (curated), else the first sentence of the description
-        (capped). Input hints come from tool_contract.inputs[].description (curated); an uncurated input
-        still renders its name + req/opt. The caller prepends the tool NAME, so this returns just the
-        body."""
-        meta = contract.get("metadata") if isinstance(contract, dict) else None
-        meta = meta if isinstance(meta, dict) else {}
-        short = str(meta.get("planner_description") or "").strip()
-        if short and len(short) > 200:   # backstop: a pathological/uncurated planner_description can't balloon
-            short = short[:197].rstrip() + "..."
-        if not short:
-            raw = str(description or "").strip()
-            if raw:
-                first_break = len(raw)
-                for sep in (". ", "\n"):
-                    idx = raw.find(sep)
-                    if idx > 0 and idx < first_break:
-                        first_break = idx
-                short = raw[:first_break].strip()
-                if len(short) > 140:
-                    short = short[:137].rstrip() + "..."
-        if not short:
-            short = "No description available."
-
-        lines = [short]
+        and its hint — so the planner picks AND fills the call correctly in one pass. The capability
+        line is metadata.planner_description when the contract has one, else the whole description; each
+        input's hint is its whole tool_contract.inputs[].description; an input without one still renders
+        its name + req/opt. Each on one line, nothing cut: a description too long for a prompt is
+        rewritten at its source, never sliced here (owner rule: no truncation in prompts; until
+        2026-10-04 the line was cut to its first sentence or line and capped, and the switchboard read
+        "...carries out a piece of work end to end and reports what it"). The caller prepends the tool
+        NAME, so this returns just the body."""
+        lines = [_capability_line(description, contract)]
         inputs = (contract.get("inputs")
                   if isinstance(contract, dict) and isinstance(contract.get("inputs"), list) else [])
         for item in inputs:
@@ -854,19 +834,7 @@ class ToolRegistry:
             if not name:
                 continue
             req = "req" if bool(item.get("required", False)) else "opt"
-            # The card shows a SHORT hint — the input's first sentence, capped. Verbose per-arg detail
-            # (e.g. send_email's courier doctrine) belongs in arguments_prompt (args-agent territory),
-            # so an uncurated long description can't balloon the planner card.
-            hint = str(item.get("description") or "").strip()
-            if hint:
-                first_break = len(hint)
-                for sep in (". ", "\n"):
-                    idx = hint.find(sep)
-                    if idx > 0 and idx < first_break:
-                        first_break = idx
-                hint = hint[:first_break].strip()
-                if len(hint) > 120:
-                    hint = hint[:117].rstrip() + "..."
+            hint = _one_line(item.get("description"))
             line = f"  · {name} ({req})"
             if hint:
                 line += f": {hint}"
