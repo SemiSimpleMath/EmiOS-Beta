@@ -156,3 +156,11 @@ context, with today's catalog (370 active). Script: a scratch replay; nothing st
 - Found while replaying: the export the day pass reads was stale (549 beliefs; the store had 370, B198 retired
   but still placed), regenerated; bug list 2026-10-03. The modifier check was asked on every hourly
   regeneration; it is now asked once a day per belief while the catalog is unchanged.
+
+## Research findings ride the judgment (2026-10-05)
+
+Pods reach the brain by what made them: camera frames as camera events, chat images as their description inside
+the chat message, research findings through the work that produced them — no lane of their own (owner, 2026-10-05).
+A `judged` receipt carries `finding_refs`: the `datapod:research_finding:*` pods recorded on the task or under it
+(`work_objects/concern_outbox._finding_refs`). The brain event (shared/work/work_report.j2) shows each finding whole,
+id, title and body, after the finalizer's account: the brain has no tool to open a pod.

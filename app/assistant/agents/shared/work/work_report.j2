@@ -1,7 +1,8 @@
 {#- A report on work the assistant did, as the brain inbox holds it (subconscious/concern_feedback.py):
     one finalizer judgment or the work's ending, what the work was made for, and where the work stands.
     Expects `report`: kind (judged | done | abandoned), work_id, title, objective, concern_titles, and
-    for judged: task_title, outcome (the finalizer's account), replies (lines); for an ending: reason;
+    for judged: task_title, outcome (the finalizer's account), replies (lines), findings (the research
+    findings the task recorded, each pod_id, title, body); for an ending: reason;
     progress (work_objects/progress.work_progress) when the report carries it. -#}
 {% if report.kind == "judged" -%}
 Work "{{ report.title }}" ({{ report.work_id }}): the finalizer judged the task "{{ report.task_title }}".
@@ -14,6 +15,10 @@ Objective: {{ report.objective }}
 {% if report.kind == "judged" -%}
 What happened in this task: {{ report.outcome }}
 {% for r in report.replies %}{{ r }}
+{% endfor -%}
+{% for f in report.findings -%}
+Research finding this task recorded ({{ f.pod_id }}): {{ f.title }}
+{{ f.body }}
 {% endfor -%}
 {% else -%}
 Reason: {{ report.reason or "(none recorded)" }}.

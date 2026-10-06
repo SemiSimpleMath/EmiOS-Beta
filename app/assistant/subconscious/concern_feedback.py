@@ -72,6 +72,16 @@ def _reply_line(reply: dict) -> str:
     return "; ".join(parts) or "The owner replied (no words recorded)."
 
 
+def _finding(pod_id: str) -> dict:
+    """A research finding as the brain reads it: whole. The brain has no tool to open a pod; the report
+    carries the finding (owner, 2026-10-05: findings reach the brain through the work that made them)."""
+    from app.assistant.pod_store.pod_store import PodStore
+    pod = PodStore().get(pod_id)
+    if pod is None:
+        return {'pod_id': pod_id, 'title': '(no longer stored)', 'body': ''}
+    return {'pod_id': pod_id, 'title': pod.one_liner, 'body': pod.body or ''}
+
+
 def _report_text(report: dict) -> str:
     """A work report as the brain inbox holds it, worded by shared/work/work_report.j2 (the template every
     reader of a work report shares)."""
@@ -90,7 +100,8 @@ def _event_text(receipt, concern_titles=()) -> str:
               'progress': payload.get('progress')}
     if kind == 'judged':
         task, fin = payload['task'], payload['task']['finalizer']
-        report.update(task_title=task['title'], outcome=fin.get('outcome'), replies=[_reply_line(r) for r in task.get('replies') or []])
+        report.update(task_title=task['title'], outcome=fin.get('outcome'), replies=[_reply_line(r) for r in task.get('replies') or []],
+                      findings=[_finding(p) for p in task.get('finding_refs') or []])
     else:
         report['reason'] = (payload['context'].get('terminal') or {}).get('reason')
     return _report_text(report)

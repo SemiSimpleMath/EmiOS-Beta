@@ -7,8 +7,9 @@ docs/design/what_was_done_reaches_the_brain_2026-10-03.md), so every work object
 are receipts, whether it cites a concern or not. Each is written in the same transaction as the change:
 
 - `attached`  the work cites a concern it did not cite before (created citing it, or revised to);
-- `judged`    the finalizer judged one of the work's tasks: the verdict, its account, and the owner's
-              replies that task received, verbatim (every work object);
+- `judged`    the finalizer judged one of the work's tasks: the verdict, its account, the owner's
+              replies that task received, verbatim, and the research findings it recorded (every work
+              object);
 - `done` / `abandoned`  the work ended (every work object).
 
 A judged or ended receipt carries the work's progress at that moment (work_objects/progress.py: what is
@@ -51,6 +52,13 @@ def _replies(wo, node_id):
             if n.type == 'evidence' and isinstance(n.payload.get('user_reply'), dict)]
 
 
+def _finding_refs(wo, node_id):
+    """The research-finding pods recorded on one task or under it (pod_ref on the task or its own records)."""
+    nodes = [wo.nodes[node_id], *wo.provenance_for(node_id)]
+    return list(dict.fromkeys(n.pod_ref for n in nodes
+                              if str(n.pod_ref or '').startswith('datapod:research_finding:')))
+
+
 class ConcernOutboxMixin:
     def _queue_concern_feedback(self, wo, previous_status, now, before):
         refs = _concern_refs(wo)
@@ -68,7 +76,8 @@ class ConcernOutboxMixin:
             if wo.is_work_unit(node) and fin and fin.get('at') != before['judged'].get(node.id):
                 rows.append(('judged', {'concern_refs': refs, 'work': work, 'task': {
                     'node_id': node.id, 'title': node.title, 'status': node.status,
-                    'finalizer': fin, 'replies': _replies(wo, node.id)}, 'progress': progress}))
+                    'finalizer': fin, 'replies': _replies(wo, node.id),
+                    'finding_refs': _finding_refs(wo, node.id)}, 'progress': progress}))
         if wo.status in {'done', 'abandoned'} and wo.status != previous_status:
             goal = wo.nodes.get(wo.goal_node_id)
             rows.append((wo.status, {

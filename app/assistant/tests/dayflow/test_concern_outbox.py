@@ -305,3 +305,23 @@ def test_a_concern_the_brain_attached_hears_later_judgments(setup):
     concern_feedback.recover_pending_concern_feedback(store)
     work=path.read()['active'][0]['attached_work'][wid]
     assert work['status']=='done' and len(work['judgments'])==1
+
+
+def test_a_judgment_carries_the_research_findings_its_task_recorded_whole(setup,monkeypatch):
+    store,path,inbox=setup
+    wid=graph(store,refs=[])
+    store.apply('add_node', {'work_id':wid,'id':'search','type':'subtask','title':'Search the shop sites',
+        'parent_id':'main','status':'done','pod_ref':'datapod:research_finding:abc'})
+    store.apply('add_node', {'work_id':wid,'id':'note','type':'evidence','title':'An email',
+        'parent_id':'main','status':'assumed','pod_ref':'datapod:email:xyz'})
+    pods={'datapod:research_finding:abc':SimpleNamespace(one_liner='Two shops service the boiler',
+                                                          body='Shop A: Tuesdays. Shop B: any weekday, call first.')}
+    from app.assistant.pod_store import pod_store
+    monkeypatch.setattr(pod_store, 'PodStore', lambda: SimpleNamespace(get=pods.get))
+    finish(store,wid)
+    judged=[r for r in store.pending_concern_feedback() if r['outcome']=='judged'][0]
+    assert judged['payload']['task']['finding_refs']==['datapod:research_finding:abc']   # the email is not a finding
+    concern_feedback.recover_pending_concern_feedback(store)
+    text=work_events(inbox)[0]['text']
+    assert ('Research finding this task recorded (datapod:research_finding:abc): Two shops service the boiler\n'
+            'Shop A: Tuesdays. Shop B: any weekday, call first.') in text
