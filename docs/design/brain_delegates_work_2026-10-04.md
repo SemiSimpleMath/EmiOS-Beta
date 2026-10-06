@@ -652,3 +652,17 @@ than its division of roles; verified and fixed (bug list, "Brain → dayflow con
 - On a live calendar day the day's tasks see calendar-made work: it is the brain's own.
 Still open: one decision context across the list (a concern's decider sees only its own entries), a changed
 placement as citable evidence, and a recovery path for failed matters and plans.
+
+## The steward's retirement, behind a switch (2026-10-05)
+
+`configs/brain_lanes.json` `steward.mode`: `on` | `retired`, read every planning tick. Retired, the steward's prep node
+keeps what the rest of the tick reads (pending concern and belief feedback delivered, the portfolio, recent work and
+reminder history for the architect), skips the steward's own context and model call, hands the architect an empty
+steward result and routes straight to the list-item intake node. Admitted intake left with no reviewer is logged as an
+ERROR every tick (0 pending at preparation). Owner: switch after the calendar lane's first live day (2026-10-06) is
+observed. What the steward still did that nothing replaces: noticing duplicate goals across the portfolio and asking
+for their end; the brain's deciders do not yet share one view of the list (review finding 5).
+Owner's principle, same day: all input flows to the brain, the brain decides, consumers carry it out, every part of the
+brain learns the outcome; no part duplicates work or misses that work became moot. Remaining departures: the steward
+(this switch), dayflow reading chat and email as wake context itself, dayflow_cron_tickets deciding wellness reminders,
+intake triage (the steward's front door; idle once nothing reaches it).

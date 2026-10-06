@@ -61,7 +61,14 @@ def lanes() -> Dict[str, Any]:
     for lane in ("calendar", "concern"):
         if data[lane]["mode"] not in ("off", "dry_run", "live"):
             raise ValueError(f"brain_lanes.json: {lane}.mode {data[lane]['mode']!r} is not off, dry_run or live")
+    if data["steward"]["mode"] not in ("on", "retired"):
+        raise ValueError(f"brain_lanes.json: steward.mode {data['steward']['mode']!r} is not on or retired")
     return data
+
+
+def steward_retired(lane_config: Optional[Dict[str, Any]] = None) -> bool:
+    """True when the planning tick skips the steward (configs/brain_lanes.json steward.mode: retired)."""
+    return (lane_config or lanes())["steward"]["mode"] == "retired"
 
 
 def calendar_live(day: str, lane_config: Optional[Dict[str, Any]] = None) -> bool:

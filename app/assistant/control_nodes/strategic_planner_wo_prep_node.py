@@ -7,6 +7,12 @@ builders live in this module (relocated when the legacy strategic_planner_prep_n
 prep is now their sole user). Resource-backed context (schedule/presence/routine/etc.) is
 auto-resolved by the context injector and needs no building here.
 
+Retiring the steward (configs/brain_lanes.json steward.mode: retired; owner's principle 2026-10-05: all input flows
+to the brain, the brain decides, consumers carry it out): this node keeps the work others read every tick (pending
+concern and belief feedback delivered, the portfolio, recent work and reminder history for the architect), skips the
+steward's own context, hands the architect an empty steward result, and routes straight to the list-item intake node.
+Intake still admitted then has no reviewer: it is logged as an ERROR every tick until it is resolved.
+
 Inert until the dayflow manager's state_map routes to it.
 """
 from app.assistant.control_nodes.control_node import ControlNode
@@ -221,6 +227,22 @@ class StrategicPlannerWoPrepNode(ControlNode):
         from app.assistant.dayflow_orchestrator.communication_context import scheduled_reminder_history
         self.blackboard.update_state_value("scheduled_reminder_history",
                                            scheduled_reminder_history(datetime.now(timezone.utc)))
+
+        from app.assistant.dayflow_orchestrator.brain_list_intake import steward_retired
+        if steward_retired():
+            if remaining:
+                ids = [str(get_meta(item).get("item_id") or item.get("id") or "") for item in remaining]
+                logger.error("[%s] the steward is retired and %d admitted intake item(s) have no reviewer: %s",
+                             self.name, len(ids), ids)
+            self.blackboard.update_state_value("steward_persist_result", {"created": [], "changed": [],
+                                                                          "end_requested": []})
+            self.blackboard.update_state_value("replan_work_ids", [])
+            self.blackboard.update_state_value("user_directed_replan_ids", [])
+            logger.info("[%s] steward retired: %d active work object(s); on to the list-item intake",
+                        self.name, n_active)
+            self.blackboard.update_state_value("last_agent", self.name)
+            self.blackboard.update_state_value("next_agent", "brain_list_intake_node")
+            return
 
         # 2) Situational context — reuse strategic_planner_prep_node's proven builders.
         try:
