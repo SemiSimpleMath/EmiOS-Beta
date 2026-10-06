@@ -45,10 +45,12 @@ system_context_items:
   - resource_assistant_data
   - resource_orchestrator_user_prefs
 
-# Log the rendered SYSTEM + USER prompts to the agents log on every architect call.
-# The architect is invoked directly via work_architect_node, and its prompts are otherwise
+# Log the rendered SYSTEM + USER prompts and the architect's answer to the agents log on every
+# architect call. The architect is invoked directly via work_architect_node, and its prompts are otherwise
 # invisible (suppressed by the prompt_debug gate) - seeing the rendered CONTEXT (ticket
-# replies, portfolio) is key to verifying re-plan behaviour.
+# replies, portfolio) is key to verifying re-plan behaviour. The answer (results) was not logged until
+# 2026-10-05, when a refused re-plan could be read only from its error, not from what was proposed.
 prompt_debug:
   system: true
   user: true
+  results: true

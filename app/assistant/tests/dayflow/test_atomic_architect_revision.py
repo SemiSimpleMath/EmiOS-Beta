@@ -111,3 +111,37 @@ def test_a_replan_restating_existing_dependencies_adds_only_the_new_ones(graph):
     assert res["added"] == ["act--" + wid.split("_")[-1][:6]] and res["edges"] == 2
     assert wo.deps_of("ask") == ["existing"]
     assert sorted(wo.deps_of(res["added"][0])) == ["ask", "existing"]
+
+
+def test_a_restated_task_in_motion_keeps_its_wake_and_a_queued_one_takes_the_new_one(graph):
+    """An in-flight ask restated with a wake_ref used to become an event wake and be parked (dispatched ->
+    waiting), losing its user_reply wake. In-motion nodes are the runtime's."""
+    store, wid = graph
+    gid = store.load(wid).goal_node_id
+    store.apply("add_node", {"work_id": wid, "id": "ask", "type": "subtask", "parent_id": gid, "status": "dispatched"})
+    store.apply("defer_node", {"work_id": wid, "node_id": "ask", "wake_kind": "user_reply", "wake_ref": "the answer"})
+    res = apply_architect_dag(store, wid, [
+        {"node_id": "ask", "title": "Ask", "wake_ref": "the user's answer to the question"},
+        {"node_id": "existing", "title": "Retry later", "wake_at": "2030-01-01T09:00:00+00:00"},
+    ])
+    wo = store.load(wid)
+    assert (wo.nodes["ask"].status, wo.nodes["ask"].wake_kind) == ("dispatched", "user_reply")
+    assert wo.nodes["existing"].wake_kind == "time" and res["waits"] == 1
+
+
+def test_a_refused_revision_gets_one_correction_and_a_second_refusal_raises():
+    from types import SimpleNamespace
+    from app.assistant.control_nodes.work_architect_node import _apply_with_correction
+    tasks = []
+    answers = iter([{"nodes": ["fixed"]}, {"nodes": ["still bad"]}])
+    agent = SimpleNamespace(action_handler=lambda m: tasks.append(m.task) or SimpleNamespace(data=next(answers)))
+
+    def apply(d):
+        if d["nodes"] != ["fixed"]:
+            raise ValueError("add_edge: dependency cycle")
+        return {"added": ["fixed"]}
+    data, res = _apply_with_correction(agent, {"nodes": ["cyclic"]}, "TASK", "info", None, apply)
+    assert res == {"added": ["fixed"]} and len(tasks) == 1
+    assert tasks[0].startswith("TASK") and "WAS REFUSED" in tasks[0] and "dependency cycle" in tasks[0]
+    with pytest.raises(ValueError, match="cycle"):
+        _apply_with_correction(agent, {"nodes": ["cyclic"]}, "TASK", "info", None, apply)

@@ -193,6 +193,21 @@ def _situational_context(bb) -> str:
         completed=bb.get_state_value("recent_completed_work", "") or "")
 
 
+def _apply_with_correction(agent, data: dict, task: str, information: str, scope, apply):
+    """Apply the architect's answer; when the graph refuses it (ValueError/KeyError from the revision:
+    an invalid or cyclic dependency, a refused prune, an invalid duplicate pair), ask once more with the
+    refusal, then apply that. A second refusal raises. Until 2026-10-05 the first refusal lost the whole
+    revision with an ERROR the architect never saw. Returns (data, result of apply)."""
+    try:
+        return data, apply(data)
+    except (ValueError, KeyError) as refusal:
+        logger.warning("[work_architect_node] revision refused, one correction: %s", refusal)
+        correction = render_view("architect_refused", reason=str(refusal))
+        result = agent.action_handler(Message(task=task + correction, information=information, scope_context=scope))
+        data = getattr(result, "data", {}) or {}
+        return data, apply(data)
+
+
 def _deliver_ending(store, work_id: str, status: str) -> None:
     """After an ending commits: the concerns and beliefs the work served get its outcome. Both
     deliveries are receipt-backed; a failure leaves the receipt for evaluator prep to retry."""
@@ -281,10 +296,12 @@ class WorkArchitectNode(ControlNode):
                         # A goal can be moot or need rewording before anything is planned. Until 2026-10-04 only
                         # the re-plan branch passed these on: a task-less goal the architect ended ("its useful
                         # moment has passed") stayed active and was decomposed again every tick, from 10-02 on.
-                        res = apply_architect_dag(store, work_id, data.get("nodes", []) or [],
-                                                  revise_objective=data.get("revise_objective"),
-                                                  end_goal=data.get("end_goal"),
-                                                  expected_updated_at=wo.updated_at)
+                        def apply(d, wo=wo, work_id=work_id):
+                            return apply_architect_dag(store, work_id, d.get("nodes", []) or [],
+                                                       revise_objective=d.get("revise_objective"),
+                                                       end_goal=d.get("end_goal"),
+                                                       expected_updated_at=wo.updated_at)
+                        data, res = _apply_with_correction(agent, data, task, why, scope, apply)
                         decomposed.append({"work_id": work_id, "nodes": len(res.get("added", [])),
                                            "ended": res.get("ended")})
                         logger.info("[%s] decomposed %s into %d node(s), revised=%s ended=%s",
@@ -318,17 +335,20 @@ class WorkArchitectNode(ControlNode):
                                            stranded=work_id in stranded)
                         result = agent.action_handler(Message(task=task, information=info, scope_context=scope))
                         data = getattr(result, "data", {}) or {}
-                        res = apply_architect_dag(store, work_id, data.get("nodes", []) or [],
-                                                  abandon_reason=str(data.get("abandon_reason") or "").strip(),
-                                                  abandon_node_ids=data.get("abandon_node_ids", []) or [],
-                                                  licensed=licensed,
-                                                  duplicate_of=_duplicate_pairs(data),
-                                                  finalizer_instructions=pending.get(work_id, []),
-                                                  goal_instructions=instructions.get(work_id, []),
-                                                  review_fingerprint=stranded.get(work_id),
-                                                  revise_objective=data.get("revise_objective"),
-                                                  end_goal=data.get("end_goal"),
-                                                  expected_updated_at=wo.updated_at)
+
+                        def apply(d, wo=wo, work_id=work_id, licensed=licensed):
+                            return apply_architect_dag(store, work_id, d.get("nodes", []) or [],
+                                                       abandon_reason=str(d.get("abandon_reason") or "").strip(),
+                                                       abandon_node_ids=d.get("abandon_node_ids", []) or [],
+                                                       licensed=licensed,
+                                                       duplicate_of=_duplicate_pairs(d),
+                                                       finalizer_instructions=pending.get(work_id, []),
+                                                       goal_instructions=instructions.get(work_id, []),
+                                                       review_fingerprint=stranded.get(work_id),
+                                                       revise_objective=d.get("revise_objective"),
+                                                       end_goal=d.get("end_goal"),
+                                                       expected_updated_at=wo.updated_at)
+                        data, res = _apply_with_correction(agent, data, task, info, scope, apply)
                         replanned.append({"work_id": work_id, "added": len(res.get("added", [])),
                                           "abandoned": len(res.get("abandoned", [])),
                                           "deduplicated": len(res.get("deduplicated", [])),

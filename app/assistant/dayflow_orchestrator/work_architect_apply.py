@@ -240,6 +240,15 @@ def apply_architect_dag(store, work_id: str, nodes: List[Dict[str, Any]],
             wk = "event"
         else:
             wk = None
+        # A node in motion is the runtime's: the architect's wake on a restated dispatched node is not
+        # applied. defer_node parks a dispatched node (-> waiting), and an in-flight ask restated with a
+        # wake_ref lost its user_reply wake (suspected 2026-10-05; the prompt already says plan around it).
+        node = wo.nodes.get(nid)
+        if wk and node is not None and node.status == "dispatched":
+            if (wk, wake_at, wake_ref) != (node.wake_kind, node.wake_at, node.wake_ref):
+                logger.warning("apply_architect_dag(%s): %s is in motion; its wake stays %s (architect asked %s)",
+                               work_id, nid, node.wake_kind, wk)
+            continue
         if wk:
             queue("defer_node", {"work_id": work_id, "node_id": nid, "wake_kind": wk,
                                        "wake_at": wake_at, "wake_ref": wake_ref}, actor="architect")
