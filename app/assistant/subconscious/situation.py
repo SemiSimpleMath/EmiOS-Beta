@@ -129,7 +129,7 @@ def gather(now_utc: datetime, *, calendar_work: bool = True) -> Dict[str, Any]:
     from app.assistant.control_nodes.strategic_planner_wo_prep_node import _load_active_tickets
     from app.assistant.dayflow_orchestrator.communication_context import scheduled_reminder_history
     from app.assistant.location_manager.location_manager import get_user_location_summary
-    from app.assistant.pipelines.context import boundary_date_local_str
+    from app.assistant.pipelines.context import boundary_date_local_str, day_window_local
     from app.assistant.pipelines.dayflow.utils.context_sources import get_current_presence_status
     from app.assistant.subconscious.brain_step import _calendar
     from app.assistant.subconscious.romantic_context_builder import _build_key_dates
@@ -139,18 +139,24 @@ def gather(now_utc: datetime, *, calendar_work: bool = True) -> Dict[str, Any]:
     day = boundary_date_local_str(now_local)
     daily = _resource(scope, "resource_daily_context_generator_output")
     weather = _resource(scope, "resource_weather")
+    health = _resource(scope, "resource_health_inference_output")
     return {
         "now": now_utc.isoformat(), "day": day, "weekday": now_local.strftime("%A"),
         "key_dates": _build_key_dates(now_local=now_local),
         "calendar_today": calendar_today(scope),
-        "calendar_ahead": _calendar(now_utc),
+        # From the day's start, not now: the text's header names its window, and a window starting now changed every
+        # minute, so the day's tasks saw new input on every pass (2026-10-05).
+        "calendar_ahead": _calendar(day_window_local(day)[0].astimezone(timezone.utc)),
         "day_theme": str(daily.get("day_theme") or ""), "current_status": str(daily.get("current_status") or ""),
         "presence": get_current_presence_status(),
         "location": get_user_location_summary(hours_ahead=24),
         "weather": {"city": (weather.get("location") or {}).get("city"),
                     "temperature": (weather.get("current") or {}).get("temperature"),
                     "condition": (weather.get("current") or {}).get("condition")},
-        "health": str(_resource(scope, "resource_health_inference_output").get("general_health_assessment") or ""),
+        "health": str(health.get("general_health_assessment") or ""),
+        # The inference's assessed state, without what moves with the clock (hunger, hydration): what the fingerprint
+        # counts in place of the prose, which is reworded on every inference run.
+        "health_state": {k: health.get(k) for k in ("mental", "cognitive", "physical", "health_concerns_today")},
         "chat": finished_conversations(chat_today(day, now_utc), now_utc),
         "todos": todos(),
         "work": work(now_utc, calendar_work=calendar_work),
@@ -162,10 +168,13 @@ def gather(now_utc: datetime, *, calendar_work: bool = True) -> Dict[str, Any]:
 
 def fingerprint_view(s: Dict[str, Any]) -> Dict[str, Any]:
     """The situation minus what moves with the clock alone (the time, minutes away or at the keyboard, the
-    temperature, the reminder window's bounds), so a decider runs again when something changed, not every pass."""
+    temperature, the reminder window's bounds) and minus rewording (the health prose: its assessed state counts
+    instead), so a decider runs again when something changed, not every pass. Until 2026-10-05 the calendar's window
+    and the health prose changed every pass, and the day's tasks called the model about every ten minutes to decide
+    nothing."""
     presence = s["presence"]
     reminders = s["reminders"]
-    return {**{k: v for k, v in s.items() if k not in ("now", "presence", "weather", "reminders")},
+    return {**{k: v for k, v in s.items() if k not in ("now", "presence", "weather", "reminders", "health")},
             "presence": presence.get("status_label"),
             "weather": s["weather"].get("condition"),
             "reminders": {"status": reminders.get("status"),
