@@ -722,7 +722,6 @@
       const result = await res.json();
       const status = result.manager_status || 'unknown';
       const report = result.report || {};
-      const cascaded = result.siblings_cascaded || 0;
 
       let msg;
       if (status === 'completed') {
@@ -730,17 +729,11 @@
         const regens = (report.regenerations || []).length;
         const findings = (report.findings_resolved || []).length;
         msg = `Resolved by manager: ${muts} mutation(s), ${regens} regen(s), ${findings} finding(s) closed.`;
-      } else if (status === 'partial') {
-        const open = (report.open_questions || []).length;
-        msg = `Manager partial — ${cascaded} sibling(s) cascade-closed. ${open} open question(s).`;
-      } else if (status === 'no_report') {
-        msg = `Manager exited without a report — siblings cascade-closed (${cascaded}). Check logs.`;
-      } else if (status === 'error') {
-        msg = `Manager error: ${result.manager_error || '?'} — siblings cascade-closed (${cascaded}).`;
       } else {
-        msg = `Cluster closed: ${cascaded} sibling(s).`;
+        const open = (report.open_questions || []).length;
+        msg = `Manager partial — the cluster stays open. ${open} open question(s).`;
       }
-      showToast(msg, status === 'error');
+      showToast(msg);
 
       // Surface the report so the user can see what the manager actually
       // did, when it produced one. Markdown rendering is a follow-up;

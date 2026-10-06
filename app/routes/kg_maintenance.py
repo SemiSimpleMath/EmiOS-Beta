@@ -323,10 +323,15 @@ def api_resolve_with_prose(finding_id):
          change, applies surgical mutations, regenerates the affected
          entity card and wiki page, and resolves every finding in the
          cluster with kg_finding_resolve.
-      3. Cascade-close any siblings the manager didn't explicitly resolve
-         (belt-and-suspenders — the manager SHOULD resolve every finding
-         in the cluster but the cascade ensures the dashboard clears
-         even on partial completion).
+      3. When the manager reports the resolution completed, close the lead
+         and cascade to any sibling it did not resolve itself. A partial
+         resolution (open questions) closes nothing more than the manager
+         resolved; its report goes back to the UI.
+
+    A failed, aborted or report-less manager run returns an error and
+    closes nothing (owner, 2026-10-05: any failed call in the KG stops
+    processing); until then the route marked the whole cluster executed
+    whatever the manager's status. The prose stays on the lead.
 
     Returns the manager's structured report alongside the cascade count.
     Latency: 30-90s for typical resolutions (multiple LLM steps + regen
@@ -384,31 +389,27 @@ def api_resolve_with_prose(finding_id):
             prose=prose,
         )
     except Exception as e:
-        logger.error("[resolve_with_prose] manager invocation crashed: %s", e, exc_info=True)
-        manager_result = {"status": "error", "error": str(e)}
+        logger.error("[resolve_with_prose] manager run failed; nothing closed: %s", e, exc_info=True)
+        return jsonify({"error": f"Resolution failed; nothing was closed: {e}", "lead_id": finding_id}), 500
 
-    # 3) Belt-and-suspenders cascade: if the manager didn't explicitly
-    #    resolve every finding (status='partial' or 'error'), close the
-    #    siblings via the existing cascade so the dashboard clears.
-    #    'completed' status means the manager already called
-    #    kg_finding_resolve on every member; cascade is a no-op there.
-    cascaded = set_status(
-        finding_id,
-        "executed",
-        executed_by="ui:resolve_with_prose",
-        execution_notes=(
-            f"Prose-resolution via kg_resolution_manager. "
-            f"Manager status: {manager_result.get('status')}."
-        ),
-        cascade_to_siblings=True,
-    )
+    # 3) Completed: close the lead and cascade to any sibling the manager did
+    #    not resolve itself. Partial: the manager's own kg_finding_resolve
+    #    calls stand; nothing more is closed.
+    cascaded = 0
+    if manager_result["status"] == "completed":
+        cascaded = set_status(
+            finding_id,
+            "executed",
+            executed_by="ui:resolve_with_prose",
+            execution_notes="Prose-resolution via kg_resolution_manager: completed.",
+            cascade_to_siblings=True,
+        )
 
     return jsonify({
         "ok": True,
         "lead_id": finding_id,
-        "manager_status": manager_result.get("status"),
-        "report": manager_result.get("report"),
-        "manager_error": manager_result.get("error"),
+        "manager_status": manager_result["status"],
+        "report": manager_result["report"],
         "siblings_cascaded": cascaded,
         "lead": get_finding(finding_id),
     })

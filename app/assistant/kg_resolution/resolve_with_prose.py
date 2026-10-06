@@ -136,12 +136,7 @@ def _build_brief(*, lead_finding_id: str, prose: str) -> Optional[Dict[str, Any]
 
 def _extract_report_from_audit(blackboard) -> Optional[Dict[str, Any]]:
     """Pull the resolution report from kg_resolution::final_answer."""
-    try:
-        msgs = blackboard.get_messages()
-    except Exception as e:
-        logger.warning("could not read blackboard messages: %s", e)
-        return None
-    for m in msgs:
+    for m in blackboard.get_messages():
         sender = str(getattr(m, "sender", "") or "")
         if sender.endswith("final_answer") and "kg_resolution" in sender:
             data = getattr(m, "data", None) or {}
@@ -156,44 +151,37 @@ def _extract_report_from_audit(blackboard) -> Optional[Dict[str, Any]]:
 
 def resolve_cluster_with_prose(*, lead_finding_id: str, prose: str) -> Dict[str, Any]:
     """Invoke kg_resolution_manager synchronously. Returns
-    {status, lead_id, report?, error?}.
+    {status, lead_id, report}.
 
     status:
       - 'completed' — manager produced a structured report with completed=True
       - 'partial'   — manager finished but report.completed=False (escalation
-                       or open questions). Still a clean outcome; the UI
-                       surfaces the report.
-      - 'no_report' — the manager exited without a final-answer message
-      - 'error'     — invocation crashed (manager broken, scope rejected, etc.)
+                       or open questions); the UI surfaces the report.
+
+    A missing lead, a missing, failed or aborted manager run, or a run that
+    ends without a report raises (owner, 2026-10-05: any failed call in the
+    KG stops processing). Until then each came back as a status the route
+    still closed the whole cluster on.
     """
+    from app.assistant.kg_investigator.finding_processor import invoke_manager
+
     brief = _build_brief(lead_finding_id=lead_finding_id, prose=prose)
     if brief is None:
-        return {"status": "error", "error": "lead finding not found"}
+        raise LookupError(f"[resolve_with_prose] lead finding {lead_finding_id} not found")
 
     mgr = DI.multi_agent_manager_factory.create_manager(MANAGER_NAME)
-    if mgr is None:
-        return {"status": "error", "error": f"manager {MANAGER_NAME} not registered"}
-
     msg = Message(
         task=brief["task"],
         information=brief["information"],
         scope_context=_resolution_scope(),
     )
-
-    try:
-        DI.manager_invoker.invoke(mgr, msg)
-    except Exception as e:
-        logger.error("[resolve_with_prose] manager invocation failed: %s", e, exc_info=True)
-        logger.debug("manager exception details", exc_info=True)
-        return {
-            "status": "error",
-            "lead_id": lead_finding_id,
-            "error": str(e),
-        }
+    invoke_manager(MANAGER_NAME, mgr, msg)
 
     report = _extract_report_from_audit(mgr.blackboard)
     if report is None:
-        return {"status": "no_report", "lead_id": lead_finding_id}
+        raise RuntimeError(
+            f"[resolve_with_prose] {MANAGER_NAME} finished without a report for lead {lead_finding_id}"
+        )
 
     return {
         "status": "completed" if report.get("completed") else "partial",
