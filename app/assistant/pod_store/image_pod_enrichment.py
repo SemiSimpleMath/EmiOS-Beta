@@ -1,246 +1,164 @@
-"""Vision + chat context → enrich an image pod's body/one_liner/tags.
+"""Every image pod is described when it is created.
 
-Closes the gap where chat-pasted image pods get minted with empty
-content. ingest_image_file gives us the bytes + metadata but writes:
+ingest_image_file mints an image pod with the bytes and their metadata. A source that already has a
+description passes it in (the camera dispatcher, with its analyzer's output). Every other image —
+a chat attachment, an agent's camera snapshot, a file minted by hand — is queued here as it is minted:
+`image_pod_captioner` looks at the image with what was said around it and writes one_liner, body,
+tags and depicted_entities back to the pod.
 
-    one_liner: "[image: jpg, 234kb, 1024x768]"
-    body: ""
-    vision_extraction_status: "pending"
+What was said: a chat attachment carries `chat_trigger_text` (the message it was sent with) and
+`chat_room_id` in its metadata; the captioner reads that message and the room's conversation up to
+the image, whole. Other images have no chat.
 
-Camera-captured pods get enriched by camera_dispatcher running
-scene_analyzer. Chat-pasted pods had nothing analogous until now.
-This module provides the analogous pass: take the pod, build chat
-context (the trigger message + a few surrounding messages from
-unified_log_2026), invoke image_pod_captioner, write back to the pod.
-
-Triggered from process_request.py via a monitored thread so the chat
-turn doesn't block on vision LLM latency.
+Until 2026-10-05 this ran only for chat attachments, started by the chat route, and never started:
+the thread call lacked a required argument and the failure was logged as a warning. All 25 chat
+images since April stayed "[image: png, 58kb, 500x248]". A failed description now raises in its
+worker (logged ERROR); the pod stays `pending` and `describe_image_pod` can be run on it again.
 """
 from __future__ import annotations
 
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from app.assistant.pod_store.contracts import Pod
 from app.assistant.pod_store.pod_store import PodStore
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_repo_root
 
 logger = get_logger(__name__)
 
+# How far before the image the room's conversation is read.
+CHAT_WINDOW = timedelta(minutes=30)
 
-def enrich_image_pod(
-    *,
-    pod_id: str,
-    trigger_message: Optional[str] = None,
-    chat_room_id: str = "master_room",
-    history_minutes: int = 10,
-    history_count: int = 6,
-) -> Dict[str, Any]:
-    """Run vision + chat-context captioning on an image pod.
+_executor = None
+_executor_lock = threading.Lock()
 
-    Idempotent: if vision_extraction_status is already 'done', no-op.
 
-    Args:
-        pod_id: the image pod to enrich.
-        trigger_message: the chat-text accompanying the upload. When None,
-            we use a best-effort fallback (most recent user message from
-            chat_room_id around the pod's occurred_at_utc).
-        chat_room_id: which room's history to pull for surrounding context.
-        history_minutes: window before the trigger to pull from.
-        history_count: max messages to include.
+def queue_description(pod_id: str) -> None:
+    """Describe the pod on the describer pool (two workers: a bulk mint queues, it does not fan out)."""
+    global _executor
+    from app.assistant.runtime import MonitoredThreadPoolExecutor
+    with _executor_lock:
+        if _executor is None:
+            _executor = MonitoredThreadPoolExecutor(name="image-describer", owner="image_pod_enrichment",
+                                                    max_workers=2)
+    _executor.submit(_describe_logged, pod_id)
 
-    Returns: summary dict.
-    """
+
+def _describe_logged(pod_id: str) -> None:
+    try:
+        describe_image_pod(pod_id)
+    except Exception:
+        logger.exception("[image_pod_enrichment] describing %s failed; it stays pending", pod_id)
+        raise
+
+
+def describe_image_pod(pod_id: str, *, call=None) -> Dict[str, Any]:
+    """Describe one image pod and write the description back. A pod already described is left as it
+    is. Raises when the pod or its file is missing, or the captioner returns nothing usable. `call` is
+    a test seam for the captioner."""
     store = PodStore()
     pod = store.get(pod_id)
     if pod is None:
-        return {"status": "error", "error": "pod_not_found", "pod_id": pod_id}
+        raise LookupError(f"no pod {pod_id}")
     if pod.kind != "image":
-        return {"status": "error", "error": "not_image_pod", "kind": pod.kind}
-
+        raise ValueError(f"pod {pod_id} is a {pod.kind}, not an image")
     meta = pod.metadata or {}
     if meta.get("vision_extraction_status") == "done":
-        return {"status": "skipped", "reason": "already_done"}
+        return {"status": "already_described", "pod_id": pod_id}
 
-    stored_path = (meta.get("stored_path") or "").strip()
-    if not stored_path:
-        return {"status": "error", "error": "no_stored_path"}
-    abs_path = (Path(get_repo_root()) / stored_path).resolve()
-    if not abs_path.is_file():
-        return {"status": "error", "error": "file_missing_on_disk", "path": str(abs_path)}
+    path = (Path(get_repo_root()) / meta["stored_path"]).resolve()
+    if not path.is_file():
+        raise FileNotFoundError(f"image file for {pod_id} is missing: {path}")
 
-    # Build surrounding chat context. Trigger message is primary; the
-    # chat_context_block is supportive.
-    if not trigger_message:
-        trigger_message = (meta.get("chat_trigger_text") or "").strip()
-    chat_context_block = _build_chat_context_block(
-        room_id=chat_room_id,
-        anchor_utc=meta.get("occurred_at_utc"),
-        history_minutes=history_minutes,
-        history_count=history_count,
-    )
-
-    # Invoke the captioner agent
-    try:
-        from app.assistant.scope.loader import load_scope_for_source
-        from app.assistant.ServiceLocator.service_locator import DI
-        from app.assistant.utils.pydantic_classes import Message
-        from app.assistant.utils.time_utils import get_local_time_str
-
-        agent = DI.agent_factory.create_agent("image_pod_captioner")
-        if agent is None:
-            return {"status": "error", "error": "agent_unavailable"}
-        agent_input = {
-            "date_time": get_local_time_str(),
-            "image": str(abs_path),
-            "image_filename": meta.get("original_filename") or abs_path.name,
-            "trigger_message": (trigger_message or "").strip() or "(no accompanying message)",
-            "chat_context_block": chat_context_block,
-        }
-        scope = load_scope_for_source(
-            kind="subsystem",
-            source_id="image_pod_enrichment",
-            actor_id="image_pod_enrichment",
-            identity_overrides={
-                "owner_id": "system",
-                "surface": "internal",
-                "scope_id": "pod_store::image_enrichment",
-            },
-        )
-        result = agent.action_handler(Message(agent_input=agent_input, scope_context=scope))
-    except Exception as e:
-        logger.exception("[image_pod_enrichment] captioner invocation raised")
-        return {"status": "error", "error": f"{type(e).__name__}: {e}"}
-
-    # Agent return: OneShotAgent returns dict directly; Agent wraps in .data
-    data: Optional[Dict[str, Any]] = None
-    if isinstance(result, dict):
-        data = result
-    else:
-        candidate = getattr(result, "data", None)
-        if isinstance(candidate, dict):
-            data = candidate
-    if not data:
-        logger.warning("[image_pod_enrichment] captioner returned no structured data")
-        return {"status": "error", "error": "no_structured_data"}
-
-    one_liner = (data.get("one_liner") or "").strip()
-    body = (data.get("body") or "").strip()
-    tags = list(data.get("tags") or [])
-    depicted = list(data.get("depicted_entities") or [])
-    if not one_liner and not body:
-        return {"status": "error", "error": "empty_caption"}
-
-    # Write back to the pod
-    try:
-        # Re-fetch to avoid clobbering anything mutated concurrently
-        pod = store.get(pod_id)
-        if pod is None:
-            return {"status": "error", "error": "pod_disappeared_during_run"}
-        if one_liner:
-            pod.one_liner = one_liner[:160]
-        if body:
-            pod.body = body
-        # Merge tags — keep any existing, append new (deduped)
-        existing_tags = list(pod.tags or [])
-        for t in tags:
-            t_clean = str(t).strip().lower()
-            if t_clean and t_clean not in existing_tags:
-                existing_tags.append(t_clean)
-        pod.tags = existing_tags
-
-        new_meta = dict(pod.metadata or {})
-        new_meta["vision_extraction_status"] = "done"
-        new_meta["vision_extraction_at_utc"] = datetime.now(timezone.utc).isoformat()
-        new_meta["depicted_entities"] = depicted
-        if trigger_message and "chat_trigger_text" not in new_meta:
-            new_meta["chat_trigger_text"] = trigger_message
-        pod.metadata = new_meta
-
-        store.put(pod)
-    except Exception as e:
-        logger.exception("[image_pod_enrichment] pod write-back failed")
-        return {"status": "error", "error": f"write_back_failed: {e}"}
-
-    return {
-        "status": "ok",
-        "pod_id": pod_id,
-        "one_liner": one_liner[:120],
-        "body_chars": len(body),
-        "tag_count": len(pod.tags),
-        "depicted_entities": depicted,
+    room = meta.get("chat_room_id")
+    trigger = str(meta.get("chat_trigger_text") or "").strip()
+    agent_input = {
+        "date_time": _local_now(),
+        "image": str(path),
+        "image_filename": meta.get("original_filename") or path.name,
+        "trigger_message": trigger or "(no accompanying message)",
+        "chat_context_block": (_chat_context(room, meta["occurred_at_utc"]) if room
+                               else "(the image was not sent in a chat)"),
     }
+    data = (call or _caption)(agent_input)
+    if not isinstance(data, dict) or not (str(data.get("one_liner") or "").strip()
+                                          and str(data.get("body") or "").strip()):
+        raise ValueError(f"image_pod_captioner returned no description for {pod_id}: {data!r}")
+
+    pod = store.get(pod_id)       # re-read: write onto the current row
+    pod.one_liner = data["one_liner"].strip()
+    pod.body = data["body"].strip()
+    tags = list(pod.tags or [])
+    for t in data.get("tags") or []:
+        t = str(t).strip().lower()
+        if t and t not in tags:
+            tags.append(t)
+    pod.tags = tags
+    pod.metadata = {**(pod.metadata or {}), "vision_extraction_status": "done",
+                    "vision_extraction_at_utc": datetime.now(timezone.utc).isoformat(),
+                    "depicted_entities": list(data.get("depicted_entities") or [])}
+    store.put(pod)
+    logger.info("[image_pod_enrichment] described %s: %s", pod_id, pod.one_liner)
+    return {"status": "described", "pod_id": pod_id, "one_liner": pod.one_liner}
 
 
-def _build_chat_context_block(
-    *,
-    room_id: str,
-    anchor_utc: Optional[str],
-    history_minutes: int,
-    history_count: int,
-) -> str:
-    """Pull recent chat messages around the pod's occurred_at_utc."""
+def _local_now() -> str:
+    from app.assistant.utils.time_utils import get_local_time_str
+    return get_local_time_str()
+
+
+def _caption(agent_input: Dict[str, Any]) -> Any:
+    from app.assistant.scope.loader import load_scope_for_source
+    from app.assistant.ServiceLocator.service_locator import DI
+    from app.assistant.utils.pydantic_classes import Message
+    agent = DI.agent_factory.create_agent("image_pod_captioner")
+    scope = load_scope_for_source(
+        kind="subsystem", source_id="image_pod_enrichment", actor_id="image_pod_enrichment",
+        identity_overrides={"owner_id": "system", "surface": "internal", "scope_id": "pod_store::image_enrichment"},
+    )
+    result = agent.action_handler(Message(agent_input=agent_input, scope_context=scope))
+    return result if isinstance(result, dict) else getattr(result, "data", None)
+
+
+def _chat_context(room_id: str, anchor_iso: str) -> str:
+    """The room's user and assistant turns in the CHAT_WINDOW up to the image, oldest first, whole."""
+    from app.assistant.database.db_handler import UnifiedLog2026
+    from app.assistant.utils.time_utils import utc_to_local
+    from app.models.base import get_session
+    anchor = datetime.fromisoformat(anchor_iso)
+    anchor = (anchor if anchor.tzinfo else anchor.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+    session = get_session()
     try:
-        from sqlalchemy import text as sql_text
-        from app.models.db_manager import get_db_manager
-    except Exception as e:
-        logger.warning("[image_pod_enrichment] cannot import db for chat context: %s", e)
-        return "(chat context unavailable)"
+        rows = (session.query(UnifiedLog2026)
+                .filter(UnifiedLog2026.room_id == room_id, UnifiedLog2026.role.in_(("user", "assistant")),
+                        UnifiedLog2026.timestamp >= anchor - CHAT_WINDOW,
+                        UnifiedLog2026.timestamp <= anchor + timedelta(minutes=1))
+                .order_by(UnifiedLog2026.timestamp.asc()).all())
+        lines: List[str] = []
+        for r in rows:
+            ts = r.timestamp if r.timestamp.tzinfo else r.timestamp.replace(tzinfo=timezone.utc)
+            who = "assistant" if r.role == "assistant" else (r.speaker_name or "user")
+            lines.append(f"- {utc_to_local(ts.isoformat()).strftime('%H:%M')} {who}: {r.message or ''}")
+    finally:
+        session.close()
+    return "\n".join(lines) or "(no chat in the room around the image)"
 
-    # Window: from (anchor - history_minutes) to anchor (inclusive)
-    try:
-        if anchor_utc:
-            anchor_dt = datetime.fromisoformat(anchor_utc.replace("Z", "+00:00"))
-        else:
-            anchor_dt = datetime.now(timezone.utc)
-        if anchor_dt.tzinfo is None:
-            anchor_dt = anchor_dt.replace(tzinfo=timezone.utc)
-    except Exception:
-        anchor_dt = datetime.now(timezone.utc)
-    cutoff_dt = anchor_dt - timedelta(minutes=history_minutes)
-    cutoff_str = cutoff_dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
-    anchor_str = anchor_dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
 
-    try:
-        with get_db_manager().read_session() as session:
-            rows = session.execute(
-                sql_text(
-                    """
-                    SELECT timestamp, role, speaker_name, message
-                    FROM unified_log_2026
-                    WHERE room_id = :rid
-                      AND source IN ('chat', 'room_slack', 'room_sms', 'room_ui')
-                      AND role IN ('user', 'assistant')
-                      AND message IS NOT NULL
-                      AND TRIM(message) != ''
-                      AND timestamp >= :cutoff
-                      AND timestamp <= :anchor
-                    ORDER BY timestamp DESC
-                    LIMIT :lim
-                    """
-                ),
-                {
-                    "rid": room_id,
-                    "cutoff": cutoff_str,
-                    "anchor": anchor_str,
-                    "lim": history_count,
-                },
-            ).fetchall()
-    except Exception as e:
-        logger.warning("[image_pod_enrichment] chat fetch failed: %s", e)
-        return "(chat context fetch failed)"
+def image_text(pod_id: str) -> str:
+    """An image pod as a reader sees it in place of its id: its description, or that it has none yet."""
+    pod = PodStore().get(pod_id)
+    if pod is None:
+        return f"[image {pod_id}: no longer stored]"
+    if (pod.metadata or {}).get("vision_extraction_status") != "done":
+        return f"[image {pod_id}: not described yet]"
+    return f"[image: {pod.one_liner}. {pod.body}]"
 
-    if not rows:
-        return "(no surrounding chat messages found)"
 
-    lines: List[str] = []
-    # rows are most-recent-first; flip to chronological for readability
-    for r in reversed(rows):
-        ts, role, speaker, msg = r[0], r[1], r[2], r[3]
-        ts_short = str(ts)[:19]  # "YYYY-MM-DD HH:MM:SS"
-        who = (speaker or "").strip() or (role or "user")
-        body = str(msg or "").replace("\n", " ").strip()
-        lines.append(f"- [{ts_short}] {who}: {body[:240]}")
-    return "\n".join(lines)
+def with_images(text: str, *, describe=None) -> str:
+    """The text with each line that is an image pod id (how a chat message carries its attached
+    image, ui_inbound_service) replaced by the image's description."""
+    describe = describe or image_text
+    return "\n".join(describe(line.strip()) if line.strip().startswith("datapod:image:") else line
+                     for line in text.split("\n"))

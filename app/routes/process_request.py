@@ -176,38 +176,19 @@ def handle_normal_processing(text, socket_id, speaking_mode, timer_id, request_i
                 pod = ingest_image_file(
                     src_path=_Path(processed_path),
                     source_kind="chat_attachment",
+                    # The captioner, queued as the pod is minted, reads the message the
+                    # image came with and the room's conversation (image_pod_enrichment.py).
                     metadata_extra={
                         "chat_request_id": request_id,
                         "original_filename": original_filename,
                         "content_type": image_file.mimetype,
+                        "chat_trigger_text": text or "",
+                        "chat_room_id": target_room,
                     },
                 )
                 attachment_record["pod_id"] = pod.pod_id
                 logger.info("[process_request] minted image pod %s for request_id=%s",
                             pod.pod_id, request_id)
-
-                # Async enrichment: scene_analyzer-equivalent runs vision +
-                # surrounding chat → writes one_liner/body/tags back to the
-                # pod. Non-blocking so the chat turn doesn't wait on the
-                # vision LLM. The pod is searchable+queryable within seconds.
-                try:
-                    from app.assistant.pod_store.image_pod_enrichment import enrich_image_pod
-                    from app.assistant.runtime import start_monitored_thread as _start_thread
-                    _start_thread(
-                        owner="process_request",
-                        name=f"image-pod-enrich-{pod.pod_id[:24]}",
-                        target=enrich_image_pod,
-                        kwargs={
-                            "pod_id": pod.pod_id,
-                            "trigger_message": text or "",
-                            "chat_room_id": target_room,
-                        },
-                    )
-                except Exception as enrich_err:
-                    logger.warning(
-                        "[process_request] failed to spawn image-pod enrichment: %s",
-                        enrich_err,
-                    )
             except Exception as e:
                 logger.warning("[process_request] image_ingest failed: %s — chat will use legacy path marker", e)
                 logger.debug("image_ingest failure details", exc_info=True)

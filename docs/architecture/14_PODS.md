@@ -315,9 +315,9 @@ User-attached images flow through the chat upload path (`POST /process_request`)
 2. Mints a `kind="image"` pod via `PodStore.put` (`image` is `kg_admissible`, so KG edges may later target it by URI).
 3. Writes a sidecar JSON stamp (`<file>.emipod.json`) next to the stored copy with `{pod_id, sha256, stamped_at_utc}` so the reconciler can identify the file later regardless of filename.
 4. The pod's `metadata` carries `sha256`, `stored_path` (repo-relative), `width`, `height`, `format`, `file_size_bytes`, `source_kind` (`chat_attachment` / `email_attachment` / `manual_upload`).
-5. The `body` starts empty with `vision_extraction_status: "pending"` and a structural `one_liner` placeholder (`[image: jpeg, 320kb, 1920x1080]`).
+5. A source that has the image's description passes it (`one_liner` + `body`) and the pod is minted `vision_extraction_status: "done"` — the camera dispatcher, with its analyzer's output. Otherwise the pod starts with an empty `body`, `"pending"` and a structural `one_liner` placeholder (`[image: jpeg, 320kb, 1920x1080]`), and is queued for description.
 
-**Vision extraction is built** (`pod_store/image_pod_enrichment.py`). `enrich_image_pod(pod_id, …)` runs the `image_pod_captioner` agent over the stored bytes plus surrounding chat context (the trigger message + a few messages from `unified_log_2026` around the pod's `occurred_at_utc`), then writes back `one_liner` + `body` (caption + OCR) + merged `tags` + `depicted_entities`, and flips `vision_extraction_status` to `"done"` (idempotent — a second call no-ops). It's triggered off the chat turn via a monitored thread so vision latency doesn't block the reply. Camera-captured pods get the analogous pass via `camera_dispatcher` running `scene_analyzer`.
+**Every image pod is described when it is created** (`pod_store/image_pod_enrichment.py`, 2026-10-05). An image minted without a description is queued (`queue_description`) on a two-worker monitored pool; `describe_image_pod(pod_id)` runs the `image_pod_captioner` agent over the stored bytes plus, for a chat attachment, the message it came with (`chat_trigger_text`) and the room's conversation in the 30 minutes up to it (`chat_room_id`), whole; then writes back `one_liner` + `body` + merged `tags` + `depicted_entities` and flips `vision_extraction_status` to `"done"` (a described pod is left as it is). A failure raises in the worker (logged ERROR) and the pod stays `pending`. Readers that show chat (the brain's conversations, concern evidence) replace an image's pod-id line with its description (`with_images`). Until 2026-10-05 only the chat route started the captioner, and that call never ran (bug list).
 
 After ingest, `ui_inbound_service` emits the **naked pod URI** as the chat marker:
 
@@ -410,7 +410,7 @@ What is planned but not built:
 | `app/assistant/pod_store/pod_uri.py` | URI regex + `extract_pod_ids` / `hydrate_headers_from_text` |
 | `app/assistant/pod_store/pod_classifier_service.py` | The minter — chat burst path + email single-shot path |
 | `app/assistant/pod_store/image_ingest.py` | Image bytes → content-addressed storage + `kind=image` pod |
-| `app/assistant/pod_store/image_pod_enrichment.py` | Vision + chat-context captioning of an image pod (`enrich_image_pod`) |
+| `app/assistant/pod_store/image_pod_enrichment.py` | Describes every image pod minted without a description (`queue_description`, `describe_image_pod`); `with_images` for readers |
 | `app/assistant/pod_store/file_ingest.py` | Generic file → content-addressed pod (video/audio/document/file) |
 | `app/assistant/pod_store/file_stamp.py` | Sidecar JSON stamp for content-addressed files |
 | `app/assistant/pod_store/image_reconcile.py` | Walk a directory, sync pods with disk, handle moves |

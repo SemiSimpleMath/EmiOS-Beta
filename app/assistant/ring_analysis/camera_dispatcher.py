@@ -417,22 +417,17 @@ def _mint_camera_pod(
                 meta_extra[k] = v
 
         store = PodStore()
+        # The analyzer's output is the description; without one the captioner describes it.
+        described = body or one_liner
         pod = ingest_image_file(
             src_path=jpeg,
             source_kind=source_kind,
             pod_store=store,
             metadata_extra=meta_extra,
             occurred_at_utc=occurred_at,
+            one_liner=(one_liner or body) if described else None,
+            body=described or None,
         )
-
-        # Backfill body/one_liner from the analyzer's output if the pod is
-        # newly minted (vision_extraction_status=pending).
-        if not (pod.body or "").strip() and (body or one_liner):
-            pod.body = body or one_liner
-            pod.one_liner = (one_liner or body)[:140]
-            if isinstance(pod.metadata, dict):
-                pod.metadata["vision_extraction_status"] = "done"
-            store.put(pod)
 
         logger.info(
             "[%s] minted pod %s source_kind=%s",

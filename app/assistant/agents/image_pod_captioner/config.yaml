@@ -5,9 +5,9 @@ llm_params:
   model_tier: "mini"
 
 # Generic image-pod enrichment. Vision + surrounding chat → write
-# one_liner + body + tags back to the pod. Runs async after a chat-
-# attachment image pod is minted (process_request.py spawns a thread).
-# Powerful tier for vision quality; speed is fine because async.
+# one_liner + body + tags back to the pod. Runs on the describer pool
+# for every image pod minted without a description
+# (pod_store/image_pod_enrichment.py).
 allowed_tools: []
 except_tools: []
 

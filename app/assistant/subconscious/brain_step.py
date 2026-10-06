@@ -136,7 +136,8 @@ def _message_text(message_id: str) -> str:
             return "(this message is no longer stored)"
         when = utc_to_local(_utc(row.timestamp).isoformat()).strftime("%a %Y-%m-%d %H:%M")
         speaker = "assistant" if row.role == "assistant" else (row.speaker_name or "user")
-        return f"{when} in {row.room_id}, {speaker}: {row.message or ''}"
+        from app.assistant.pod_store.image_pod_enrichment import with_images
+        return f"{when} in {row.room_id}, {speaker}: {with_images(row.message or '')}"
     finally:
         session.close()
 

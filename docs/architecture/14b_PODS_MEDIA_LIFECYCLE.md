@@ -154,8 +154,8 @@ The plumbing is the same shape; the only differences are:
 > (image-shaped files still delegate to the richer `image_ingest`
 > path + `data/images/`), and mints a kind-tagged pod. Vision
 > extraction is built too: `pod_store/image_pod_enrichment.py::
-> enrich_image_pod` runs `image_pod_captioner` on chat-pasted image
-> pods (off the chat turn, in a monitored thread) and writes back
+> describe_image_pod` runs `image_pod_captioner` on every image pod
+> minted without a description (queued at mint, on a monitored pool) and writes back
 > `one_liner` / `body` / `tags` / `depicted_entities`, flipping
 > `vision_extraction_status` to `done`. Still kind-specific and
 > pending: transcription for audio/video and OCR for documents to

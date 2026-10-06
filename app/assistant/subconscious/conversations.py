@@ -10,6 +10,7 @@ Now each reader (gate, noticer) gets the events in groups, each under a line say
 - chat, by room, under the room's ROOM.md `description:`. Each event sits inside its whole
   conversation: the room's user and assistant turns, split wherever the room fell silent for
   CONVERSATION_GAP, walked back to where the conversation started and forward to where it ended.
+  An image attached to a message (a line holding its pod id) is shown as the image's description.
 - email, by account, under the account's `description` (configs/oauth_accounts.json). Each event
   sits inside its Gmail thread: every stored email of that thread, in time order.
 - work, by work object: dayflow's reports on work attached to a concern (a finalizer judgment, the
@@ -83,6 +84,11 @@ def _conversation_end(room_id: str, at: datetime, now: datetime) -> datetime:
     return end
 
 
+def _with_images(text: str) -> str:
+    from app.assistant.pod_store.image_pod_enrichment import with_images
+    return with_images(text)
+
+
 def _describe_account(account_id: str) -> str:
     from app.assistant.lib.google_auth.oauth_registry import get_description
     return get_description(account_id)
@@ -131,6 +137,7 @@ def _chat_groups(events: List[Dict[str, Any]], now: datetime) -> List[Dict[str, 
         turns = [_event_turn(e) for e in evs]
         turns += [{**t, "mark": None, "note": None} for t in _fetch_turns(room_id, start, end)
                   if t["ref"] not in marked]
+        turns = [{**t, "text": _with_images(t["text"])} for t in turns]
         turns.sort(key=lambda t: t["at"])
         segments: List[List[Dict[str, Any]]] = []
         for t in turns:

@@ -1,6 +1,6 @@
 """Structured output for the image_pod_captioner.
 
-Runs once per image pod (chat-attached) to enrich it from `vision_extraction_status:
+Runs once per image pod minted without a description to enrich it from `vision_extraction_status:
 pending` to "done" with a real description. Combines what's visible in
 the image with what the user just said about it (the trigger message
 plus surrounding chat) so downstream search has both signals.

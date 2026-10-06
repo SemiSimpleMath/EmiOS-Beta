@@ -8,20 +8,18 @@ Storage shape: ``data/images/<hash[:2]>/<hash>.<ext>``
 
 Pod shape:
 - ``kind="image"``
-- ``one_liner`` = vision caption when extraction has run; placeholder
-  ("[image: <ext>, <KB>kb, <WxH>]") until then.
-- ``body`` = vision caption + OCR text once an extraction pass runs.
-  Empty until then. Search via ``pod_search?kind=image&query=...`` will
-  pick up whatever's in the body.
+- ``one_liner`` / ``body`` = the image's description: the source's own when it has one
+  (the camera dispatcher passes its analyzer's), else image_pod_captioner's, queued as the
+  pod is minted (image_pod_enrichment.py). Until the captioner finishes, the one_liner is a
+  placeholder ("[image: <ext>, <KB>kb, <WxH>]") and the body empty.
 - ``source_refs`` = ``[{kind: "image_file", id: "<sha256>"}]``
 - ``metadata`` carries width / height / format / file_size_bytes /
   source_path (where it came from) / source_kind (chat_attachment,
   email_attachment, manual_upload, etc.) so consumers can filter
   without reading the file.
 
-This module deliberately does NOT do the vision-LLM extraction pass.
-That's a separate step (image_vision_extractor) the next commit will
-add. Splitting the storage layer from the LLM-extraction layer means:
+The vision pass runs after the pod is stored, on the describer pool, not in this call.
+Splitting the storage layer from the LLM-extraction layer means:
 - An image is fully ingested and recoverable the moment its bytes hit
   disk, even if vision extraction fails or hasn't been wired yet.
 - Re-running vision (cheaper prompt, better model) is a pure-update
@@ -114,6 +112,8 @@ def ingest_image_file(
     pod_store: Optional[PodStore] = None,
     metadata_extra: Optional[Dict[str, Any]] = None,
     occurred_at_utc: Optional[datetime] = None,
+    one_liner: Optional[str] = None,
+    body: Optional[str] = None,
 ) -> Pod:
     """Ingest one image: hash it, copy into content-addressed storage,
     mint an image pod, return it.
@@ -133,7 +133,11 @@ def ingest_image_file(
             (e.g., chat envelope ids, EXIF, captured-by transport).
         occurred_at_utc: when the image was originally created /
             received. Defaults to file mtime, falls back to now.
+        one_liner, body: the image's description when the source has one. Both or neither;
+            without them the pod is queued for image_pod_captioner.
     """
+    if bool(one_liner) != bool(body):
+        raise ValueError("ingest_image_file: give both one_liner and body, or neither")
     src_path = Path(src_path).resolve()
     if not src_path.is_file():
         raise FileNotFoundError(f"image source not found: {src_path}")
@@ -190,7 +194,7 @@ def ingest_image_file(
         "source_path": str(src_path),
         "source_kind": source_kind,
         "occurred_at_utc": occurred_at_utc.astimezone(timezone.utc).isoformat() if occurred_at_utc else None,
-        "vision_extraction_status": "pending",
+        "vision_extraction_status": "done" if body else "pending",
     }
     if metadata_extra:
         metadata.update(metadata_extra)
@@ -199,8 +203,8 @@ def ingest_image_file(
         pod_id=pod_id,
         kind="image",
         tags=[],  # populated by vision extraction pass
-        one_liner=one_liner_placeholder,
-        body="",   # populated by vision extraction pass (caption + OCR text)
+        one_liner=one_liner or one_liner_placeholder,
+        body=body or "",
         source_refs=[PodSourceRef(kind="image_file", id=sha256)],
         for_agents=[],  # consumers filter by kind="image" + tags + query
         scope_id=None,
@@ -222,4 +226,7 @@ def ingest_image_file(
 
     logger.info("[image_ingest] minted image pod %s sha256=%s... %s %skb",
                 pod_id, sha256[:12], dims_str, file_size // 1024)
+    if not body:
+        from app.assistant.pod_store.image_pod_enrichment import queue_description
+        queue_description(pod_id)
     return pod
