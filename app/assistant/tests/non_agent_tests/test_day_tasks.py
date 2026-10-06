@@ -283,15 +283,11 @@ def test_an_entry_is_briefed_from_the_run_that_decided_it_not_the_current_plan(t
         D.decided_placement(DAY, "B404", connect=conn)
 
 
-def test_rewording_the_health_prose_is_not_new_input_but_a_changed_health_state_is():
+def test_the_health_assessment_alone_is_not_new_input():
     """2026-10-05: the health prose is reworded on every inference run, and the day's tasks called the model about
-    every ten minutes to decide nothing. The assessed state counts instead."""
+    every ten minutes to decide nothing. Owner: health out of the fingerprint; the decider reads it when it runs."""
     from app.assistant.subconscious.situation import fingerprint_view
-    state = {"mental": {"stress_load": "elevated"}, "cognitive": {}, "physical": {"pain_level": "none"},
-             "health_concerns_today": []}
-    a = situation(health="Slept well; energy normal.", health_state=state)
-    b = situation(health="Energy is normal after a good night.", health_state=state)
+    a = situation(health="Slept well; energy normal.")
+    b = situation(health="Energy is low; a headache since noon.")
     assert fingerprint_view(a) == fingerprint_view(b)
-    sick = situation(health="Energy is normal after a good night.",
-                     health_state={**state, "physical": {"pain_level": "moderate"}})
-    assert fingerprint_view(sick) != fingerprint_view(b)
+    assert fingerprint_view(situation(chat="I have a headache")) != fingerprint_view(a)

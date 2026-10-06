@@ -139,7 +139,6 @@ def gather(now_utc: datetime, *, calendar_work: bool = True) -> Dict[str, Any]:
     day = boundary_date_local_str(now_local)
     daily = _resource(scope, "resource_daily_context_generator_output")
     weather = _resource(scope, "resource_weather")
-    health = _resource(scope, "resource_health_inference_output")
     return {
         "now": now_utc.isoformat(), "day": day, "weekday": now_local.strftime("%A"),
         "key_dates": _build_key_dates(now_local=now_local),
@@ -153,10 +152,7 @@ def gather(now_utc: datetime, *, calendar_work: bool = True) -> Dict[str, Any]:
         "weather": {"city": (weather.get("location") or {}).get("city"),
                     "temperature": (weather.get("current") or {}).get("temperature"),
                     "condition": (weather.get("current") or {}).get("condition")},
-        "health": str(health.get("general_health_assessment") or ""),
-        # The inference's assessed state, without what moves with the clock (hunger, hydration): what the fingerprint
-        # counts in place of the prose, which is reworded on every inference run.
-        "health_state": {k: health.get(k) for k in ("mental", "cognitive", "physical", "health_concerns_today")},
+        "health": str(_resource(scope, "resource_health_inference_output").get("general_health_assessment") or ""),
         "chat": finished_conversations(chat_today(day, now_utc), now_utc),
         "todos": todos(),
         "work": work(now_utc, calendar_work=calendar_work),
@@ -168,9 +164,11 @@ def gather(now_utc: datetime, *, calendar_work: bool = True) -> Dict[str, Any]:
 
 def fingerprint_view(s: Dict[str, Any]) -> Dict[str, Any]:
     """The situation minus what moves with the clock alone (the time, minutes away or at the keyboard, the
-    temperature, the reminder window's bounds) and minus rewording (the health prose: its assessed state counts
-    instead), so a decider runs again when something changed, not every pass. Until 2026-10-05 the calendar's window
-    and the health prose changed every pass, and the day's tasks called the model about every ten minutes to decide
+    temperature, the reminder window's bounds) and minus the health assessment, so a decider runs again when something
+    changed, not every pass. The health prose is reworded on every inference run; a change in health alone waits for
+    the next change of anything else, and the decider then reads the whole assessment (owner, 2026-10-05: health out
+    of the fingerprint, no field list of the inference's output). Until 2026-10-05 the calendar's window and the
+    health prose changed every pass, and the day's tasks called the model about every ten minutes to decide
     nothing."""
     presence = s["presence"]
     reminders = s["reminders"]
