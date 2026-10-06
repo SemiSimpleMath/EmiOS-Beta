@@ -17,7 +17,7 @@ import pytest
 def _fake_runner_result(status):
     return SimpleNamespace(
         pipeline_id="kg_pipeline", run_id="r1", date="2026-07-09",
-        status=status, workers=[{"step": "s", "errors": 0}], halt_reason=None, halt_step=None,
+        status=status, workers=[{"step": "s", "errors": 0}], halt_reason=None, halt_step=None, halt_outage=False,
     )
 
 

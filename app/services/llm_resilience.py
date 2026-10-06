@@ -127,6 +127,41 @@ def is_transient(exc: Exception) -> bool:
     return isinstance(exc, ConnectionError)
 
 
+# Exception classes, by name, that say the provider or the network was unavailable: the SDKs' connection, timeout and
+# server-side errors, and the quota breaker's refusal (llm_client.QuotaExhaustedError). Names, so this module imports no
+# SDK; matched on the class and its bases.
+_OUTAGE_CLASS_NAMES = frozenset({
+    "QuotaExhaustedError", "APIConnectionError", "APITimeoutError", "InternalServerError",
+    "ServiceUnavailableError", "OverloadedError", "ServerError", "ConnectTimeout", "ReadTimeout",
+})
+
+
+def is_outage(exc: BaseException) -> bool:
+    """True when *exc*, or any exception it was raised from, says the provider or the network was unavailable — a
+    credit or billing outage (the quota breaker), a rate limit that outlasted its retries, a timeout, a connection
+    error, an HTTP 429 or 5xx — rather than anything about the work being done (owner, 2026-10-06: a credit outage
+    lasts until it is refilled, an API outage minutes to hours; neither is the item's fault). By type and status only,
+    never by message: work errors carry ids whose digits read like status codes. Callers: the KG failure ledger does
+    not count an outage against an item; the routine manager backs off on one without counting it toward
+    auto-disable."""
+    seen = set()
+    e: Optional[BaseException] = exc
+    while e is not None and id(e) not in seen:
+        seen.add(id(e))
+        if isinstance(e, (BillingQuotaExhausted, TransientRateLimit, TimeoutError, ConnectionError)):
+            return True
+        if any(c.__name__ in _OUTAGE_CLASS_NAMES for c in type(e).__mro__):
+            return True
+        status = getattr(e, "status_code", None)
+        if not isinstance(status, int):
+            code = getattr(e, "code", None)
+            status = code if isinstance(code, int) else None
+        if status is not None and (status == 429 or 500 <= status <= 599):
+            return True
+        e = e.__cause__ or e.__context__
+    return False
+
+
 def retry_transient(
     fn: Callable[[], Any],
     *,

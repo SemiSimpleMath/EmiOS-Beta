@@ -99,6 +99,7 @@ class KGPipeline:
             "workers": result.workers,
             "halt_reason": result.halt_reason,
             "halt_step": result.halt_step,
+            "outage": result.halt_outage,
         }
 
     def stop(self) -> None:

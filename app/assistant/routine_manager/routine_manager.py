@@ -62,6 +62,9 @@ class RoutineRunState:
     # the routine is auto-disabled in the status file and surfaced as
     # a ticket (see _record_failure / _maybe_auto_disable_after_failure).
     consecutive_failures: int = 0
+    # Failed runs in a row that were outages (llm_resilience.is_outage: credits out, API down). They set the backoff
+    # but never count toward auto-disable (owner, 2026-10-06: a credit outage lasts until the morning). Reset on success.
+    consecutive_outages: int = 0
     # When set, _should_run gates until this UTC moment passes. Computed
     # from on_error.backoff after each failure so retries don't hammer.
     next_attempt_after_utc: Optional[str] = None
@@ -650,6 +653,7 @@ class RoutineManager:
             last_error=data.get("last_error"),
             run_count=int(data.get("run_count") or 0),
             consecutive_failures=int(data.get("consecutive_failures") or 0),
+            consecutive_outages=int(data.get("consecutive_outages") or 0),
             next_attempt_after_utc=data.get("next_attempt_after_utc"),
             auto_disabled_reason=data.get("auto_disabled_reason"),
             auto_disabled_at_utc=data.get("auto_disabled_at_utc"),
@@ -671,7 +675,7 @@ class RoutineManager:
                     "last_run_utc", "last_run_id", "last_started_utc",
                     "last_finished_utc", "last_duration_s", "last_target_date",
                     "last_runner", "last_status", "last_error", "run_count",
-                    "consecutive_failures", "next_attempt_after_utc",
+                    "consecutive_failures", "consecutive_outages", "next_attempt_after_utc",
                     "auto_disabled_reason", "auto_disabled_at_utc",
                 }:
                     preserved[k] = v
@@ -688,6 +692,7 @@ class RoutineManager:
             "last_error": entry.last_error,
             "run_count": entry.run_count,
             "consecutive_failures": entry.consecutive_failures,
+            "consecutive_outages": entry.consecutive_outages,
             "next_attempt_after_utc": entry.next_attempt_after_utc,
             "auto_disabled_reason": entry.auto_disabled_reason,
             "auto_disabled_at_utc": entry.auto_disabled_at_utc,
@@ -1421,6 +1426,7 @@ class RoutineManager:
 
         status = "success"
         error: Optional[str] = None
+        outage = False
         try:
             # Routines OPTIONALLY attach a scope (sibling configs/routines/public/
             # <id>.scope.yaml); None when undeclared. Tool/function payloads run under
@@ -1449,6 +1455,7 @@ class RoutineManager:
             )
             run_result = self._dispatch_routine(routine, run_ctx)
             status, error = _status_from_result(run_result)
+            outage = status != "success" and _reported_outage(run_result)
             if status != "success" and propagate_exceptions:
                 # Manual/chat runs surface the reported failure to the
                 # caller the same way a raised one would.
@@ -1456,9 +1463,11 @@ class RoutineManager:
                     error or f"Routine '{routine.routine_id}' reported failure"
                 )
         except Exception as e:
+            from app.services.llm_resilience import is_outage
             status = "error"
             error = str(e)[:1000]
-            logger.error("Routine '%s' failed", routine.routine_id)
+            outage = outage or is_outage(e)
+            logger.error("Routine '%s' failed%s", routine.routine_id, " (an outage)" if outage else "")
             logger.debug("routine '%s' failed exception details", routine.routine_id, exc_info=True)
             if propagate_exceptions:
                 raise
@@ -1480,6 +1489,7 @@ class RoutineManager:
                     increment_run_count=succeeded,
                     on_error=routine.on_error,
                     finished_at_utc=finished_at_utc,
+                    outage=outage,
                 ),
             )
             # Was this run a probe attempt? If the entry still carries an
@@ -1696,6 +1706,14 @@ def _status_from_result(run_result: Any) -> Tuple[str, Optional[str]]:
     return "error", message[:1000]
 
 
+def _reported_outage(run_result: Any) -> bool:
+    """A runner that reports failure without raising says whether it was an outage in its data: a pipeline's result
+    carries `outage` (the KG pipeline: its halting worker's exception, llm_resilience.is_outage)."""
+    data = getattr(run_result, "data", None) or {}
+    pipeline_result = data.get("pipeline_result") if isinstance(data, dict) else None
+    return bool(isinstance(pipeline_result, dict) and pipeline_result.get("outage"))
+
+
 def _set_running_state(
     entry: RoutineRunState,
     *,
@@ -1724,6 +1742,7 @@ def _set_finished_state(
     increment_run_count: bool,
     on_error: Optional[Dict[str, Any]] = None,
     finished_at_utc: Optional[datetime] = None,
+    outage: bool = False,
 ) -> None:
     entry.last_finished_utc = finished_at_utc_iso
     entry.last_run_utc = finished_at_utc_iso
@@ -1733,18 +1752,25 @@ def _set_finished_state(
     if increment_run_count:
         entry.run_count += 1
 
-    # Failure tracking + backoff. Success resets the streak; failure
-    # increments and schedules the next attempt.
+    # Failure tracking + backoff. Success resets the streaks; failure
+    # increments and schedules the next attempt. An outage (the provider or the
+    # network unavailable) grows its own streak: it sets the backoff and never
+    # counts toward auto-disable (owner, 2026-10-06).
     if status == "success":
         entry.consecutive_failures = 0
+        entry.consecutive_outages = 0
         entry.next_attempt_after_utc = None
     else:
-        entry.consecutive_failures += 1
+        if outage:
+            entry.consecutive_outages += 1
+        else:
+            entry.consecutive_failures += 1
+        streak = entry.consecutive_outages if outage else entry.consecutive_failures
         if on_error and finished_at_utc is not None:
             base = max(1, int(on_error.get("backoff_base_seconds") or 60))
             ceiling = max(base, int(on_error.get("backoff_max_seconds") or 3600))
             # Exponential: base * 2^(n-1), capped.
-            wait_s = min(ceiling, base * (2 ** max(0, entry.consecutive_failures - 1)))
+            wait_s = min(ceiling, base * (2 ** max(0, streak - 1)))
             from datetime import timedelta as _td
             entry.next_attempt_after_utc = (finished_at_utc + _td(seconds=wait_s)).isoformat()
 

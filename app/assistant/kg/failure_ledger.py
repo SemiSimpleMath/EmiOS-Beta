@@ -7,6 +7,10 @@ an over-long prompt) block its whole queue every night, so each failure is count
 failed runs the item is set aside, its queue skips it, and a `processing_failure` finding, born escalated, puts it in
 front of the owner. A set-aside item is never dropped; `release` returns it to its queue.
 
+An outage is not the item's failure (owner, 2026-10-06): when the provider or the network was unavailable
+(llm_resilience.is_outage: credits out, API down, timeouts) the run still stops, but the item's count is left as it is.
+Until then a credit outage at a minute's retry set every item of a queue aside within three minutes.
+
 Usage in a queue loop:
 
     skip = failure_ledger.set_aside_ids("kg_window")
@@ -61,9 +65,14 @@ def set_aside_ids(kind: str) -> Set[str]:
 
 
 def record_failure(kind: str, item_id: str, error: BaseException, *, label: Optional[str] = None) -> bool:
-    """Count one failed run for this item. Returns True when this failure set it aside (and raised its finding)."""
+    """Count one failed run for this item. Returns True when this failure set it aside (and raised its finding). An
+    outage (llm_resilience.is_outage) is logged and not counted."""
+    from app.services.llm_resilience import is_outage
     item_id = str(item_id)
     message = f"{type(error).__name__}: {error}"
+    if is_outage(error):
+        logger.error("[kg_failure_ledger] %s %s stopped by an outage, not counted against it: %s", kind, item_id, message)
+        return False
     with get_db_manager().transaction(op="kg_failure_ledger.record") as s:
         _ensure(s)
         row = s.get(KGItemFailure, (kind, item_id))

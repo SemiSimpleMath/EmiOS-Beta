@@ -59,6 +59,9 @@ class PipelineRunResult:
     # the LLM account, fix code, or just resume on next schedule.
     halt_reason: Optional[str] = None
     halt_step: Optional[str] = None
+    # The halting worker's exception was an outage (llm_resilience.is_outage): the routine backs off without counting
+    # it toward auto-disable.
+    halt_outage: bool = False
 
 
 def _is_database_locked(exc: BaseException) -> bool:
@@ -129,6 +132,7 @@ class KGPipelineRunner:
         # the operator knows WHY the pipeline stopped.
         self._halt_reason: Optional[str] = None
         self._halt_step: Optional[str] = None
+        self._halt_outage = False
 
     def run(
         self,
@@ -139,6 +143,11 @@ class KGPipelineRunner:
     ) -> PipelineRunResult:
         self._stop_event.clear()
         self._worker_stats.clear()
+        # The runner lives as long as the process (KGPipeline builds it once); a halt belongs to its own run. Until
+        # 2026-10-06 the halt was never cleared, so every run after one reported "halted".
+        self._halt_reason = None
+        self._halt_step = None
+        self._halt_outage = False
 
         threads: List[threading.Thread] = []
         for step in self._steps:
@@ -191,6 +200,7 @@ class KGPipelineRunner:
             workers=worker_dicts,
             halt_reason=self._halt_reason,
             halt_step=self._halt_step,
+            halt_outage=self._halt_outage,
         )
 
     def stop(self) -> None:
@@ -255,8 +265,10 @@ class KGPipelineRunner:
                 reason = "QUOTA/RATE-LIMIT" if is_quota else "ERROR"
                 with self._lock:
                     if self._halt_reason is None:
+                        from app.services.llm_resilience import is_outage
                         self._halt_reason = f"{reason}: {type(exc).__name__}: {str(exc)[:300]}"
                         self._halt_step = step.name
+                        self._halt_outage = is_outage(exc)
                 logger.error(
                     "[kg_pipeline] %s: HALTING — %s: %s: %s",
                     thread_name, reason, type(exc).__name__, exc,
