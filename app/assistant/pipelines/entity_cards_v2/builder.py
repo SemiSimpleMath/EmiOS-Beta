@@ -357,8 +357,8 @@ _BRIDGE_NODE_TYPES = {"State", "Event", "Goal", "Concept"}
 # selection, so high-importance bridges are visited first.
 _HOP2_MAX_ENDPOINTS_PER_BRIDGE = 5
 
-# ── Nano prefilter (wiki parity) ───────────────────────────────────────────
-# Mirrors description_creator._prefilter_edges. Entities whose collected
+# ── Nano prefilter ─────────────────────────────────────────────────────────
+# Entities whose collected
 # fact pool exceeds _CARD_PREFILTER_THRESHOLD are run through the
 # kg_maintenance::edge_filter nano agent in batches of
 # _CARD_PREFILTER_BATCH_SIZE; nano picks the most informative facts and
@@ -376,8 +376,7 @@ def _chunk(lst: List[Any], size: int) -> List[List[Any]]:
 def _format_fact_oneliner(fact: Dict[str, Any], index: int) -> str:
     """One-line descriptor of a fact for the nano prefilter prompt.
 
-    Mirrors description_creator._format_edge_oneliner but adapted to the
-    card-fact dict shape. NOT sliced — sentences pass full per the no-
+    Adapted to the card-fact dict shape. NOT sliced — sentences pass full per the no-
     slicing rule. The nano agent sees one fact per line; the prompt-side
     chunking in _prefilter_facts keeps each batch bounded.
     """
@@ -401,7 +400,7 @@ def _prefilter_facts(
 ) -> List[Dict[str, Any]]:
     """Nano-LLM prefilter for high-degree entity fact pools.
 
-    Wiki parity (description_creator._prefilter_edges). Below threshold,
+    Below threshold,
     pass through unchanged. Above threshold, batch the facts and ask
     kg_maintenance::edge_filter to pick the informative ones. A failed
     batch raises out of the build (until 2026-10-05 it kept every fact and
@@ -524,9 +523,8 @@ def _collect_candidate_facts(entity: Node) -> List[Dict[str, Any]]:
 
     # Wiki-parity nano prefilter. For hub entities the 1-hop + 2-hop walks
     # can produce hundreds of facts; running each through section_tagger +
-    # bullet_renderer is slow and dilutes the signal. The same nano agent
-    # the wiki's description_creator uses (kg_maintenance::edge_filter)
-    # picks the informative subset; the existing importance floor + min-
+    # bullet_renderer is slow and dilutes the signal. The nano agent
+    # kg_maintenance::edge_filter picks the informative subset; the existing importance floor + min-
     # keep top-up then operate on that smaller pool. See _prefilter_facts.
     facts = _prefilter_facts(facts, entity.label, entity.node_type)
 
@@ -655,9 +653,8 @@ def _walk_candidate_facts(session: Session, entity: Node) -> List[Dict[str, Any]
     # them to their other Entity endpoints. That's why "Dogs" doesn't
     # name Bonnie + Clyde at 1-hop — they live behind an Ownership State.
     #
-    # The wiki's description_creator effectively gets the names because
-    # it reads each connected node's description (which is itself wiki-
-    # generated and names them). The card MUST NOT do that — it would
+    # A connected node's description is wiki-generated and names them,
+    # but the card MUST NOT read it — it would
     # collapse the card/wiki cross-check. Instead, we walk the structure
     # ourselves and pick up the Entity endpoints behind each bridge.
     #

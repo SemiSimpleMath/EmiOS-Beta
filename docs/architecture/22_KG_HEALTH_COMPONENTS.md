@@ -71,6 +71,59 @@ There is **no** `entity_cards` pipeline routine and **no**
 pipeline + card-findings table" design was removed; card QA is now a
 single L0 `card_critic` veto inside the nightly refresh (see below).
 
+## A failed call stops processing (2026-10-05)
+
+Owner, 2026-10-05: "If any call fails in KG, we should treat that as a
+stop processing." Every component in this doc follows the same rules:
+
+- **A failed LLM, embedding, Chroma or DB call raises and the run
+  stops.** The item in hand and everything after it stay pending for the
+  next run. Nothing is skipped, defaulted, passed through, stamped as
+  scanned or recorded as a verdict because a call failed (an outage is
+  never a verdict). Result dicts no longer carry `errors` / `failed`
+  counts; a run either finishes or raises.
+- **A well-formed but incomplete answer gets ONE targeted correction**,
+  then raises. The re-ask names exactly what is missing or malformed (the
+  omitted ids, the invalid verdicts); the agents gained a `correction`
+  slot in their user prompt for it (the edge canon curator receives it in
+  its `information` field). An answer with no structured data at all (no
+  verdict list) raises without a correction.
+- **Per-item failure ledger** (`app/assistant/kg/failure_ledger.py`,
+  table `kg_item_failure`). A queue loop records each failure against the
+  item it concerns (`record_failure(kind, item_id, exc)`) and re-raises;
+  a success clears the count. After `SET_ASIDE_AFTER = 3` failed runs the
+  item is **set aside**: its queue skips it (`set_aside_ids(kind)`) and a
+  `processing_failure` finding, born `escalated`, puts it in front of the
+  owner. A set-aside item is never dropped; `release(kind, item_id)`
+  returns it to its queue. This is what stops one item that always fails
+  (a content refusal, an over-long prompt) from blocking its queue every
+  night.
+
+Ledger kinds and the queue that uses each:
+
+| Kind | Item | Queue |
+|---|---|---|
+| `kg_window`, `kg_extraction`, `kg_enrichment` | window / extraction / enrichment | ingestion (`09_KG_PIPELINE.md`) |
+| `kg_proposal` | claim proposal | `run_promoter` |
+| `edge_importance` | edge | `kg_importance_rater` edge rater |
+| `section_tag` | node | `kg_importance_rater` section tagger |
+| `entity_card` | entity node | `entity_card_refresh` |
+| `kg_finding_investigation` | finding | `investigate_findings` (backlog / state-date drains, pipeline final pass, wiki critic) |
+| `kg_finding_execution` | finding | `run_executable_findings` |
+| `kg_duplicate_cluster` | cluster (sha1 of its node-id set) | `kg_dup_cluster_drain` |
+| `kg_duplicate_pair` | candidate pair (`min_id\|max_id`) | `duplicate_scan` detector |
+| `kg_role_succession` | Entity node | `role_succession_scan` |
+| `kg_wiki_inference` | page subject node | `kg_wiki_inference` |
+| `kg_finding_cluster` | primary node id | `kg_finding_cluster_resolve` |
+| `kg_context_embedding`, `kg_label_embedding` | node | `context_embedding_backfill` |
+| `kg_identity_sentence` | node | `kg_identity_sentence_refresh` |
+| `kg_evidence_digest` | node | `kg_evidence_digestion` |
+
+Per-component specifics are in the sections below and in
+`09_KG_PIPELINE.md` (ingestion, promoter), `12_ENTITY_CARDS.md`,
+`23_NODE_IMPORTANCE.md` and `13_KG_MUTATOR_TOOLS.md` (Chroma cleanup after
+a committed merge/delete raises naming the revision).
+
 ## Lifecycle of a finding
 
 ```
@@ -189,6 +242,21 @@ result_summary: str
 
 The memo is `~12 words`, names node ids inline, and persists in `kg_node_verdict` for future agents to consult.
 
+**Failed investigations** (2026-10-05). A failed or aborted manager run
+(`invoke_manager`, see the executor section), or a run that ends without
+a structured report, raises and leaves the finding `pending`.
+`investigate_findings` stops at the first failure and counts it in the
+failure ledger (kind `kg_finding_investigation`); `drain_pending_findings`
+and `run_pending_findings` both delegate to it, and set-aside findings are
+skipped. The `evidence_json.investigation_attempts` counter and its
+escalation after three failed attempts are retired: the ledger now counts
+per item, and a set-aside finding surfaces as an escalated
+`processing_failure` finding instead of being escalated itself. The
+finding brief (`finding_brief.build_finding_brief`) and the importance
+ordering (`finding_priority`) raise on a failed read instead of producing
+a thinner brief or a zero score. Results carry `processed` /
+`investigated`, no `errors`.
+
 ## Executor: `kg_resolution_manager`
 
 Manager config: `app/assistant/multi_agents/kg_resolution_manager/config.yaml`. Same `MultiAgentManager` shell. Reads the investigator's prose recommendation and applies the corresponding mutations.
@@ -227,6 +295,19 @@ land.
 The driver (`finding_executor.execute_one`) detects no-op runs (manager
 returned without mutations or regenerations) and flips the finding to
 `escalated` rather than leaving it stuck at `investigated`.
+
+**A failed run is never an outcome** (2026-10-05). Manager runs go
+through `finding_processor.invoke_manager`, which raises on an exception,
+a missing manager, or a run `ManagerInvoker` returns as `manager_aborted`
+(an abort does not raise, and its graceful-exit final answer looked like a
+report). Any failure after the claim, including an abort after partial
+mutations and a run that ends without a `kg_resolution::final_answer`,
+**releases the claim** (back to `investigated`) and raises, so an outage
+is never recorded as `executed` or `escalated`.
+`run_executable_findings` stops at the first failed finding (ledger kind
+`kg_finding_execution`); the rest stay `investigated`. Its result carries
+`executed` / `escalated` / `skipped`, no `errors`. The legacy `apply_one`
+(`kg_mutation_manager`) also raises on a failed or aborted run.
 
 ### Scope-context trick
 
@@ -294,7 +375,15 @@ run Mon 02:00): `lifecycle_gc` → `orphan_scan` →
 `context_embedding_backfill` → `duplicate_scan` → `pagerank` →
 `missing_dates_scan` → `edge_canon_curation` → `arrangement_scan` → `role_succession_scan` →
 `date_lint_scan` → `disambiguation_scan` → `investigate_findings`
-(final pass, caps at 20 investigations/run). `lifecycle_gc` and
+(final pass, caps at 20 investigations/run). **A failed step stops the
+run** (2026-10-05): the remaining steps do not run and the step's
+exception propagates, so the routine layer records the run as an error
+(backoff / auto-disable / ticket); each step leaves its unfinished work
+pending for the next run. Until then a failed step was recorded as
+`{"error": …}` in the summary (status `error`, `failed_steps`) and the
+pipeline went on to the next step. Inside the steps, the rules in "A failed call stops
+processing" apply; step specifics are in the per-step failure table below.
+`lifecycle_gc` and
 `edge_canon_curation` landed in the 2026-07-08 KG-core audit (deletion
 lifecycle + predicate canon curation). The old
 `description_fill`/`missing_description` step was deleted 2026-06-10
@@ -303,7 +392,7 @@ lifecycle + predicate canon curation). The old
 | Producer | Type | finding_type | Notes |
 |---|---|---|---|
 | `step_orphan_scan` | maintenance pipeline step | `orphan_node` | Cheap structural scan |
-| `step_duplicate_scan` | maintenance pipeline step | `duplicate_node` | Three-tier candidate gen + LLM confirm; consults `kg_node_verdict` to skip already-decided pairs. Drained by `kg_dup_cluster_drain`, not the backlog drain |
+| `step_duplicate_scan` | maintenance pipeline step | `duplicate_node` | Three-tier candidate gen + LLM confirm; consults `kg_node_verdict` to skip already-decided pairs; a failed call stops the run before any node is stamped (see the failure table below). Drained by `kg_dup_cluster_drain`, not the backlog drain |
 | `step_missing_dates_scan` | maintenance pipeline step | `state_missing_dates` | State/Event nodes missing one or both dates, scored by connected-entity pagerank |
 | `step_arrangement_scan` | maintenance pipeline step | (arrangement supersession, 2026-10-05) | Pairs each open State with later-said States/Events sharing a participant (not the owner; said dates from the source messages), ranked by sentence similarity; `kg_maintenance::arrangement_judge` says supersedes / both_true / same_statement / unrelated / unsure. Supersedes becomes an `arrangement_supersession` finding born investigated / needs_user_review (Accept closes the State and adds `succeeded_by`); a State is re-judged only when a new later statement appears. ≤100 per run, freshest changes first |
 | `step_role_succession_scan` | maintenance pipeline step | (diachronic disambiguation) | Judges role-reference entities for referent changes before the disambiguation scan |
@@ -313,12 +402,33 @@ lifecycle + predicate canon curation). The old
 | `wiki_consistency_critic` | wiki-pipeline agent | `wiki_contradiction` | Bypasses `upsert_finding` — writes rich `evidence_json` directly |
 | `wiki_connection_investigator` | `kg_wiki_inference` routine | `synthetic_fact_proposal` | Investigator handles duplicate-check; promotion path is `synthetic_fact_review` |
 
+**Per-step failure behaviour** (2026-10-05; each raise stops the step and,
+inside the weekly pipeline, the run):
+
+| Step / helper | On a failed call | On an incomplete answer |
+|---|---|---|
+| `lifecycle_gc` | A failed Chroma edge-ghost sweep raises (the SQL sweep before it is already committed; the next run retries) | — |
+| `context_embedding_backfill` | A failed embed or Chroma write raises; ledger kinds `kg_context_embedding` / `kg_label_embedding`; set-aside nodes skipped; result has no `errors` key | — |
+| `duplicate_scan` | A failed triage batch, Tier 4 load, Tier 5b Chroma read or detector call raises before any node is stamped scanned (no pass-through of a failed triage batch; no stamping after a failed tier). A failed detector call is counted against the pair (kind `kg_duplicate_pair`); a set-aside pair is not re-sent, and its nodes stay **unstamped** so a released pair returns | Triage batch: a pair without a valid verdict (`distinct` / `uncertain` / `defective_sentences`) gets one correction, then raises. Detector: no `merge_actions` list raises |
+| `missing_dates_scan` | An unconfigured primary user name raises | — |
+| `edge_canon_curation` | Every batch is judged before anything is applied: a missing agent or failed call raises with nothing written; a failed alias-cache reset raises | A predicate without a valid verdict, or a `variant_of` naming no existing canon, gets one correction, then raises |
+| `role_succession_scan` | A failed judge call raises; kind `kg_role_succession` | A malformed verdict (verdict, confidence, a succession's `split_date` / `split_basis`) gets one correction, then raises; it never becomes a cooldown finding |
+| `disambiguation_scan` | A failed temporal-drain transaction raises; the rest stays parked | — |
+| `investigate_findings` (final pass) | See the investigator section | — |
+| `kg_finding_cluster_resolve` (`step_cluster_resolve`) | A failed call raises; kind `kg_finding_cluster` (keyed by primary node) | A "same root" answer missing its lead, members or root question, or naming foreign finding ids, gets one correction, then raises |
+| `kg_goal_outcome_detect` | A failed call or evidence read raises; every Goal stays as it is | A candidate without a valid outcome / numeric confidence, or an unknown id, gets one correction, then raises |
+| `kg_wiki_inference` | A failed call, page read or finding write raises before the page is marked examined, so it is read again next run; kind `kg_wiki_inference` | No `sentences` list raises |
+| `kg_identity_sentence_refresh` | A failed writer call or source-window read raises before anything is stamped (no `undefinable` stamp after a failed read); kind `kg_identity_sentence`. A failed embed or Chroma write after the sentence is written raises too (the hourly sync heals the vectors). An unconfigured primary user name raises | `definable` with no sentence gets one correction, then raises |
+| `kg_evidence_digestion` | A failed digester call raises with nothing written for that node; kind `kg_evidence_digest` | An empty digest gets one correction, then raises |
+| Approved-finding executors (`step_execute_findings`, run from `/kg-maintenance`) | `duplicate_node`: a failed or empty `node_data_merger` answer raises before anything is written; the field-copy fallback merge is gone. The batch route `/api/execute_approved` stops at the first failure (that finding marked `execute_error`, retryable; the rest stay `approved`). The unwired autopilot `run()` was deleted | — |
+
 ### Cron functions (drains + audits)
 
 | Routine | Function | Manager invoked |
 |---|---|---|
-| `kg_finding_backlog_drain` | `finding_processor.run_pending_findings` | `kg_investigation_manager` |
-| `kg_state_date_drain` | `finding_processor.run_state_date_findings` | `kg_investigation_manager` (specialized brief) |
+| `kg_finding_backlog_drain` | `finding_processor.drain_pending_findings` | `kg_investigation_manager` |
+| `kg_state_date_drain` | `finding_processor.run_pending_findings(finding_types=["state_missing_dates"])` | `kg_investigation_manager` (specialized brief) |
+| `kg_dup_cluster_drain` | `duplicate_cluster_drain.drain_duplicate_clusters` | `kg_maintenance::duplicate_cluster_resolver` agent (see below) |
 | `kg_finding_executor_drain` | `finding_executor.run_executable_findings` | `kg_resolution_manager` (only `auto_apply` findings past 24h grace) |
 | `kg_finding_cluster_resolve` | `step_cluster_resolve.run` | `kg_finding_cluster_resolver` agent |
 | `kg_state_decay` | `step_state_decay.run` | (none — pure SQL; writes `state_auto_closed` as `executed`) |
@@ -326,6 +436,22 @@ lifecycle + predicate canon curation). The old
 | `kg_goal_outcome_detect` | `step_goal_outcome_detect.run` | `goal_outcome_detector` agent (one-shot) |
 | `kg_wiki_inference` | `step_wiki_inference.run` | `wiki_connection_investigator` agent → claim_proposals |
 | `kg_importance_rater` | rater function | (none) |
+
+**Duplicate cluster drain** (`kg_investigator/duplicate_cluster_drain.py`).
+Union-finds pending `duplicate_node` findings into clusters and asks
+`kg_maintenance::duplicate_cluster_resolver` once per cluster to place
+every node id exactly once, in a merge group or in `distinct_node_ids`.
+A node the answer leaves out is **never taken as `distinct`** (2026-10-05):
+an answer that omits, repeats or invents ids, or has a merge group with no
+duplicates, gets one correction naming the problems (the agent's
+`correction` slot), then raises. All of a cluster's merges commit in **one
+transaction**; any failure, including a merge winner that no longer
+exists, rolls the whole cluster back and leaves its findings pending. Only
+after that commit are the findings closed (`executed` for pairs that
+collapsed, `dismissed` + recorded `distinct` verdicts for the rest). The
+first failing cluster stops the drain (ledger kind `kg_duplicate_cluster`,
+keyed by the sha1 of the cluster's node-id set, so a cluster that gains or
+loses a node is a new item); set-aside clusters are skipped.
 
 ### Manager surfaces
 
@@ -375,12 +501,16 @@ Each run, against `entity_card_v2`:
   accumulate, one rebuild fires when the cooldown expires) and a per-night
   cap (default 10, highest node `importance` first).
 - **Build new cards** for newly card-worthy entities (cap default 5). Each
-  freshly rendered card is judged by `entity_cards::card_critic`
+  is built **inactive** and judged by `entity_cards::card_critic`
   (`gpt-5-mini`, mini tier; `app/assistant/agents/entity_cards/card_critic/`)
-  — a 3-verdict L0 quality judge whose **veto** drops noise cards before
-  they go live.
+  — a 3-verdict L0 quality judge: `pass` / `rewrite` activate the card, a
+  **veto** leaves it inactive so noise cards never go live. A failed critic
+  call deletes the unjudged card, so the next run rebuilds and judges it.
 - **Deactivate orphans** — cards whose entity node no longer exists (merge
   losers) are flipped `is_active=0`.
+
+The first failed build or critic call stops the run (ledger kind
+`entity_card`; set-aside entities are skipped). See `12_ENTITY_CARDS.md`.
 
 There is no investigator+executor loop and no card-findings table on the
 card side — staleness is stateless (the `updated_at` comparison), and the

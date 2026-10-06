@@ -53,7 +53,13 @@ steps; the pure-DB derivations take none. Steps, in order:
    which now sees real importance values for its source-entity gate.
 
 The order is load-bearing: step 3 reads the Entity importances written
-by step 2; step 4 reads both. The deferred-dependency chain is
+by step 2; step 4 reads both. **A failed step stops the routine**
+(owner, 2026-10-05): every step's exception escapes, so the routine
+records a failure and the later steps wait for the next run (until then
+a failed tagging step was logged and returned as `{"error": "exception"}`).
+The two derivations write in one transaction each; a failed node write
+raises and nothing of that pass is committed (it used to be skipped per
+node). The deferred-dependency chain is
 `promote (NULL importance) → rate edges → derive nodes → tag → card/wiki dirty-sweep`.
 
 Per-run caps (`max_edges`, `max_tags`) pair with `only_unrated` /
@@ -108,8 +114,21 @@ routine/task/device/list/document targets → 1–3 ("using a thing is not a
 relationship"); family relationship types keep high scores even with an
 empty target description (the type itself is the signal).
 
-When the LLM omits an edge from its output, `scoring.DEFAULT_EDGE_SCORE = 5.0`
-fills it — mid-scale, neither "important" nor "trivia."
+An edge is never given a default score (`DEFAULT_EDGE_SCORE = 5.0` was
+removed 2026-10-05). A rating is well-formed when its id is in the batch
+and its score is a finite number; a score of 0 is written as 0 (it used
+to become 5.0). When the answer leaves edges unrated or gives a
+non-numeric score, **one correction call** goes to the rater with
+exactly those edge ids (the agent's `correction_ids` prompt slot, sent
+empty on a first call so an earlier list is never inherited); if any is
+still unrated the batch raises with nothing written. A missing agent, a
+failed call or a failed write raises at once (the rater used to run on
+until five failed batches). Later batches stay unrated for the next run.
+Each failure is counted in the KG failure ledger
+(`app/assistant/kg/failure_ledger.py`, kind `edge_importance`, one item
+per edge): the whole batch for a failed call or write, the unrated edges
+for an incomplete answer. An edge failing in three runs is set aside, the
+selector skips it, and an escalated `processing_failure` finding names it.
 
 Failure modes (documented in `regenerate_edge_importance`):
 - **Source-perspective undervaluation** of contact-info edges ("a friend's

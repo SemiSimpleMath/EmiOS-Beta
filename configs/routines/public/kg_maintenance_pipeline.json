@@ -17,5 +17,5 @@
     "day_of_week": "Monday",
     "time_local": "02:00"
   },
-  "notes": "Re-enabled 2026-05-12 after KG pipeline rebuild + Tier 4 anchor-propagation duplicate scan + nano-triage. Weekly KG maintenance scan: orphan nodes, missing descriptions, suspect nodes (LLM), duplicate pairs (Tier 4 + LLM random sampling). All findings are written to kg_maintenance_finding table for review at /kg-maintenance."
+  "notes": "Re-enabled 2026-05-12 after KG pipeline rebuild + Tier 4 anchor-propagation duplicate scan + nano-triage. Weekly KG maintenance scan: lifecycle GC, orphan nodes, context embeddings, duplicate pairs, pagerank, missing dates, edge canon, arrangement and role succession, date lint, disambiguation, then investigation of the run's findings. The first failed step stops the run (2026-10-05). All findings are written to kg_maintenance_finding table for review at /kg-maintenance."
 }

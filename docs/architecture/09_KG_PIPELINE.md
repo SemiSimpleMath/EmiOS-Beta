@@ -40,6 +40,12 @@ def commit(output_row):
 
 The runner spawns one daemon thread per stage and they advance independently.
 
+### A failed call stops the run (2026-10-05)
+
+Owner, 2026-10-05: "If any call fails in KG, we should treat that as a stop processing." Every stage raises on a failed LLM, embedding, Chroma or DB call, and on an answer it cannot use; nothing is defaulted, skipped or written as a degraded result. The item stays in its input bucket (no output row), and the runner (`runner.py`) **halts the whole pipeline** on any exception other than a SQLite lock error, recording `halt_reason` / `halt_step` and returning status `halted`. Only `database is locked` / `database table is locked` is retried after a backoff (until 2026-10-05 every `sqlite3.OperationalError` was treated as a lock and retried forever, so a missing table looped instead of halting). A failed `pending_count` raises too.
+
+Windows (Block 3), extractions (Block 4) and enrichments (Block 5) also count each failure in the KG failure ledger (`app/assistant/kg/failure_ledger.py`; kinds `kg_window`, `kg_extraction`, `kg_enrichment`). After `SET_ASIDE_AFTER = 3` failed runs an item is **set aside**: its stage's claim query and `pending_count` skip it, and a `processing_failure` finding, born `escalated`, puts it in front of the owner. A set-aside item is never dropped; `failure_ledger.release(kind, id)` returns it to its queue, and a success clears its count. Blocks 1 and 2 halt the run but do not use the ledger.
+
 ---
 
 ## Big picture flow
@@ -86,6 +92,8 @@ kg_node_metadata + kg_edge_metadata  ← live KG (+ Chroma embed-at-write)
 
 3. **Per-day chronological batching.** Each batch is up to 10 unresolved messages plus up to 10 already-resolved messages from the same day for context.
 
+4. **No answer, no row.** A resolver call that returns no answer, or leaves any message of the batch without resolved text, raises; the batch is one transaction, so nothing is written and the messages stay unresolved (until 2026-10-05 the raw text was stored as the resolved text).
+
 **Input → Output.** `unified_log_2026` (filtered) → `kg_resolved_message` (keyed by `unified_log_id`).
 
 **Code.**
@@ -109,6 +117,7 @@ kg_node_metadata + kg_edge_metadata  ← live KG (+ Chroma embed-at-write)
 3. Agent emits windows — each one spanning N consecutive messages — with a summary and a reason for each boundary.
 4. **Gating rule** prevents fragmenting live conversations: a day's tail won't be segmented until either (a) at least 6 contiguous resolved-but-unsegmented messages have accumulated, OR (b) the resolver has caught up to the most recent eligible message for the day.
 5. **Cross-window links.** When a new window continues a topic from an older window (the A-B-A pattern), the agent emits `related_previous_window_ids` so downstream consumers can rejoin them on demand. The worker never modifies older windows.
+6. **Incomplete answers are refused.** A failed segmenter call, or no answer, raises and the runner halts (until 2026-10-05 it logged and returned 0, so the same paid call repeated every poll). An answer that leaves any message out of every window also raises; nothing is written.
 
 **Input → Output.** `kg_resolved_message` → `kg_window` + `kg_window_message` (join table).
 
@@ -131,9 +140,11 @@ kg_node_metadata + kg_edge_metadata  ← live KG (+ Chroma embed-at-write)
 3. Otherwise → `fact_extractor` (powerful tier) runs over the SAME window, but `user_text` is narrowed to only the kept lines. The `full_conversation` (all messages including assistant) stays visible for anaphora / discourse coherence. Output: structured nodes + edges with original_sentence + temporal context.
 4. Write `kg_window_extraction` row with `verdict='extracted'` + nodes/edges JSON.
 
+**Failures write no row.** A missing critic agent, a failed critic call, no answer, or an `extractable_lines` entry that names no valid user line raises; the critic no longer accepts every line on a failure (until 2026-10-05 an outage extracted and promoted whole windows the critic never judged). A failed `fact_extractor` call raises too, instead of writing a permanent `verdict='error'` row that was never retried. The window stays pending, the failure is counted under ledger kind `kg_window`, and the run stops (see "A failed call stops the run").
+
 The critic is calibrated by a single resource file (`resources/user/resource_kg_interests.json`) — the description + categories there are the one knob that decides what counts as "claim-bearing." See `feedback_no_truncated_tool_results.md` etc. for why we keep all critic data flowing into the extractor without slicing.
 
-**Input → Output.** `kg_window` → `kg_window_extraction` (one row per window; `verdict` ∈ {extracted, rejected, skipped, error}).
+**Input → Output.** `kg_window` → `kg_window_extraction` (one row per window; `verdict` ∈ {extracted, rejected, skipped}; `error` is no longer written, though rows from before 2026-10-05 may carry it).
 
 **Flushing.** Need to re-extract everything with a tuned critic / extractor? `TRUNCATE kg_window_extraction` and the next worker run reprocesses all windows.
 
@@ -153,7 +164,9 @@ The critic is calibrated by a single resource file (`resources/user/resource_kg_
 
 1. Split the extraction's nodes/edges into **connected components** (deterministic — disjoint subgraphs become separate proposals).
 2. For each component, call `meta_data_add` (gpt-5.6-luna) to fill in: aliases, hash_tags, `start_date` / `end_date` (ISO + confidence + prose anchor), `valid_during`, `category`, `semantic_label`, `goal_status`, `confidence`, `importance`.
-3. Write one `kg_window_enrichment` row per component, carrying the enriched nodes + edges.
+3. Write one `kg_window_enrichment` row per component, carrying the enriched nodes + edges. Every component is enriched before any row is written, and all of an extraction's rows are written in **one transaction**, so a failure leaves the extraction pending whole (until 2026-10-05 rows were written per component, and a later failure left it half enriched and no longer pending).
+
+**Failures.** A missing agent, a failed call or no answer raises. A State/Event the enricher leaves out of its answer gets **one targeted correction**: the agent is asked again for exactly the nodes it omitted; if any is still missing the step raises. An extraction whose row or window is missing raises. Failures are counted under ledger kind `kg_extraction` and the run stops.
 
 After this block, each enrichment row maps **1:1 to a future claim_proposal**.
 
@@ -178,6 +191,8 @@ After this block, each enrichment row maps **1:1 to a future claim_proposal**.
 3. Insert one `claim_proposal_edge` per edge.
 4. Insert one `claim_proposal_evidence` row pointing back to the enrichment + the source window (`window_id`, `enrichment_id`, `unified_log_id`, raw text).
 
+A failed write, or an enrichment whose extraction or window is missing, raises: the enrichment stays pending, the failure is counted under ledger kind `kg_enrichment`, and the run stops (until 2026-10-05 it was logged and the step moved on).
+
 **Input → Output.** `kg_window_enrichment` → `claim_proposal` + `claim_proposal_node` + `claim_proposal_edge` + `claim_proposal_evidence`.
 
 **Code.** Step: `app/assistant/pipelines/kg_pipeline/steps/write_proposals.py` (`WriteProposalsStep`).
@@ -200,7 +215,7 @@ This is the structural fix for the 2026-05-02 "database is locked" cascade. Each
 2. **LLM** (no session) — run `state_ttl_estimator`, `fact_canonicalizer`, and `node_merger` (only when there are candidates). Results land in a `_PromoterPlan` keyed by proposal-node id.
 3. **APPLY** (`db_manager.transaction`, ≈ sub-millisecond) — `_evaluate_and_apply` makes **zero** LLM calls; every match/create decision is read from the plan. The writer slot is held only for deterministic SQL.
 
-**A failed call is never a decision.** In the LLM phase, a missing agent, a failed call, a malformed answer (a merge into a non-candidate, no TTL class, no canonical sentence) or an unavailable Chroma raises; `run_promoter` logs it as an error and the proposal stays `pending` for the next run. Only the merger's actual decline means "create". Until 2026-10-05 each of these returned None and the proposal was promoted degraded: on 2026-06-27 three failed `node_merger` calls during a network outage minted a second owner Entity, and `_mint_disambiguation_on_label_collision` then parked every later mention of the owner on a Disambiguation marker (381 edges by 2026-10-05; bug list, 2026-10-05). A Property label collision never mints a marker (Properties are subject-scoped).
+**A failed call is never a decision.** In the LLM phase, a missing agent, a failed call, a malformed answer (a merge into a non-candidate, no TTL class, no canonical sentence) or an unavailable Chroma raises, and the proposal stays `pending` for the next run. **The first failed proposal stops the run**: `run_promoter` counts it in the KG failure ledger (kind `kg_proposal`; after three failed runs the proposal is set aside, skipped by the pending query, and raised to the owner as an escalated `processing_failure` finding) and re-raises so the routine records the failure; proposals already applied keep their own transactions (until 2026-10-05 it logged the failure and moved to the next proposal). The same holds outside the LLM phase: the label-or-similarity filter no longer degrades to label-only when the embedder or Chroma fails (a different-label candidate with no stored context vector is embedded from its own sentence and compared, not dropped), and the context vector at mint, the mention-map mint, the post-commit follow-up finding writes and the window/timestamp reads all raise. Only the merger's actual decline means "create". Until 2026-10-05 each of these returned None and the proposal was promoted degraded: on 2026-06-27 three failed `node_merger` calls during a network outage minted a second owner Entity, and `_mint_disambiguation_on_label_collision` then parked every later mention of the owner on a Disambiguation marker (381 edges by 2026-10-05; bug list, 2026-10-05). A Property label collision never mints a marker (Properties are subject-scoped).
 
 ### Node resolution tiers (READ + LLM phases)
 
@@ -223,7 +238,7 @@ State/Event nodes resolve by **participant fingerprint**: candidates are scored 
 `_evaluate_and_apply` writes nodes (entity-like first, then relationship-like), then edges:
 
 - **Node match** → `matched_existing`: `_refresh_on_reobservation` bumps observation columns (monotonic `last_observed`, `observation_count`, gentle confidence, Goal `last_pursued_at`/revive) **without bumping `updated_at`** for pure bookkeeping (an explicit self-ref UPDATE avoids cascading wiki/card refreshes); writes a `kg_node_evidence` row (`merge_action="confirmed"`). Confirmed binds from a merger call mint a mention-map entry.
-- **Node create** → `created_new`: a **mint/match race guard** re-checks `_resolve_entity_like` inside the write txn (a concurrent run may have minted it); on hit it converts to match. Otherwise `_create_kg_node_from_proposal` mints the row, promotes first-class columns out of `attributes_json` (`semantic_label`, `confidence`, `valid_during`, `goal_status`, observation fields), embeds the node into Chroma **at write** (`_embed_and_store_node` — context vector; the label/identity vectors are owned by the ORM sync chokepoint), then `_mint_disambiguation_on_label_collision` mints a Disambiguation marker if the new label now collides with a same-type node.
+- **Node create** → `created_new`: a **mint/match race guard** re-checks `_resolve_entity_like` inside the write txn (a concurrent run may have minted it); on hit it converts to match. Otherwise `_create_kg_node_from_proposal` mints the row, promotes first-class columns out of `attributes_json` (`semantic_label`, `confidence`, `valid_during`, `goal_status`, observation fields), embeds the node into Chroma **at write** (`_embed_and_store_node` — context vector, a failure raises and rolls the apply back; the label/identity vectors are owned by the ORM sync chokepoint `kg/chroma/embedding_sync.py`, whose post-commit embed raises on a failure so the caller stops, with the hourly diff sync healing the vectors), then `_mint_disambiguation_on_label_collision` mints a Disambiguation marker if the new label now collides with a same-type node.
 - **Edge** → match an existing edge via `_existing_kg_edge` (predicate *spelling class* + symmetric/`bidirectional` reverse-triple dedup) and append evidence, or create a fresh `Edge`. **Pod-URI endpoints** (`datapod:<kind>:<id>`) bypass node resolution and are gated by `is_kg_admissible` (`pod_kind_registry`) — there is **no `kg_node` mirror** for pods; the FK was dropped, this admission check is the replacement.
 
 `_NodeOutcome.action` vocabulary: **`matched_existing` | `created_new` | `skipped_locked` | `skipped_conflict`** (there is no `held_needs_existing`).
@@ -253,7 +268,7 @@ The promoter writes only `promoted` and `contradicted`, and otherwise leaves the
 
 ### Section tagging is no longer here
 
-The promoter does **not** tag nodes. Per the deferred-dependency chain `promote (NULL importance) → rate → tag → card/wiki dirty-sweep`, section tagging moved into the importance-rater routine: `_lazy_kg_importance_rater` (`app/assistant/routine_manager/routine_functions.py`, registered as `kg_importance_rater`) calls `section_tagging.backfill_untagged_nodes` **after** rating, so the tagger sees real importance values. `kg_node_section_tagger` (gpt-5.6-luna) classifies each untagged State/Event/Goal/Property into the `card` and `wiki` namespaces in one call; tags persist in `kg_node_section_tag` and the projection builders read them rather than re-tagging. Section vocabularies live in `app/assistant/kg/section_tagging.py` (`CARD_SECTION_VOCAB`, `WIKI_SECTION_VOCAB`).
+The promoter does **not** tag nodes. Per the deferred-dependency chain `promote (NULL importance) → rate → tag → card/wiki dirty-sweep`, section tagging moved into the importance-rater routine: `_lazy_kg_importance_rater` (`app/assistant/routine_manager/routine_functions.py`, registered as `kg_importance_rater`) calls `section_tagging.backfill_untagged_nodes` **after** rating, so the tagger sees real importance values. `kg_node_section_tagger` (gpt-5.6-luna) classifies each untagged State/Event/Goal/Property into the `card` and `wiki` namespaces in one call; tags persist in `kg_node_section_tag` and the projection builders read them rather than re-tagging. Tagging is not best-effort: a failed rating stops the routine before tagging, and a failed tagger call or write, or a node the tagger leaves out after one correction, raises and stops the run (ledger kind `section_tag`; see `23_NODE_IMPORTANCE.md` and `11_WIKI_GENERATOR.md`). Section vocabularies live in `app/assistant/kg/section_tagging.py` (`CARD_SECTION_VOCAB`, `WIKI_SECTION_VOCAB`).
 
 **Code.**
 - Promoter: `app/assistant/kg/proposal_promoter.py` (`run_promoter`, `_prepare_proposal_plan`, `_evaluate_and_apply`, `_classify_durable_conflict`)

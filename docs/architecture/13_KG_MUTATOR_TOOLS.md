@@ -59,6 +59,7 @@ user revokes it — see `_refuse_if_locked` and its absence from
 - `dry_run: true` returns the diff that would be applied without touching the KG — content is `"DRY RUN: would …"`, data carries `before` + `after` previews.
 - Optional `finding_id` ties the revision back to its source finding; copied into both `args_json` and the dedicated `finding_id` column on `kg_revision_log`.
 - Errors are surfaced as `ToolResult(data={"ok": False, ...})` rather than raised — the calling agent inspects and decides (typically: escalate the finding rather than retry).
+- **Exception: Chroma cleanup after a committed merge or delete raises.** `kg_merge_nodes` and `kg_delete_node` remove the folded/deleted node's label, context and identity vectors (`node_merge.delete_node_chroma_vectors`) **after** the SQLite commit, since Chroma is not transactional with the DB. A failure there raises a `RuntimeError` naming the committed op and its `revision_log_id` (e.g. `merge_nodes (revision_log_id=…) was committed, but removing node …'s Chroma vectors failed`), so the caller stops; the hourly diff sync later removes the ghost vectors. Until 2026-10-05 the failure was reported as `Chroma embeddings CLEANUP FAILED` inside a success result with `chroma_cleaned: false`; that data key is gone. (Inside `merge_nodes_in_session`, which other merge paths use, the same failure rolls the merge back, since `delete_node_chroma_vectors` now raises instead of returning `False`.)
 
 ## `kg_revision_log` table
 

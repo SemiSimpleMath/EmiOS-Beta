@@ -39,7 +39,7 @@ The pipeline registry (`pipelines/pipeline_registry.py`) lazily registers exactl
 | `weekly_insights` | `weekly_insights.pipeline.WeeklyInsightsPipeline` | Cross-day pattern + belief-candidate synthesis |
 | `belief_engine` | `belief_engine.pipeline.routine_adapter.BeliefEngineAdapter` | **One** pipeline that loops every domain marked enabled in `configs/belief_domains.yaml`, then exports beliefs inline |
 | `belief_engine_export` | `belief_engine.pipeline.routine_adapter.BeliefEngineExportAdapter` | Manual re-export only (belief_engine exports inline at end of its run) |
-| `kg_maintenance_pipeline` | `kg_maintenance_pipeline.pipeline.KGMaintenancePipeline` | Orphan nodes, missing descriptions, suspect nodes, duplicate pairs |
+| `kg_maintenance_pipeline` | `kg_maintenance_pipeline.pipeline.KGMaintenancePipeline` | Weekly KG audit: lifecycle GC, orphans, embedding backfill, duplicate pairs, PageRank, missing dates, predicate canon, arrangement supersession, role succession, date lint, disambiguation drain, then investigation of the run's findings (step order in `22_KG_HEALTH_COMPONENTS.md`). The first failed step raises and stops the run |
 
 There is **no** `entity_cards` pipeline and **no** `entity_card_maintenance_pipeline`. Entity card upkeep runs as the `entity_card_refresh` **function** routine (`pipelines/entity_cards_v2/refresh_subscriber.run_card_refresh`). `belief_engine` is a single domain-looping pipeline — not six per-domain registrations.
 

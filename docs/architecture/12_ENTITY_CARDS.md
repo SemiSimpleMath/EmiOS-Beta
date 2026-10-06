@@ -49,8 +49,9 @@ order):
 - **Property**: always admit (timeless attribute).
 - **Entity / Concept / Pod**: reject — they're link targets, not bullets.
 
-The filter is applied to the *other* side of each edge during fact collection
-and re-applied on incremental refresh (a state that just closed drops its bullets).
+The filter is applied to the *other* side of each edge during fact collection,
+so a state that closed drops its bullets at the card's next rebuild (there is no
+per-bullet incremental refresh; it was removed 2026-10-05).
 
 ## Storage schema
 
@@ -87,7 +88,8 @@ source tier: `axiom > confirmed > provisional > inferred`).
 **`entity_card_bullet_source_node`** (`EntityCardBulletSourceNode`): denormalized
 `(bullet_id, node_id)` PK with an index on `node_id`, so "which bullets reference
 this changed node" is an O(log n) join instead of a JSON scan of every bullet.
-This is the spine of incremental refresh.
+Every build writes it; since the incremental refresh that read it was removed
+(2026-10-05), no code reads it (nor writes `last_incremental_at`).
 
 ### Section templates + bullet caps
 
@@ -125,8 +127,10 @@ summarizer — a 5-agent pipeline plus structural walks:
    names Bonnie + Clyde without reading the wiki-derived `Node.description` (which
    would collapse the card↔wiki cross-check). For hub entities whose pool exceeds
    `_CARD_PREFILTER_THRESHOLD = 60`, a **nano `kg_maintenance::edge_filter`
-   prefilter** (batches of 200, fail-open) trims to the informative subset — same
-   agent and thresholds as the wiki's `description_creator`. Survivors are sorted
+   prefilter** (batches of 200) trims to the informative subset. A missing agent or
+   a failed batch call stops the build (until 2026-10-05 it failed open and kept
+   every fact); a batch answer with empty or out-of-range `keep_indices` gets one
+   correction, then raises. Survivors are sorted
    by importance, then cut by the selection policy: keep iff importance ≥
    `CARD_FACT_FLOOR` OR contact-tagged, topped up to `CARD_FACT_MIN_KEEP` for
    sparse entities.
@@ -151,19 +155,39 @@ summarizer — a 5-agent pipeline plus structural walks:
    Chunked `entity_cards::bullet_renderer` fuses
    near-duplicate facts and returns each bullet's `source_fact_ids`. When a
    section exceeds its cap, `entity_cards::section_distiller` does the final
-   salience cut (pick/fuse to ≤ cap). `_mark_section_drops` records facts the
+   salience cut (pick/fuse to ≤ cap). A failed distiller call aborts the build
+   (until 2026-10-05 the uncapped renderer output was kept); a distiller answer
+   with no bullets, more bullets than the cap, or a bullet citing no input id gets
+   one correction, then raises. `_mark_section_drops` records facts the
    renderer/distiller rejected (see drop-tracking) so the next build doesn't re-pay
    to rediscover them.
 6. **Deterministic + summary sections:** `_build_alias_section` (from
    `Node.aliases`), then `entity_cards::summary_writer` over the rendered bullets
-   (no contact), then `_build_level_0` (first sentence of the summary).
+   (no contact), then `_build_level_0`: only the first sentence of the summary.
+   A card with no summary is a failed build: nothing to summarize, a missing
+   agent or a failed call raises, and an empty summary gets one correction, then
+   raises (until 2026-10-05 a summary-less card was persisted with `level_0` cut
+   from the wiki-derived `Node.description`).
 7. **Persist** (`_persist_card`) atomically: rewrite `card_title`/`card_aliases`
    from the node, write sections in template order, write bullets + one
    `entity_card_bullet_source_node` row per source node, stamp `last_built_at` /
-   `last_full_rebuild_at`.
+   `last_full_rebuild_at`. `build_card(entity_node_id, *, activate_new=True)`:
+   a card that does not exist yet is created active only when `activate_new`;
+   the nightly refresh passes `False` so a new card stays inactive until the
+   critic judges it.
 
-`rebuild_all_group_a()` iterates PageRank-thresholded Group A entities and calls
-`build_card` per entity (per-entity errors don't abort).
+**A failed call stops the build** (owner, 2026-10-05: any failed call in the KG
+stops processing). Every LLM and DB call runs before the persist phase, so a
+failure raises out of `build_card` with nothing written, and an existing card
+stays as it was (stale, for the next run). A well-formed but incomplete answer
+gets **one targeted correction**: the agents `edge_filter`, `section_tagger`,
+`bullet_renderer`, `section_distiller` and `summary_writer` each gained a
+`correction` prompt slot, and `_ask_with_one_correction` re-asks once with the
+problems listed there (no or out-of-range `keep_indices`, a fact with no
+`tagged_facts` entry, a bullet with no text or citing no input id, a distiller
+answer empty or over the cap, an empty summary). Still incomplete, it raises.
+`correction` is always passed (empty on a first call) so a reused agent never
+inherits the previous call's list.
 
 ### Generator agents
 
@@ -205,14 +229,6 @@ builder and the wiki page builder — neither re-tags at projection time.
   otherwise the build skips it. This is why the builder prefers persisted tags:
   the drop ledger lives on the tag row.
 
-## Incremental refresh — `refresh_card_for_changed_node(changed_node_id)`
-
-The per-bullet cheap path. Joins `entity_card_bullet_source_node` on the changed
-node to find affected bullets, then for each: if the source no longer
-`is_now_admissible` (state closed) → delete the bullet; else re-run
-`bullet_renderer` on the current source and update `bullet_text` + `source_hash`
-if it changed. No section/summary regen — surgical bullet updates only.
-
 ## Nightly routine — `entity_card_refresh`
 
 The **only** card routine (there is no `entity_cards_pipeline` and no
@@ -231,10 +247,24 @@ drains), `runner: function`, `function_name: entity_card_refresh`. Dispatches vi
   **7-day cooldown** (`cooldown_days`) damps churn: changes accumulate and trigger
   one rebuild when the cooldown expires.
 - **New cards** (cap `max_new = 5`): the most-important Entities with no card,
-  filtered by `is_card_worthy`. After each new build, `_critic_veto_if_noise` runs
-  `card_critic` on the rendered L0 and **deactivates** the card on a `veto` verdict.
+  filtered by `is_card_worthy`. Each is built **inactive**
+  (`build_card(..., activate_new=False)`), then `_judge_new_card` runs
+  `card_critic` on the rendered card: `pass` or `rewrite` **activates** it; `veto`
+  leaves it inactive (its row keeps the entity out of the new-card queue). A
+  missing critic, a failed critic call or an answer with no verdict deletes the
+  unjudged card (`_discard_unjudged_card`) and raises, so the entity is a new-card
+  candidate again and the next run rebuilds and judges it.
 - **Orphan deactivation** (`_ORPHAN_SQL`): active cards whose `entity_node_id` no
   longer resolves (merge losers) get `is_active = 0`.
+
+**The first failed build or critic call stops the run** (2026-10-05): the
+exception escapes to the routine runner and the remaining stale and new cards
+wait for the next run. Each failure is counted in the KG failure ledger
+(`app/assistant/kg/failure_ledger.py`, kind `entity_card`, one item per entity
+node); after three failed runs the entity is set aside, both the stale and the
+new-card selections skip it, and an escalated `processing_failure` finding puts it
+in front of the owner until `failure_ledger.release` returns it. The summary dict
+carries `rebuilt`, `built_new`, `vetoed_new`, `skipped` and `set_aside`.
 
 **User-self double-gating** (commit 4bbe5b0e): `build_card` skips the user's own
 entity via `_is_user_self_entity`, which matches the label against the canonical
@@ -350,8 +380,8 @@ all sections. `min_authority`/`approval_min_authority` 95, `risk_level` low,
 | Form | section/bullet DB rows | Markdown file (frontmatter + prose) |
 | Target consumer | agent prompts (lexical-match injection) | human reader + agents hydrating full neighborhoods |
 | Storage | `entity_card_v2` + section/bullet tables | files in the `EmiWiki` vault |
-| Refresh | nightly `entity_card_refresh` + incremental | nightly section refresh |
-| Shared upstream | promotion-time `kg_node_section_tag` (`namespace='card'`), nano `edge_filter` prefilter | same tagger (`namespace='wiki'`), same prefilter |
+| Refresh | nightly `entity_card_refresh` (whole-card rebuilds) | nightly section refresh |
+| Shared upstream | promotion-time `kg_node_section_tag` (`namespace='card'`) | same tagger (`namespace='wiki'`) |
 
 The card builder must **not** read `Node.description` (it's wiki-derived); it walks
 KG structure (the 2-hop bridge walk) instead, keeping the card and wiki as
@@ -363,8 +393,8 @@ independent cross-checkable projections.
 |---|---|
 | `app/assistant/entity_management/entity_card_v2.py` | ORM (4 tables), templates, caps, NOW filter, prompt-injection renderer |
 | `app/assistant/entity_management/entity_cards.py` | v1 bridge shim (renderer wrapper + no-op usage) |
-| `app/assistant/pipelines/entity_cards_v2/builder.py` | `build_card`, `refresh_card_for_changed_node`, `rebuild_all_group_a`, fact collection + bridge walk + prefilter |
-| `app/assistant/pipelines/entity_cards_v2/refresh_subscriber.py` | nightly `run_card_refresh` (stale / new / orphan, critic veto, user-self filter) |
+| `app/assistant/pipelines/entity_cards_v2/builder.py` | `build_card`, fact collection + bridge walk + prefilter, one-correction helper |
+| `app/assistant/pipelines/entity_cards_v2/refresh_subscriber.py` | nightly `run_card_refresh` (stale / new / orphan, new cards built inactive and judged by the critic, user-self filter, failure ledger) |
 | `app/assistant/kg/section_tagging.py` | shared promotion-time tagging + drop-tracking |
 | `app/assistant/kg/db/knowledge_graph_db_sqlite.py` | `NodeSectionTag` model |
 | `app/assistant/importance/consumers.py` | `is_card_worthy` + card thresholds |

@@ -2,6 +2,8 @@
 
 What every tracked routine in `configs/routines/public/` actually does. Assembled from the `notes` field of each routine file — the canonical description lives in the JSON, this doc is just the categorized view. Trigger types, policies, active windows, and on_error backoff are documented in `skills/extending-emi-routines/SKILL.md`; the manager mechanics live in `docs/architecture/06_PIPELINES_AND_ROUTINES.md`.
 
+**KG routines stop at their first failed call** (owner, 2026-10-05): a failed LLM, embedding, Chroma or DB call raises out of the routine, so `on_error` backoff applies, and the remaining work stays pending for the next run. An item that fails in three runs is set aside by the KG failure ledger and surfaces as an escalated `processing_failure` finding. Result dicts carry no `errors` / `failed` counts. See `22_KG_HEALTH_COMPONENTS.md` ("A failed call stops processing"). Some routine `notes` below predate this.
+
 **Total: 56 public routines** — 51 enabled, 5 disabled (`belief_engine_export`, `example_camera_motion_poll`, `morning_briefing`, `sample_morning_routine`, `timesheet_routine`). The v2-store `belief_tag_new` was deleted 2026-07-07. The `morning_briefing.compiled.json` sibling is the compiled work object the task runner executes, not a routine.
 
 Personal routines live in `configs/routines/private/` (gitignored) and override matching public ids on collision — see `skills/extending-emi-routines/SKILL.md` for the layout.
@@ -20,7 +22,7 @@ Ingests chat messages into the knowledge graph (2026-04-25 refactor — bucket-p
 
 **Cadence:** daily 02:30 (function)
 
-Nightly sweep over pending claim_proposals. Auto-promotes anything resolvable + conflict-free. Held proposals (conflicts, lock violations, placeholders) stay in the review queue. Manual trigger: POST /kg-proposals/run-promoter (dry-run) or ?commit=1.
+Nightly sweep over pending claim_proposals. Auto-promotes anything resolvable + conflict-free. Held proposals (conflicts, lock violations, placeholders) stay in the review queue. The first failed proposal stops the run and stays pending. Manual trigger: POST /kg-proposals/run-promoter (dry-run) or ?commit=1.
 
 ### `chat_memory_index`
 
@@ -42,7 +44,7 @@ Keeps the graph healthy: detects issues (duplicates, missing dates, stale states
 
 **Cadence:** weekly Monday 02:00 (pipeline)
 
-Weekly KG maintenance scan: orphan nodes, missing descriptions, suspect nodes (LLM), duplicate pairs (Tier 4 anchor-propagation + LLM random sampling). All findings written to kg_maintenance_finding for review at /kg-maintenance.
+Weekly KG maintenance scan: lifecycle GC, orphan nodes, context/label embedding backfill, duplicate pairs (candidate tiers + nano triage + LLM detector), PageRank, missing dates, predicate canon curation, arrangement supersession, role succession, date lint, disambiguation drain, then investigation of the run's own findings (step order in `22_KG_HEALTH_COMPONENTS.md`). Findings are written to kg_maintenance_finding for review at /kg-maintenance. The first failed step raises and stops the run. (The routine's JSON `notes` still name the retired missing-description and suspect-node scans.)
 
 ### `kg_finding_backlog_drain`
 
@@ -66,7 +68,7 @@ Reads pending findings, groups by primary_node_id, calls kg_finding_cluster_reso
 
 **Cadence:** daily 03:15
 
-The canonical duplicate_node resolver. Union-finds pending duplicate_node findings into connected components and adjudicates each in ONE kg_maintenance::duplicate_cluster_resolver (gpt-5.4) call: merge true label/coreference variants, keep recurring-event occurrences DISTINCT. Distinct verdicts go to the durable verdict store (scanner short-circuit); true dups merge via the revertible node_merge path (kg_merge_log). limit=50 clusters/run; dry_run:true + run-now writes scratch/dup_cluster_report.json without mutating.
+The canonical duplicate_node resolver. Union-finds pending duplicate_node findings into connected components and adjudicates each in ONE kg_maintenance::duplicate_cluster_resolver (gpt-5.4) call: merge true label/coreference variants, keep recurring-event occurrences DISTINCT. Distinct verdicts go to the durable verdict store (scanner short-circuit); true dups merge via the revertible node_merge path (kg_merge_log). A node the resolver leaves out is never taken as distinct: an incomplete answer gets one correction, then raises; a cluster's merges commit in one transaction; the first failing cluster stops the drain. limit=50 clusters/run; dry_run:true + run-now writes scratch/dup_cluster_report.json without mutating.
 
 ### `kg_state_date_drain`
 
@@ -108,13 +110,13 @@ Flips long-silent Goal nodes from active -> dormant. Reversible — any re-obser
 
 **Cadence:** daily 03:45
 
-(Re)generates identity sentences — graph-derived definite descriptions that uniquely identify each node's referent. NULL-sentence backfill first by pagerank, then hash-stale nodes (label/era/anchor-edge drift). Embeds into node_identity_embeddings; resolution + merge judges read them. Runs after the KG drains, before card refresh (04:30). max_per_run 1500 (free local models; server is the only chroma writer).
+(Re)generates identity sentences — graph-derived definite descriptions that uniquely identify each node's referent. NULL-sentence backfill first by pagerank, then hash-stale nodes (label/era/anchor-edge drift). Embeds into node_identity_embeddings; resolution + merge judges read them. Runs after the KG drains, before card refresh (04:30). max_per_run 1500 (free local models; server is the only chroma writer). The first failed writer call, source-window read or embed raises and stops the run (a "definable" answer with no sentence gets one correction first); the result has no `failed` count.
 
 ### `kg_evidence_digestion`
 
 **Cadence:** daily 04:00
 
-Folds the oldest evidence rows of the heaviest-evidenced nodes (>=40 live rows) into ONE consolidated digest row each, keeping the newest 15 verbatim. NOTHING DELETED: originals stamped digested_at and kept for provenance. Max 80 rows/node/night, 5 nodes/night, one gpt-5.6-luna call/node. Runs after identity refresh (03:45).
+Folds the oldest evidence rows of the heaviest-evidenced nodes (>=40 live rows) into ONE consolidated digest row each, keeping the newest 15 verbatim. NOTHING DELETED: originals stamped digested_at and kept for provenance. Max 80 rows/node/night, 5 nodes/night, one gpt-5.6-luna call/node. Runs after identity refresh (03:45). The first failed digester call raises and stops the run with nothing written for that node (an empty digest gets one correction first); the result has no `failed` count.
 
 ### `kg_embedding_diff_sync`
 
@@ -132,7 +134,7 @@ Re-embeds EVERY node's label + identity + context vector regardless of apparent 
 
 **Cadence:** every 1800s (30 min)
 
-ONE LLM rater (me::edge_importance_rater on unrated edges), then all node importance is DERIVED: Entity/Concept = max(adjacent edge importance); State/Event/Goal/Property = max(src_imp × edge_imp / 10). Replaces the buggy me::importance_rater Entity-LLM path. Cheap, idempotent; also section-tags untagged nodes (max_edges_per_run 400 cap + watchdog).
+ONE LLM rater (me::edge_importance_rater on unrated edges), then all node importance is DERIVED: Entity/Concept = max(adjacent edge importance); State/Event/Goal/Property = max(src_imp × edge_imp / 10). Replaces the buggy me::importance_rater Entity-LLM path. Cheap, idempotent; also section-tags untagged nodes (max_edges_per_run 400 cap + watchdog). A failed step stops the run before the later steps; an edge or node the LLM leaves out gets one correction, then the batch raises (no default score, no processed sentinel).
 
 ## Entity cards & wiki
 
@@ -142,7 +144,7 @@ Generates and refreshes the human-readable views on top of the KG.
 
 **Cadence:** daily 04:30 (function)
 
-Nightly 04:30 (after the KG drains): rebuild up to 10 stale cards (entity or neighbor updated since last build, per-card 7-day cooldown so cards never churn), build up to 5 newly card-worthy entities (post-build critic veto kills noise L0s), deactivate orphaned cards. Wires the entity_cards_v2 refresh loop that the v2 design never connected.
+Nightly 04:30 (after the KG drains): rebuild up to 10 stale cards (entity or neighbor updated since last build, per-card 7-day cooldown so cards never churn), build up to 5 newly card-worthy entities (built inactive; the post-build critic activates them on pass/rewrite, a veto keeps noise L0s inactive), deactivate orphaned cards. The first failed build or critic call stops the run. Wires the entity_cards_v2 refresh loop that the v2 design never connected.
 
 ### `wiki_nightly_refresh`
 
