@@ -92,3 +92,22 @@ def test_stale_instruction_rolls_back_new_tasks_in_the_same_revision(graph):
         apply_architect_dag(store, wid, [{"node_id": "new", "title": "Stale plan"}],
             finalizer_instructions=[{"node_id": "existing", "verdict": "retry", "next_step": "retry", "outcome": "Old instruction"}])
     assert store.load(wid).model_dump(mode="json") == before
+
+
+def test_a_replan_restating_existing_dependencies_adds_only_the_new_ones(graph):
+    """2026-10-05, work_062b58b07e65: a re-plan restated an existing task with its existing
+    dependency; the store refused the duplicate edge and the whole re-plan was lost. The prompt
+    tells the architect to reuse existing node_ids in depends_on, so a restated edge is the graph
+    it already has, as a restated node is."""
+    store, wid = graph
+    gid = store.load(wid).goal_node_id
+    store.apply("add_node", {"work_id": wid, "id": "ask", "type": "subtask", "parent_id": gid})
+    store.apply("add_edge", {"work_id": wid, "src": "existing", "dst": "ask", "relation": "depends_on"})
+    res = apply_architect_dag(store, wid, [
+        {"node_id": "ask", "title": "Ask", "depends_on": ["existing", "existing"]},     # restated, and twice
+        {"node_id": "act", "title": "Act on the answer", "depends_on": ["ask", "existing"]},
+    ])
+    wo = store.load(wid)
+    assert res["added"] == ["act--" + wid.split("_")[-1][:6]] and res["edges"] == 2
+    assert wo.deps_of("ask") == ["existing"]
+    assert sorted(wo.deps_of(res["added"][0])) == ["ask", "existing"]

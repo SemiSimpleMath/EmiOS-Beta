@@ -195,8 +195,12 @@ def apply_architect_dag(store, work_id: str, nodes: List[Dict[str, Any]],
         existing.add(nid)
         added.append(nid)
 
-    # 2) dependency edges (both endpoints must exist now)
+    # 2) dependency edges (both endpoints must exist now). A dependency the graph already has, or one
+    #    this plan states twice, is the graph as it is — skipped, as a restated node is. The prompt has
+    #    the architect reuse existing node_ids in depends_on; on 2026-10-05 a restated edge made the
+    #    store refuse a duplicate and the whole re-plan was lost.
     edges = 0
+    have = {(e.src, e.dst) for e in wo.edges if e.relation == "depends_on"}
     for spec in specs:
         raw_nid = str(spec.get("node_id") or "").strip()
         if not raw_nid:
@@ -208,11 +212,13 @@ def apply_architect_dag(store, work_id: str, nodes: List[Dict[str, Any]],
             dep = _real(str(dep).strip()) if str(dep).strip() else ""
             if not dep or dep not in existing or dep == nid:
                 raise ValueError(f"architect: invalid dependency {dep!r} for {nid!r}")
-            if dep and dep in existing and dep != nid:
-                queue("add_edge", {
-                    "work_id": work_id, "src": dep, "dst": nid, "relation": "depends_on",
-                }, actor="architect")
-                edges += 1
+            if (dep, nid) in have:
+                continue
+            queue("add_edge", {
+                "work_id": work_id, "src": dep, "dst": nid, "relation": "depends_on",
+            }, actor="architect")
+            have.add((dep, nid))
+            edges += 1
 
     # 3) wake-gates — the architect authors two primitives, wake_at | wake_ref (+ an `ask` flag); DERIVE the
     #    substrate wake_kind here so the store / state_mover / dispatch are unchanged. wake_at -> a
