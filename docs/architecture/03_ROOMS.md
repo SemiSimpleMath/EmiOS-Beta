@@ -39,7 +39,7 @@ Three required top-level mappings — `policy`, `permissions`, `access`:
   permissions — see below.)
 - **`access`** — `allowed_global_resources`, `allowed_entity_cards`,
   `pinned_entities`, `blocked_entities`, `rag_scopes`, `shared_chat_room_ids`,
-  and (for ingesting rooms) `chat_ingestion_entitled_rooms` + `ingestion_pod_kinds`.
+  and (for ingesting rooms) `chat_ingestion_entitled_rooms`.
 
 ### ROOM.md body → blackboard keys
 
@@ -225,8 +225,6 @@ Unified-log persistence additionally respects the room's `retention.write_unifie
   builder pulls those rooms' messages into context (cross-room dedup applied).
 - `access.chat_ingestion_entitled_rooms` lists rooms whose chat a consuming room
   ingests (the dayflow orchestrator ingests `master_room` chat as context-only).
-- `access.ingestion_pod_kinds` declares pod kinds (by `kind` + `source_kind`) a
-  room ingests — e.g. dayflow ingests `image` pods from `ring_doorbell_significant`.
 - `pod_scopes` controls which rooms' pods a room may read (`[self]` default,
   `[all]` for owner surfaces).
 

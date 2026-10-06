@@ -263,6 +263,41 @@ def test_a_room_still_talking_waits_whole_and_email_goes_at_once(connect):
     assert "Car booked" in seen[1] and "tyres" in seen[1]
 
 
+def image_pod(pod_id, minutes, source_kind, text, camera="Front Door", **meta):
+    return SimpleNamespace(pod_id=pod_id, body=text, one_liner=text, metadata={
+        "source_kind": source_kind, "camera_name": camera,
+        "occurred_at_utc": (NOW - timedelta(minutes=minutes)).isoformat(), **meta})
+
+
+def test_flagged_camera_frames_reach_the_brain_and_raw_doorbell_events_stay_out(connect):
+    pods = [image_pod("datapod:image:a", 40, "ring_doorbell_significant", "Two people carry a sofa to the door.",
+                      significance_reason="A large delivery at the door."),
+            image_pod("datapod:image:b", 30, "ring_doorbell_event", "Motion on the walkway."),
+            image_pod("datapod:image:c", 20, "ring_bedroom_notable", "Awake with a screen on.", camera="Bedroom")]
+    asked = []
+    fetch = lambda since: asked.append(since) or pods
+    assert inbox.ingest_camera(now_utc=NOW, connect=connect, fetch=fetch) == 2
+    assert inbox.ingest_camera(now_utc=NOW + timedelta(minutes=5), connect=connect, fetch=fetch) == 0
+    assert asked == [NOW - timedelta(hours=72), NOW]
+    events = inbox.pending(connect)
+    assert [(e["source"], e["source_ref"], e["speaker"]) for e in events] == [
+        ("camera", "datapod:image:a", "Front Door"), ("camera", "datapod:image:c", "Bedroom")]
+    assert events[0]["text"] == "Two people carry a sofa to the door.\n(flagged because: A large delivery at the door.)"
+    assert inbox.ready(events, NOW) == events                         # a sighting goes at once
+
+
+def test_sightings_render_under_their_camera_and_cite_their_pod():
+    events = [{"source": "camera", "source_ref": f"datapod:image:{k}", "speaker": cam, "room_id": None,
+               "occurred_at": (NOW - timedelta(minutes=m)).isoformat(), "text": text, "mark": f"E{i}"}
+              for i, (k, cam, m, text) in enumerate([("a", "Front Door", 40, "A van parks."),
+                                                     ("b", "Front Door", 30, "A parcel is left.")], 1)]
+    [group] = conversations.build(events, now_utc=NOW)
+    assert group["heading"] == "Camera Front Door" and "vision model" in group["description"]
+    assert "[E2] Front Door: A parcel is left." in conversations.render([group])
+    assert len(brain_step.group_matters([{**e, "id": i} for i, e in enumerate(events)])) == 1
+    assert brain_step._evidence(events[0]) == {"kind": "pod", "ref": "datapod:image:a", "snippet": "A van parks."}
+
+
 def test_the_wake_runs_on_events_and_register_changes_but_not_on_its_own_writes(monkeypatch):
     import threading
     from app.assistant.subconscious import brain_wake

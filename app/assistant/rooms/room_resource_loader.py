@@ -106,7 +106,7 @@ def load_room_access(room_id: str) -> Dict[str, Any]:
     """Read and return the room's access block from ROOM.md frontmatter.
 
     Used by ingestion / scheduling callers that need the access
-    declarations (chat_ingestion_entitled_rooms, ingestion_pod_kinds,
+    declarations (chat_ingestion_entitled_rooms,
     rag_scopes, pinned/blocked entities) without loading the full
     prompt-context payload.
     """

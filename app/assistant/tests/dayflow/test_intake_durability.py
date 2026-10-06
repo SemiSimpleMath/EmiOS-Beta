@@ -28,7 +28,6 @@ def sources(monkeypatch):
     monkeypatch.setattr(ingestion, "load_orchestrator_status", lambda: {})
     monkeypatch.setattr(ingestion, "ingest_cross_room_chat", lambda **kwargs: ([message], now))
     monkeypatch.setattr(ingestion, "_ingest_emails", lambda *args: [])
-    monkeypatch.setattr(ingestion, "_load_dayflow_pod_kinds_filter", lambda: [])
     persisted = Mock()
     monkeypatch.setattr(ingestion, "persist_orchestrator_status", persisted)
     return now, persisted
@@ -89,16 +88,6 @@ def test_conversion_failure_prevents_skipping_chat(monkeypatch):
     monkeypatch.setattr(chat, "_row_to_dayflow_message", Mock(side_effect=ValueError("invalid source")))
     with pytest.raises(ValueError, match="invalid source"):
         chat.ingest_cross_room_chat(since_utc=now, entitled_room_ids=["master_room"])
-
-
-def test_pod_scan_does_not_cut_off_older_unseen_rows(sources, monkeypatch):
-    from app.assistant.pod_store.pod_store import PodStore
-    now, _ = sources
-    query = Mock(return_value=[])
-    monkeypatch.setattr(PodStore, "query", query)
-    monkeypatch.setattr(ingestion, "_load_dayflow_pod_kinds_filter", lambda: [{"kind": "camera"}])
-    ingestion._ingest_pods(set(), now)
-    assert query.call_args.kwargs["limit"] is None
 
 
 def test_ingestion_identity_index_keeps_old_closed_ids():

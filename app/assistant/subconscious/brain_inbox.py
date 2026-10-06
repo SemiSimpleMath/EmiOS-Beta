@@ -8,9 +8,11 @@ it, so the flea concern it settled stayed live. Nothing reported to the brain; i
 Now events REPORT. Each source writes one row per thing that happened, keyed by the source's own
 id so it lands exactly once. Chat: every user message, verbatim, whatever its length, except in
 rooms the brain does not read (EXCLUDED_ROOM_PREFIXES). Email: every email the parser scored at least
-MIN_EMAIL_IMPORTANCE, from its pod, full body; the pod id is the ref. The gate
+MIN_EMAIL_IMPORTANCE, from its pod, full body; the pod id is the ref. Camera: every frame
+image_ingest flagged notable (CAMERA_SOURCE_KINDS), as the vision model described it; the pod id is
+the ref, the camera the speaker (2026-10-05; until then they reached only dayflow's pod intake). The gate
 (subconscious/gate.py) routes each row against the open concerns once it is ready (`ready`): an
-email at once, a chat room's messages once the room has been quiet for QUIET — `concern` (bears
+email or camera event at once, a chat room's messages once the room has been quiet for QUIET — `concern` (bears
 on named concerns), `new_matter`, or `none`. Work: dayflow's judgments and endings of work attached
 to a concern (`add_work_event`) arrive routed to those concerns by id, never gated. The brain step
 (subconscious/brain_step.py) reads what the gate passed on, one matter at a time, inside the
@@ -70,6 +72,9 @@ QUIET = timedelta(minutes=5)
 MIN_EMAIL_IMPORTANCE = 6
 # Owner, 2026-09-30: Slack is relaxed talk with friends, not something to act on. Left out for now.
 EXCLUDED_ROOM_PREFIXES = ("slack/",)
+# Owner, 2026-10-05: the brain takes the camera frames image_ingest flags notable. Raw doorbell
+# events (every ring and motion) stay out.
+CAMERA_SOURCE_KINDS = ("ring_doorbell_significant", "ring_bedroom_notable")
 
 
 def ensure_schema(connect=None) -> None:
@@ -171,6 +176,50 @@ def ingest_email(*, now_utc: Optional[datetime] = None, connect=None, fetch=None
     return added
 
 
+def ingest_camera(*, now_utc: Optional[datetime] = None, connect=None, fetch=None) -> int:
+    """Every camera frame image_ingest flagged notable (CAMERA_SOURCE_KINDS) since the last one
+    ingested: the vision model's description of it, the camera as speaker, the pod id as the ref.
+    Returns rows added.
+
+    `fetch(since_utc)` returns the image pods created after `since_utc`; production reads the pod
+    store. Cursor and idempotency as for email."""
+    connect = connect or _connect
+    ensure_schema(connect)
+    now_utc = now_utc or datetime.now(timezone.utc)
+    with connect(False) as c:
+        last = c.execute("SELECT MAX(received_at) FROM brain_events WHERE source='camera'").fetchone()[0]
+    since = datetime.fromisoformat(last) if last else now_utc - _FIRST_RUN_LOOKBACK
+    pods = (fetch or _fetch_image_pods)(since)
+    received = _iso(now_utc)
+    added = 0
+    with connect(True) as c:
+        for pod in pods:
+            meta = pod.metadata or {}
+            if meta.get("source_kind") not in CAMERA_SOURCE_KINDS:
+                continue
+            text = (pod.body or pod.one_liner or "").strip()
+            if not text:
+                raise ValueError(f"camera pod {pod.pod_id} has no description")
+            reason = meta.get("significance_reason") or meta.get("importance_reason")
+            if reason:
+                text += f"\n(flagged because: {reason})"
+            cur = c.execute(
+                "INSERT OR IGNORE INTO brain_events (source, source_ref, occurred_at, room_id, speaker, text, "
+                "received_at) VALUES ('camera', ?, ?, NULL, ?, ?, ?)",
+                (pod.pod_id, _iso(datetime.fromisoformat(meta["occurred_at_utc"])), meta["camera_name"], text,
+                 received))
+            added += cur.rowcount
+    if added:
+        logger.info("[brain_inbox] ingested %d camera event(s) since %s", added, since.isoformat())
+    return added
+
+
+def _fetch_image_pods(since_utc: datetime) -> list:
+    from app.assistant.pod_store.pod_store import PodStore
+    since = since_utc if since_utc.tzinfo else since_utc.replace(tzinfo=timezone.utc)
+    return PodStore().query(kind="image", since_utc=since, limit=None)
+
+
 def add_work_event(*, work_id: str, receipt_id: str, occurred_at: str, text: str, connect=None) -> bool:
     """What dayflow did reports here: each finalizer judgment and each ending of every work object
     (concern_feedback.py). The event is pending like a chat message or an email: the gate routes it to
@@ -201,7 +250,7 @@ def pending(connect=None) -> List[Dict[str, Any]]:
 
 
 def ready(events: List[Dict[str, Any]], now_utc: datetime) -> List[Dict[str, Any]]:
-    """The events whose matter is complete: every email, and the chat of every room whose latest
+    """The events whose matter is complete: every email, camera and work event, and the chat of every room whose latest
     message is at least QUIET old. Messages of a room still talking wait, all of them together."""
     last = _last_message_by_room(events)
     return [e for e in events

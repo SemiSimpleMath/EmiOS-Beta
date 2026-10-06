@@ -22,7 +22,6 @@ HEALTH_INFERENCE_OUTPUT_RESOURCE_ID = "resource_health_inference_output"
 MASTER_ROOM_BLOCK_SECONDS = 180
 _STATUS_WRITE_LOCK = RLock()
 CHAT_WATERMARK_KEY = "chat_ingested_up_to_utc"
-POD_WATERMARK_KEY = "pods_ingested_up_to_utc"
 
 
 def _status_scope_context() -> Dict[str, Any]:

@@ -1,4 +1,4 @@
-"""The front-door emergency escalation reaches the user AND reaches dayflow.
+"""The front-door emergency escalation reaches the user AND reaches the brain.
 
 Three things had to be true for an emergency at the front door to be handled, and on
 2026-09-18 none of them were:
@@ -10,11 +10,11 @@ Three things had to be true for an emergency at the front door to be handled, an
    block until answered, the camera never reads the answer, and the event routine's soft
    watchdog is 120s — so a 600s block meant a spurious "this routine is stuck" ticket at
    two minutes and the emergency ticket EXPIRING at ten, despite asking for four hours.
-3. The frame's pod had to be one dayflow ingests, so the orchestrator could pick the
-   emergency up and act on it. It was not: dayflow's allowlist
-   (dayflow_orchestrator/ROOM.md, access.ingestion_pod_kinds) asks for
-   `ring_doorbell_significant`, and the camera minted `ring_doorbell_event`. Every
-   front-door pod was minted and then ignored.
+3. The frame's pod had to be one the household's intake takes, so the emergency is read and
+   acted on. It was not: dayflow's pod allowlist asked for `ring_doorbell_significant`, and
+   the camera minted `ring_doorbell_event`. Every front-door pod was minted and then ignored.
+   Since 2026-10-05 the brain's inbox takes camera frames (brain_inbox.CAMERA_SOURCE_KINDS)
+   and dayflow's pod intake is retired; the two names must still agree.
 
 Run:
     .venv\\Scripts\\python.exe -m pytest \\
@@ -34,7 +34,6 @@ from app.assistant.ring_analysis.camera_dispatcher import _pod_source_kind
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _CAMERAS_JSON = _REPO_ROOT / "configs" / "cameras.json"
-_ROOM_MD = _REPO_ROOT / "app" / "assistant" / "rooms" / "dayflow_orchestrator" / "ROOM.md"
 _CAMERA_DISPATCHER = _REPO_ROOT / "app" / "assistant" / "ring_analysis" / "camera_dispatcher.py"
 
 
@@ -46,48 +45,35 @@ def _front_door() -> dict:
     raise AssertionError("no camera named 'Front Door' in configs/cameras.json")
 
 
-def _dayflow_ingested_source_kinds() -> set[str]:
-    """The (kind, source_kind) allowlist dayflow ingests, read from ROOM.md frontmatter.
-
-    Parsed rather than hardcoded: the point of the test is that the two sides AGREE, so
-    reading one side from a constant would defeat it.
-    """
-    import yaml
-
-    text = _ROOM_MD.read_text(encoding="utf-8")
-    assert text.startswith("---"), "ROOM.md must open with YAML frontmatter"
-    frontmatter = text.split("---", 2)[1]
-    access = (yaml.safe_load(frontmatter) or {}).get("access") or {}
-    entries = access.get("ingestion_pod_kinds") or []
-    return {
-        str(e.get("source_kind") or "").strip()
-        for e in entries
-        if isinstance(e, dict) and str(e.get("kind") or "").strip() == "image"
-    }
+def _brain_source_kinds() -> set[str]:
+    """The camera source kinds the brain's inbox takes. Read from the inbox itself: the point of
+    the test is that the camera config and the inbox AGREE."""
+    from app.assistant.subconscious.brain_inbox import CAMERA_SOURCE_KINDS
+    return set(CAMERA_SOURCE_KINDS)
 
 
 # --------------------------------------------------------------------------- #
-# 3. The pod dayflow actually sees
+# 3. The pod the brain actually sees
 # --------------------------------------------------------------------------- #
 
-def test_the_emergency_pod_kind_is_one_dayflow_ingests():
-    """The whole escalation-to-dayflow path rests on these two names matching."""
+def test_the_emergency_pod_kind_is_one_the_brain_takes():
+    """The whole escalation-to-the-brain path rests on these two names matching."""
     policy = _front_door()["pod_policy"]
     emergency_kind = _pod_source_kind(policy, {"category": "emergency"}, camera_id="x")
-    assert emergency_kind in _dayflow_ingested_source_kinds(), (
-        f"the front door mints {emergency_kind!r} for an emergency, which dayflow does not "
-        f"ingest. Allowlist: {sorted(_dayflow_ingested_source_kinds())}"
+    assert emergency_kind in _brain_source_kinds(), (
+        f"the front door mints {emergency_kind!r} for an emergency, which the brain does not "
+        f"take. It takes: {sorted(_brain_source_kinds())}"
     )
 
 
-def test_everyday_categories_stay_out_of_dayflow():
-    """A pod per doorbell event would make every passing delivery dayflow intake."""
+def test_everyday_categories_stay_out_of_the_brain():
+    """A pod per doorbell event would make every passing delivery a brain event."""
     policy = _front_door()["pod_policy"]
     for category in ("person", "package", "stranger_lingering", "unknown"):
         kind = _pod_source_kind(policy, {"category": category}, camera_id="x")
-        assert kind not in _dayflow_ingested_source_kinds(), (
-            f"category {category!r} mints {kind!r}, which dayflow ingests — that is intake "
-            f"for an ordinary event"
+        assert kind not in _brain_source_kinds(), (
+            f"category {category!r} mints {kind!r}, which the brain takes — that is an event "
+            f"for an ordinary sighting"
         )
 
 

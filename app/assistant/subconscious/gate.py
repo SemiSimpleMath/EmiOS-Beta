@@ -109,7 +109,7 @@ def _agent_call(payload: Dict[str, Any]) -> Any:
 def run_gate(*, ingest: bool = True, call: Optional[Callable[[Dict[str, Any]], Any]] = None,
              register: Optional[Dict[str, Any]] = None, connect=None,
              now_utc: Optional[datetime] = None) -> Dict[str, Any]:
-    """Ingest new chat and email and route every ready event. Free when nothing is ready (no model
+    """Ingest new chat, email and camera events and route every ready event. Free when nothing is ready (no model
     call). `next_ready_at` is when the next room still talking goes quiet (None: none is). The
     keyword arguments are test seams."""
     from app.assistant.subconscious import brain_inbox as inbox
@@ -117,7 +117,8 @@ def run_gate(*, ingest: bool = True, call: Optional[Callable[[Dict[str, Any]], A
 
     now_utc = now_utc or datetime.now(timezone.utc)
     kw = {"connect": connect} if connect else {}
-    ingested = (inbox.ingest_chat(now_utc=now_utc, **kw) + inbox.ingest_email(now_utc=now_utc, **kw)) if ingest else 0
+    ingested = (inbox.ingest_chat(now_utc=now_utc, **kw) + inbox.ingest_email(now_utc=now_utc, **kw)
+                + inbox.ingest_camera(now_utc=now_utc, **kw)) if ingest else 0
     pending = inbox.pending(**kw)
     events = inbox.ready(pending, now_utc)
     waiting = {"waiting": len(pending) - len(events), "next_ready_at": inbox.next_ready_at(pending, now_utc)}

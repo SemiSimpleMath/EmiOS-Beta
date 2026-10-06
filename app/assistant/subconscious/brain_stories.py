@@ -148,8 +148,8 @@ def _handed_on(start_iso: str, end_iso: str) -> int:
 _DOOR = {"create": "opened as a new concern", "merge_open": "joined the open concern “{into}”",
          "suppress_closed": "matched “{into}”, which is already settled",
          "merge_candidate": "joined another new concern raised here"}
-_SOURCES = {"chat": "chat message", "email": "email", "work": "report on work done"}
-_PLURALS = {"chat": "chat messages", "email": "emails", "work": "reports on work done"}
+_SOURCES = {"chat": "chat message", "email": "email", "work": "report on work done", "camera": "camera sighting"}
+_PLURALS = {"chat": "chat messages", "email": "emails", "work": "reports on work done", "camera": "camera sightings"}
 
 
 def _event_who(e: Dict[str, Any]) -> str:

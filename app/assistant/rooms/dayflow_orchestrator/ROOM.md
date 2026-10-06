@@ -69,11 +69,6 @@ access:
   shared_chat_room_ids: []
   chat_ingestion_entitled_rooms:
   - master_room
-  ingestion_pod_kinds:
-  - kind: image
-    source_kind: ring_doorbell_significant
-  - kind: image
-    source_kind: ring_bedroom_notable
 ---
 
 # Room context

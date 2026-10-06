@@ -121,25 +121,21 @@ blackboard once — which is where control nodes must read it, since the activat
 receive carries no data.
 
 ### run_dayflow_ingestion — `dayflow_orchestrator/ingestion.py`
-Dedups against existing item IDs, then pulls new items from four sources — `_ingest_chat`,
-`_ingest_emails`, `_ingest_pods` (delegations retired 2026-09-30) — assigns `short_id`s, and persists
-via `write_dayflow_items_batch`. Delegation requests are marked ingested only after that write.
+Dedups against existing item IDs, then pulls new items from two sources — `_ingest_chat` and
+`_ingest_emails` (delegations retired 2026-09-30; pods retired 2026-10-05: the camera frames that lane
+took now reach the brain's inbox, `subconscious/brain_inbox.ingest_camera`) — assigns `short_id`s, and
+persists via `write_dayflow_items_batch`. Both are wake context only.
 
-**Two of the four are gated by the room's `access` block, which lives in the frontmatter of
-`rooms/dayflow_orchestrator/ROOM.md` — there is no `access.json`, whatever the code comments say.**
-The two gates fail in deliberately opposite directions:
+Chat is gated by the room's `access` block, which lives in the frontmatter of
+`rooms/dayflow_orchestrator/ROOM.md`:
 
 - `chat_ingestion_entitled_rooms` is **required**: missing, non-list or empty **raises**. Today it is
   `[master_room]`, so dayflow ingests chat from the main UI room only. (`chat_ingestion.py`'s
   docstring claims a fallback to `shared_chat_room_ids`; there is none on this path.)
-- `ingestion_pod_kinds` **absent = pod ingestion off**, silently and by design. Present today with
-  exactly two entries, both `kind: image` — `source_kind: ring_doorbell_significant` and
-  `ring_bedroom_notable`. So "pods" in this lane means Ring camera stills, not pods generally;
-  everything else stays reachable through `pod_search` without entering the working set.
 
-Chat and pods carry **persistent watermarks** in the orchestrator status resource, and both advance
+Chat carries a **persistent watermark** in the orchestrator status resource, and it advances
 **even when every row deduped** — the rows have been seen, and re-querying them each tick is the cost
-this avoids. A first pod run with no watermark caps at start-of-day rather than replaying history.
+this avoids.
 `short_id`s continue from the highest existing one and wrap to 1 past 10,000.
 
 ### The four sweeps — `dayflow_orchestrator/dispatch_sweeper.py`

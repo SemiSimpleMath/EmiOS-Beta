@@ -354,15 +354,14 @@ def _pod_source_kind(
     """Which ``source_kind`` this frame's pod is minted under.
 
     ``pod_policy.source_kind_by_category`` lets an escalation-worthy category mint under a
-    different kind from the camera's everyday one. That exists because the dayflow
-    orchestrator ingests pods by an ALLOWLIST of (kind, source_kind) pairs, declared in the
-    dayflow_orchestrator room's ROOM.md under ``access.ingestion_pod_kinds`` — and that
-    allowlist asked for ``ring_doorbell_significant`` while no camera produced that name.
-    Every front-door pod was therefore minted and then ignored by dayflow.
+    different kind from the camera's everyday one. The brain's inbox takes camera frames by
+    source_kind (``subconscious/brain_inbox.CAMERA_SOURCE_KINDS``, since 2026-10-05; before
+    that, dayflow's pod allowlist, which asked for ``ring_doorbell_significant`` while no
+    camera produced that name, so every front-door pod was minted and then ignored).
 
     One pod under the right kind, rather than a second pod for the same frame: the everyday
-    kind stays out of dayflow's working set (a pod per doorbell event would be intake for
-    every passing delivery), and the rare escalating category opts in.
+    kind stays out of the brain (a pod per doorbell event would be an event for every passing
+    delivery), and the rare escalating category opts in.
     """
     base = str(policy.get("source_kind") or f"camera_{camera_id or 'unknown'}")
     by_category = policy.get("source_kind_by_category") or {}

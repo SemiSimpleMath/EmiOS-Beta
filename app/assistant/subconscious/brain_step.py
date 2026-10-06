@@ -6,7 +6,7 @@ this, the noticer read all of it once a day, in one call, beside twenty other co
 
 A matter is a group of events read together:
 - events the gate routed to the same concerns;
-- new-matter or unrouted events from the same conversation: a chat room, or a Gmail thread.
+- new-matter or unrouted events from the same conversation: a chat room, a Gmail thread, or a camera.
 Dayflow's reports on attached work (finalizer judgments, endings) arrive routed to their concerns.
 A split that leaves two matters about one thing is caught by the concern door, which folds the
 second concern into the first.
@@ -107,6 +107,8 @@ def group_matters(events: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
         elif e["source"] == "email":
             record = conversations._load_email(e["source_ref"])
             key = ("thread", record.get("account_id"), record.get("thread_id") or e["source_ref"])
+        elif e["source"] == "camera":
+            key = ("camera", e["speaker"])
         else:
             key = ("room", e.get("room_id"))
         groups.setdefault(key, []).append(e)
@@ -315,6 +317,8 @@ def _evidence(e: Dict[str, Any]) -> Dict[str, Any]:
         return {"kind": "pod", "ref": e["source_ref"], "snippet": e["text"].split("\n", 1)[0]}
     if e["source"] == "work":
         return {"kind": "work", "ref": e["source_ref"], "snippet": e["text"]}
+    if e["source"] == "camera":
+        return {"kind": "pod", "ref": e["source_ref"], "snippet": e["text"]}
     return {"kind": "chat_msg", "ref": e["source_ref"], "snippet": e["text"]}
 
 
