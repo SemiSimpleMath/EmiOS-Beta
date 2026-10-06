@@ -1,18 +1,21 @@
-"""The day's tasks: the brain decides what today's calendar needs. SHADOW ONLY (2026-10-04).
+"""The day's tasks: the brain decides what today's calendar needs.
 
-Design: docs/design/brain_delegates_work_2026-10-04.md. The brain is to decide what work exists and dayflow how;
-today the calendar's placements reach dayflow's steward by code (subconscious/belief_occurrences.py), and the
-steward invents an act for each. Replays on 2026-10-04 showed the brain deciding them better: no timesheets task
-when the owner had said "I'll start at 5", the family-time heads-up kept once the steward's purpose was in its
-prompt.
+Design: docs/design/brain_delegates_work_2026-10-04.md. The brain decides what work exists and dayflow how. Until the
+calendar lane went live (configs/brain_lanes.json, calendar.from_day: 2026-10-06) the calendar's placements reached
+dayflow's steward by code (subconscious/belief_occurrences.py), and the steward invented an act for each; this ran in
+shadow beside it. Replays on 2026-10-04 showed the brain deciding them better: no timesheets task when the owner had
+said "I'll start at 5", the family-time heads-up kept once the steward's purpose was in its prompt. From the lane's
+first day the decisions are the work: dayflow's list-item intake makes work from each needed entry
+(dayflow_orchestrator/brain_list_intake.py). A day before it stays the steward's, and is still decided in shadow.
 
-This runs that decision live without acting on it. On each brain wake, when anything it reads has changed, the
+On each brain wake, when anything it reads has changed, the
 `subconscious::day_tasks` agent (named the day decider until 2026-10-04) decides every placement of today's plan
 (subconscious/day_plan.py): needed (who acts, the assistant's part, when), not needed (why), or done elsewhere. It
 reads the placements with their related beliefs and their entries on the brain's list, and the brain's situation
 (subconscious/situation.py): the schedule, presence, location, weather, health, the finished chat, the todo list,
 the work in motion and what finished or was dropped, the reminders sent, the questions waiting, the open concerns.
-In shadow the situation leaves out work made from the calendar: that work is the steward's.
+On a day the steward still holds, the situation leaves out work made from the calendar: that work is the steward's,
+and the brain must not copy it. On a live day it is the brain's own and is shown.
 
 A run decides as the steward and the architect do (2026-10-04): once, then only what changes. A placement not yet on
 the list is decided; a placement on the list keeps its entry unless the answer changes it, and a change must cite a
@@ -28,8 +31,8 @@ concern_planner.concern_text) with the concern's own entries on the list, and wh
 (brain_matters: each event with the brain's decision and reason, the notes it wrote, the concerns it raised). A
 concern's entry is a fact a change can cite: the concern side runs first in the brain's pass, so an entry it makes
 ("we're eating out tonight") reaches the day's tasks in the same pass. Code checks the answer (one correction round) and records the run in `brain_day_decisions` (the
-table keeps the name it was created with). Nothing is handed to dayflow: the steward goes on handling the calendar, and
-`compare(day)` sets the brain's decisions beside what dayflow did with the same beliefs, for the owner to judge.
+table keeps the name it was created with). `compare(day)` sets the brain's decisions beside what dayflow did with the
+same beliefs, for the owner to judge.
 """
 from __future__ import annotations
 
@@ -256,10 +259,11 @@ def gather(now_utc: datetime, *, plan_connect=None) -> Optional[Dict[str, Any]]:
     plan = day_plan.load_plan(day, connect=plan_connect)
     if plan is None:
         return None
+    from app.assistant.dayflow_orchestrator.brain_list_intake import calendar_live
     from app.assistant.subconscious import brain_list, situation
     every = placements(plan)
-    # Shadow: the situation leaves out calendar-made work, which is the steward's (module docstring).
-    s = situation.gather(now_utc, calendar_work=False)
+    # Calendar-made work is the brain's own on a live day; on a steward day it is left out (module docstring).
+    s = situation.gather(now_utc, calendar_work=calendar_live(day))
     with_concerns(s)
     matters = matters_today(day, now_utc)
     items = offered(day, with_current(day, every), now_utc)
@@ -295,18 +299,23 @@ def run_day_tasks(*, now_utc: Optional[datetime] = None, connect=None,
         found = problems(data, inputs["items"], inputs["refs"])
         if found:
             raise ValueError(f"day_tasks answer still invalid after one correction: {found}")
+    # The list changes land before the run (its fingerprint) is recorded: a run counts as done only once its entries
+    # are on the list. Until 2026-10-05 the run was recorded first, and a failure applying the entries left the
+    # next pass "unchanged" with the decisions lost; now it decides again, reading the entries that did land.
+    from app.assistant.subconscious import brain_list
+    changed = brain_list.apply_calendar(inputs["day"], inputs["items"], data["decisions"],
+                                        cause=f"day's tasks {now.isoformat()}", at=now, connect=connect)
     with connect(True) as c:
         c.execute("INSERT INTO brain_day_decisions (day, decided_at_utc, fingerprint, items, decisions) "
                   "VALUES (?,?,?,?,?)",
                   (inputs["day"], now.isoformat(), fp, json.dumps(inputs["items"], ensure_ascii=False),
                    json.dumps(data["decisions"], ensure_ascii=False)))
-    from app.assistant.subconscious import brain_list
-    changed = brain_list.apply_calendar(inputs["day"], inputs["items"], data["decisions"],
-                                        cause=f"day's tasks {now.isoformat()}", at=now, connect=connect)
-    step("day_tasks", "decided (shadow)", subject=inputs["day"], items=len(labels), decided=len(data["decisions"]),
+    from app.assistant.dayflow_orchestrator.brain_list_intake import calendar_live
+    mode = "live" if calendar_live(inputs["day"]) else "shadow"
+    step("day_tasks", f"decided ({mode})", subject=inputs["day"], items=len(labels), decided=len(data["decisions"]),
          list_changes=changed, decisions=data["decisions"])
-    logger.info("[day_tasks] %s: %d placement(s) offered, %d decided; list %s (shadow; nothing handed to dayflow)",
-                inputs["day"], len(labels), len(data["decisions"]), changed)
+    logger.info("[day_tasks] %s: %d placement(s) offered, %d decided; list %s (%s)",
+                inputs["day"], len(labels), len(data["decisions"]), changed, mode)
     return {"day_tasks": "decided", "day_items": len(labels), "day_decided": len(data["decisions"]),
             "day_list_changes": changed}
 

@@ -449,7 +449,7 @@ class WorkStore(ConcernOutboxMixin, BeliefOutboxMixin, ExecutionStoreMixin):
         # (set_work_status, last).
         allowed = {"add_node", "add_edge", "set_status", "edit_node", "defer_node",
                    "consume_finalizer_instruction", "redirect_dependencies", "revise_goal",
-                   "consume_goal_instructions", "record_goal_review", "set_work_status"}
+                   "consume_goal_instructions", "record_goal_review", "set_work_status", "instruct_goal"}
         for change in data.get("operations", []):
             op = change.get("op")
             if op not in allowed or op not in self._HANDLERS:
@@ -834,16 +834,18 @@ class WorkStore(ConcernOutboxMixin, BeliefOutboxMixin, ExecutionStoreMixin):
         wo.constraints = dict(data["constraints"])
 
     def _op_instruct_goal(self, wo, data, now, actor=None) -> None:
-        """Ask the architect, which owns the work object, to end it: the steward's judgment that it is
-        a duplicate, superseded by intake, or declined by the owner, with the reason. Kept on the work
-        object until the architect acts on it (`consume_goal_instructions`)."""
+        """Ask the architect, which owns the work object, to act on it, with the reason: `end` (the steward's
+        judgment that it is a duplicate, superseded by intake, or declined by the owner; the brain's list entry
+        cancelled) or `replan` (the brain revised the entry the work was made from; 2026-10-05, until then the
+        re-plan request lived only on the tick's blackboard and was lost with a failed architect call, a restart
+        or the per-tick cap). Kept on the work object until the architect acts on it (`consume_goal_instructions`)."""
         reason = str(data.get("reason") or "").strip()
-        if data.get("kind") != "end" or not reason:
-            raise ValueError("instruct_goal: an instruction is kind 'end' with a non-empty reason")
+        if data.get("kind") not in ("end", "replan") or not reason:
+            raise ValueError("instruct_goal: an instruction is kind 'end' or 'replan' with a non-empty reason")
         if wo.status not in {"active", "blocked"}:
             raise ValueError(f"instruct_goal: {wo.id} is already {wo.status}")
         wo.constraints.setdefault("architect_instructions", []).append(
-            {"kind": "end", "reason": reason, "from": actor or "steward", "at": now})
+            {"kind": data["kind"], "reason": reason, "from": actor or "steward", "at": now})
 
     def _op_consume_goal_instructions(self, wo, data, now, actor=None) -> None:
         """The architect acted on these instructions (by their `at`)."""

@@ -639,3 +639,16 @@ dropped deliberately. A design comes before the code: where the brain writes it,
    retires.
 6. The day's schedule as a new resource, joined by code from the record and the brain's list (section 6); its
    readers moved one at a time. Then the day theme moves to the brain, by its own design.
+
+## Contract hardening before the calendar lane's first day (2026-10-05)
+
+An external review of the cutover found the contract between the brain's decisions and dayflow's execution weaker
+than its division of roles; verified and fixed (bug list, "Brain → dayflow contract"):
+- A closed concern ends its work: its open entries are cancelled on the next brain pass, with its resolution.
+- An entry's change reaches its work whatever field changed, and the re-plan it asks for is durable: a `replan`
+  instruction on the work object, committed with the revised objective, consumed by the architect's revision.
+- Every re-plan reads what the goal was made from (the brief), not only the objective line.
+- A decision counts as made only once its entries are on the list (calendar run, concern plan).
+- On a live calendar day the day's tasks see calendar-made work: it is the brain's own.
+Still open: one decision context across the list (a concern's decider sees only its own entries), a changed
+placement as citable evidence, and a recovery path for failed matters and plans.

@@ -1,10 +1,21 @@
 {{ objective }}
 {% if mode == 'replan' %}
 {{ finalizer_block }}
-{%- if goal_instructions is defined and goal_instructions %}
-THE STEWARD ASKS YOU TO END THIS GOAL. It sees the whole portfolio and new intake; you hold this goal's plan, so the decision is yours. End it (end_goal) when its reason stands against what the graph shows; otherwise keep the goal and say in architect_summary why it continues.
-{% for entry in goal_instructions %}- {{ entry.at | local_time }}: {{ entry.reason }}
+{%- set ends = (goal_instructions or []) | selectattr("kind", "equalto", "end") | list %}
+{%- set replans = (goal_instructions or []) | selectattr("kind", "equalto", "replan") | list %}
+{%- if ends %}
+YOU ARE ASKED TO END THIS GOAL, for the reason given. You hold this goal's plan, so the decision is yours. End it (end_goal) when its reason stands against what the graph shows; otherwise keep the goal and say in architect_summary why it continues.
+{% for entry in ends %}- {{ entry.at | local_time }}: {{ entry.reason }}
 {% endfor %}
+{%- endif %}
+{%- if replans %}
+THE BRAIN REVISED WHAT THIS GOAL IS FOR. The objective above is the revised one, and what it was made from (below) is the revised entry. Revise the graph to it: add what the revised objective needs, and abandon the steps it makes moot or wrong, with the reason.
+{% for entry in replans %}- {{ entry.at | local_time }}: {{ entry.reason }}
+{% endfor %}
+{%- endif %}
+{%- if rationale is defined and rationale %}
+What this goal was made from:
+{{ rationale }}
 {%- endif %}
 {%- if stranded is defined and stranded %}
 THIS GOAL HAS NOTHING LEFT TO RUN: no step is in flight, waiting on a time ahead or on the outside world, or runnable now, and the automatic completion did not close it. Each step that was worked on shows its outcome as the finalizer judged it; a step that never ran shows why. From those outcomes, judge whether the goal's outcome is reached: if it is, end it as done, with the reason. If not: add the step that moves it (when the user is needed first, a step that tells or asks them, with the retry depending on the answer), revise the objective to what is still needed, or end it as abandoned, with the reason.

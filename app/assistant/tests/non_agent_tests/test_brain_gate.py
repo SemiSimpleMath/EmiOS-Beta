@@ -358,6 +358,8 @@ def test_the_wake_sleeps_until_a_room_goes_quiet_or_a_hold_passes_whichever_is_f
     monkeypatch.setattr(brain_stories, "run_stories", lambda: {})
     monkeypatch.setattr(gate, "run_gate", lambda: {"next_ready_at": quiet})
     monkeypatch.setattr(brain_step, "run_brain_step", lambda: {"matters": 0})
+    from app.assistant.subconscious import brain_list
+    monkeypatch.setattr(brain_list, "cancel_for_closed_concerns", lambda register, at: [])
     monkeypatch.setattr(concern_brief, "run_briefs", lambda: {})
     monkeypatch.setattr(concern_handoff, "run_handoffs", lambda: {})
     monkeypatch.setattr(concern_store, "load_register", lambda: {})

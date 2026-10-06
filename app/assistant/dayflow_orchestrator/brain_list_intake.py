@@ -8,8 +8,10 @@ judges nothing; the entry already says what is needed:
 - an entry decided needed with no work yet: a work object shell is built from it (objective = the outcome and when,
   success = the outcome, the brief = the entry with the concern or belief behind it in full and the sources word for
   word; the entry id, and the concern or belief, in its constraints) and the architect lays its graph;
-- an entry changed while its work is active: the objective is revised, and the work flagged for a re-plan licensed
-  as the brain's directive;
+- an entry changed while its work is active (any change the list records: what, the decision, the assistant's part,
+  when, what it covers): the objective and brief are revised and a re-plan instruction is left on the work object in
+  the same commit, licensed as the brain's directive (until 2026-10-05 only a changed what or when counted, and the
+  re-plan request lived on the tick's blackboard);
 - an entry cancelled, or decided not needed, while its work is active: an end instruction with the brain's reason;
 - an entry changed after its work ended: recorded only. A done entry runs again only by a new decision, never by a
   rewording (the design's rule for a modified entry whose work ended).
@@ -145,7 +147,8 @@ def _work_by_entry() -> Dict[str, Dict[str, Any]]:
 
 
 def _decide(entry: Dict[str, Any], work: Optional[Dict[str, Any]]) -> str:
-    """What the entry's current state asks of its work."""
+    """What the entry's current state asks of its work. Called only for an entry with undelivered changes, and the
+    list records a change only when the entry did change (brain_list.upsert), so active work is revised."""
     active = work is not None and work["status"] in _ACTIVE
     if entry["status"] == "cancelled" or entry["decision"] != "needed":
         return "end" if active else "none"
@@ -153,14 +156,13 @@ def _decide(entry: Dict[str, Any], work: Optional[Dict[str, Any]]) -> str:
         return "create"
     if not active:
         return "work_ended_not_reopened"
-    return "revise" if work["constraints"].get("objective") != objective(entry) else "none"
+    return "revise"
 
 
 def deliver(store, *, now_utc: Optional[datetime] = None, connect=None, list_connect=None,
             lane_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Act on every change on the brain's list not yet delivered in its lane's mode, one entry at a time (its newest
-    state stands for all its changes). Returns {created, revised, ended, recorded, dry_run} work and entry ids, and
-    `licensed`: the work objects whose re-plan is the brain's directive."""
+    state stands for all its changes). Returns {created, revised, ended, recorded, dry_run} work and entry ids."""
     from app.assistant.subconscious import brain_list
     from app.assistant.subconscious.brain_trace import step
     now = now_utc or datetime.now(timezone.utc)
@@ -170,7 +172,7 @@ def deliver(store, *, now_utc: Optional[datetime] = None, connect=None, list_con
     config = lane_config or lanes()
     out: Dict[str, List[Any]] = {"created": [], "revised": [], "ended": [], "recorded": [], "dry_run": []}
     if config["calendar"]["mode"] == "off" and config["concern"]["mode"] == "off":
-        return {**out, "licensed": []}
+        return out
     with (list_connect or _connect)(False) as c:
         changes = [dict(r) for r in c.execute("SELECT id, entry_id FROM brain_list_changes ORDER BY id")]
         entries = {r["id"]: dict(r) for r in c.execute("SELECT * FROM brain_list_entries")}
@@ -183,7 +185,7 @@ def deliver(store, *, now_utc: Optional[datetime] = None, connect=None, list_con
         if mode != "off" and (ch["id"], mode) not in delivered:
             pending.setdefault(ch["entry_id"], []).append(ch["id"])
     if not pending:
-        return {**out, "licensed": []}
+        return out
     by_entry = _work_by_entry()
     for entry_id, change_ids in pending.items():
         entry = entries[entry_id]
@@ -207,7 +209,10 @@ def deliver(store, *, now_utc: Optional[datetime] = None, connect=None, list_con
             wo = store.load(work_id)
             update = goal_update(wo, objective=objective(entry), success_criteria=entry["what"])
             update["constraints"]["rationale"] = brief(entry)
-            store.apply("revise_goal", update, actor="brain")
+            reason = f"The brain revised the entry this goal was made from: {entry['why']}"
+            store.apply("batch", {"work_id": work_id, "operations": [
+                {"op": "revise_goal", "data": update},
+                {"op": "instruct_goal", "data": {"kind": "replan", "reason": reason}}]}, actor="brain")
             out["revised"].append(work_id)
         elif action == "end":
             reason = entry["why"] if entry["status"] != "cancelled" else f"cancelled on the brain's list: {entry['why']}"
@@ -224,7 +229,7 @@ def deliver(store, *, now_utc: Optional[datetime] = None, connect=None, list_con
                           [(cid, mode, entry_id, now.isoformat(), action, work_id) for cid in change_ids])
     logger.info("[brain_list_intake] created=%s revised=%s ended=%s recorded=%s dry_run=%s", out["created"],
                 out["revised"], out["ended"], out["recorded"], out["dry_run"])
-    return {**out, "licensed": out["revised"]}
+    return out
 
 
 def work_of(entry_ids: List[str]) -> Dict[str, Dict[str, Any]]:

@@ -8,7 +8,8 @@ object at a time:
   on its objective and lay the resulting DAG (subtask nodes, depends_on edges, wait-gates) into the graph
   via apply_architect_dag.
 - RE-PLAN, woken per work object by: a finalizer verdict that asks for something (on its node as
-  `payload.finalizer`); a steward instruction to end it (`constraints.architect_instructions`); the
+  `payload.finalizer`); an instruction to end it (the steward's, or the brain's for a cancelled list entry) or the
+  brain's instruction to re-plan it (its list entry revised) (`constraints.architect_instructions`); the
   steward's `replan_work_ids` (intake, a user directive); or the work object being STRANDED (nothing in
   it can still run and no scheduled time lies ahead, `stranded_fingerprint`). It re-invokes the architect
   with the goal + the existing graph and applies the DELTA: add the missing steps, abandon the moot ones,
@@ -327,11 +328,14 @@ class WorkArchitectNode(ControlNode):
                         goal = wo.nodes.get(wo.goal_node_id)
                         objective = (getattr(goal, "content", "") or getattr(goal, "title", "")) if goal else ""
                         finalizer_block, licence = _finalizer_block(pending.get(work_id))
-                        # A stranded goal's prunes are licensed by its state: nothing in it can run.
-                        licensed = bool(licence) or (work_id in user_directed) or (work_id in stranded)
+                        # A stranded goal's prunes are licensed by its state: nothing in it can run. The brain's
+                        # re-plan instruction (its list entry revised) is a directive, like the user's.
+                        brain_replan = any(e.get("kind") == "replan" for e in instructions.get(work_id, []))
+                        licensed = bool(licence) or (work_id in user_directed) or (work_id in stranded) or brain_replan
                         task = render_view("architect_task", mode="replan", objective=objective,
                                            finalizer_block=finalizer_block, graph=_render_existing_graph(wo),
                                            goal_instructions=instructions.get(work_id, []),
+                                           rationale=str((wo.constraints or {}).get("rationale") or "").strip(),
                                            stranded=work_id in stranded)
                         result = agent.action_handler(Message(task=task, information=info, scope_context=scope))
                         data = getattr(result, "data", {}) or {}

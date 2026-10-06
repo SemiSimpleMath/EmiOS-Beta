@@ -96,7 +96,7 @@ def work(now_utc: datetime, *, calendar_work: bool) -> Dict[str, Any]:
     """Work in motion with where each stands, and the work that ended in the last ENDED_HOURS, each as the brain
     reads past work (work_links.work_view: why it ended and each task's outcome in the finalizer's own words, never
     its verdict or next step, which are dayflow's). `calendar_work=False` leaves out work made from a calendar
-    placement: in shadow that work is the steward's, and the brain must not copy it."""
+    placement: on a day the steward still holds that work is the steward's, and the brain must not copy it."""
     from datetime import timedelta
     from app.assistant.subconscious import work_links
     from app.assistant.utils.time_utils import parse_iso_utc

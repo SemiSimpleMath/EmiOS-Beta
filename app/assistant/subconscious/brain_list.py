@@ -1,10 +1,11 @@
-"""The brain's list: what needs doing, decided once and changed deliberately. SHADOW ONLY (2026-10-04).
+"""The brain's list: what needs doing, decided once and changed deliberately (2026-10-04).
 
 Design: docs/design/brain_delegates_work_2026-10-04.md, section 1. Concerns are the matters in the owner's life;
 the list holds the pieces of work the brain decides they, and today's calendar, need. Each entry has a stable id,
 what it serves (a calendar placement or a concern), the decision (needed, not needed, done elsewhere), who acts,
-the assistant's part and when, and a status. Nothing is handed to dayflow yet: the entries are what the brain would
-delegate, recorded beside what dayflow actually does.
+the assistant's part and when, and a status. In a lane switched live (configs/brain_lanes.json) dayflow's list-item
+intake makes work from the entries (dayflow_orchestrator/brain_list_intake.py); elsewhere they are recorded beside
+what dayflow actually does.
 
 Every change is recorded with its cause, so a changed decision reads as what it would be when live: entry X
 created, modified (before, after, why), or cancelled. Calendar entries are keyed by code to their belief and day
@@ -197,3 +198,32 @@ def apply_concern(concern_id: str, actions: List[Dict[str, Any]], *, cause: str,
                     cause=cause, at=when)
                 counts[result] += 1
     return counts
+
+
+def cancel_for_closed_concerns(register: Dict[str, Any], *, at: datetime, connect=None) -> List[str]:
+    """Cancel every open entry whose concern is no longer open (resolved, dormant, or gone from the register), with
+    the concern's resolution as the reason; dayflow's list-item intake then ends the entry's work like any cancelled
+    entry's. Run on every brain pass, so it covers every way a concern closes (the brain step, the noticer).
+    Until 2026-10-05 a resolution touched no entry: the brain could hold a matter settled while dayflow still had
+    an active goal for it. Returns the ids cancelled."""
+    connect = connect or _connect
+    ensure_schema(connect)
+    open_ids = {c["concern_id"] for b in ("active", "addressing") for c in register.get(b) or []}
+    closed = {c["concern_id"]: (b, c) for b in ("resolved", "dormant") for c in register.get(b) or []}
+    with connect(False) as c:
+        rows = c.execute("SELECT id, concern_id FROM brain_list_entries WHERE kind = 'concern' "
+                         "AND status != 'cancelled'").fetchall()
+    stale = [(r["id"], r["concern_id"]) for r in rows if r["concern_id"] not in open_ids]
+    if not stale:
+        return []
+    when = at.isoformat()
+    with connect(True) as c:
+        for entry_id, concern_id in stale:
+            if concern_id in closed:
+                bucket, concern = closed[concern_id]
+                why = concern.get("resolution_reason") or concern.get("dormant_reason") or "(no reason recorded)"
+                reason = f"its concern was {bucket}: {why}"
+            else:
+                reason = "its concern is no longer in the register"
+            cancel(c, entry_id, reason=reason, cause=f"concern closed {when}", at=when)
+    return [entry_id for entry_id, _ in stale]

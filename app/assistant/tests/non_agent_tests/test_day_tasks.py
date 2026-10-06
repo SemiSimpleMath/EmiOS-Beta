@@ -250,3 +250,19 @@ def test_the_brain_s_view_concerns_in_full_with_their_entries_and_today_s_decisi
     assert "- [E1] the owner knows the family eats out tonight (the assistant: tell the owner the table is at 6), 5:30 PM; open" in user
     assert "- chat at" in user and ": we are eating out tonight" in user
     assert "the brain: tracked as new: Dinner plans changed." in user and "- raised a concern: Dinner out tonight" in user
+
+
+def test_a_run_whose_entries_fail_is_not_recorded_and_decides_again(tmp_path, monkeypatch):
+    """Until 2026-10-05 the run (its fingerprint) was recorded first: a failure applying the entries left the next
+    pass "unchanged", the decisions lost."""
+    conn = sqlite_file(tmp_path / "d.db")
+    real = L.apply_calendar
+
+    def broken(*a, **k):
+        raise OSError("list unavailable")
+    monkeypatch.setattr(L, "apply_calendar", broken)
+    with pytest.raises(OSError):
+        D.run_day_tasks(now_utc=NOW, connect=conn, gather_inputs=_gather(conn), call=lambda p: GOOD)
+    monkeypatch.setattr(L, "apply_calendar", real)
+    out = D.run_day_tasks(now_utc=NOW, connect=conn, gather_inputs=_gather(conn), call=lambda p: GOOD)
+    assert out["day_tasks"] == "decided" and out["day_list_changes"]["created"] == 3

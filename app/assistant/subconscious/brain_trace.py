@@ -49,7 +49,7 @@ TRACED_AGENTS = frozenset({
     "subconscious::noticer", "dayflow_orchestrator::strategic_planner_wo",
     "subconscious::concern_planner", "subconscious::concern_tasks",
     "dayflow_routine_writer",   # the day pass
-    "subconscious::day_tasks",     # the day's tasks, shadow only (subconscious/day_tasks.py)
+    "subconscious::day_tasks",     # the day's tasks (subconscious/day_tasks.py)
     "subconscious::story_matter", "subconscious::story_concern", "subconscious::story_day",
 })
 

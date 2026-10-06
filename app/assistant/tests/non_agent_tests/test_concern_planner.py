@@ -163,3 +163,24 @@ def test_a_plan_for_a_brief_that_changed_meanwhile_is_refused(tmp_path):
 def test_the_brief_decides_nothing():
     brief = {k: v for k, v in BRIEF.items()}
     assert concern_brief._problems(brief, {}) == []
+
+
+def test_a_plan_whose_entries_fail_is_not_stored_and_is_planned_again(tmp_path, monkeypatch):
+    """Until 2026-10-05 the plan was stored first: a failure applying its entries left a current plan whose entries
+    never reached the list, and nothing planned it again."""
+    reg = ScratchRegister(tmp_path).write({**EMPTY, "active": [_briefed(_matter())]})
+    lst = sqlite_file(tmp_path / "list.db")
+    invoke = lambda task, information: {"decision": "act_now", "why": "It moved.", "entries": [_new("Guests told")]}
+
+    def broken(*a, **k):
+        raise OSError("list unavailable")
+    real = brain_list.apply_concern
+    monkeypatch.setattr(brain_list, "apply_concern", broken)
+    assert concern_planner.run_planners(invoke=invoke, register_connect=reg.connect, list_connect=lst) == \
+        {"plans_written": 0, "plans_failed": 1}
+    [c] = reg.read()["active"]
+    assert "plan" not in c and "plan_error" not in c
+    monkeypatch.setattr(brain_list, "apply_concern", real)
+    assert concern_planner.run_planners(invoke=invoke, register_connect=reg.connect,
+                                        list_connect=lst)["plans_written"] == 1
+    assert [e["what"] for e in brain_list.entries(concern_id="c-club", connect=lst)] == ["Guests told"]

@@ -40,7 +40,7 @@ def test_finalizer_receipts_show_each_call_local_time():
 
 def test_architect_instructions_and_concern_history_are_local():
     text = render_view("architect_task", mode="replan", objective="o", finalizer_block="", graph="",
-                       goal_instructions=[{"at": "2026-09-30T17:20:00+00:00", "reason": "moot"}], stranded=False)
+                       goal_instructions=[{"kind": "end", "at": "2026-09-30T17:20:00+00:00", "reason": "moot"}], stranded=False)
     assert "- Wed 09-30 10:20 AM: moot" in text
     concerns = [{"concern_id": "c1234567", "title": "t", "status": "addressing", "done_when": "d", "owner_words": "", "brief": None,
                  "attempts": [{"work_id": "w", "objective": "o", "status": "abandoned",

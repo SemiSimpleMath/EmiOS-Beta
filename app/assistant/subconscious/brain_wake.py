@@ -44,8 +44,8 @@ _start_lock = threading.Lock()
 
 
 def run_brain() -> Dict[str, Any]:
-    """One pass: gate, brain step, briefs, the concern planner, handoffs, the day pass and its occurrences,
-    the stories, and the day's tasks."""
+    """One pass: gate, brain step, the entries of closed concerns cancelled, briefs, the concern planner, handoffs,
+    the day pass and its occurrences, the stories, and the day's tasks."""
     from app.assistant.subconscious.brain_step import run_brain_step
     from app.assistant.subconscious.concern_brief import run_briefs
     from app.assistant.subconscious.concern_handoff import run_handoffs
@@ -56,6 +56,9 @@ def run_brain() -> Dict[str, Any]:
     from app.assistant.subconscious.belief_occurrences import run_occurrence_handoffs
     gate = run_gate()
     brain = run_brain_step()
+    # A concern the brain (or the noticer) closed takes its open list entries with it, so dayflow ends their work.
+    from app.assistant.subconscious import brain_list
+    closed_entries = brain_list.cancel_for_closed_concerns(load_register(), at=datetime.now(timezone.utc))
     briefs = run_briefs()
     plans = concern_planner.run_planners()
     handoffs = run_handoffs()
@@ -80,12 +83,12 @@ def run_brain() -> Dict[str, Any]:
     # list changed (dayflow_orchestrator/brain_list_intake.py).
     from app.assistant.dayflow_orchestrator.brain_list_intake import lanes
     config = lanes()
-    if (plans.get("plans_written") or decided.get("day_list_changes")) and "live" in (
+    if (closed_entries or plans.get("plans_written") or decided.get("day_list_changes")) and "live" in (
             config["calendar"]["mode"], config["concern"]["mode"]):
         from app.assistant.subconscious.concern_handoff import _poke_dayflow
         _poke_dayflow()
     return {**gate, **{f"brain_{k}": v for k, v in brain.items()}, **briefs, **plans, **handoffs, **day, **occurrences,
-            **stories, **decided,
+            **stories, **decided, "closed_concern_entries": closed_entries,
             "next_wake_at": min(due) if due else None}
 
 

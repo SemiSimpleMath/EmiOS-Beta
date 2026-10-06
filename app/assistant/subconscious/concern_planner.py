@@ -210,7 +210,7 @@ def write_plan(concern: Dict[str, Any], bucket: str, *, invoke: Optional[Callabl
 
 def run_planners(*, invoke=None, register_connect=None, list_connect=None) -> Dict[str, Any]:
     """Plan every matter concern that needs it, and apply each plan's changes to the concern's entries on the
-    brain's list once the plan is stored. Free when none does."""
+    brain's list, then store the plan. Free when none does."""
     from app.assistant.subconscious import persist
     from app.assistant.subconscious.concern_store import load_register
     todo = stale(load_register(connect=register_connect))
@@ -232,11 +232,26 @@ def run_planners(*, invoke=None, register_connect=None, list_connect=None) -> Di
             persist.set_concern_plan(cid, from_brief, error=f"{type(exc).__name__}: {exc}", connect=register_connect)
             failed += 1
             continue
-        if persist.set_concern_plan(cid, from_brief, plan=plan, connect=register_connect):
-            from app.assistant.subconscious import brain_list
-            now = datetime.now(timezone.utc)
-            listed = brain_list.apply_concern(cid, changes, cause=f"concern plan {now.isoformat()}", at=now,
-                                              connect=list_connect)
+        from app.assistant.subconscious import brain_list
+        now = datetime.now(timezone.utc)
+        listed = {}
+
+        def apply_entries(cid=cid, changes=changes, now=now):
+            listed.update(brain_list.apply_concern(cid, changes, cause=f"concern plan {now.isoformat()}", at=now,
+                                                   connect=list_connect))
+        # The entries land before the plan is stored (persist.set_concern_plan): a plan is current only once
+        # its entries are on the list. A failure applying them stores nothing: the concern is planned again.
+        try:
+            stored = persist.set_concern_plan(cid, from_brief, plan=plan, before_store=apply_entries,
+                                              connect=register_connect)
+        except Exception as exc:
+            logger.error("[plan] %s: its entries could not be put on the list; no plan stored, planned again next "
+                         "pass: %s", cid, exc, exc_info=True)
+            step("plan", "entries not applied: no plan stored, planned again", subject=cid,
+                 error=f"{type(exc).__name__}: {exc}")
+            failed += 1
+            continue
+        if stored:
             step("plan", "written", subject=cid, plan=plan, entries=changes, list_changes=listed)
             written += 1
         else:
