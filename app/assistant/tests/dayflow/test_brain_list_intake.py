@@ -49,7 +49,8 @@ def _deliver(scratch, config=LIVE, at=NOW):
 
 def test_with_every_lane_off_nothing_happens(scratch):
     _decide(scratch[0])
-    assert _deliver(scratch, OFF) == {"created": [], "revised": [], "ended": [], "recorded": [], "dry_run": []}
+    assert _deliver(scratch, OFF) == {"created": [], "revised": [], "ended": [], "recorded": [], "dry_run": [],
+                                      "failed": []}
     assert _store().list_work_objects() == []
 
 
@@ -178,3 +179,21 @@ def test_a_closed_concern_cancels_its_open_entries_and_its_work_ends(scratch, mo
     assert _deliver(scratch, config, at=later)["ended"] == [work_id]
     [instruction] = _store().load(work_id).constraints["architect_instructions"]
     assert instruction["kind"] == "end" and "The owner recharged it this morning." in instruction["reason"]
+
+
+def test_one_entry_that_fails_is_left_for_the_next_tick_and_the_others_go_on(scratch, monkeypatch):
+    lst, _ = scratch
+    _decide(lst, belief="B3")
+    _decide(lst, belief="B4")
+    real = B.brief
+
+    def brief(entry):
+        if entry["belief_key"] == "B3":
+            raise KeyError("no day's-tasks run decided B3")
+        return real(entry)
+    monkeypatch.setattr(B, "brief", brief)
+    out = _deliver(scratch)
+    assert out["failed"] == [L.calendar_id(DAY, "B3")] and len(out["created"]) == 1
+    monkeypatch.setattr(B, "brief", real)
+    retry = _deliver(scratch)
+    assert retry["failed"] == [] and len(retry["created"]) == 1, "the failed entry is delivered on the next tick"

@@ -94,7 +94,8 @@ def objective(entry: Dict[str, Any]) -> str:
 
 def brief(entry: Dict[str, Any]) -> str:
     """The entry with what it serves in full: the concern as the brain's agents read it and the emails and messages
-    it came from word for word, or the calendar belief with the beliefs read beside it."""
+    it came from word for word, or the calendar belief with the beliefs read beside it, as the run that decided the
+    entry saw them (day_tasks.decided_placement)."""
     from app.assistant.dayflow_orchestrator.work_context import render_view
     concern_text, belief, sources = "", None, []
     if entry["kind"] == "concern":
@@ -110,14 +111,8 @@ def brief(entry: Dict[str, Any]) -> str:
         concern_text = render_concern(concern, bucket)
         sources = [_evidence_text(e) for e in concern.get("evidence") or []]
     else:
-        from app.assistant.subconscious import day_plan
-        from app.assistant.subconscious.day_tasks import placements
-        plan = day_plan.load_plan(entry["day"])
-        placed = [p for p in placements(plan) if p["belief_key"] == entry["belief_key"]] if plan else []
-        if not placed:
-            raise KeyError(f"brain list entry {entry['id']}: belief {entry['belief_key']} is not placed on "
-                           f"{entry['day']}")
-        belief = placed[0]
+        from app.assistant.subconscious.day_tasks import decided_placement
+        belief = decided_placement(entry["day"], entry["belief_key"])
     return render_view("brain_entry_brief", entry={**entry, "times": entry.get("placement_time") or ""},
                        concern_text=concern_text, belief=belief, sources=sources).strip()
 
@@ -162,7 +157,10 @@ def _decide(entry: Dict[str, Any], work: Optional[Dict[str, Any]]) -> str:
 def deliver(store, *, now_utc: Optional[datetime] = None, connect=None, list_connect=None,
             lane_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Act on every change on the brain's list not yet delivered in its lane's mode, one entry at a time (its newest
-    state stands for all its changes). Returns {created, revised, ended, recorded, dry_run} work and entry ids."""
+    state stands for all its changes). Returns {created, revised, ended, recorded, dry_run} work and entry ids, and
+    `failed`: entries whose action raised. Reading the list raises; one entry's failure is logged ERROR and left
+    undelivered for the next tick, and the other entries go on (2026-10-05: until then one entry that could not be
+    briefed stopped every planning tick)."""
     from app.assistant.subconscious import brain_list
     from app.assistant.subconscious.brain_trace import step
     now = now_utc or datetime.now(timezone.utc)
@@ -170,7 +168,8 @@ def deliver(store, *, now_utc: Optional[datetime] = None, connect=None, list_con
     ensure_schema(connect)
     brain_list.ensure_schema(list_connect)
     config = lane_config or lanes()
-    out: Dict[str, List[Any]] = {"created": [], "revised": [], "ended": [], "recorded": [], "dry_run": []}
+    out: Dict[str, List[Any]] = {"created": [], "revised": [], "ended": [], "recorded": [], "dry_run": [],
+                                 "failed": []}
     if config["calendar"]["mode"] == "off" and config["concern"]["mode"] == "off":
         return out
     with (list_connect or _connect)(False) as c:
@@ -188,48 +187,60 @@ def deliver(store, *, now_utc: Optional[datetime] = None, connect=None, list_con
         return out
     by_entry = _work_by_entry()
     for entry_id, change_ids in pending.items():
-        entry = entries[entry_id]
-        mode = _lane_mode(entry, config)
-        work = by_entry.get(entry_id)
-        action = _decide(entry, work)
-        work_id = work["id"] if work else None
-        if mode == "dry_run":
-            out["dry_run"].append({"entry": entry_id, "action": action, "work_id": work_id})
-            step("list_intake", f"dry run: would {action}", subject=entry_id, work_id=work_id, outcome=entry["what"])
-        elif action == "create":
-            wo = store.apply("create_work_object", _shell(entry), actor="brain")
-            store.apply("set_status", {"work_id": wo.id, "node_id": wo.goal_node_id, "status": "dispatched"},
-                        actor="brain")
-            from app.assistant.subconscious.concern_feedback import propagate_work_outcome
-            propagate_work_outcome(store, wo.id, "attached")
-            work_id = wo.id
-            out["created"].append(wo.id)
-        elif action == "revise":
-            from app.assistant.dayflow_orchestrator.work_intake import goal_update
-            wo = store.load(work_id)
-            update = goal_update(wo, objective=objective(entry), success_criteria=entry["what"])
-            update["constraints"]["rationale"] = brief(entry)
-            reason = f"The brain revised the entry this goal was made from: {entry['why']}"
-            store.apply("batch", {"work_id": work_id, "operations": [
-                {"op": "revise_goal", "data": update},
-                {"op": "instruct_goal", "data": {"kind": "replan", "reason": reason}}]}, actor="brain")
-            out["revised"].append(work_id)
-        elif action == "end":
-            reason = entry["why"] if entry["status"] != "cancelled" else f"cancelled on the brain's list: {entry['why']}"
-            store.apply("instruct_goal", {"work_id": work_id, "kind": "end", "reason": f"The brain: {reason}"},
-                        actor="brain")
-            out["ended"].append(work_id)
-        elif action == "work_ended_not_reopened":
-            out["recorded"].append(entry_id)
-        if mode == "live":
-            step("list_intake", action, subject=entry_id, work_id=work_id, outcome=entry["what"])
-        with connect(True) as c:
-            c.executemany("INSERT OR IGNORE INTO brain_list_deliveries (change_id, mode, entry_id, at, action, work_id) "
-                          "VALUES (?,?,?,?,?,?)",
-                          [(cid, mode, entry_id, now.isoformat(), action, work_id) for cid in change_ids])
-    logger.info("[brain_list_intake] created=%s revised=%s ended=%s recorded=%s dry_run=%s", out["created"],
-                out["revised"], out["ended"], out["recorded"], out["dry_run"])
+        try:
+            _deliver_entry(store, entries[entry_id], change_ids, by_entry.get(entry_id), config, now, connect, out)
+        except Exception as exc:
+            logger.error("[brain_list_intake] entry %s could not be delivered; left for the next tick: %s",
+                         entry_id, exc, exc_info=True)
+            step("list_intake", "failed: left for the next tick", subject=entry_id, error=f"{type(exc).__name__}: {exc}")
+            out["failed"].append(entry_id)
+    logger.info("[brain_list_intake] created=%s revised=%s ended=%s recorded=%s dry_run=%s failed=%s", out["created"],
+                out["revised"], out["ended"], out["recorded"], out["dry_run"], out["failed"])
     return out
+
+
+def _deliver_entry(store, entry: Dict[str, Any], change_ids: List[int], work: Optional[Dict[str, Any]],
+                   config: Dict[str, Any], now: datetime, connect, out: Dict[str, List[Any]]) -> None:
+    """Act on one entry's undelivered changes and record them delivered."""
+    from app.assistant.subconscious.brain_trace import step
+    entry_id = entry["id"]
+    mode = _lane_mode(entry, config)
+    action = _decide(entry, work)
+    work_id = work["id"] if work else None
+    if mode == "dry_run":
+        out["dry_run"].append({"entry": entry_id, "action": action, "work_id": work_id})
+        step("list_intake", f"dry run: would {action}", subject=entry_id, work_id=work_id, outcome=entry["what"])
+    elif action == "create":
+        wo = store.apply("create_work_object", _shell(entry), actor="brain")
+        store.apply("set_status", {"work_id": wo.id, "node_id": wo.goal_node_id, "status": "dispatched"},
+                    actor="brain")
+        from app.assistant.subconscious.concern_feedback import propagate_work_outcome
+        propagate_work_outcome(store, wo.id, "attached")
+        work_id = wo.id
+        out["created"].append(wo.id)
+    elif action == "revise":
+        from app.assistant.dayflow_orchestrator.work_intake import goal_update
+        wo = store.load(work_id)
+        update = goal_update(wo, objective=objective(entry), success_criteria=entry["what"])
+        update["constraints"]["rationale"] = brief(entry)
+        reason = f"The brain revised the entry this goal was made from: {entry['why']}"
+        store.apply("batch", {"work_id": work_id, "operations": [
+            {"op": "revise_goal", "data": update},
+            {"op": "instruct_goal", "data": {"kind": "replan", "reason": reason}}]}, actor="brain")
+        out["revised"].append(work_id)
+    elif action == "end":
+        reason = entry["why"] if entry["status"] != "cancelled" else f"cancelled on the brain's list: {entry['why']}"
+        store.apply("instruct_goal", {"work_id": work_id, "kind": "end", "reason": f"The brain: {reason}"},
+                    actor="brain")
+        out["ended"].append(work_id)
+    elif action == "work_ended_not_reopened":
+        out["recorded"].append(entry_id)
+    if mode == "live":
+        step("list_intake", action, subject=entry_id, work_id=work_id, outcome=entry["what"])
+    with connect(True) as c:
+        c.executemany("INSERT OR IGNORE INTO brain_list_deliveries (change_id, mode, entry_id, at, action, work_id) "
+                      "VALUES (?,?,?,?,?,?)",
+                      [(cid, mode, entry_id, now.isoformat(), action, work_id) for cid in change_ids])
 
 
 def work_of(entry_ids: List[str]) -> Dict[str, Dict[str, Any]]:

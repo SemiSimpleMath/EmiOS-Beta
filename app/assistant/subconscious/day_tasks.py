@@ -243,6 +243,26 @@ def _agent_call(payload: Dict[str, Any]) -> Any:
                                    scope_id="subconscious::day_tasks", actor_id="subconscious::day_tasks")
 
 
+def decided_placement(day: str, belief_key: str, *, connect=None) -> Dict[str, Any]:
+    """The placement of `belief_key` as the newest run that decided it saw it (brain_day_decisions): its times,
+    statement and related beliefs. What a calendar entry was decided from, read by the work made from it
+    (dayflow_orchestrator/brain_list_intake.brief). Not the current plan: the day pass re-places the day as its
+    inputs change and a belief can drop out of a run and return, and a brief read from the plan then raised and
+    stopped every planning tick until it returned (found 2026-10-05, before the calendar lane went live). Raises
+    when no run decided it."""
+    connect = connect or _connect
+    ensure_schema(connect)
+    with connect(False) as c:
+        rows = c.execute("SELECT items, decisions FROM brain_day_decisions WHERE day = ? ORDER BY id DESC",
+                         (day,)).fetchall()
+    for r in rows:
+        decided = {d["item"] for d in json.loads(r["decisions"])}
+        for it in json.loads(r["items"]):
+            if it["belief_key"] == belief_key and it["label"] in decided:
+                return {k: it[k] for k in ("belief_key", "times", "statement", "related")}
+    raise KeyError(f"no day's-tasks run on {day} decided {belief_key}")
+
+
 def _last_fingerprint(day: str, connect) -> Optional[str]:
     with connect(False) as c:
         row = c.execute("SELECT fingerprint FROM brain_day_decisions WHERE day = ? ORDER BY id DESC LIMIT 1",

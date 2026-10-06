@@ -266,3 +266,18 @@ def test_a_run_whose_entries_fail_is_not_recorded_and_decides_again(tmp_path, mo
     monkeypatch.setattr(L, "apply_calendar", real)
     out = D.run_day_tasks(now_utc=NOW, connect=conn, gather_inputs=_gather(conn), call=lambda p: GOOD)
     assert out["day_tasks"] == "decided" and out["day_list_changes"]["created"] == 3
+
+
+def test_an_entry_is_briefed_from_the_run_that_decided_it_not_the_current_plan(tmp_path):
+    """The day pass re-places the day; a belief can drop out of the plan and return. The brief read the current plan
+    and raised, stopping every planning tick until the belief returned (found 2026-10-05)."""
+    conn = sqlite_file(tmp_path / "d.db")
+    D.run_day_tasks(now_utc=NOW, connect=conn, gather_inputs=_gather(conn), call=lambda p: GOOD)
+    later = NOW + timedelta(minutes=10)
+    D.run_day_tasks(now_utc=later, connect=conn, gather_inputs=_gather(conn, "dinner is at 6 as usual"),
+                    call=lambda p: {"decisions": []})                         # a later run that decided nothing
+    placed = D.decided_placement(DAY, "B3", connect=conn)
+    assert placed["statement"] == "The owner wants the AC at 70 at 9 PM." and placed["times"] == ["9:00 PM"]
+    assert placed["related"] == ["The owner likes it quiet."]
+    with pytest.raises(KeyError):
+        D.decided_placement(DAY, "B404", connect=conn)
