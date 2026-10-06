@@ -21,6 +21,10 @@ user_context_items:
   - date_time
   - day_of_week
   - task
+  # The concern's current entries on the brain's list (concern_planner._invoke passes them as the Message's
+  # information). Undeclared until 2026-10-05: the prompt rendered "(nothing yet)", so the decider could not modify
+  # or cancel an entry by its id.
+  - information
   - recent_history
 
 system_context_items:
