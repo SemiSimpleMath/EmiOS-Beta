@@ -1,8 +1,17 @@
 {#- A concern's entries on the brain's list (brain_list.entries), as the concern's tasks agent and its planner read
-    them, each with the work made from it (`work`, or None). Expects `entries`. Times local. -#}
+    them, each with the work made from it (`work`, or None), then the entries it cancelled earlier with why (`cancelled`,
+    optional; 2026-10-06: the decider re-created a question it had cancelled the night before, not seeing it).
+    Expects `entries`. Times local. -#}
 {% for e in entries -%}
 - [{{ e.id }}] {{ e.what }} | the assistant: {{ e.assistant_part }} | when: {{ e.when_local }} | {{ e.status }}, decided {{ e.updated_at | local_time }}
 {% if e.work is defined and e.work %}{% with w = e.work, pad = "  " %}{% include 'shared/brain/entry_work.j2' %}{% endwith %}{% endif -%}
 {% else -%}
 (nothing yet)
 {% endfor %}
+{%- if cancelled is defined and cancelled %}
+Cancelled earlier (a record of decisions already made, not entries to change; an outcome cancelled here is asked for
+again only on something new since its cancellation):
+{% for e in cancelled -%}
+- [{{ e.id }}] {{ e.what }} | the assistant: {{ e.assistant_part }} | cancelled {{ e.updated_at | local_time }}: {{ e.why }}
+{% endfor %}
+{%- endif %}

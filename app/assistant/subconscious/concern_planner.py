@@ -188,9 +188,11 @@ def write_plan(concern: Dict[str, Any], bucket: str, *, invoke: Optional[Callabl
     now = datetime.now(timezone.utc)
     from app.assistant.dayflow_orchestrator.brain_list_intake import work_of
     current = brain_list.entries(concern_id=concern["concern_id"], connect=list_connect)
+    cancelled = [e for e in brain_list.entries(concern_id=concern["concern_id"], include_cancelled=True,
+                                               connect=list_connect) if e["status"] == "cancelled"]
     work = work_of([e["id"] for e in current])
     entries_text = _ENV.get_template("shared/brain/concern_entries.j2").render(
-        entries=[{**e, "work": work.get(e["id"])} for e in current]).strip()
+        entries=[{**e, "work": work.get(e["id"])} for e in current], cancelled=cancelled).strip()
     data = (invoke or _invoke)(concern_text(concern, bucket), entries_text)
     found = problems(data, now, [e["id"] for e in current])
     if found:

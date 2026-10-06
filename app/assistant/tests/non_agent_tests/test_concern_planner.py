@@ -184,3 +184,19 @@ def test_a_plan_whose_entries_fail_is_not_stored_and_is_planned_again(tmp_path, 
     assert concern_planner.run_planners(invoke=invoke, register_connect=reg.connect,
                                         list_connect=lst)["plans_written"] == 1
     assert [e["what"] for e in brain_list.entries(concern_id="c-club", connect=lst)] == ["Guests told"]
+
+
+def test_the_decider_sees_what_it_cancelled_and_why(tmp_path):
+    """2026-10-06: the decider re-created a question it had cancelled the night before; it saw only open entries."""
+    reg = ScratchRegister(tmp_path).write({**EMPTY, "active": [_briefed(_matter())]})
+    lst = sqlite_file(tmp_path / "list.db")
+    brain_list.apply_concern("c-club", [_new("Guests told", part="ask the owner whether the guests were told")],
+                             cause="plan", at=NOW, connect=lst)
+    [e] = brain_list.entries(concern_id="c-club", connect=lst)
+    brain_list.apply_concern("c-club", [{"entry": e["id"], "action": "cancel", "why": "The evening has passed."}],
+                             cause="plan", at=NOW, connect=lst)
+    seen = []
+    concern_planner.run_planners(invoke=lambda task, info: seen.append(info) or {"decision": "no_action", "why": "w"},
+                                 register_connect=reg.connect, list_connect=lst)
+    assert seen[0].startswith("(nothing yet)")
+    assert "Cancelled earlier" in seen[0] and "Guests told" in seen[0] and "The evening has passed." in seen[0]
