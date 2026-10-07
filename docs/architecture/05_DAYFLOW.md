@@ -1,14 +1,16 @@
 # Dayflow Orchestrator
 
 The Dayflow Orchestrator is the autonomous daily workflow engine — a background "day planner AI" that
-continuously turns intake (the brain's concern handoffs, calendar-driven routine, pods) into executed work,
-reminders, and questions for the user.
+continuously turns the work the brain decides exists (its list: the day's calendar tasks and concern tasks)
+into executed work, reminders, and questions for the user.
 
 ## Core Philosophy
 
-**Everything actionable is a WORK OBJECT** — a goal plus a small DAG of typed nodes in a durable,
-event-sourced graph store. Even a one-shot action is a one-node work object. Items (the older Message
-substrate) are intake and context only; the evaluator is the sole path from intake to action.
+**Everything actionable is a WORK OBJECT** — a goal plus a small DAG of typed nodes in a durable
+graph store (current-state tables plus a mutation-input audit log). Even a one-shot action is a
+one-node work object. Items (the older Message substrate) are intake and context only. Work objects
+are created from the brain's list by the list-item intake (see "Brain list intake" below); the
+evaluator (steward) path is retired behind `configs/brain_lanes.json` `steward.mode`.
 The substrate itself — model, store, invariants, wake primitives, runtime, and every graph writer —
 has its own reference: [08_WORK_OBJECTS.md](08_WORK_OBJECTS.md).
 
@@ -20,7 +22,8 @@ Sharp role separation, one bounded LLM judgment per role, deterministic mechanic
 
 | Role | Decides | Deterministic guard |
 |------|---------|---------------------|
-| evaluator (`strategic_planner_wo`) | WHAT work exists (create/change/re-plan/complete/abandon) | `work_persist` applies; intake consumed with provenance |
+| the brain (its list, `subconscious/brain_list.py`) | WHAT work exists (create / revise / end, per list entry) | `brain_list_intake` turns each list change into a shell, a revision + re-plan instruction, or an end instruction, once per change |
+| evaluator (`strategic_planner_wo`) — RETIRED (`steward.mode: retired`) | formerly WHAT work exists (create/change/re-plan/request an end) | `work_persist` applies; intake consumed with provenance; the stage is skipped while retired |
 | work_architect | the STRUCTURE of one goal (DAG + wake gates + dedupe) | `work_architect_apply` projects the delta; a dedupe prune is licensed only after the named survivor is verified live |
 | state_mover | did the awaited event arrive; is now the wrong moment | promotion itself is deterministic `is_ready` (time + deps) |
 | switchboard | WHERE one ready node goes, by READING its goal | two routes only: ticket the user, or run the worker |
@@ -29,20 +32,25 @@ Sharp role separation, one bounded LLM judgment per role, deterministic mechanic
 
 `work_repair` was retired on 2026-09-16; its three dispositions moved to the finalizer's verdicts
 (retry -> `retry`, which must NAME what will differ; escalate -> `unrecoverable` + `ask_user`, and the
-architect plans the ask; abandon -> `unrecoverable` + `stop` for a branch, the steward for a whole goal).
-Its files remain on disk, unwired. The repeated-failure bound is `work_finalizer_node._REPEAT_FAILURE_LIMIT`
-against the goal's `goal_unmet_attempts` (2026-09-17).
+architect plans the ask; abandon -> `unrecoverable` + `stop` for a branch, the architect's `end_goal` for a
+whole goal). Its files remain on disk, unwired. The repeated-failure bound is
+`work_finalizer_node._REPEAT_FAILURE_LIMIT`, applied in `WorkStore._op_finalize_task` against the goal's
+`goal_unmet_since_progress` (reset by an achieved verdict; `goal_unmet_attempts` keeps lifetime history).
 
 ## Architecture
 
 ```
 DayflowScheduler (event-driven, debounced; precise per-node time wakes; work-progress follow-ups)
   -> dayflow_orchestrator_cadence_tick()
-    -> run_dayflow_ingestion()          (chat / email as wake context; pods -> items table)
+    -> run_dayflow_ingestion()          (chat / email -> items, wake context only; pod intake retired 2026-10-05)
     -> four sweeps                      (legacy stale / orphaned / zombie items, then stuck work nodes)
+    -> recover_pending_finalizations()  (judge recorded-but-unjudged results; never reruns a tool)
     -> Invoke dayflow_orchestrator_manager (state_map order):
-         intake_triage -> triage_persist
-           -> strategic_planner_wo (EVALUATOR) -> strategic_planner_wo_persist
+         intake_triage -> triage_spawn_guard -> triage_persist
+           -> strategic_planner_wo_prep
+                (steward retired: skips the model + persist, routes straight to brain_list_intake)
+              -> strategic_planner_wo (EVALUATOR) -> strategic_planner_wo_persist
+           -> brain_list_intake_node   (work from the brain's list, per live lane)
            -> work_architect_node
            -> state_mover -> state_mover_persist (node promotion + event wakes)
            -> work_node_materializer -> action_selector -> switchboard
@@ -86,9 +94,48 @@ scheduler's `_run_gate` for the length of a manager invocation. A wake is its ow
 fall into. (It used to be a routing hint inside the orchestrator that the router never saw, so every
 wake ran the full pipeline.)
 
+## Brain list intake (2026-10-05)
+
+The brain decides what work exists and keeps it as entries on its list (`subconscious/brain_list.py`,
+tables `brain_list_entries` and `brain_list_changes` in emi.db). Entry kinds: calendar placements
+(`cal:<day>:<belief_key>`), concern tasks (`con:<hex>`), and the day's tasks' own entries
+(`day:<day>:<hex>`, which ride the calendar lane by their day). `configs/brain_lanes.json`, read fresh
+on every tick, switches each lane `off` / `dry_run` / `live`: the calendar lane from `from_day`, the
+concern lane from `since`. A live lane stops reaching the steward. Today both lanes are live and
+`steward.mode` is `retired`.
+
+`brain_list_intake_node` runs after `strategic_planner_wo_persist_node` and before
+`work_architect_node`; the logic is `dayflow_orchestrator/brain_list_intake.py::deliver`. For each
+entry with undelivered changes in a non-off lane it acts on the entry's newest state, by code (it
+judges nothing):
+
+- **create** — decided needed, no work yet: a work-object shell (goal only; objective = what + when,
+  success = what, `rationale` = the entry's brief with its concern or belief in full,
+  `constraints.list_entry_id`), `concern_refs` for a concern entry, `belief_refs` for a calendar
+  entry; the goal is set `dispatched` and the concern is told it is attached;
+- **revise** — changed while its work is active: one batch of `revise_goal` + `instruct_goal`
+  `kind=replan` with the brain's reason;
+- **end** — cancelled or decided not needed while its work is active: `instruct_goal` `kind=end`;
+- **work_ended_not_reopened** — changed after its work ended: recorded only; a done entry runs again
+  only by a new decision.
+
+Each change is recorded once per mode in `brain_list_deliveries`; a dry run records its own marker and
+acts on nothing. One entry's failure is logged ERROR and left for the next tick; a failure to read the
+list raises.
+
+The architect picks the work up in the same tick: a shell is a work object with no tasks, which
+`work_architect_node._undecomposed_goals` finds and decomposes like any new goal, and the replan / end
+instructions are `constraints.architect_instructions`, which wake the architect for that work object
+(the brain's replan licenses prunes like a user directive).
+
 ## The work object lifecycle
 
-**Creation.** The evaluator judges the portfolio + new intake each tick and emits only WHAT changed:
+**Creation.** Today work is created from the brain's list (see "Brain list intake" above); the
+evaluator below is retired (`steward.mode: retired`): `strategic_planner_wo_prep_node` still
+recovers pending concern/belief feedback and builds the shared portfolio, then skips the model call
+and persist, sets empty `replan_work_ids`, logs an ERROR if admitted intake items remain (they have
+no reviewer), and routes to `brain_list_intake_node`. With the steward on, the evaluator judges the
+portfolio + new intake each tick and emits only WHAT changed:
 new/changed objectives (with a prose `rationale` brief for the architect and `based_on` provenance),
 `replan_work_ids`, and `end_requests` (a work object it judges should end, with the reason, for the
 architect to decide; 2026-09-30, see "Goal ownership" below). Consumed intake items are closed
@@ -115,7 +162,9 @@ decides delivery, the architect never picks channels. On re-plan the architect e
 plus `abandon_node_ids` for moot branches (pruned recursively, finished nodes kept as a record).
 
 **Readiness and promotion.** `is_ready` (substrate, deterministic) = status in
-proposed/waiting/actionable + `wake_at` passed + all `depends_on` satisfied. The state_mover persist node promotes every ready main task (direct subtask child of the goal) to
+proposed/waiting/actionable + not parked on an `event`/`signal` wake + `wake_at` passed + all
+`depends_on` satisfied; for a main task the work object must also be `active` with no pending
+finalizer revision. The state_mover persist node promotes every ready main task (direct subtask child of the goal) to
 `actionable`; the state_mover LLM may HOLD a few (`held_work_nodes` with `reactivate_at`) for quiet
 hours / meetings / user-away — the worst LLM failure is "acted when it could have waited", never a stuck
 node. External-event (`wake_ref`) nodes are never promoted; the state_mover wakes them via `node_wakes`
@@ -195,7 +244,7 @@ account of what was found and what was not. Then:
 
 `retry` must name the difference: re-running a step whose circumstances have not changed reproduces
 its error. A single node's result never ends a whole work object; a finalizer that thinks the goal is
-finished or moot says so in `outcome` and the steward rules next tick.
+finished or moot says so in `outcome` (with a `stop` route) and the architect ends it next tick.
 
 **Verdicts persist on the NODE**, not in memory: `nodes.payload.finalizer`, beside the terminal
 epitaph. The architect that acts on a route runs on a LATER tick, and every tick builds
@@ -204,23 +253,24 @@ exists. `work_architect_node._pending_finalizer_instructions` reads them off the
 the atomic architect batch stamps the exact instruction it consumed, so a judgment made ticks ago stops arriving as fresh
 advice. When all of the goal's children are closed, the store's rollup completes the work object.
 
-**Closure is a transition with obligations (2026-07-31).** Entering `done`/`abandoned` — via the
-steward or automatic rollup — cascade-abandons every still-startable node
+**Closure is a transition with obligations (2026-07-31).** Entering `done`/`abandoned` — via an
+explicit `set_work_status` (the architect's `end_goal`, the /work UI) or automatic rollup — cascade-abandons every still-startable node
 (proposed/actionable/waiting/failed) and clears its wakes, so a closed object can never fire again;
 `WorkObject.validate()` enforces the invariant (a terminal object holding a startable node is a
 write-time error), and `repair_terminal_zombies()` healed pre-cascade rows at boot. Motivation: a
 `done` object's leftover `waiting` node kept an armed timer and ghost-ticketed the user a day later.
-If the closed work object carries `concern:` provenance (`constraints.concern_refs`, forwarded from
-the evaluator's `based_on`), the outcome — with the user's recorded words — back-propagates to the
+If the closed work object carries `concern:` provenance (`constraints.concern_refs`, set from a
+concern list entry by the list-item intake, or forwarded from the evaluator's `based_on`), the outcome — with the user's recorded words — back-propagates to the
 subconscious concerns register and triggers a cooldown-guarded noticer rerun
 (`subconscious/concern_feedback.py`, 2026-08-01).
 
 **Failure.** A node judged not-achieved carries the finalizer's verdict: `retry` re-opens it to the architect's
 inbox with what will be different; `unrecoverable` leaves it failed with a typed route the architect
 acts on next tick (prune the branch, plan a different approach, or plan the ONE node that asks the
-user the given question). The steward sees the same outcome/recommendation on the node in the
-portfolio (`FINALIZER (...)` / `RECOMMENDS` / `ASK THE USER` lines) and decides what becomes of the
-goal. A failed node still blocks its goal (`is_satisfied` requires `closed`).
+user the given question). The architect, which owns the goal to its end, decides what becomes of
+the goal. (With the steward on, it also saw the outcome/recommendation in the portfolio's
+`FINALIZER (...)` / `RECOMMENDS` / `ASK THE USER` lines.) A failed node still blocks its goal
+(`is_satisfied` requires `closed`).
 
 Dispatch-manager aborts/exceptions and inactivity timeouts use the common result recorder. Cadence resumes unjudged results without rerunning their tools. A swept timeout is eligible even if the old worker thread remains alive; stale results cannot overwrite it.
 
@@ -228,7 +278,8 @@ Dispatch-manager aborts/exceptions and inactivity timeouts use the common result
 
 `dayflow_scheduler.py` — event-driven with two-tier throttling:
 - `DEBOUNCE_SECONDS=60`, `MIN_GAP_SECONDS=120` (mutual-exclusion floor), `POKE_MIN_INTERVAL_SECONDS=600`
-  (delta pokes: chat/email/AFK/ticket), `MAX_CEILING_SECONDS=1800`, `STARTUP_TICK_DELAY_SECONDS=45`.
+  (delta pokes: `repo_update` for email/calendar/todo/scheduler events, AFK return, ticket response,
+  concern handoff), `MAX_CEILING_SECONDS=1800`, `STARTUP_TICK_DELAY_SECONDS=45`.
 - **Precise work-node wakes**: one APScheduler one-shot per time-gated node (`dayflow_work_wake::` jobs,
   re-armed after ticks and wake passes, restart-safe from the durable store; obsolete jobs are removed). Firing opens
   **`dayflow_wake_manager`** (`_fire_work_node`) — the WAKE PASS: `work_node_wake_prep_node` stages the
@@ -253,8 +304,9 @@ Dispatch-manager aborts/exceptions and inactivity timeouts use the common result
 ## Persistent state — two substrates
 
 **Work objects** (`work_objects/` substrate): five tables in emi.db (`work_objects`, `nodes`, `edges`,
-`events`, `actions`), opened via `dayflow_orchestrator/work_store.py`. The append-only event log is the source of
-truth; nodes/edges are the rebuildable projection; every mutation is one short atomic transaction through
+`events`, `actions`), opened via `dayflow_orchestrator/work_store.py`. The graph tables hold current
+state; the `events` log records each mutation's inputs (an audit trail, not replayable: generated ids
+and cascade details are not captured); every mutation is one short atomic transaction through
 `WorkStore.apply` (allowed transitions per node family, authority ceilings, structural validation,
 derived rollup). `DAYFLOW_WORK_DB` overrides the path for tests.
 
@@ -262,11 +314,12 @@ derived rollup). `DAYFLOW_WORK_DB` overrides the path for tests.
 `metadata.item_id`; numeric `short_id` for prompts; `state_store.py` reads, `dayflow_item_writer.py`
 writes (`ALLOWED_TRANSITIONS` enforced). Freshness windows age untouched items out of the agents' view
 (active >24h, closed >2h). Ingestion sources: cross-room chat (context, `closed`), important email
-(`artifact`, wake context only since 2026-09-30, never steward intake), allowlisted pods, and the brain's concern handoffs (`concern`, written straight to the inbox; master-room delegations were retired 2026-09-30). Calendar events are not
-ingested — the evaluator sees them via `resource_expected_calendar` and the routine overlay.
+(`artifact`, wake context only since 2026-09-30, never steward intake), and the brain's concern handoffs (`concern`, written straight to the inbox; none since the concern lane went live 2026-10-05). Master-room delegations were retired 2026-09-30 and pod intake 2026-10-05 (camera frames go to the brain's inbox). Calendar events are not
+ingested as items — the day's calendar reaches dayflow as the brain's calendar entries (calendar lane);
+with the steward on, the evaluator saw it via `resource_expected_calendar` and the routine overlay.
 
 **The item dispatch lane is gone (deleted 2026-09-16).** Items are intake and context only; the
-evaluator is the sole intake -> action path. The dormancy window closed with zero traffic — no item had
+path from intake to action is the brain's list (the evaluator, while it was on). The dormancy window closed with zero traffic — no item had
 armed a wake in the 30 days before removal — so the lane was removed rather than guarded: the
 scheduler's item-timer scan (now `_arm_ceiling_tick`, heartbeat only), the `fast_tick` /
 `triggered_item_id` plumbing, `fast_tick_promoter_node`, `view_materializer_node`,
@@ -299,7 +352,8 @@ ticket manager, not in dayflow items.
 ## Master Room Integration
 
 - User chat in `master_room` blocks dayflow for 180s (`MASTER_ROOM_BLOCK_SECONDS`) so it doesn't talk over them.
-- The master-room chat gate can delegate to dayflow (`dayflow_request` tagged messages, ingested next tick).
+- Master-room delegation to dayflow (`dayflow_request` tagged messages) was retired 2026-09-30; chat reaches
+  dayflow only as wake context (and through the brain, which reads every message).
 - Ticket responses poke the scheduler (`dayflow_ticket_responded`).
 
 ## Key Files
@@ -310,7 +364,12 @@ ticket manager, not in dayflow items.
 | `dayflow_orchestrator/dayflow_tick.py` | Cadence tick entry point |
 | `dayflow_orchestrator/ingestion.py` + `input_message_builder.py` | Per-source intake -> items |
 | `dayflow_orchestrator/work_store.py` | The dayflow WorkObject store (emi.db) |
-| `dayflow_orchestrator/work_persist.py` | Applies the evaluator's output (mint/change/complete/abandon) |
+| `configs/brain_lanes.json` | Lane switches (calendar / concern: off, dry_run, live) and `steward.mode` (on, retired); read every tick |
+| `dayflow_orchestrator/brain_list_intake.py` | Work from the brain's list: shell / revise + replan / end instruction per entry change; `brain_list_deliveries` |
+| `control_nodes/brain_list_intake_node.py` | Runs the list-item intake between the steward's persist node and the architect |
+| `dayflow_orchestrator/work_intake.py` | Durable source records, goal content and `goal_update` for creations and revisions |
+| `dayflow_orchestrator/intake_review.py` | Evaluator intake dispositions (no_action / defer with `reconsider_at`) |
+| `dayflow_orchestrator/work_persist.py` | Applies the evaluator's output (mint / change objective / record end requests as `instruct_goal`); unused while the steward is retired |
 | `dayflow_orchestrator/work_architect_apply.py` | Projects an architect DAG/delta onto the graph (+ licensed dedupe prunes) |
 | `dayflow_orchestrator/work_session.py` | Opens a dispatch room per claimed node; session registry; ask recovery at boot |
 | `dayflow_orchestrator/work_portfolio.py` | Strategic projection (failures loud, outcomes as node -> result) |
@@ -319,7 +378,7 @@ ticket manager, not in dayflow items.
 | `dayflow_orchestrator/dispatch_sweeper.py` | Tick sweeps (stale / orphaned / zombie) |
 | `control_nodes/strategic_planner_wo_prep/persist_node.py` | Evaluator context build / output apply |
 | `control_nodes/work_finalizer_node.py` | Judges one call's result AND writes the verdict (runs in the dispatch room) |
-| `control_nodes/work_architect_node.py` | Decompose new goals, re-plan flagged ones, read pending finalizer instructions |
+| `control_nodes/work_architect_node.py` | Decompose new and empty goals, re-plan woken ones (finalizer / goal instructions, stranded goals), end goals |
 | `control_nodes/dayflow_switchboard_arguments_node.py` / `dayflow_tool_caller.py` | Build the tool's arguments from the node; execute it |
 | `control_nodes/state_mover_prep/persist_node.py` | Waits + promotion candidates / promotion + node wakes |
 | `control_nodes/work_node_materializer_node.py` | Ready-node listing |
@@ -390,8 +449,8 @@ goal is finished or moot says so in `outcome` with a `stop` route, and the archi
 could read that instruction, since `_pending_finalizer_instructions` scans ACTIVE work objects only.
 A satisfied goal therefore holds while any node carries an unconsumed finalizer instruction with a
 `next_step`, until the architect consumes it. Only the automatic
-rollup defers: the steward's explicit `set_work_status` stays authoritative, because a person
-deciding a goal is over outranks a pending note about how to continue it.
+rollup defers: an explicit `set_work_status` (the architect's `end_goal`, the /work UI) stays
+authoritative, because a decision that a goal is over outranks a pending note about how to continue it.
 
 **No re-planning, but always re-judge the moment.** A work node's precise time-wake opens
 `dayflow_wake_manager`, a manager with no intake, evaluator or architect in its state_map — the
@@ -400,8 +459,9 @@ the pass to fall into if a routing step misfires. It does NOT skip the state_mov
 is a good moment is a fresh judgment every time, because the world moved since the timer was set (the
 user went to bed early, the meeting ran long, they are away). The state_mover sees exactly that one
 node; `work_node_wake_router_node` then dispatches it if it was left `actionable`, or ends the pass if
-it was held. The hold persists `reactivate_at` as `wake_at`, but the next ordinary planning tick
-must re-arm the timer: the wake pass currently performs no re-arm itself. A timed node is
+it was held. The hold persists `reactivate_at` as `wake_at`, and `_fire_work_node`'s `finally`
+always re-arms the work wakes (`_arm_work_node_wakes`, with a `MIN_GAP_SECONDS` floor after a failed
+pass), so a held node's timer does not wait for the next planning tick. A timed node is
 ready BECAUSE its time came: the state_mover's prompt says a boundary announcement ("work hours are
 over") is never held for the boundary it announces, and a hold moves by minutes, never to the next day.
 
@@ -435,11 +495,12 @@ node gets its own blackboard; what it needs arrives through the Message or as a 
 - **`ManagerInterface._run_on_child_node`** still puts a work-graph special case inside the generic
   manager-as-tool wrapper. Removing it requires retiring the `node_aware` sub-manager variants
   (`work_web_manager`) in favour of plain ones, which changes what every run records in the graph.
-- **A held wake needs the next planning tick to re-arm its timer.** `_fire_work_node` does not call
-  `_arm_work_node_wakes`; a short hold can therefore run later than its requested `reactivate_at`.
+- ~~A held wake needs the next planning tick to re-arm its timer.~~ Resolved: `_fire_work_node`'s
+  `finally` now always calls `_arm_work_node_wakes`.
 - **The steward re-mints actions that already ran.** Its only defence against duplicate goals is a
   prompt telling it to check the portfolio. Routine actions that ran this morning were minted again
-  as fresh work objects the same day.
+  as fresh work objects the same day. (Moot while the steward is retired: list-item work is keyed to
+  its entry id, and a delivered change is never acted on twice.)
 - **The ROUTINE reads as a backlog.** It is timing context ("judge the goal's timing against this")
   but is written as imperatives — "Issue the cooling-stop action" — and the architect turns lines
   into nodes.
@@ -447,15 +508,16 @@ node gets its own blackboard; what it needs arrives through the Message or as a 
   hardcoded tautology on every abandon (448 of 592 historic rows); the architect's `end_goal` now
   carries its reason. `propagate_work_outcome` then finds no user words, the
   originating concern stays active, and the goal is re-minted the next morning.
-- **The failure ceiling counts per goal, not per action.** `goal_unmet_attempts` survives a re-plan
-  but not the steward minting a fresh work object for the same action tomorrow. Catching that needs a
+- **The failure ceiling counts per goal, not per action.** `goal_unmet_since_progress` survives a
+  re-plan but not a fresh work object being minted for the same action tomorrow. Catching that needs a
   counter keyed on something more durable — the action and its target, roughly what the `actions`
   ledger records.
 
 
 ## Current durability and prompt contracts (2026-09-19)
 
-Admission persists an evaluator inbox across ticks using explicit `evaluator_pending=true` metadata. Legacy `triage_admit` classification alone does not enter this inbox. Pending admissions survive regardless of age; prompts display original source dates and do not treat historical deadlines as current urgency. New goals contain their source
+(While the steward is retired nothing reviews this inbox: evaluator prep logs an ERROR naming any
+admitted items that remain.) Admission persists an evaluator inbox across ticks using explicit `evaluator_pending=true` metadata. Legacy `triage_admit` classification alone does not enter this inbox. Pending admissions survive regardless of age; prompts display original source dates and do not treat historical deadlines as current urgency. New goals contain their source
 summaries, pod handles and success criteria in the creation write; changes retain
 those sources. Interrupted acknowledgments and empty-goal decomposition resume from
 the durable store. Ingestion saves destination items before cursor updates, scans
@@ -484,11 +546,11 @@ error code on the dispatched attempt. Explicit approval denial requires finaliza
 to stop the action even if a model suggests retrying. Ordinary recoverable child
 failures remain available to the parent for replanning.
 
-External wake persistence clears the waiting condition and appends the arrival
+External wake persistence clears the waiting condition and adds the arrival
 evidence in one version-checked store batch. Either both changes commit or neither
-does; failures leave the task gated. This currently retains evidence in task content.
-The version check covers the post-node load-to-save interval, not the earlier LLM
-matching snapshot or external-message identity.
+does; failures leave the task gated. The evidence is a separate child node
+(`context_role=external_wake`); the task directive is unchanged. The version fence
+is the work version captured before the LLM matching call (see the next section).
 
 ## Attributed external task context (2026-09-20)
 
@@ -566,8 +628,10 @@ the five graph tables. The finalizer remains responsible for judgment and failur
 
 ### Intake review lifecycle (DF33)
 
-All admitted source types follow the same lifecycle, including email, chat, delegation,
-and camera pods. The evaluator accounts for every presented item through a work-object
+(Applies while the steward is on. With `steward.mode: retired` no evaluator runs and
+admitted items stay pending, logged at ERROR by evaluator prep; email/chat are wake
+context only, and delegation and pod intake are retired.) All admitted source types
+follow the same lifecycle. The evaluator accounts for every presented item through a work-object
 `based_on` handoff or `intake_reviews`: `no_action` closes it with a reason;
 `defer` requires a reason and future timezone-aware `reconsider_at`. Deferred items return
 on the first normal planning cycle at/after that time. There is no extra model call or timer.
@@ -596,12 +660,18 @@ abandon cascaded over the question. Now the architect owns each work object from
 - its output gains `revise_objective` and `end_goal` (done | abandoned, with the reason), applied in
   its revision batch after the task changes (`revise_goal` first, since it writes the whole
   constraints; `set_work_status` last);
-- it is woken by a finalizer instruction, a steward end request, the steward's replan flags, or the
-  goal being stranded: active, not achieved, no judgment pending, and no task that can still run (in
-  flight, waiting on a time ahead or on the outside world, or runnable). A reviewed stranded state is
-  recorded (`record_goal_review`) and not reviewed again until it changes;
-- the steward's `end_requests` (work_id + reason) are recorded on the work object (`instruct_goal`);
-  the architect ends it or keeps it, marking them acted on (`consume_goal_instructions`);
+- it is woken by a finalizer instruction, a goal instruction on the work object
+  (`constraints.architect_instructions`: a steward end request, or the brain's `end` / `replan` from
+  the list-item intake), the steward's replan flags, or the goal being stranded: active, not
+  achieved, no judgment pending, and no task that can still run (in flight, waiting on a time ahead
+  or on the outside world, or runnable). A reviewed stranded state is recorded (`record_goal_review`)
+  and not reviewed again until it changes. Goals with no tasks yet — this tick's creations, the
+  brain's shells, and durable empty goals from a lost tick (`_undecomposed_goals`) — are decomposed.
+  The per-tick cap (`_MAX_REPLANS_PER_TICK = 3`) applies to re-plans only. A stranded goal or a brain
+  replan licenses prunes, like a finalizer verdict or a user directive;
+- end requests (work_id + reason; the steward's `end_requests`, or the brain's) are recorded on the
+  work object (`instruct_goal`); the architect ends it or keeps it, marking them acted on
+  (`consume_goal_instructions`);
 - concern and belief feedback for an ended goal is delivered after the architect's commit.
 
 The durable closure intents (`pending_work_closure`) and their execution barrier are retired with the
@@ -639,8 +709,9 @@ hear about (work_objects/concern_outbox.py): `attached` (the work cites a concer
 before, at creation or revision), `judged` (the finalizer judged one of its main tasks, whatever
 the verdict; the receipt carries the verdict, the account and the user's replies to that task),
 and `done`/`abandoned` (including automatic goal rollup). Receipts of one transaction keep their
-order. Dayflow delivers after creation, each judgment and explicit closure; evaluator prep
-retries pending receipts. Register failures or unknown concern refs leave receipts pending, and a
+order. Dayflow delivers after creation and revision (`brain_list_intake`, `work_persist`), each
+judgment (`work_finalizer_node`) and the architect's ending (`work_architect_node`); evaluator prep
+retries pending receipts on every tick, including while the steward is retired. Register failures or unknown concern refs leave receipts pending, and a
 work object's later receipts wait behind its first undelivered one. Per-concern receipt IDs prevent
 duplicate writes after partial delivery or a crash before acknowledgment. Generic WorkStore has
 no register/model side effects.

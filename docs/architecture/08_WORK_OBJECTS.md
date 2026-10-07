@@ -73,8 +73,8 @@ five core tables alongside `unified_log_2026`, allowing joins in one DB. Separat
 work/item writes do not thereby share a transaction; migration metadata adds `work_store_meta`. It is a per-path singleton with locked
 double-checked creation (audit W3 — two racing first-touches used to mint two stores with
 two separate RLocks), runs **two** one-time migrations, and runs `repair_terminal_zombies()`
-before returning a newly created singleton. Migration failures are logged and swallowed;
-obtaining the store does not prove both migrations succeeded. `DAYFLOW_WORK_DB` overrides the path (tests); the `work.db` /
+before returning a newly created singleton. Migration failures are logged and re-raised;
+the store is closed and not cached, so obtaining the store means both migrations succeeded. `DAYFLOW_WORK_DB` overrides the path (tests); the `work.db` /
 `business_run.db` files inside the package serve scenario harnesses only.
 
 The two migrations are worth knowing because they encode two model changes:
@@ -158,14 +158,15 @@ and transition tables. This persistence audit does not certify all their produce
 ### Ownership tree and relationship edges
 
 - **Ownership is a tree on `parent_id`** — ≤1 parent, roots NULL, acyclic (validated).
-  It carries decomposition. `add_node` compares authority only when both child and
-  immediate parent have explicit values; it does not resolve ancestor inheritance. Edges are never used for
+  It carries decomposition. When the new node has an explicit authority, `add_node` walks
+  every ancestor and refuses one above any explicit ancestor ceiling. Edges are never used for
   ownership, so the two representations cannot drift.
 - **Dependency/knowledge uses typed edges** in their own table (`depends_on`,
   `produces`, `verifies`, `answers`, `supports`, `supersedes`, `contradicts`,
   `references`) — relational and indexed because the ready-set query is the hot path.
-  A node owned once can be reused by many via edges. Validation checks endpoints,
-  not dependency cycles, self-links or duplicate relationships. A DAG remains the intent.
+  A node owned once can be reused by many via edges. `_op_add_edge` checks endpoints and,
+  for `depends_on`, refuses self-links, duplicates and cycles. Historical graphs are not
+  re-validated, and other relations are not cycle-checked.
 
 ### ActionRecord — what this goal actually DID to the outside world
 
@@ -193,8 +194,10 @@ target — the projection every planning pass reads before deciding to act again
 
 ### Derived, never stored
 
-`is_ready(node)` — status ∈ {proposed, waiting, actionable}, `wake_at` not in the
-future, and every `depends_on` source satisfied. `is_satisfied(node)` — keyed on
+`is_ready(node)` — status ∈ {proposed, waiting, actionable}, not parked on an
+`event`/`signal` wake (unless `ignore_external_wake`), `wake_at` not in the future, every
+`depends_on` source satisfied, and, for a main task, the work object `active` with no
+pending finalizer revision. `is_satisfied(node)` — keyed on
 `satisfied_when_kind` (`tool_success`/`user_signoff` → status `closed`;
 `all_owned_children_done` → nonempty set of ALL `parent_id` children recursively; `verified_by` → the ref
 node `passed`; default → a terminal-good status). **The satisfied spine terminal is
@@ -202,8 +205,8 @@ node `passed`; default → a terminal-good status). **The satisfied spine termin
 normal Dayflow finalizer judges it and produces `closed`. The store does not reserve
 that status to the finalizer. Nested `subtask` nodes at `done` satisfy before contract
 checks. `ready` and node `blocked` are queries; knowledge `stale` and container `blocked`
-are stored statuses. `is_ready` does not check `wake_kind`, `wake_ref`, container status,
-authority or approval; event/signal matching belongs to the higher-level wake machinery.
+are stored statuses. `is_ready` does not check `wake_ref`, authority or approval;
+event/signal matching belongs to the higher-level wake machinery.
 
 ## The store — graph state, audit events and transactions
 
@@ -246,8 +249,8 @@ are caller-supplied data, not authenticated permissions.
 
 ### Invariants and fences
 
-- **Closure cascade.** Entering a terminal WorkObject status — via the
-  steward's `set_work_status` *or* the automatic `_rollup` when the goal satisfies — is
+- **Closure cascade.** Entering a terminal WorkObject status — via an explicit
+  `set_work_status` (the architect's `end_goal`, the /work UI) *or* the automatic `_rollup` when the goal satisfies — is
   a transition with obligations: explicit closure mirrors a nonterminal goal, while
   auto-rollup marks the satisfied goal `done`. Every still-**startable** node (`proposed/actionable/waiting/failed` =
   `_STARTABLE_STATUSES`) is cascade-abandoned with its wake cleared. `validate()`
@@ -282,7 +285,8 @@ are caller-supplied data, not authenticated permissions.
   wake, requires `licensed` in the write. Queued and held work belongs to the runtime and
   WILL run — "hasn't run yet" is not "will never run". 33 generations of one delivery node
   died to replan churn before this existed. A licence means evidence: the finalizer's
-  verdict on that node, or a user directive.
+  verdict on that node, a user directive, the brain's replan instruction, or the goal being
+  stranded (`work_architect_node` computes it).
 - **The failed-node fence.** A `set_status` on a `failed` node by `actor == "architect"`
   without `licensed` is refused. The finalizer's verdict is what licenses what happens next
   (retry / new approach / stop / ask the user). Origin: the architect's prompt once claimed
@@ -305,12 +309,16 @@ are caller-supplied data, not authenticated permissions.
   finalizer verdict with a `next_step`, `_rollup` **holds** the object open rather than
   completing it: the architect that acts on that verdict runs a LATER tick, and a
   completion would destroy the recommendation before its reader exists (the reader scans
-  ACTIVE objects only). The steward's explicit `set_work_status` still wins — a person
-  deciding a goal is over outranks a pending note about how to continue it.
+  ACTIVE objects only). An explicit `set_work_status` (the architect's `end_goal`, the
+  /work UI) still wins — a decision that a goal is over outranks a pending note about how
+  to continue it.
 - **Finalizer-owned failure counts.** A `retry` or `unrecoverable` judgment increments
-  the main task's `failure_count` and the goal's `goal_unmet_attempts`, once per
-  dispatch epoch. Tool errors, timeout status, and internal provenance failures do
-  not themselves increment either count. The goal count survives task replacement.
+  the main task's `failure_count` and the goal's `goal_unmet_attempts` (lifetime) and
+  `goal_unmet_since_progress` (reset to 0 by an achieved verdict), once per dispatch
+  epoch. At the caller's `repeat_failure_limit` on `goal_unmet_since_progress`,
+  `_op_finalize_task` escalates the route to `ask_user` unless it is `stop`. Tool errors,
+  timeout status, and internal provenance failures do not themselves increment the
+  counts. The goal counts survive task replacement.
 
 
 ## Wake primitives
@@ -451,23 +459,26 @@ declare a DEV-ONLY `scenario_scope()` under `scenarios/`.
 
 | Writer | Ops | When |
 |---|---|---|
-| **evaluator** (`strategic_planner_wo` via `work_persist`) | `create_work_object`, objective edits, `set_work_status` | converts intake to WOs; authoritative complete/abandon; forwards `constraints.concern_refs` from subconscious-born work |
-| **architect** (`work_architect_apply`) | `add_node` (born `proposed`), `add_edge` (`depends_on`), `defer_node` (wake gates), abandon deltas | decomposes new/replanned goals, ≤3/tick |
+| **brain's list-item intake** (`brain_list_intake`, actor `brain`) | `create_work_object` + goal `set_status → dispatched`; `batch` of `revise_goal` + `instruct_goal kind=replan`; `instruct_goal kind=end` | per live lane in `configs/brain_lanes.json`, once per list change (`brain_list_deliveries`); shells carry `list_entry_id`, `concern_refs` (concern entries), `belief_refs` (calendar entries) |
+| **evaluator** (`strategic_planner_wo` via `work_persist`) | `create_work_object`, `revise_goal`, `instruct_goal kind=end` | RETIRED while `steward.mode: retired`; when on, converts intake to WOs and records end requests for the architect; forwards `constraints.concern_refs` / `belief_refs` |
+| **architect** (`work_architect_apply`) | one `batch`: `add_node` (born `proposed`), `add_edge` (`depends_on`), `defer_node` (wake gates), abandon deltas, `revise_goal`, `consume_*` acknowledgments, `set_work_status` (`end_goal`) | decomposes new and empty goals; re-plans woken goals (≤3 re-plans/tick); owns each goal's ending |
 | **state_mover** | `set_status` (`proposed/waiting → actionable`), wake clears | promotes ready main tasks only; LLM may HOLD; provenance is excluded |
 | **dispatch** (`work_node_dispatch_node` -> `work_session.open_session` / `discharge_node`) | `set_status` (`→ dispatched`, `→ done/failed`), `defer_node` (asks), `attach_pod`, evidence children | one node per tick + the worker's own subtree |
 | **worker** (via `work_*` tools + reconcile hook) | subtasks, evidence, artifacts, questions, defers | inside the job thread |
 | **finalizer** (`work_finalizer_node`) | `set_status` (`done → closed`; `→ failed`; `failed → proposed` on retry), `payload.finalizer` (verdict + outcome + route) | normal Dayflow producer of `closed`; not a store-level exclusivity rule; escalates repeated failure to `ask_user` |
-| **repair** (`work_repair_apply`) | — | RETIRED 2026-09-16; files remain, unwired. Judged failures carry the finalizer's route (retry / stop / new_approach / ask_user); abandoning a goal is the steward's |
+| **repair** (`work_repair_apply`) | — | RETIRED 2026-09-16; files remain, unwired. Judged failures carry the finalizer's route (retry / stop / new_approach / ask_user); ending a goal is the architect's |
 | **sweeper** (`sweep_stuck_work_nodes`) | atomic `record_result` (`→ failed`) and execution revocation | dispatched main tasks with over 80 minutes of owned-history inactivity; ordinary pending finalization judges the timeout; old execution still blocks takeover |
 | **/work UI** | `edit_node`, `set_status`, `set_work_status`, node add/remove | owner's manual surface |
 
-Concern back-propagation: a WO carrying `constraints.concern_refs` reports its terminal
-outcome to the subconscious register (`concern_feedback.propagate_work_outcome`). It fires from the **steward's** `set_work_status` only — `work_persist` calls it
-directly on complete and abandon. The one other call site is the retired `work_repair_apply`.
-**Not** the finalizer: that path needs a terminal *WorkObject* status, and the finalizer
-stopped setting one when `resolve` was removed, so a concern is reported on when the steward
-ends the goal rather than when the finalizer closes its last node. The `concern:` refs
-themselves are lifted out of the evaluator's `based_on` at creation, in `work_persist`.
+Concern back-propagation: a WO carrying `constraints.concern_refs` gets
+`work_concern_feedback` receipts queued by the store in the transaction of each change
+(attached, each main-task judgment, the ending — including automatic rollup), and
+`concern_feedback.propagate_work_outcome` delivers them post-commit from
+`work_finalizer_node` (each judgment), `work_architect_node` (after `end_goal`),
+`brain_list_intake` and `work_persist` (attached, at creation / revision), with
+`strategic_planner_wo_prep_node` recovering pending receipts every tick. (The retired
+`work_repair_apply` still holds a call; it is unwired.) The `concern:` refs come from a
+concern list entry (`brain_list_intake`) or the evaluator's `based_on` (`work_persist`).
 
 ## The /work UI
 
@@ -550,7 +561,9 @@ Two things can ask for work to exist and then need to know how it ended: a **sub
 concern** and a **belief**. Both ride the same contract, and the belief lane is a deliberate
 mirror of the concern lane rather than a second pattern.
 
-**Provenance in.** The steward's `based_on` carries prefixed source ids. At creation
+**Provenance in.** A shell made from the brain's list carries the refs directly
+(`brain_list_intake`: `concern:<id>` from a concern entry, the belief_key from a calendar
+entry). With the steward on, its `based_on` carries prefixed source ids. At creation
 `work_persist` lifts `concern:` entries into `constraints.concern_refs` and `belief:` entries
 into `constraints.belief_refs`. Beliefs are stored as the **belief_key with the prefix stripped**,
 never the row id: a merge deprecates the losing id, but the surviving key still resolves through
@@ -569,9 +582,11 @@ main task's finalizer verdict, and attributed user replies. Carrying the criteri
 the reader has to be able to see that a delivery satisfied the *work* while the belief's own
 condition was stricter.
 
-**Delivery sites** (identical for both lanes): `work_finalizer_node` after an atomic
-finalization, `work_architect_node` after the architect ends a goal, and
-`strategic_planner_wo_prep_node` as crash recovery before the next planning pass.
+**Delivery sites**: for both lanes, `work_finalizer_node` after an atomic
+finalization (concerns on every judgment; beliefs when the judgment ended the work object),
+`work_architect_node` after the architect ends a goal, and `strategic_planner_wo_prep_node`
+as crash recovery before the next planning pass (it runs even while the steward is retired).
+Concerns also hear `attached` from `brain_list_intake` and `work_persist`.
 
 **Who decides what it means.** `belief_engine::work_outcome` returns `no_change` | `resolve` |
 `revise` per belief, with a valence and reasoning. It decides only —
