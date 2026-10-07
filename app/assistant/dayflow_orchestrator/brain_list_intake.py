@@ -85,7 +85,7 @@ def concern_live(lane_config: Optional[Dict[str, Any]] = None) -> bool:
 def _lane_mode(entry: Dict[str, Any], config: Dict[str, Any]) -> str:
     """The mode this entry's lane is in for this entry: off when it falls before the lane's start."""
     from app.assistant.utils.time_utils import parse_iso_utc
-    if entry["kind"] == "calendar":
+    if entry["kind"] in ("calendar", "day"):          # a day's own entries ride the calendar lane by their day
         lane = config["calendar"]
         return lane["mode"] if lane.get("from_day") and entry["day"] >= lane["from_day"] else "off"
     lane = config["concern"]
@@ -117,7 +117,7 @@ def brief(entry: Dict[str, Any]) -> str:
         concern, bucket = found[0]
         concern_text = render_concern(concern, bucket)
         sources = [_evidence_text(e) for e in concern.get("evidence") or []]
-    else:
+    elif entry["kind"] == "calendar":
         from app.assistant.subconscious.day_tasks import decided_placement
         belief = decided_placement(entry["day"], entry["belief_key"])
     return render_view("brain_entry_brief", entry={**entry, "times": entry.get("placement_time") or ""},

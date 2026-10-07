@@ -37,6 +37,19 @@ in why.
 Several items about the same moment and the same act become one task: decide it needed on one item, list the
 others in covers, and decide each covered item not_needed, naming the item that covers it.
 
+## Your own entries for the day
+
+An item's entry belongs to that item's belief: it says what today needs about that belief, and nothing else. The day
+can also need something no item asks for: a calendar event starting, something said in chat, a change the brain
+recorded, one of {{ owner }}'s standing directives applying to the moment. Give each such need its own entry
+(own_entries, entry "new"): the outcome wanted, the assistant's part, when, why, and in cites the labels of what
+prompted it: a schedule line (K1...), a chat message (M), work (W), a reminder sent (R), a concern (C) or its entry
+(E), what the brain decided today (B), the standing directives (D).
+Your own entries made earlier today are listed with their ids and their work. Each stays as it is unless something
+new since it was made changes it: modify or cancel it by id, citing what is new.
+Work shown as "made from your entry" or "made from your own entry" is that entry's own work, carrying it out; it is
+not a separate fact that covers the entry.
+
 ## What the assistant can do and sense
 
 {% include 'shared/brain/capabilities.j2' %}
@@ -48,7 +61,7 @@ others in covers, and decide each covered item not_needed, naming the item that 
 
 {% include 'shared/work/stewardship.j2' %}
 {% if resource_orchestrator_user_prefs %}
-## {{ owner }}'s standing directives
+## {{ owner }}'s standing directives [D]
 
 {{ resource_orchestrator_user_prefs }}
 {% endif %}

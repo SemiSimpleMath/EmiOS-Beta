@@ -25,6 +25,12 @@
 {% else %}
 (none)
 {% endfor %}
+### Your own entries today (each stays as it is unless something new since it was made changes it)
+{% for e in A.own %}- [{{ e.id }}] {{ e.what }} | the assistant: {{ e.assistant_part }} | when: {{ e.when_local }} | {{ e.status }}, made {{ e.updated_at | local_time }}: {{ e.why }}
+{% if e.work %}{% with w = e.work, pad = "    " %}{% include 'shared/brain/entry_work.j2' %}{% endwith %}{% endif -%}
+{% else %}
+(none)
+{% endfor %}
 {% with s = A.situation %}{% include 'shared/brain/situation.j2' %}{% endwith %}
 
 ## What the brain read and decided today
@@ -47,4 +53,5 @@
 ## Your previous answer was refused
 {{ A.correction }}
 {% endif %}
-Decide every item not yet on the list, and an item on the list only when something new changes it.
+Decide every item not yet on the list, and an item on the list only when something new changes it. Add your own
+entries for what the day needs that no item asks for.

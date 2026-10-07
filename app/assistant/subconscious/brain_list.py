@@ -74,11 +74,14 @@ def _row(r) -> Dict[str, Any]:
 
 
 def entries(*, day: Optional[str] = None, concern_id: Optional[str] = None, include_cancelled: bool = False,
-            connect=None) -> List[Dict[str, Any]]:
-    """The current entries for a day's calendar or for one concern."""
+            kind: str = "calendar", connect=None) -> List[Dict[str, Any]]:
+    """The current entries for a day (its calendar placements, or with kind "day" the day's tasks' own entries) or
+    for one concern."""
     connect = connect or _connect
     ensure_schema(connect)
-    where, args = ("kind = 'calendar' AND day = ?", [day]) if day is not None else ("concern_id = ?", [concern_id])
+    if kind not in ("calendar", "day"):
+        raise ValueError(f"brain list: a day's entries are kind calendar or day, not {kind!r}")
+    where, args = (f"kind = '{kind}' AND day = ?", [day]) if day is not None else ("concern_id = ?", [concern_id])
     if not include_cancelled:
         where += " AND status != 'cancelled'"
     with connect(False) as c:
@@ -170,6 +173,32 @@ def apply_calendar(day: str, items: List[Dict[str, Any]], decisions: List[Dict[s
                 "what": d["assistant_part"] if needed else it["statement"], "decision": d["decision"],
                 "who_acts": "", "assistant_part": d["assistant_part"], "when_local": d["when"],
                 "covers": [ids[x] for x in d.get("covers") or []], "why": d["why"]}, cause=cause, at=when)
+            counts[result] += 1
+    return counts
+
+
+def apply_day_own(day: str, changes: List[Dict[str, Any]], *, cause: str, at: datetime,
+                  connect=None) -> Dict[str, int]:
+    """The day's tasks' own entries onto the list (2026-10-06): something today needs that no calendar item asks for
+    (a calendar event starting, something said, a standing directive applying to the moment). New ones get an id
+    (`day:<day>:<hex>`); modify and cancel name it. Kind "day": the calendar lane delivers them by their day. Until
+    then the decider could only fill a belief's entry, and put other acts into unrelated beliefs' entries."""
+    connect = connect or _connect
+    ensure_schema(connect)
+    when = at.isoformat()
+    counts = {"created": 0, "modified": 0, "unchanged": 0, "cancelled": 0}
+    with connect(True) as c:
+        for a in changes:
+            if a["action"] == "cancel":
+                cancel(c, a["entry"], reason=a["why"], cause=cause, at=when)
+                counts["cancelled"] += 1
+                continue
+            entry_id = a["entry"] if a["action"] == "modify" else f"day:{day}:{uuid.uuid4().hex[:8]}"
+            result = upsert(c, {
+                "id": entry_id, "kind": "day", "day": day, "belief_key": None, "placement_time": None,
+                "concern_id": None, "what": a["what"], "decision": "needed", "who_acts": "",
+                "assistant_part": a["assistant_part"], "when_local": a["when"], "covers": [], "why": a["why"]},
+                cause=cause, at=when)
             counts[result] += 1
     return counts
 

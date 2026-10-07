@@ -22,7 +22,7 @@ Health today: {{ s.health or "(no assessment yet)" }}
 {% endif %}{% if s.current_status %}Status: {{ s.current_status }}
 {% endif %}Today's schedule:
 {% for e in s.calendar_today -%}
-- {{ e.title }} {{ e.start_local }}{% if e.end_local %} - {{ e.end_local }}{% endif %}{% if e.status %} ({{ e.status }}){% endif %}
+- {% if e.ref is defined %}[{{ e.ref }}] {% endif %}{{ e.title }} {{ e.start_local }}{% if e.end_local %} - {{ e.end_local }}{% endif %}{% if e.status %} ({{ e.status }}){% endif %}
 {% else -%}
 (nothing on the schedule)
 {% endfor %}
@@ -46,14 +46,14 @@ The calendar ahead:
 {% endfor %}
 ## Work the assistant has in motion
 {% for w in s.work.in_motion -%}
-- {% if w.ref is defined %}[{{ w.ref }}] {% endif %}{{ w.objective or w.title }} (started {{ w.created }})
+- {% if w.ref is defined %}[{{ w.ref }}] {% endif %}{{ w.objective or w.title }} (started {{ w.created }}{% if w.from_list is defined and w.from_list %}; made from {{ w.from_list }}{% endif %})
 {% with p = w.progress, pad = "  " %}{% include 'shared/work/work_progress.j2' %}{% endwith -%}
 {% else -%}
 (none)
 {% endfor %}
 ## Work that ended in the last 18 hours
 {% for w in s.work.ended -%}
-{% if w.ref is defined %}[{{ w.ref }}]
+{% if w.ref is defined %}[{{ w.ref }}]{% if w.from_list is defined and w.from_list %} made from {{ w.from_list }}{% endif %}
 {% endif %}{% include 'shared/brain/past_work.j2' %}
 {% else -%}
 (none)

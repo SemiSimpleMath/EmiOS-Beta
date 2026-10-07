@@ -93,6 +93,7 @@ def work_view(work_id: str, *, link: str, score: Optional[float] = None) -> Dict
         "objective": str((wo.constraints or {}).get("objective") or ""),
         "created": _local(summary["created_at"]), "updated": _local(summary["updated_at"]),
         "ended_because": _goal_epitaph(wo),
+        "list_entry": (wo.constraints or {}).get("list_entry_id"),
         "outcomes": [{"title": n.title, "outcome": n.payload["finalizer"].get("outcome"),
                       "at": n.payload["finalizer"].get("at")} for n in nodes.values()
                      if wo.is_work_unit(n) and (n.payload or {}).get("finalizer")],
@@ -209,7 +210,7 @@ def active_work() -> List[Dict[str, Any]]:
     from the calendar (`from_calendar`)."""
     return [{"work_id": r["id"], "title": r["title"], "objective": str(r["constraints"].get("objective") or ""),
              "created": _local(r["created_at"]), "progress": progress(r["id"]),
-             "from_calendar": from_calendar(r["constraints"])}
+             "from_calendar": from_calendar(r["constraints"]), "list_entry": r["constraints"].get("list_entry_id")}
             for r in sorted(_rows(), key=lambda r: r["created_at"] or "") if r["status"] == "active"]
 
 

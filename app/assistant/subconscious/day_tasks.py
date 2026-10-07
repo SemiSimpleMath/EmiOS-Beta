@@ -84,7 +84,7 @@ def fingerprint(inputs: Dict[str, Any]) -> str:
     counting them would make every run trigger the next): a run is repeated only when one of these changed. The
     situation counts without what moves with the clock alone (situation.fingerprint_view)."""
     from app.assistant.subconscious.situation import fingerprint_view
-    read = {k: v for k, v in inputs.items() if k not in ("now", "correction", "items", "situation", "refs")}
+    read = {k: v for k, v in inputs.items() if k not in ("now", "correction", "items", "situation", "refs", "own")}
     read["items"] = [{k: v for k, v in it.items() if k != "current"} for it in inputs["items"]]
     read["situation"] = fingerprint_view(inputs["situation"])
     return hashlib.sha256(json.dumps(read, sort_keys=True, default=str).encode("utf-8")).hexdigest()
@@ -188,10 +188,63 @@ def label_refs(situation: Dict[str, Any], matters: List[Dict[str, Any]] = ()) ->
     mark(situation["concerns"], "C", lambda c: c["changed_at"])
     mark([e for c in situation["concerns"] for e in c.get("entries") or []], "E", lambda e: e["updated_at"])
     mark(list(matters), "B", lambda m: m["at"])
+    # The day's schedule lines (K) and the standing directives (D) are what prompts an own entry (2026-10-06). They
+    # date from the day's start, so they can justify a new entry but never a change to one made today.
+    from app.assistant.pipelines.context import day_window_local
+    day_start = day_window_local(situation["day"])[0].astimezone(timezone.utc).isoformat()
+    mark(situation["calendar_today"], "K", lambda e: day_start)
+    refs["D"] = day_start
     return refs
 
 
 # ── the answer ─────────────────────────────────────────────────────────────
+
+def own_problems(data: Dict[str, Any], own: List[Dict[str, Any]], refs: Dict[str, str]) -> List[str]:
+    """The own entries: a new one is entry "new"; a modify or cancel names one of today's own entries; new and modify
+    name the outcome, the assistant's part and when; every one says why and cites labels given; a modify or cancel
+    cites something newer than the entry."""
+    from app.assistant.utils.time_utils import local_time_text, parse_iso_utc
+    changes = data.get("own_entries")
+    if changes is None:
+        return []
+    if not isinstance(changes, list):
+        return ["own_entries is not a list"]
+    by_id = {e["id"]: e for e in own}
+    out, seen = [], []
+    for c in changes:
+        entry, action = str((c or {}).get("entry") or "").strip(), (c or {}).get("action")
+        if action not in ("new", "modify", "cancel"):
+            out.append(f"own entry {entry!r}: action {action!r} is not new, modify or cancel")
+            continue
+        if action == "new" and entry != "new":
+            out.append(f'a new own entry is written as entry "new", got {entry!r}')
+        if action != "new":
+            if entry not in by_id:
+                out.append(f"{entry!r} is not one of your own entries today")
+                continue
+            seen.append(entry)
+        if action in ("new", "modify"):
+            missing = [f for f in ("what", "assistant_part", "when") if not str(c.get(f) or "").strip()]
+            if missing:
+                out.append(f"own entry {entry}: {action} names {', '.join(missing)}")
+        if not str(c.get("why") or "").strip():
+            out.append(f"own entry {entry}: why is empty")
+        cites = [str(x).strip() for x in c.get("cites") or []]
+        unknown = [x for x in cites if x not in refs]
+        if not cites:
+            out.append(f"own entry {entry}: cites names nothing; name what prompted it")
+        elif unknown:
+            out.append(f"own entry {entry}: cites {unknown}, which are not labels given")
+        elif action != "new":
+            since = parse_iso_utc(by_id[entry]["updated_at"])
+            if not any(parse_iso_utc(refs[x]) > since for x in cites):
+                out.append(f"own entry {entry} was made {local_time_text(by_id[entry]['updated_at'])} and nothing cited is "
+                           f"newer: leave it as it is, or cite what is new since then")
+    twice = sorted({x for x in seen if seen.count(x) > 1})
+    if twice:
+        out.append(f"own entries changed more than once: {twice}")
+    return out
+
 
 def problems(data: Any, items: List[Dict[str, Any]], refs: Dict[str, str]) -> List[str]:
     """Every item not yet on the list decided, once; an item on the list decided only with a fact newer than its
@@ -288,8 +341,27 @@ def gather(now_utc: datetime, *, plan_connect=None) -> Optional[Dict[str, Any]]:
     matters = matters_today(day, now_utc)
     items = offered(day, with_current(day, every), now_utc)
     with_work(day, items)
-    return {"day": day, "now": now_utc.isoformat(), "items": items,
+    from app.assistant.dayflow_orchestrator.brain_list_intake import work_of
+    own = brain_list.entries(day=day, kind="day")
+    own_work = work_of([e["id"] for e in own])
+    own = [{**e, "work": own_work.get(e["id"])} for e in own]
+    mark_list_work(s, day, items, own)
+    return {"day": day, "now": now_utc.isoformat(), "items": items, "own": own,
             "situation": s, "matters": matters, "refs": label_refs(s, matters), "correction": None}
+
+
+def mark_list_work(situation: Dict[str, Any], day: str, items: List[Dict[str, Any]],
+                   own: List[Dict[str, Any]]) -> None:
+    """Each work item of the situation, in place, with `from_list`: the entry it was made from as this decider knows
+    it (an item's entry, by its label; one of its own entries, by id), or the list entry's id. On 2026-10-06 the
+    decider called an item's own work "already covered by W8" and decided the item not needed, which would have ended
+    that work."""
+    from app.assistant.subconscious import brain_list
+    names = {brain_list.calendar_id(day, it["belief_key"]): f"your entry for {it['label']}" for it in items}
+    names.update({e["id"]: f"your own entry {e['id']}" for e in own})
+    for w in [*situation["work"]["in_motion"], *situation["work"]["ended"]]:
+        entry = w.get("list_entry")
+        w["from_list"] = names.get(entry, f"list entry {entry}") if entry else None
 
 
 def run_day_tasks(*, now_utc: Optional[datetime] = None, connect=None,
@@ -311,12 +383,17 @@ def run_day_tasks(*, now_utc: Optional[datetime] = None, connect=None,
         return {"day_tasks": "unchanged"}
     call = call or _agent_call
     labels = [it["label"] for it in inputs["items"]]
+    own = inputs.get("own") or []
+
+    def check(answer):
+        found = problems(answer, inputs["items"], inputs["refs"])
+        return found + (own_problems(answer, own, inputs["refs"]) if isinstance(answer, dict) else [])
     data = call(inputs)
-    found = problems(data, inputs["items"], inputs["refs"])
+    found = check(data)
     if found:
         step("day_tasks", "answer refused, one correction", subject=inputs["day"], problems=found)
         data = call({**inputs, "correction": "; ".join(found)})
-        found = problems(data, inputs["items"], inputs["refs"])
+        found = check(data)
         if found:
             raise ValueError(f"day_tasks answer still invalid after one correction: {found}")
     # The list changes land before the run (its fingerprint) is recorded: a run counts as done only once its entries
@@ -325,6 +402,12 @@ def run_day_tasks(*, now_utc: Optional[datetime] = None, connect=None,
     from app.assistant.subconscious import brain_list
     changed = brain_list.apply_calendar(inputs["day"], inputs["items"], data["decisions"],
                                         cause=f"day's tasks {now.isoformat()}", at=now, connect=connect)
+    own_changes = [{k: str(c.get(k) or "").strip() for k in ("entry", "action", "what", "assistant_part", "when", "why")}
+                   for c in data.get("own_entries") or []]
+    if own_changes:
+        changed = {**changed, "own": brain_list.apply_day_own(inputs["day"], own_changes,
+                                                             cause=f"day's tasks {now.isoformat()}", at=now,
+                                                             connect=connect)}
     with connect(True) as c:
         c.execute("INSERT INTO brain_day_decisions (day, decided_at_utc, fingerprint, items, decisions) "
                   "VALUES (?,?,?,?,?)",
