@@ -681,3 +681,19 @@ notice the moment as the steward did ("ah, time to send a reminder, a context sw
 - Work in the situation is marked with the entry it was made from (day_tasks.mark_list_work), so a decider never takes
   an entry's own work for a separate fact that covers it.
 Next (owner, 2026-10-06): AFK/presence transitions as brain events, which an own entry can cite.
+
+## Presence at the computer is a brain event (2026-10-07)
+
+Owner, 2026-10-06: "Noticing AFK change is the brains job since its an event. Something needs to reason about this
+afk status change, figure out what to update." Owner, 2026-10-07: an absence of 10 minutes or more is the event.
+- brain_inbox.ingest_presence reads the AFK monitor's keyboard spells (afk_db active_segments; an absence is the gap
+  between two): `away` once the latest spell ended PRESENCE_AWAY or more ago (at its end), `back` when a spell began
+  PRESENCE_AWAY or more after the last one (at its start, with the minutes away). Idempotent on the spell id; never
+  reaches before the first run's hour, so the past day's history does not arrive as news.
+- The brain wakes for both: the AFK monitor's afk_state_changed ("active") pokes it on a return, and
+  brain_inbox.next_presence_due sets the wake for the moment an absence reaches PRESENCE_AWAY.
+- The gate routes presence like a camera sighting (to concerns whose timing it bears on, new_matter, or none), the
+  brain records what it changes about a concern's timing; neither treats it as saying where the owner went.
+- Shorter absences show only in the situation's presence line, which every brain decider already reads.
+Known limit: the gate routes against concerns, not the day's placements; the day's tasks read presence from the
+situation, so an absence bearing only on a placement (bedtime lights-off) reaches it there, not as a matter.

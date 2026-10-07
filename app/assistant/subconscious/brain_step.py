@@ -109,6 +109,8 @@ def group_matters(events: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
             key = ("thread", record.get("account_id"), record.get("thread_id") or e["source_ref"])
         elif e["source"] == "camera":
             key = ("camera", e["speaker"])
+        elif e["source"] == "presence":
+            key = ("presence",)
         else:
             key = ("room", e.get("room_id"))
         groups.setdefault(key, []).append(e)
@@ -320,6 +322,8 @@ def _evidence(e: Dict[str, Any]) -> Dict[str, Any]:
         return {"kind": "work", "ref": e["source_ref"], "snippet": e["text"]}
     if e["source"] == "camera":
         return {"kind": "pod", "ref": e["source_ref"], "snippet": e["text"]}
+    if e["source"] == "presence":
+        return {"kind": "presence", "ref": e["source_ref"], "snippet": e["text"]}
     return {"kind": "chat_msg", "ref": e["source_ref"], "snippet": e["text"]}
 
 

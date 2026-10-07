@@ -16,6 +16,7 @@ Now each reader (gate, noticer) gets the events in groups, each under a line say
 - work, by work object: dayflow's reports on work attached to a concern (a finalizer judgment, the
   work's ending), in time order (subconscious/concern_feedback.py).
 - camera, by camera: the vision model's description of each frame the camera flagged, in time order.
+- presence: the owner leaving or coming back to the computer after 10 minutes or more away, in time order.
 
 Nothing is cut. Events carry the reader's mark (the gate's E-label, the noticer's ref) and
 optionally a note; the other turns are context only. Times are local, with a date header whenever
@@ -215,19 +216,33 @@ def _camera_groups(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return groups
 
 
+def _presence_group(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    from app.assistant.subconscious.brain_inbox import PRESENCE_AWAY
+    if not events:
+        return []
+    turns = sorted((_event_turn(e) for e in events), key=lambda t: t["at"])
+    return [{"heading": "Presence at the computer",
+             "description": "When the owner left the computer or came back to it, read from keyboard and mouse "
+                            f"use; only absences of {int(PRESENCE_AWAY.total_seconds() // 60)} minutes or more. "
+                            "Nobody said it, and it does not say where the owner went.",
+             "first_at": turns[0]["at"],
+             "conversations": [{"label": "Seen", "turns": _render_turns(turns)}]}]
+
+
 def build(events: List[Dict[str, Any]], *, now_utc: Optional[datetime] = None) -> List[Dict[str, Any]]:
     """Group events (brain_events rows, each with a `mark` and optionally a `note`) into chat rooms,
-    email inboxes, work objects and cameras, each with its conversations; groups ordered by their first event.
+    email inboxes, work objects, cameras and presence, each with its conversations; groups ordered by their first event.
     Raises on an unknown source, a chat event with no room, or a room or account with no description: the
     reader must know where something was said and to whom."""
     now = now_utc or datetime.now(timezone.utc)
-    by_source: Dict[str, List[Dict[str, Any]]] = {"chat": [], "email": [], "work": [], "camera": []}
+    by_source: Dict[str, List[Dict[str, Any]]] = {"chat": [], "email": [], "work": [], "camera": [], "presence": []}
     for e in events:
         if e["source"] not in by_source:
             raise ValueError(f"brain event {e['source_ref']} has unknown source {e['source']!r}")
         by_source[e["source"]].append(e)
     groups = (_chat_groups(by_source["chat"], now) + _email_groups(by_source["email"])
-              + _work_groups(by_source["work"]) + _camera_groups(by_source["camera"]))
+              + _work_groups(by_source["work"]) + _camera_groups(by_source["camera"])
+              + _presence_group(by_source["presence"]))
     groups.sort(key=lambda g: g["first_at"])
     for g in groups:
         del g["first_at"]

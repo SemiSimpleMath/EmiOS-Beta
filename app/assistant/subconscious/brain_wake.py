@@ -18,6 +18,8 @@ What wakes it:
 - a room still talking: the wake sleeps until that room goes quiet, then runs;
 - a plan holding until a time: the wake sleeps until the earliest hold, when the concern is planned
   again (concern_planner.next_hold_at);
+- presence (2026-10-07): the owner coming back to the computer (the AFK monitor's afk_state_changed), and the
+  moment an absence reaches brain_inbox.PRESENCE_AWAY (brain_inbox.next_presence_due);
 - boot: one run at start picks up whatever arrived while the app was down;
 - the heartbeat (2026-10-01): a run at least every HEARTBEAT_SECONDS, for what changes without an
   event, such as the inputs of the day pass (subconscious/day_pass.py) and the start of a new day.
@@ -63,7 +65,9 @@ def run_brain() -> Dict[str, Any]:
     plans = concern_planner.run_planners()
     handoffs = run_handoffs()
     register, now = load_register(), datetime.now(timezone.utc)
-    due = [t for t in (gate["next_ready_at"], concern_planner.next_hold_at(register, now)) if t is not None]
+    from app.assistant.subconscious.brain_inbox import next_presence_due
+    due = [t for t in (gate["next_ready_at"], concern_planner.next_hold_at(register, now),
+                       next_presence_due(now_utc=now)) if t is not None]
     # Last: a day pass that fails does not hold up the concerns' briefs and handoffs. Today's calendar is
     # handed to dayflow one placement at a time (subconscious/belief_occurrences.py).
     from app.assistant.subconscious.brain_trace import trace
@@ -102,6 +106,14 @@ def poke() -> None:
 def handle_envelope(envelope: Any) -> None:
     """The gut's subscriber: every new chat message or email wakes the brain."""
     poke()
+
+
+def handle_afk_state_changed(message: Any) -> None:
+    """The AFK monitor's subscriber: the owner coming back to the computer wakes the brain, which records the
+    absence when it was long enough (brain_inbox.ingest_presence). Leaving is due on the timer instead
+    (brain_inbox.next_presence_due): an absence becomes an event only once it has lasted PRESENCE_AWAY."""
+    if getattr(message, "content", None) == "active":
+        poke()
 
 
 def _loop() -> None:

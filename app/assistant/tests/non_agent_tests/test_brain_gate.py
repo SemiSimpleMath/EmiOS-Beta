@@ -399,3 +399,67 @@ def test_the_wake_never_sleeps_longer_than_the_heartbeat(monkeypatch, summary, e
     with pytest.raises(Stop):
         brain_wake._loop()
     assert waits == [expected]
+
+
+# ── presence: the owner leaving or coming back to the computer (2026-10-07) ──
+
+def spell(i, start_min_ago, end_min_ago, provisional=False):
+    return {"id": i, "start": NOW - timedelta(minutes=start_min_ago), "end": NOW - timedelta(minutes=end_min_ago),
+            "provisional": provisional}
+
+
+def test_an_absence_of_ten_minutes_or_more_reaches_the_brain_and_a_short_one_does_not(connect):
+    spells = [spell(1, 300, 54), spell(2, 50, 35),             # a 4-minute gap: a coffee
+              spell(3, 20, 12)]                                 # 15 minutes away, then gone again 12 minutes ago
+    fetch = lambda start, end: spells
+    assert inbox.ingest_presence(now_utc=NOW, connect=connect, fetch=fetch) == 2
+    assert inbox.ingest_presence(now_utc=NOW + timedelta(minutes=5), connect=connect, fetch=fetch) == 0
+    events = inbox.pending(connect)
+    assert [(e["source"], e["source_ref"], e["speaker"], e["text"]) for e in events] == [
+        ("presence", "presence:back:3", "computer", "Came back to the computer after 15 minutes away."),
+        ("presence", "presence:away:3", "computer", "Left the computer: no keyboard or mouse use since."),
+    ]
+    assert [e["occurred_at"] for e in events] == [(NOW - timedelta(minutes=20)).isoformat(),
+                                                  (NOW - timedelta(minutes=12)).isoformat()]
+    assert inbox.ready(events, NOW) == events                          # presence goes at once
+
+
+def test_an_absence_before_presence_intake_began_never_arrives(connect):
+    """The first run reaches back an hour; a later run looks back a day but never before the first run's reach."""
+    first = [spell(1, 600, 500), spell(2, 400, 50), spell(3, 30, 0, provisional=True)]   # back 30 minutes ago
+    assert inbox.ingest_presence(now_utc=NOW, connect=connect, fetch=lambda s, e: first) == 1
+    later = NOW + timedelta(hours=3)
+    spells = [*first[:2], spell(3, 30, -60), spell(4, -100, -180, provisional=True)]   # away 40 minutes, back
+    assert inbox.ingest_presence(now_utc=later, connect=connect, fetch=lambda s, e: spells) == 1
+    assert [e["source_ref"] for e in inbox.pending(connect)] == ["presence:back:3", "presence:back:4"]
+    assert inbox.pending(connect)[1]["text"] == "Came back to the computer after 40 minutes away."
+
+
+def test_an_absence_is_due_for_the_brain_when_it_reaches_ten_minutes():
+    away = [spell(1, 60, 4)]
+    assert inbox.next_presence_due(now_utc=NOW, fetch=lambda s, e: away) == NOW + timedelta(minutes=6)
+    assert inbox.next_presence_due(now_utc=NOW, fetch=lambda s, e: [spell(1, 60, 12)]) is None    # already an event
+    assert inbox.next_presence_due(now_utc=NOW, fetch=lambda s, e: [spell(1, 60, 0, provisional=True)]) is None
+    assert inbox.next_presence_due(now_utc=NOW, fetch=lambda s, e: []) is None
+
+
+def test_presence_renders_as_its_own_group_and_cites_itself():
+    events = [{"source": "presence", "source_ref": "presence:away:3", "speaker": "computer", "room_id": None,
+               "occurred_at": (NOW - timedelta(minutes=40)).isoformat(),
+               "text": "Left the computer: no keyboard or mouse use since.", "mark": "E1"}]
+    [group] = conversations.build(events, now_utc=NOW)
+    assert group["heading"] == "Presence at the computer" and "10 minutes or more" in group["description"]
+    assert "[E1] computer: Left the computer" in conversations.render([group])
+    assert len(brain_step.group_matters([{**e, "id": i} for i, e in enumerate(events)])) == 1
+    assert brain_step._evidence(events[0])["kind"] == "presence"
+
+
+def test_coming_back_wakes_the_brain_and_leaving_waits_for_the_timer(monkeypatch):
+    from app.assistant.subconscious import brain_wake
+    monkeypatch.setattr(brain_wake._inside, "run", False, raising=False)   # not the wake's own thread
+    brain_wake._poked.clear()
+    brain_wake.handle_afk_state_changed(SimpleNamespace(content="afk"))
+    assert not brain_wake._poked.is_set()
+    brain_wake.handle_afk_state_changed(SimpleNamespace(content="active"))
+    assert brain_wake._poked.is_set()
+    brain_wake._poked.clear()

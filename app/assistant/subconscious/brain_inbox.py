@@ -10,7 +10,9 @@ id so it lands exactly once. Chat: every user message, verbatim, whatever its le
 rooms the brain does not read (EXCLUDED_ROOM_PREFIXES). Email: every email the parser scored at least
 MIN_EMAIL_IMPORTANCE, from its pod, full body; the pod id is the ref. Camera: every frame
 image_ingest flagged notable (CAMERA_SOURCE_KINDS), as the vision model described it; the pod id is
-the ref, the camera the speaker (2026-10-05; until then they reached only dayflow's pod intake). The gate
+the ref, the camera the speaker (2026-10-05; until then they reached only dayflow's pod intake). Presence: the
+owner leaving or coming back to the computer after an absence of PRESENCE_AWAY or more, from the AFK monitor's
+keyboard spells (2026-10-07). The gate
 (subconscious/gate.py) routes each row against the open concerns once it is ready (`ready`): an
 email or camera event at once, a chat room's messages once the room has been quiet for QUIET — `concern` (bears
 on named concerns), `new_matter`, or `none`. Work: dayflow's judgments and endings of work attached
@@ -75,6 +77,14 @@ EXCLUDED_ROOM_PREFIXES = ("slack/",)
 # Owner, 2026-10-05: the brain takes the camera frames image_ingest flags notable. Raw doorbell
 # events (every ring and motion) stay out.
 CAMERA_SOURCE_KINDS = ("ring_doorbell_significant", "ring_bedroom_notable")
+# Owner, 2026-10-07: noticing the owner leave or come back to the computer is the brain's job, it being an event;
+# an absence of this long or more is one. Shorter ones (a coffee, a call) only show in the situation's presence line.
+# The gate's and the brain's system prompts state the same minutes in their presence paragraphs.
+PRESENCE_AWAY = timedelta(minutes=10)
+# First run only: how far back presence intake reaches (an older absence is history, not news).
+_FIRST_PRESENCE_LOOKBACK = timedelta(hours=1)
+# Every later run looks back this far; the event ids make it idempotent. The keyboard spells are kept 7 days.
+_PRESENCE_LOOKBACK = timedelta(hours=24)
 
 
 def ensure_schema(connect=None) -> None:
@@ -220,6 +230,79 @@ def _fetch_image_pods(since_utc: datetime) -> list:
     return PodStore().query(kind="image", since_utc=since, limit=None)
 
 
+def _minutes_text(delta: timedelta) -> str:
+    minutes = int(round(delta.total_seconds() / 60))
+    hours, rest = divmod(minutes, 60)
+    if not hours:
+        return f"{minutes} minutes"
+    return f"{hours} h {rest} min" if rest else f"{hours} h"
+
+
+def ingest_presence(*, now_utc: Optional[datetime] = None, connect=None, fetch=None) -> int:
+    """The owner leaving or coming back to the computer, when the absence is PRESENCE_AWAY or more (2026-10-07).
+    Returns rows added.
+
+    Read from the keyboard spells the AFK monitor keeps (afk_db active_segments; an absence is the gap between two
+    spells), so a restart loses nothing. `away`: the latest spell is closed and ended PRESENCE_AWAY or more ago; the
+    event is at its end, when the owner was last at the computer (the monitor closes a spell once input has stopped
+    for its confirmed-AFK minutes). `back`: a spell began PRESENCE_AWAY or more after the one before ended; the event
+    is at its start, with how long the owner was away. `fetch(start_utc, end_utc)` returns the spells overlapping the
+    range as dicts (id, start, end: aware UTC datetimes; provisional: still open). Idempotent on the spell id.
+    Known limit: while the app is down no spell is recorded, so a downtime of more than the monitor's 30-minute
+    recovery window reads as an absence."""
+    connect = connect or _connect
+    ensure_schema(connect)
+    now_utc = now_utc or datetime.now(timezone.utc)
+    with connect(False) as c:
+        first = c.execute("SELECT MIN(received_at) FROM brain_events WHERE source='presence'").fetchone()[0]
+    # Never before the first run's reach, so an absence it left out as history does not arrive on a later run.
+    start = datetime.fromisoformat(first) if first else now_utc
+    since = max(now_utc - _PRESENCE_LOOKBACK, start - _FIRST_PRESENCE_LOOKBACK)
+    spells = sorted((fetch or _fetch_keyboard_spells)(since - timedelta(days=7), now_utc), key=lambda s: s["start"])
+    rows = []
+    for before, after in zip(spells, spells[1:]):
+        gap = after["start"] - before["end"]
+        if gap >= PRESENCE_AWAY and after["start"] >= since:
+            rows.append((f"presence:back:{after['id']}", after["start"],
+                         f"Came back to the computer after {_minutes_text(gap)} away."))
+    if spells:
+        last = spells[-1]
+        if not last["provisional"] and now_utc - last["end"] >= PRESENCE_AWAY and last["end"] >= since:
+            rows.append((f"presence:away:{last['id']}", last["end"],
+                         "Left the computer: no keyboard or mouse use since."))
+    received = _iso(now_utc)
+    added = 0
+    with connect(True) as c:
+        for ref, at, text in rows:
+            cur = c.execute(
+                "INSERT OR IGNORE INTO brain_events (source, source_ref, occurred_at, room_id, speaker, text, "
+                "received_at) VALUES ('presence', ?, ?, NULL, 'computer', ?, ?)",
+                (ref, _iso(at), text, received))
+            added += cur.rowcount
+    if added:
+        logger.info("[brain_inbox] ingested %d presence event(s)", added)
+    return added
+
+
+def next_presence_due(*, now_utc: datetime, fetch=None) -> Optional[datetime]:
+    """When the current absence reaches PRESENCE_AWAY, so the brain wakes for it then; None while the owner is at the
+    computer or once it has."""
+    spells = sorted((fetch or _fetch_keyboard_spells)(now_utc - timedelta(days=1), now_utc), key=lambda s: s["start"])
+    if not spells or spells[-1]["provisional"]:
+        return None
+    due = spells[-1]["end"] + PRESENCE_AWAY
+    return due if due > now_utc else None
+
+
+def _fetch_keyboard_spells(start_utc: datetime, end_utc: datetime) -> List[Dict[str, Any]]:
+    from app.assistant.afk_manager.afk_db import get_active_segments_overlapping_range
+
+    def aware(dt: datetime) -> datetime:
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return [{"id": s.id, "start": aware(s.start_time), "end": aware(s.end_time), "provisional": bool(s.is_provisional)}
+            for s in get_active_segments_overlapping_range(start_utc, end_utc, include_provisional=True)]
+
+
 def add_work_event(*, work_id: str, receipt_id: str, occurred_at: str, text: str, connect=None) -> bool:
     """What dayflow did reports here: each finalizer judgment and each ending of every work object
     (concern_feedback.py). The event is pending like a chat message or an email: the gate routes it to
@@ -250,7 +333,7 @@ def pending(connect=None) -> List[Dict[str, Any]]:
 
 
 def ready(events: List[Dict[str, Any]], now_utc: datetime) -> List[Dict[str, Any]]:
-    """The events whose matter is complete: every email, camera and work event, and the chat of every room whose latest
+    """The events whose matter is complete: every email, camera, presence and work event, and the chat of every room whose latest
     message is at least QUIET old. Messages of a room still talking wait, all of them together."""
     last = _last_message_by_room(events)
     return [e for e in events
