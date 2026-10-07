@@ -1,10 +1,24 @@
 # What was done reaches the brain; beliefs are not concerns (design, 2026-10-03)
 
-Status: built 2026-10-03, uncommitted, not yet live (needs a restart; the standing concerns are retired to
-dormant after it, `persist.retire_standing_concerns`). Validated against five old calendars (below). Supersedes the "placed beliefs become concerns"
+Status: built 2026-10-03, committed as cca09c93 (the standing concerns are retired to dormant by
+`persist.retire_standing_concerns`). Validated against five old calendars (below). Supersedes the "placed beliefs become concerns"
 half of `day_items_have_owners_2026-10-02.md` (points 2–4: owners through the door, standing concerns,
 occurrence handoffs by concern). The placements half (the writer returns belief_key → time; code builds the
 day) stays.
+
+Later changes (recorded 2026-10-07; the text below is kept as written):
+- Same day, before the commit: the daily selector and the per-belief modifier check (section 1) were not kept.
+  The day pass places the beliefs the owner approved for the calendar, each read with its nearest beliefs in
+  meaning (`day_pass._related`); see the `subconscious/day_pass.py` docstring and cca09c93.
+- Section 1's occurrence handoff to dayflow's intake and section 3's "the steward then sees" are superseded by
+  the brain's list (`brain_delegates_work_2026-10-04.md`): the calendar lane is live from 2026-10-06 (8ea18f73),
+  so a live day's placements are decided by `subconscious::day_tasks` and not handed to the steward
+  (`belief_occurrences.run_occurrence_handoffs` checks `calendar_live`); the steward is retired (d02e72e2).
+- Section 3, attach on route, as built (`brain_step._attach_cited_work` → `persist.attach_seen_work`): when the
+  brain cites a work report on a concern the work does not hold, the concern gains the work in its
+  `attached_work`. The work object's `constraints.concern_refs` is not changed and no `attached` receipt is
+  written, so the work's agents do not read that concern's brief (`work_engine_2026-10-03.md`: "That side is not
+  built").
 
 ## The decision
 
@@ -108,7 +122,9 @@ Two consequences:
   settles the concern.
 - When the brain routes work to a concern the work does not cite, it attaches the work to that concern (the
   work's `concern_refs` gains it through the work store, with an `attached` receipt), so the agents working on
-  it read that concern's brief, and the work shows on the concern as attached work.
+  it read that concern's brief, and the work shows on the concern as attached work. (As built, only the
+  concern side: `persist.attach_seen_work` writes the concern's `attached_work`; the work's `concern_refs` is
+  unchanged. See "Later changes" above.)
 - The steward then sees every concern's attached work when it decides what to create, which is what keeps one
   thing from being done twice.
 

@@ -5,6 +5,14 @@ build of `what_was_done_reaches_the_brain_2026-10-03.md`. It generalizes that no
 done reports to the brain) and replaces, in the long run, the belief-derived calendar with commitments.
 Each section marks what exists in the code today and what is new.
 
+Later changes (recorded 2026-10-07; the text below is kept as written):
+- Front doors (section 2 and build step 5): the brain no longer reaches dayflow through the steward. It keeps a
+  list of what needs doing, and dayflow's list-item intake node makes work from it by code
+  (`brain_delegates_work_2026-10-04.md`; concern lane live since 2026-10-05, calendar lane from 2026-10-06). The
+  steward is retired (d02e72e2, 2026-10-06), and dayflow's pod intake with it (0d43a54c).
+- Sensor events: the owner leaving or coming back to the computer is a brain inbox event (7626e8be, 2026-10-07).
+  It is not a work node's event wake: `wake_ref` conditions are still matched by the state mover against intake.
+
 ## Why
 
 Found on 2026-10-03, while building and checking the belief calendar and the brain's work reports:
@@ -88,7 +96,7 @@ Front doors decide that work should exist. They never plan or execute.
 | Chat | The owner asked: no judgment needed. | "order lunch"; "watch for email from [a friend] today and text me" |
 | Steward | Judges open-ended intake. | an email that needs a reply; a concern the brain handed over |
 | Commitments | Code, per occurrence or per triggering event. | "AC to 70 at 9 PM"; "when [the owner] leaves for lunch, email [a family member]" |
-| Brain | Through the steward, as concern handoffs (exists). | "the physical is still not booked" |
+| Brain | Through the steward, as concern handoffs (exists). Superseded 2026-10-05/06: the brain's list, made into work by the list-item intake node; the steward retired (see "Later changes"). | "the physical is still not booked" |
 
 ### Chat
 
@@ -119,7 +127,8 @@ becomes a fully fledged wo in dayflow if it still needs completing."
 ### Steward
 
 It keeps its job of judging open-ended intake (emails, concern handoffs, pods), and loses the job of
-inventing the day's routine work: commitments generate that by code.
+inventing the day's routine work: commitments generate that by code. (Superseded 2026-10-06: the steward is
+retired, d02e72e2; see "Later changes".)
 
 ### Commitments
 
@@ -138,7 +147,8 @@ The owner's standing wishes about what the assistant does on its own:
   node waiting on that event. The judgment left at each occurrence is narrow: does it still make sense now
   (away, sick, already done in chat)? That is the state mover's question today.
 - **Event triggers need new work.** Event wakes today match prose against intake (emails, pods); sensor
-  events (going AFK, a location change) are not intake. "Leaves for lunch" also needs a reliable signal:
+  events (going AFK, a location change) are not intake (presence became a brain event 2026-10-07, 7626e8be, but
+  still not something a waiting node matches). "Leaves for lunch" also needs a reliable signal:
   AFK detection has been seen to go blind during a fullscreen game (2026-09-17).
 - **Beliefs never generate acts by themselves.** They inform how an act is done (today's modifiers: walk
   times are flexible, no approval needed for the thermostat) and whether one is needed. A belief that would

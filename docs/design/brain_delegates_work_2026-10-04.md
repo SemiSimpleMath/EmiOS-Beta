@@ -21,6 +21,15 @@ direction the same day. Builds on `three_layer_mind` (2026-09-29: the brain reco
 `dayflow_goal_ownership_2026-09-30.md`, `what_was_done_reaches_the_brain_2026-10-03.md` and
 `work_progress_for_outside_readers_2026-10-04.md`.
 
+**Current state (recorded 2026-10-07; the status paragraph above is the 2026-10-04 record).** No longer shadow:
+the concern lane is live since 2026-10-05T16:31Z and the calendar lane from day 2026-10-06 (8ea18f73); the steward
+is retired (d02e72e2), all three by `configs/brain_lanes.json`. `subconscious/day_decision.py` became
+`subconscious/day_tasks.py` (agent `subconscious::day_tasks`, fca75318); `subconscious::concern_decider`,
+`subconscious::concern_list_decider` and `subconscious/concern_list_shadow.py` were removed, replaced by
+`subconscious::concern_tasks` inside the concern planner (ee2e2372). Retiring the steward did not change the
+planning tick's state map: intake triage and the steward's prep node still run, and the prep node routes past the
+steward to the list-item intake node (section "The steward's retirement, behind a switch").
+
 ## The owner's words
 
 "it makes a lot of sense if brain races all the concerns comes up with the broad tasks related to the concerns
@@ -123,7 +132,8 @@ and the todo list the steward never had.
 
 Code gathers one situation per brain pass, and every brain agent that decides gets the same block (a shared
 partial): the day's tasks agent (`subconscious::day_tasks`, below), the brain step, the concern decider and the
-list decider. Every source exists today; the steward reads most of them.
+list decider. Every source exists today; the steward reads most of them. (As of 2026-10-07 only day_tasks reads it:
+`agents/subconscious/day_tasks/prompts/user.j2` is the one prompt that includes `shared/brain/situation.j2`.)
 
 | Part | Source |
 |---|---|
@@ -201,7 +211,9 @@ copy of the day's list: no change; once the fence refused a re-judgment with not
 everything. Not built from 3b: entries tracking their work's status (it needs live delegation), calendar entries keyed
 by belief and day (it changes stored ids: the owner's go), and the merge into `concern_tasks` (at cutover).
 
-**The cutover machinery (built 2026-10-05, behind switches that start off, needs a restart).**
+**The cutover machinery (built 2026-10-05, behind switches that start off, needs a restart).** (Switched since:
+concern lane live from 2026-10-05T16:31Z, calendar lane from day 2026-10-06 (8ea18f73), steward retired 2026-10-06
+(d02e72e2); `configs/brain_lanes.json`.)
 - Calendar entries are keyed by belief and day (`cal:<day>:<belief>`; owner's go): one item per belief per day with
   every time the plan places it, so a moved placement changes its entry instead of cancelling one and making
   another. Today's shadow rows kept their old ids; the next run cancels them and makes the new ones.
@@ -388,7 +400,10 @@ concerns (3 runs each).
 ### The list-item intake node
 
 A control node in the planning tick, in place of intake triage, the steward and its persist node:
-list-item intake node (Python) → architect → state mover → … as today. It judges nothing; the brain's list already
+list-item intake node (Python) → architect → state mover → … as today. (As built, 2026-10-05: it was added after
+the steward's persist node, and nothing was removed from the state map; with the steward retired, triage and the
+steward's prep node still run and the prep node routes straight to it. See "The steward's retirement, behind a
+switch".) It judges nothing; the brain's list already
 says what changed. Each change on the list (`brain_list_changes`) is typed `created`, `modified` or `cancelled`
 and names the entry's stable id (a calendar entry keyed by code, `cal:<day>:<belief>`; a concern entry by the id
 it got at creation). The handoff carries the kind of change with the id, and the node acts on the kind:
@@ -463,7 +478,7 @@ which is when the reports arrive.
 | Day decider (shadow) | decides today's placements, recorded only | becomes `day_tasks`, reading the brain's view of the day |
 | Day pass / occurrence handoffs | each placement handed to the steward by code | placements go to the brain's decision, not to dayflow |
 | Steward | decides what work exists; reviews intake; maps the owner's feedback to work; keeps work within capabilities; invents acts | retires (below) |
-| Planning tick | intake triage → steward → its persist node → architect → … | the list-item intake node → architect → … (section 3) |
+| Planning tick | intake triage → steward → its persist node → architect → … | the list-item intake node → architect → … (section 3); as built: intake triage → the steward's prep node → the list-item intake node → architect → …, the steward skipped by its switch |
 | Architect, workers, finalizer | as now | as now; reports carry the task id |
 | Morning review | which beliefs go on the calendar | also what the assistant does with each |
 
@@ -472,7 +487,9 @@ which is when the reports arrive.
 Retiring means unwiring, not deleting (owner, 2026-10-04: keep the agent "for a while because its prompt and schema
 are valuable to have for reference"). When no lane uses it, the steward leaves the planning tick's state map, and
 `agents/dayflow_orchestrator/strategic_planner_wo/` (config, prompts, form) and its prep and persist nodes stay on disk,
-unwired, as `work_repair` did after 2026-09-16.
+unwired, as `work_repair` did after 2026-09-16. (As built, 2026-10-06: the steward was retired by
+`configs/brain_lanes.json` `steward.mode` `retired` (d02e72e2), not by leaving the state map; the map is unchanged
+and the steward's prep node skips it.)
 
 Each of the steward's jobs (`strategic_planner_wo`, `prompts/system.j2`) has a new home:
 
@@ -660,12 +677,12 @@ keeps what the rest of the tick reads (pending concern and belief feedback deliv
 reminder history for the architect), skips the steward's own context and model call, hands the architect an empty
 steward result and routes straight to the list-item intake node. Admitted intake left with no reviewer is logged as an
 ERROR every tick (0 pending at preparation). Owner: switch after the calendar lane's first live day (2026-10-06) is
-observed. What the steward still did that nothing replaces: noticing duplicate goals across the portfolio and asking
+observed. (Switched 2026-10-06: `steward.mode` `retired`, d02e72e2.) What the steward still did that nothing replaces: noticing duplicate goals across the portfolio and asking
 for their end; the brain's deciders do not yet share one view of the list (review finding 5).
 Owner's principle, same day: all input flows to the brain, the brain decides, consumers carry it out, every part of the
 brain learns the outcome; no part duplicates work or misses that work became moot. Remaining departures: the steward
 (this switch), dayflow reading chat and email as wake context itself, dayflow_cron_tickets deciding wellness reminders,
-intake triage (the steward's front door; idle once nothing reaches it).
+intake triage (the steward's front door; idle once nothing reaches it; it still runs in every planning tick).
 
 ## The day's tasks' own entries (2026-10-06)
 
@@ -694,6 +711,7 @@ afk status change, figure out what to update." Owner, 2026-10-07: an absence of 
   brain_inbox.next_presence_due sets the wake for the moment an absence reaches PRESENCE_AWAY.
 - The gate routes presence like a camera sighting (to concerns whose timing it bears on, new_matter, or none), the
   brain records what it changes about a concern's timing; neither treats it as saying where the owner went.
-- Shorter absences show only in the situation's presence line, which every brain decider already reads.
+- Shorter absences show only in the situation's presence line, which the day's tasks (`subconscious::day_tasks`)
+  read; the gate, the brain step and the concern planner do not read the situation.
 Known limit: the gate routes against concerns, not the day's placements; the day's tasks read presence from the
 situation, so an absence bearing only on a placement (bedtime lights-off) reaches it there, not as a matter.

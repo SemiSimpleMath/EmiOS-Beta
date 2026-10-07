@@ -7,6 +7,11 @@ Not built: the check that a node's wake matches its occurrence's time.
 Superseded 2026-10-03 for points 2–4 (owners through the door, standing concerns, occurrence handoffs by
 concern): beliefs are not concerns (`what_was_done_reaches_the_brain_2026-10-03.md`). Placements and the
 concern planner stay.
+Superseded 2026-10-05/06 for point 5 and "Its tasks are hints": the brain decides what work exists. The concern
+planner's `concern_tasks` writes the concern's entries on the brain's list (ee2e2372; concern lane live since
+2026-10-05T16:31Z), `day_tasks` decides the day's calendar items (calendar lane live from 2026-10-06, 8ea18f73),
+dayflow's list-item intake node makes the work, and the steward is retired (d02e72e2)
+(`brain_delegates_work_2026-10-04.md`).
 Step 2 (with 3) of `brain_owns_the_day_2026-10-01.md`.
 
 ## The problem
@@ -45,7 +50,7 @@ work from a concern it was handed.
    are now, unless it is for another day with no bearing on today. The handoff carries the item's time;
    work made from it is tagged to the concern in the database by code.
 5. **The steward stops making work from routine text.** The ROUTINE stays in its prompt as context for
-   timing and wording.
+   timing and wording. (Superseded 2026-10-06: the steward is retired; see the status note.)
 
 ## The reasoning layer: a concern planner
 
@@ -67,6 +72,8 @@ actionable tasks. It does not carry them out.
 - **Its tasks are hints.** Each goes to its consumer as a handoff carrying the concern's brief and the
   reason, as concern handoffs do now. The steward still decides what work exists (work, defer, decline,
   with a reason); work it makes is tagged to the concern by code, and every outcome lands back on it.
+  (Superseded 2026-10-05: `concern_tasks` writes list entries that dayflow carries out as given; the steward is
+  retired 2026-10-06. See the status note.)
 
 Example: the book club moves from the 9th to the 16th. The planner reads what is attached (food ordered
 for the 9th, #123; eight invitations; directions; a reminder for the 9th), checks the calendar for the

@@ -1,7 +1,10 @@
 # The brain owns the day: concerns, owners and routes (design, 2026-10-01)
 
-Status: DESIGN for owner review. No code. Built from the owner's decisions in the 2026-10-01 session and
-the evidence gathered in it. Extends the three-layer model of 2026-09-29 (subconscious notices, brain
+Status: design of 2026-10-01, partly built (updated 2026-10-07; see "Staged plan" for each step). Steps 1a and 1b
+built 2026-10-01/02; step 2 built 2026-10-02 and superseded 2026-10-03 (beliefs are not concerns,
+`what_was_done_reaches_the_brain_2026-10-03.md`); step 3's hand-over by code is now the calendar lane of the
+brain's list (`brain_delegates_work_2026-10-04.md`, live from 2026-10-06); step 4 in part. Built from the owner's
+decisions in the 2026-10-01 session and the evidence gathered in it. Extends the three-layer model of 2026-09-29 (subconscious notices, brain
 knows and recommends, dayflow acts) and `dayflow_goal_ownership_2026-09-30.md`.
 
 ## Summary
@@ -160,12 +163,23 @@ Each step works on its own and keeps the system running.
 2. **Owners for every item.** Day items pass through the concern door; standing concerns are introduced;
    the routine file shows each item's owner. Verify: the Oct 1 flea case yields one owner, and the date
    conflict reaches the owner as a question.
+   (Built 2026-10-02, `day_items_have_owners_2026-10-02.md`; superseded 2026-10-03: beliefs are not concerns,
+   placed beliefs no longer pass the concern door, `what_was_done_reaches_the_brain_2026-10-03.md`.)
 3. **Hand over by code.** Timed items reach dayflow as intake carrying their owner, like concern handoffs;
    the steward stops making owner-less work from routine lines. Belief feedback switches to uses. Verify:
    every new work object has an owner; outcomes land on it.
+   (Superseded: from 2026-10-03 each placement was handed to the steward as an occurrence item carrying its
+   belief (`subconscious/belief_occurrences.py`); from 2026-10-06 the calendar lane is live: `day_tasks` decides
+   the day's items onto the brain's list and dayflow's list-item intake node makes the work (8ea18f73); the
+   steward is retired (d02e72e2). "Belief feedback switches to uses" not checked here.)
 4. **Stage B and the reverse path.** Weather, calendar changes and health become brain events; impact
    reasoning updates affected concerns; a changed concern re-plans its attached work. Verify: a recorded
    storm warning changes tonight's dog-walk work.
+   (In part, by 2026-10-07: flagged camera frames (0d43a54c) and the owner leaving or returning to the computer
+   (7626e8be) are brain events, and every work judgment and ending is gated (2026-10-03). Weather, calendar and
+   health are not events: they reach the brain only in the situation (`subconscious/situation.py`), which the
+   day's tasks read. A changed concern's entry revises its work with a `replan` instruction
+   (`brain_list_intake.py`).)
 5. **Routes and the conversation mode.** Consumer declarations, several delegations per concern, and the
    brain proxy in chat.
 

@@ -1,5 +1,19 @@
 # Brain inbox, gate and concern store (2026-09-29)
 
+Later changes (recorded 2026-10-07; the sections below are kept as written):
+- Work events are gated (2026-10-03, cca09c93): every finalizer judgment and ending of every work object is a
+  pending inbox event the gate routes, whatever it cites (`brain_inbox.add_work_event`;
+  `what_was_done_reaches_the_brain_2026-10-03.md`).
+- Readiness and the handoff (steps 5-6): the concern planner (`subconscious/concern_planner.py`) replaced the
+  brief's readiness on 2026-10-02 (`day_items_have_owners_2026-10-02.md`); holds come from
+  `concern_planner.next_hold_at`. The concern lane is live since 2026-10-05T16:31Z: `concern_tasks` writes the
+  concern's entries on the brain's list and the list-item intake node makes the work; `concern_handoff` hands
+  nothing to the steward (`brain_delegates_work_2026-10-04.md`).
+- Dayflow's pod intake is retired (0d43a54c, 2026-10-05): flagged camera frames reach the brain inbox
+  (`brain_inbox.ingest_camera`). The steward is retired (d02e72e2, 2026-10-06).
+- The inbox's sources today: chat, email, work, camera (0d43a54c) and presence at the computer (7626e8be,
+  `brain_inbox.ingest_presence`).
+
 ## Why
 
 The noticer (the subconscious "brain") saw the household only through samples chosen by recipe:
@@ -280,7 +294,9 @@ snapshot, and work was linked to a concern only if the steward cited `concern:<i
 - Context enricher: the two nodes, both agents and their tests are removed; triage_persist now
   routes straight to the steward. Its job (KG context on intake) is the brief's, and the remaining
   triaged intake is doorbell/bedroom camera pods.
-- The steward's intake is now the brain's concern handoffs plus allowlisted pods.
+- The steward's intake is now the brain's concern handoffs plus allowlisted pods. (Superseded: pod intake retired
+  2026-10-05, 0d43a54c; concern handoffs replaced by the brain's list when the concern lane went live, 2026-10-05;
+  the steward retired 2026-10-06, d02e72e2. See "Later changes" at the top.)
 
 ## Seeing it work: the /brain page (2026-09-30)
 
@@ -336,7 +352,10 @@ in the chat for that long I am not interacting with it anymore". Replaces the `b
   the ingest service delivers a chat message or email (`handle_envelope`, a gut subscriber), when the
   concern register is saved from outside the brain (`concern_store.save_register` calls `poke`: work
   outcomes, the noticer, edits), when a waiting room goes quiet, and once at boot. Otherwise it
-  sleeps. Its own register writes do not wake it. A failed run is logged and not retried.
+  sleeps. Its own register writes do not wake it. A failed run is logged and not retried. (A pass now has
+  more stages: gate, brain step, closed concerns' entries cancelled, briefs, the concern planner, handoffs, the
+  day pass and its occurrences, the stories, the day's tasks; and more wakes: holds, presence, a heartbeat. See
+  `brain_wake.run_brain` and the module docstring.)
 - Chat is ready once the owner has been quiet in that room for `brain_inbox.QUIET` (5 minutes), all
   of the room's messages together; email is ready at once (`brain_inbox.ready`). The gate routes only
   ready events and reports when the next room goes quiet (`next_ready_at`); readiness is computed
@@ -364,7 +383,7 @@ finalizer runs we update the concerns"; `addressing` means work is attached and 
 - Attach: active → addressing. The last attached work ending: addressing → active (an explicit
   decline still parks it dormant). Only the brain resolves.
 - Each judgment and ending is also a brain inbox event (source `work`), routed to its concerns by id
-  without the gate, rendered under "Work <id>" in the brain's input; the brain notes what it
+  without the gate (superseded 2026-10-03, cca09c93: every work event is gated, see "Later changes"), rendered under "Work <id>" in the brain's input; the brain notes what it
   established and resolves when the done-when is met or the owner says nothing more is needed.
   Work feedback no longer wakes the noticer.
 - One-time startup move (persist.rederive_attached_work, owner-approved): every existing concern got
@@ -385,7 +404,8 @@ replacement.
 
 - The event-driven wake had no clock: a brief holding until a time was re-briefed only when
   something else woke the brain. The wake now sleeps until the earlier of a quiet room and the
-  earliest hold of a current brief (`concern_brief.next_hold_at`, `run_brain` → `next_wake_at`).
+  earliest hold of a current brief (`concern_brief.next_hold_at`, `run_brain` → `next_wake_at`; since 2026-10-02
+  the concern plan's hold, `concern_planner.next_hold_at`).
 - Owner: concerns are for every consumer (the meal planner, the wellness proposer, dayflow); a
   hand-over asks dayflow whether it can take a concrete step; work ending does not settle the
   concern ("research therapists" done, the concern stays open); "the concern should carry history so
@@ -425,10 +445,11 @@ matter. Grouping related events into one matter is part of the brain step's job.
 ## Not done yet
 
 - Other sources: email, calendar changes, ticket replies, dayflow outcomes, pods. Each needs an
-  emitter into the inbox.
+  emitter into the inbox. (Since built: email (step 1, 2026-09-29), dayflow outcomes (2026-09-30; all work
+  2026-10-03), camera frames (0d43a54c, 2026-10-05), presence (7626e8be, 2026-10-07).)
 - The gate in front of dayflow: dayflow's intake triage still classifies chat and email on its own.
   The plan is one gate routing to both the brain and dayflow, with the brain's reasons attached as
-  context.
+  context. (Already untrue when step 7 shipped: triage skips chat and email, which are wake context only.)
 - Time route: events for things entering their lead window (calendar, recurring obligations).
 - Discovery over the full timeline (the length-filtered passing-mentions lane is still there).
 - The digest is still clustered as chat by the pod classifier (the self-feed loop).

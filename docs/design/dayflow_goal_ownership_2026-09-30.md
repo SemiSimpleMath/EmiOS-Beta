@@ -4,6 +4,13 @@ Decisions: "time running out" is the stranded state (every scheduled time in the
 with nothing settling it; built as: nothing in it can still run and no time lies ahead). An owner's
 directive to drop a goal also goes through the architect, as a steward end request.
 
+Later changes (recorded 2026-10-07; the text below is kept as written): the steward is retired (d02e72e2,
+2026-10-06, `configs/brain_lanes.json` `steward.mode`). What work exists is now the brain's list; dayflow's
+list-item intake node (`dayflow_orchestrator/brain_list_intake.py`) creates the work, revises a changed entry's
+goal with a `replan` instruction, and records an `end` instruction (`instruct_goal`) for a cancelled entry
+(`brain_delegates_work_2026-10-04.md`). The steward rows and section below describe the 2026-09-30 build. The
+architect's side is unchanged.
+
 ## Why
 
 2026-09-30, the morning thermostat work (work_4032b7355fcc):
@@ -69,8 +76,8 @@ it, to its end, is the architect's.
 
 - Keeps: intake to new work objects; folding intake into existing ones; noticing duplicates.
 - Loses `complete_work_ids` and `abandon_work_ids`. When it judges a work object should end, it writes
-  an instruction with its reason (`end_instructions: [{work_id, reason}]`), which reaches the
-  architect the way a finalizer judgment does.
+  an instruction with its reason (`end_requests: [{work_id, reason}]`, as built in the steward's agent form
+  and `work_persist.py`), which reaches the architect the way a finalizer judgment does.
 - Its view of existing work shrinks to what deduplication needs: objective, status, and the last
   outcome in a line. The full finalizer judgments move out of its prompt (smaller, cheaper), since
   reacting to them is no longer its job.

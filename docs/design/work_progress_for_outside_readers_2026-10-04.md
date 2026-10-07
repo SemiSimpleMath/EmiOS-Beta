@@ -1,6 +1,6 @@
 # Work says where it stands, in words an outside reader understands (design, 2026-10-04)
 
-Status: built 2026-10-04, uncommitted, needs a restart (Python and templates change together). Open
+Status: built 2026-10-04, committed as 241ca486 (commit time 2026-10-03 20:58 -0700) and live. Open
 questions 1 and 2 decided as proposed (owner, 2026-10-04: "go with your proposals"). Results and the
 changes made while building are under "Built" at the end.
 
@@ -112,6 +112,10 @@ progress in the event, an in-progress report shows it is covered: "Still to come
 The gate's prompt keeps its rule that routine work going as planned is routed `none`. Nothing else
 in the gate changes here; the record now lets it tell what is going as planned. Whether an ended work
 whose need is still unmet may become a new matter stays the brain's decision, as today.
+
+(Superseded 2026-10-05/06: dayflow's pod intake was retired (0d43a54c; camera frames go to the brain inbox) and
+the steward was retired (d02e72e2, `configs/brain_lanes.json` `steward.mode`), so there is no new "steward work from
+pods"; calendar and concern work now come from the brain's list, see `brain_delegates_work_2026-10-04.md`.)
 
 ## What this does not change
 

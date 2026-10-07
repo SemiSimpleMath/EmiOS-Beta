@@ -38,7 +38,7 @@ and the finalizer adjudicates on it. The graph holds durable state; workers also
 ToolResults, which the recorder translates into graph writes before finalization.
 
 This page is the substrate reference: the model, the store, the invariants, the runtime,
-and the main Dayflow writers that touch the graph. For how a *tick* drives it (evaluate → architect
+and the main Dayflow writers that touch the graph. For how a *tick* drives it (the brain's list intake → architect
 → promote → dispatch, with the finalizer judging the result in the dispatch room) see
 [05_DAYFLOW.md](05_DAYFLOW.md) and
 [05a_DAYFLOW_ORCHESTRATOR_REFERENCE.md](05a_DAYFLOW_ORCHESTRATOR_REFERENCE.md). Design

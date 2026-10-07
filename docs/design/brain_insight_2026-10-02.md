@@ -1,7 +1,17 @@
 # Seeing the brain work: a story for the owner, a rewindable flow for the developer (design, 2026-10-02)
 
 Status: agreed 2026-10-02. Built 2026-10-02 (all three steps; tests pass; awaiting a restart to verify
-live). Build order: 1 run records, 2 the developer's flow page, 3 the stories and the owner's page.
+live); committed in cca09c93 (2026-10-03). Build order: 1 run records, 2 the developer's flow page, 3 the stories
+and the owner's page.
+
+Later changes (recorded 2026-10-07; the text below is kept as written): the day pass described here changed on
+2026-10-03 (cca09c93, `what_was_done_reaches_the_brain_2026-10-03.md`). The belief selector
+(`dayflow_belief_selector`) is gone: the writer places the beliefs the owner approved for the calendar, each read
+with its nearest beliefs (`day_pass._related`). Placed beliefs no longer get owners through the concern door, and
+standing concerns (with their readiness rule) were retired, so the day pass sends no candidates to the door and
+makes no concerns. The `day_pass` row of the steps table, the "selector" and "owners, door" in the diagram, "concerns
+the day pass made" and "the readiness rule (standing)" describe the 2026-10-02 build. Since then the brain also has
+`day_tasks` and the brain's list, and the steward is retired (`brain_delegates_work_2026-10-04.md`).
 
 ## What the owner asked for
 
