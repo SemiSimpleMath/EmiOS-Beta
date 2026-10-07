@@ -85,14 +85,17 @@ def _load_calendar_events() -> List[Dict[str, Any]]:
 
 def get_calendar_events_structured_for_day(boundary_date_local: str) -> List[Dict[str, Any]]:
     """
-    Return concrete structured calendar events overlapping the provided local day.
+    Return concrete structured calendar events overlapping the provided boundary day: its window from the boundary
+    hour to the same hour the next calendar date (pipelines/context.day_window_local). Until 2026-10-07 this took the
+    calendar date, so an event at 1 AM belonged to the wrong day.
     This is intended to be consumed by downstream stateful systems (e.g. dayflow input layer).
     """
+    from app.assistant.pipelines.context import day_window_local
     raw_boundary = str(boundary_date_local or "").strip()
     if not raw_boundary:
         raise ValueError("boundary_date_local is required for structured calendar extraction.")
     try:
-        boundary_date = datetime.strptime(raw_boundary, "%Y-%m-%d").date()
+        window_start, window_end = (t.astimezone(timezone.utc) for t in day_window_local(raw_boundary))
     except Exception as e:
         logger.error("Invalid boundary_date_local for structured calendar extraction: %s", raw_boundary)
         logger.debug("Structured calendar boundary_date_local parse exception details", exc_info=True)
@@ -110,9 +113,7 @@ def get_calendar_events_structured_for_day(boundary_date_local: str) -> List[Dic
 
         start_local_dt = utc_to_local(start_utc)
         end_local_dt = utc_to_local(end_utc) if end_utc else None
-        start_local_date = start_local_dt.date()
-        end_local_date = end_local_dt.date() if end_local_dt else start_local_date
-        if boundary_date < start_local_date or boundary_date > end_local_date:
+        if start_utc >= window_end or (end_utc <= window_start if end_utc else start_utc < window_start):
             continue
 
         if end_utc and now_utc > end_utc:
@@ -176,7 +177,7 @@ def _is_meeting_event(summary: str, attendees: List[Any]) -> bool:
     return bool(attendees) or "meeting" in label or "call" in label
 
 
-def get_calendar_events_upcoming_for_daily_context(hours: int = 12) -> List[Dict[str, Any]]:
+def get_calendar_events_upcoming_for_daily_context(hours: float = 12) -> List[Dict[str, Any]]:
     now = datetime.now(timezone.utc)
     today_local = utc_to_local(now).date()
     window_end = now + timedelta(hours=hours)

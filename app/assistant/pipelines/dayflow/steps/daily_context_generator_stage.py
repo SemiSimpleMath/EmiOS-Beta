@@ -394,14 +394,20 @@ class DailyContextGeneratorStep(BaseStep):
             chat_excerpts = self._get_recent_chat_excerpts(ctx, hours=chat_excerpts_hours)
             responded_tickets = get_responded_tickets_categorized(since_utc=now_utc - timedelta(hours=tickets_hours))
 
+        # The day being built runs to the boundary hour of the next calendar date: between midnight and then, the next
+        # date's events are not today's. Until 2026-10-07 the tracker saw the next 12 hours of events with no date and
+        # the next date's weekday, and at 1 AM rebuilt the day from the next morning's events.
+        from app.assistant.pipelines.context import day_window_local
+        day_end_utc = day_window_local(str(boundary_date))[1].astimezone(timezone.utc)
+        upcoming_hours = min(float(calendar_upcoming_hours), (day_end_utc - now_utc).total_seconds() / 3600)
         context = {
             "history_scope": resolve_room_scope(pipeline_config=ctx.pipeline_config, step_config=ctx.step_config),
-            "day_of_week": ctx.now_local.strftime("%A"),
+            "day_of_week": datetime.strptime(str(boundary_date), "%Y-%m-%d").strftime("%A"),
             "daily_context_mode": daily_context_mode,
             "current_daily_context": current_daily_context,
             "expected_calendar_payload": expected_calendar_payload,
             "expected_calendar_markdown": build_expected_calendar_markdown(expected_calendar_schedule),
-            "calendar_events_upcoming": get_calendar_events_upcoming_for_daily_context(hours=calendar_upcoming_hours),
+            "calendar_events_upcoming": get_calendar_events_upcoming_for_daily_context(hours=upcoming_hours),
             "recent_chat_excerpts": chat_excerpts,
             "calendar_events_completed": get_calendar_events_completed(hours=calendar_completed_hours),
             "recent_responded_tickets": responded_tickets,

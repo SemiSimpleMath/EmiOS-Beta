@@ -123,6 +123,9 @@ def _resolve_end_utc(
 
 
 def _parse_local_clock(boundary_date, value: str, local_tz) -> datetime:
+    """A clock time inside the boundary day's window: one before the boundary hour (1:00 AM on a day that runs to
+    5 AM) is on the next calendar date."""
+    from app.assistant.pipelines.context import _boundary_hour_local
     parsed = datetime.strptime(value, "%I:%M %p")
     local_dt = datetime(
         boundary_date.year,
@@ -132,6 +135,8 @@ def _parse_local_clock(boundary_date, value: str, local_tz) -> datetime:
         parsed.minute,
         tzinfo=local_tz,
     )
+    if parsed.hour < _boundary_hour_local():
+        local_dt += timedelta(days=1)
     return local_dt.astimezone(timezone.utc)
 
 
