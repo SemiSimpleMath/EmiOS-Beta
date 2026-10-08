@@ -13,6 +13,10 @@ from __future__ import annotations
 from collections import Counter
 from typing import Optional
 
+from app.assistant.utils.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 _TITLE_CHARS = 90
 _BODY_CHARS = 400
 
@@ -172,7 +176,32 @@ def render_work_portfolio(wo, now=None) -> str:
     return render_view("portfolio", work=work_data(wo, now))
 
 
-def render_portfolio(work_objects, now=None) -> str:
-    """Render each active work object with the shared status definitions."""
+def render_portfolio(work_objects, now=None, shown_above=None) -> str:
+    """Render each active work object with the shared status definitions. `shown_above` names the work
+    object whose full graph the reader already has (the architect's own goal): it is marked, not repeated."""
     from app.assistant.dayflow_orchestrator.work_context import render_view, work_data
-    return render_view("portfolio_list", works=[work_data(wo, now) for wo in (work_objects or [])])
+    return render_view("portfolio_list", works=[work_data(wo, now) for wo in (work_objects or [])],
+                       shown_above=shown_above)
+
+
+def render_active_portfolio(store, summaries, shown_above=None) -> tuple[str, int, list[str]]:
+    """The portfolio of every non-terminal work object in `summaries`: (text, objects rendered, unreadable ids).
+
+    An object that will not load is logged and NAMED at the top of the text, so the reader is told its
+    view is partial rather than told the work does not exist."""
+    from app.assistant.dayflow_orchestrator.work_context import render_view
+    active, unreadable = [], []
+    for s in summaries:
+        if str(s.get("status") or "").lower() in ("done", "abandoned"):
+            continue
+        try:
+            active.append(store.load(s["id"]))
+        except Exception as e:
+            unreadable.append(str(s.get("id")))
+            logger.error("[work_portfolio] active work object %s could not be loaded — it will be "
+                         "MISSING from the portfolio: %s", s.get("id"), e)
+            logger.debug("[work_portfolio] work object load exception", exc_info=True)
+    portfolio = render_portfolio(active, shown_above=shown_above)
+    if unreadable:
+        portfolio = render_view("incomplete_portfolio", unreadable=unreadable, portfolio=portfolio)
+    return portfolio, len(active), unreadable

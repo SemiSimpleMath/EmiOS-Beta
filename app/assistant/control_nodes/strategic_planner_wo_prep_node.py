@@ -21,7 +21,6 @@ from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-_TERMINAL_WO_STATES = {"done", "abandoned"}
 _ACTION_LOG_HOURS = 18
 _DAYFLOW_TYPES = frozenset({"dayflow_orchestrator"})
 
@@ -83,28 +82,35 @@ def _goal_epitaph(wo) -> str:
     return str(term.get("reason") or "").strip().replace("\n", " ") if isinstance(term, dict) else ""
 
 
-def _abandoned_line(summary, wo) -> str:
-    """One RECENTLY DROPPED entry: title + when + WHY.
+def _ended_item(wo, *, finalizers: bool) -> dict:
+    """One recently ended work object: its FULL objective (the goal node's content; the stored title is
+    the objective cut at 80 characters by work_persist), when it ended in local time, and why.
 
-    The reason is the load-bearing part — the last user reply recorded in the
-    graph and the goal node's final content. Without it the evaluator re-mints
-    a goal the user just settled (the 2026-07-27 July-timesheets double
-    reminder: the WO was dropped on "those are done first of next month
-    always", the DROPPED section showed only the bare title, and an identical
-    WO was created 11 minutes later)."""
-    from app.assistant.utils.time_utils import parse_iso_utc, utc_to_local
+    The end time is the goal's `terminal.at`, which every ending writes (set_work_status, the rollup, a
+    terminal set_status); an ended goal without one raises."""
+    from app.assistant.utils.time_utils import local_time_text
 
-    title = str(summary.get("title") or "").strip()
-    when = parse_iso_utc(str(summary.get("updated_at") or ""))
-    when_s = utc_to_local(when).strftime("%a %I:%M %p") if when else ""
-    nodes = getattr(wo, "nodes", {}) or {}
-    goal = nodes.get(getattr(wo, "goal_node_id", ""))
-    note = str(getattr(goal, "content", "") or "").strip()
-    item = {"title": title, "when": when_s, "reason": _goal_epitaph(wo),
-            "finalizers": [task.payload["finalizer"] for task in nodes.values()
-                           if wo.is_work_unit(task) and task.payload.get("finalizer")],
-            "goal_note": note if note.lower() != title.lower() else ""}
-    return render_view("recent_work", items=[item], dropped=True, window_hours=18).strip()
+    goal = wo.nodes.get(wo.goal_node_id)
+    terminal = (goal.payload.get("terminal") if goal is not None else None) or {}
+    if not terminal.get("at"):
+        raise ValueError(f"ended work object {wo.id} records no end time on its goal")
+    return {"title": (goal.content or goal.title).strip(), "when": local_time_text(terminal["at"]),
+            "reason": _goal_epitaph(wo),
+            "finalizers": [task.payload["finalizer"] for task in wo.nodes.values()
+                           if wo.is_work_unit(task) and task.payload.get("finalizer")] if finalizers else []}
+
+
+def _abandoned_line(wo) -> str:
+    """One RECENTLY DROPPED entry: objective + when + WHY.
+
+    The reason is the load-bearing part — the goal's ending reason and each task's
+    finalizer account, which carries the user's last reply. Without it the evaluator
+    re-mints a goal the user just settled (the 2026-07-27 July-timesheets double
+    reminder: the WO was dropped on "those are done first of next month always",
+    the DROPPED section showed only the bare title, and an identical WO was created
+    11 minutes later)."""
+    return render_view("recent_work", items=[_ended_item(wo, finalizers=True)], dropped=True,
+                       window_hours=18).strip()
 
 
 def _build_recent_dispatch_results(all_items, now_utc, *, max_age_hours=6, limit=10):
@@ -189,7 +195,7 @@ class StrategicPlannerWoPrepNode(ControlNode):
         # of the rendered portfolio, so the planner is told its view is partial rather than
         # told the store is empty.
         from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
-        from app.assistant.dayflow_orchestrator.work_portfolio import render_portfolio
+        from app.assistant.dayflow_orchestrator.work_portfolio import render_active_portfolio
 
         store = get_dayflow_work_store()
         from app.assistant.subconscious.concern_feedback import recover_pending_concern_feedback
@@ -202,22 +208,7 @@ class StrategicPlannerWoPrepNode(ControlNode):
         self.blackboard.update_state_value("admitted_artifacts_count", len(remaining))
         summaries = store.list_work_objects()   # newest-updated first; raises if unreadable
 
-        active, unreadable = [], []
-        for s in summaries:
-            if str(s.get("status") or "").lower() in _TERMINAL_WO_STATES:
-                continue
-            try:
-                active.append(store.load(s["id"]))
-            except Exception as e:
-                unreadable.append(str(s.get("id")))
-                logger.error("[%s] active work object %s could not be loaded — it will be "
-                             "MISSING from the planner's portfolio: %s", self.name, s.get("id"), e)
-                logger.debug("[%s] work object load exception", self.name, exc_info=True)
-        n_active = len(active)
-
-        portfolio = render_portfolio(active)
-        if unreadable:
-            portfolio = render_view("incomplete_portfolio", unreadable=unreadable, portfolio=portfolio)
+        portfolio, n_active, unreadable = render_active_portfolio(store, summaries)
         recent_completed, recent_abandoned = self._render_recent_completed(summaries, store)
         self.blackboard.update_state_value("work_portfolio", portfolio)
         self.blackboard.update_state_value("recent_completed_work", recent_completed)
@@ -265,8 +256,10 @@ class StrategicPlannerWoPrepNode(ControlNode):
         finished. Each abandoned entry is annotated with when it was dropped and why (the user's last
         recorded reply + the goal node's final content) via ``_abandoned_line`` — the reason is what
         stops the evaluator from re-minting a goal the user just settled.
-        Returns (done_str, abandoned_str). The WO title IS the objective (work_persist sets
-        title=objective[:80]); summaries are newest-updated first."""
+        Every entry shows the full objective and when it ended, in local time (``_ended_item``). The
+        stored WO title is the objective cut at 80 characters (work_persist), so it appears only for a
+        record that cannot be read, which is logged as an ERROR and marked unreadable in the log.
+        Returns (done_str, abandoned_str); summaries are newest-updated first."""
         from datetime import datetime, timedelta, timezone
 
         from app.assistant.utils.time_utils import parse_iso_utc
@@ -278,23 +271,17 @@ class StrategicPlannerWoPrepNode(ControlNode):
             if upd is not None and upd < cutoff:
                 break   # newest-first → everything after is older than the window
             status = str(s.get("status") or "").lower()
-            title = str(s.get("title") or "").strip()
-            if not title:
+            if status not in ("done", "abandoned"):
                 continue
-            if status in ("done", "abandoned"):
-                wo = None
-                try:
-                    wo = store.load(s["id"])
-                except Exception as e:
-                    logger.debug("[%s] could not load terminal WO %r for annotation: %s",
-                                 self.name, s.get("id"), e)
-            if status == "done":
-                epitaph = _goal_epitaph(wo) if wo is not None else ""
-                done.append({"title": title, "reason": epitaph, "when": "", "finalizers": [], "goal_note": ""})
-            elif status == "abandoned":
-                abandoned.append(_abandoned_line(s, wo))
+            try:
+                item = _ended_item(store.load(s["id"]), finalizers=status == "abandoned")
+            except Exception as e:
+                logger.error("[%s] ended work object %s could not be read for the recent-work log: %s",
+                             self.name, s.get("id"), e)
+                item = {"id": str(s.get("id")), "title": str(s.get("title") or "").strip(), "unreadable": str(e)}
+            (done if status == "done" else abandoned).append(item)
         done_str = render_view("recent_work", items=done, dropped=False, window_hours=window_hours).strip()
-        abandoned_str = "\n".join(abandoned) if abandoned else ""
+        abandoned_str = render_view("recent_work", items=abandoned, dropped=True, window_hours=window_hours).strip()
         return done_str, abandoned_str
 
     def _build_situational_context(self):

@@ -60,7 +60,7 @@ def persist_steward_output(store, output: Dict[str, Any], *, admitted_artifacts=
                  if str(b).strip().startswith("belief:") and str(b).strip()[len("belief:"):].strip()]
                 + belief_refs_of(sources)))
             wo = store.apply("create_work_object", {
-                "title": objective[:80],
+                "title": objective,
                 "goal_content": render_view("goal_content", objective=objective, sources=sources,
                                             success_criteria=str(spec.get("success_criteria") or "").strip()),
                 "satisfied_when_kind": "all_owned_children_done",

@@ -131,7 +131,7 @@ def _shell(entry: Dict[str, Any]) -> Dict[str, Any]:
                    "source_intake": [], "list_entry_id": entry["id"],
                    "concern_refs": [f"concern:{entry['concern_id']}"] if entry["kind"] == "concern" else [],
                    "belief_refs": [entry["belief_key"]] if entry["kind"] == "calendar" else []}
-    return {"title": goal[:80], "satisfied_when_kind": "all_owned_children_done", "constraints": constraints,
+    return {"title": goal, "satisfied_when_kind": "all_owned_children_done", "constraints": constraints,
             "goal_content": render_view("goal_content", objective=goal, sources=[], success_criteria=entry["what"])}
 
 

@@ -6,8 +6,8 @@ accepted/declined/snoozed replies (the user's acknowledge-with-correction
 never reached it), and the RECENTLY DROPPED section showed a bare title with
 no reason. These tests pin the fixes:
 
-- _abandoned_line: dropped entries carry when + the user's last word + the
-  goal's final note;
+- _abandoned_line: dropped entries carry the full objective + when (local) +
+  the user's last word;
 - the evaluator template renders the annotated drop reason;
 - the evaluator gets no ticket-reply list (2026-10-02): a reply is its work
   node's result, read in that work object's record. A 12-hour list labelled
@@ -70,7 +70,9 @@ def _fake_wo():
     from work_objects.model import WorkObject, WorkNode
     wo = WorkObject(id="work_bdc2b9abfd47", goal_node_id="node_goal", status="abandoned")
     wo.add_node(WorkNode(id="node_goal", work_id=wo.id, type="goal", status="abandoned",
-        content="Complete and submit July monthly Seyfarth timesheets on 2026-08-01."))
+        content="Complete and submit July monthly Seyfarth timesheets on 2026-08-01.",
+        payload={"terminal": {"status": "abandoned", "reason": "settled by the user",
+                              "at": "2026-07-27T19:31:45.824283+00:00"}}))
     wo.add_node(WorkNode(id="ask1", work_id=wo.id, type="subtask", parent_id="node_goal", status="closed",
         content="Finish July monthly timesheets", payload={"finalizer": {
             "verdict": "achieved", "outcome": "Those are done first of next month always."}}))
@@ -79,26 +81,22 @@ def _fake_wo():
     return wo
 
 
-SUMMARY = {
-    "id": "work_bdc2b9abfd47",
-    "title": "Complete the monthly timesheets by 2026-07-31.",
-    "status": "abandoned",
-    "updated_at": "2026-07-27T19:31:45.824283+00:00",
-}
-
-
-def test_abandoned_line_carries_reason_and_final_note():
-    line = _abandoned_line(SUMMARY, _fake_wo())
-    assert "Complete the monthly timesheets by 2026-07-31." in line
-    assert "dropped" in line
+def test_abandoned_line_carries_objective_when_and_reason():
+    from app.assistant.utils.time_utils import local_time_text
+    line = _abandoned_line(_fake_wo())
+    # The goal node's content, whole — not the stored (cut) title.
+    assert line.startswith("- Complete and submit July monthly Seyfarth timesheets on 2026-08-01.")
+    assert f"(dropped {local_time_text('2026-07-27T19:31:45.824283+00:00')})" in line
     assert "Those are done first of next month always." in line
-    assert "on 2026-08-01" in line  # the goal node's final content differs from the title
+    assert "settled by the user" in line
 
 
-def test_abandoned_line_without_loaded_wo_is_bare_but_valid():
-    line = _abandoned_line(SUMMARY, None)
-    assert line.startswith("- Complete the monthly timesheets by 2026-07-31.")
-    assert "dropped" in line
+def test_abandoned_line_refuses_an_ending_without_a_time():
+    import pytest
+    wo = _fake_wo()
+    del wo.nodes["node_goal"].payload["terminal"]["at"]
+    with pytest.raises(ValueError, match="no end time"):
+        _abandoned_line(wo)
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +128,7 @@ def test_evaluator_gets_no_ticket_reply_list():
 
 def test_evaluator_prompt_shows_drop_reason():
     out = _render_evaluator_template(
-        recent_abandoned_work=_abandoned_line(SUMMARY, _fake_wo()),
+        recent_abandoned_work=_abandoned_line(_fake_wo()),
     )
     assert "RECENTLY DROPPED" in out
     assert "Those are done first of next month always." in out

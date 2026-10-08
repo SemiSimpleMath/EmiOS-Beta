@@ -36,7 +36,7 @@ def test_wo_epitaph_reaches_the_dropped_log_whole():
                                     "reason": LONG_REASON}, actor="steward")
     wo = store.load(wid)
     assert "DO NOT RECREATE" in _goal_epitaph(wo)
-    line = _abandoned_line({"title": "Epitaph WO", "updated_at": ""}, wo)
+    line = _abandoned_line(wo)
     assert "DO NOT RECREATE" in line
 
 

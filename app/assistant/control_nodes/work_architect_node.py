@@ -180,18 +180,30 @@ def _render_existing_graph(wo) -> str:
     return render_view("portfolio", work=work_data(wo))
 
 
-def _situational_context(bb) -> str:
+def _situational_context(bb, portfolio=None) -> str:
     """Prepare the tick's situational data for the architect's Jinja context block.
 
     No tickets: the architect owns one goal, and the user's replies about it are recorded on the
     step that asked (evidence the finalizer judges). The tick's list of every answered ticket once
     reached every architect call as "directives"; on 2026-10-01 a reply to a test goal's question
     ("this task should be aborted") ended the goal that had just emailed a family member.
+
+    `portfolio` replaces the tick's portfolio for a re-plan, whose own work object is already in
+    its task as the existing graph (_goal_portfolio).
     """
     return render_view("situation",
         scheduled_reminder_history=bb.get_state_value("scheduled_reminder_history"),
-        portfolio=bb.get_state_value("work_portfolio", "") or "",
+        portfolio=(bb.get_state_value("work_portfolio", "") or "") if portfolio is None else portfolio,
         completed=bb.get_state_value("recent_completed_work", "") or "")
+
+
+def _goal_portfolio(store, work_id: str) -> str:
+    """The portfolio for a re-plan of `work_id`: every active work object, with this goal's own only
+    marked. Its full graph is in the task ("Existing nodes"); the tick's portfolio printed it a second
+    time in full (2026-10-08 read of a ~96k-character architect prompt)."""
+    from app.assistant.dayflow_orchestrator.work_portfolio import render_active_portfolio
+    portfolio, _, _ = render_active_portfolio(store, store.list_work_objects(), shown_above=work_id)
+    return portfolio
 
 
 def _apply_with_correction(agent, data: dict, task: str, information: str, scope, apply):
@@ -337,7 +349,8 @@ class WorkArchitectNode(ControlNode):
                                            goal_instructions=instructions.get(work_id, []),
                                            rationale=str((wo.constraints or {}).get("rationale") or "").strip(),
                                            stranded=work_id in stranded)
-                        result = agent.action_handler(Message(task=task, information=info, scope_context=scope))
+                        goal_info = _situational_context(self.blackboard, portfolio=_goal_portfolio(store, work_id))
+                        result = agent.action_handler(Message(task=task, information=goal_info, scope_context=scope))
                         data = getattr(result, "data", {}) or {}
 
                         def apply(d, wo=wo, work_id=work_id, licensed=licensed):
@@ -352,7 +365,7 @@ class WorkArchitectNode(ControlNode):
                                                        revise_objective=d.get("revise_objective"),
                                                        end_goal=d.get("end_goal"),
                                                        expected_updated_at=wo.updated_at)
-                        data, res = _apply_with_correction(agent, data, task, info, scope, apply)
+                        data, res = _apply_with_correction(agent, data, task, goal_info, scope, apply)
                         replanned.append({"work_id": work_id, "added": len(res.get("added", [])),
                                           "abandoned": len(res.get("abandoned", [])),
                                           "deduplicated": len(res.get("deduplicated", [])),

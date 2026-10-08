@@ -1,5 +1,5 @@
-{% for item in items %}- {{ item.title }}{% if item.when %}  (dropped {{ item.when }}){% endif %}
+{% for item in items %}{% if item.unreadable is defined %}- {{ item.title }}  (work object {{ item.id }}: its record could not be read, so this is its stored title, cut at 80 characters, and its end time is unknown: {{ item.unreadable }})
+{% else %}- {{ item.title }}  ({% if dropped %}dropped{% else %}completed{% endif %} {{ item.when }})
 {% if item.reason %}  {% if dropped %}recorded reason{% else %}ended{% endif %}: {{ item.reason }}
 {% endif %}{% for finalizer in item.finalizers %}  task outcome: {% include 'shared/work/finalizer_summary.j2' %}
-{% endfor %}{% if item.goal_note %}  final note on the goal: {{ item.goal_note }}
-{% endif %}{% else %}{% if not dropped %}(nothing completed in the last {{ window_hours }}h){% endif %}{% endfor %}
+{% endfor %}{% endif %}{% else %}{% if not dropped %}(nothing completed in the last {{ window_hours }}h){% endif %}{% endfor %}
