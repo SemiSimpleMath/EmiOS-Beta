@@ -82,7 +82,8 @@ class AgentForm(BaseModel):
     architect_summary: str = Field(description="One line on the graph you designed.")
     end_goal: Optional[GoalEnding] = Field(
         default=None,
-        description="RE-PLAN ONLY: end this goal now. Leave empty while any step can still move it.")
+        description="End this goal now: on a re-plan, or on a new goal that other work already does or that asks "
+        "nothing of the assistant. Leave empty while any step can still move it.")
     revise_objective: Optional[ObjectiveRevision] = Field(
         default=None,
         description="RE-PLAN ONLY: the goal itself changed — its premise expired or a result moved it — "

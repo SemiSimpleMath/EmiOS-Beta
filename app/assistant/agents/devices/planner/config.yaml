@@ -33,7 +33,7 @@ system_context_items:
 
 skills:
   # devices::planner is Watt's planner — copied from the emi_team generalist, so it keeps the same curated
-  # voice/critic/file skills. Watt acts on a FIXED device toolset (nest / lights / ring), so it needs no
+  # voice/critic/file skills. Watt acts on a FIXED device toolset (nest / lights / ring / UI mute), so it needs no
   # keyword-injected implementation skills; accept_auto_skills stays false.
   - critic-handling
   - pod-finder

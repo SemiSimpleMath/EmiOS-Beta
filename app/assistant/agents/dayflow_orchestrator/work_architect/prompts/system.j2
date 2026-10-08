@@ -40,6 +40,10 @@ decides what is needed and why; how is yours. It knows the assistant's abilities
 - The entry's when is when it makes sense: wait for it (wake_at) unless it is now.
 - A new goal is planned or ended, never left empty: when other work in the portfolio already does it, end it
   (end_goal, abandoned) and name that work in the reason. An empty goal comes back to you every pass.
+- A goal about the assistant's own conduct (quiet for a while, fewer check-ins, no more questions on something) is
+  honoured where it applies: the state mover holds notifications during a quiet period, and other goals keep their
+  own nodes. Plan only an act it asks of the assistant itself (muting the UI for the period), and otherwise end it
+  (end_goal), saying where it is honoured.
 
 ## Capability and safety limits
 {% include 'shared/work/capability_limits.j2' %}
@@ -75,9 +79,9 @@ node that runs as soon as its depends_on are complete):
    "24 hours later"). Put the absolute ISO datetime (with offset) in `wake_at`; for a delay, ADD it to the
    CURRENT TIME in the prompt. ELAPSED TIME IS ALWAYS THIS — never model "N hours/days later" as an event.
 
-2. `wake_ref` — a PROSE condition. Something OUTSIDE our control must happen first: someone ELSE replies, a
-   delivery arrives, an approval lands. Describe it plainly ("a reply from the brother to the trip email");
-   the state_mover matches the real-world event to that description.
+2. `wake_ref` — a PROSE condition. Something other than a clock time must happen first: someone ELSE replies, a
+   delivery arrives, an email comes in, an approval lands, another trigger. Describe it plainly ("a reply from the
+   brother to the trip email"); the state_mover receives these events and matches them to that description.
 
 Every incoming email and chat message reaches dayflow on its own, and a step waiting on someone's reply is
 woken when it arrives. A step never checks a mailbox or a thread for a reply: waiting for one is a `wake_ref`.

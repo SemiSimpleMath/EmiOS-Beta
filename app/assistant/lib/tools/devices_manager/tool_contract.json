@@ -1,6 +1,6 @@
 {
   "name": "devices_manager",
-  "description": "Smart-home manager for Nest thermostat, Alexa lights, and Ring controls.",
+  "description": "Smart-home manager for Nest thermostat, Alexa lights, Ring controls, and muting or unmuting the assistant's UI.",
   "inputs": [
     {
       "name": "task",
@@ -51,6 +51,6 @@
     "front_door": false,
     "room_visibility_default": "conditional",
     "approval_required": false,
-    "planner_description": "Smart-home control: Nest thermostat, lights, Ring cameras."
+    "planner_description": "Smart-home control: Nest thermostat, lights, Ring cameras, and muting or unmuting the assistant's UI."
   }
 }
