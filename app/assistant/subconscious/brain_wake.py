@@ -57,6 +57,10 @@ def run_brain() -> Dict[str, Any]:
     from app.assistant.subconscious.concern_store import load_register
     from app.assistant.subconscious.belief_occurrences import run_occurrence_handoffs
     gate = run_gate()
+    # A concern about a day whose day has ended is handed to the brain (brain_inbox.add_day_ended_events): the brain
+    # reads a concern only when an event bears on it.
+    from app.assistant.subconscious.brain_inbox import add_day_ended_events
+    add_day_ended_events(load_register())
     brain = run_brain_step()
     # A concern the brain (or the noticer) closed takes its open list entries with it, so dayflow ends their work.
     from app.assistant.subconscious import brain_list

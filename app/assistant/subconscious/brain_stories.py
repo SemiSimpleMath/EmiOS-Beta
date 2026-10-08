@@ -149,9 +149,9 @@ _DOOR = {"create": "opened as a new concern", "merge_open": "joined the open con
          "suppress_closed": "matched “{into}”, which is already settled",
          "merge_candidate": "joined another new concern raised here"}
 _SOURCES = {"chat": "chat message", "email": "email", "work": "report on work done", "camera": "camera sighting",
-            "presence": "presence at the computer"}
+            "presence": "presence at the computer", "time": "a concern's day ending"}
 _PLURALS = {"chat": "chat messages", "email": "emails", "work": "reports on work done", "camera": "camera sightings",
-            "presence": "comings and goings at the computer"}
+            "presence": "comings and goings at the computer", "time": "concerns whose day ended"}
 
 
 def _event_who(e: Dict[str, Any]) -> str:

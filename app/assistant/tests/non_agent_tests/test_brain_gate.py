@@ -464,3 +464,29 @@ def test_coming_back_wakes_the_brain_and_leaving_waits_for_the_timer(monkeypatch
     brain_wake.handle_afk_state_changed(SimpleNamespace(content="active"))
     assert brain_wake._poked.is_set()
     brain_wake._poked.clear()
+
+
+# ── a concern whose day has ended (2026-10-08) ────────────────────────────────
+
+def _day_concern(cid, raised, horizon="today"):
+    return {"concern_id": cid, "title": cid, "horizon": horizon, "first_observed": raised}
+
+
+def test_a_concern_whose_day_has_ended_reaches_the_brain_once_per_day(connect):
+    # NOW is 2026-03-10 18:00 UTC; local day boundary is 05:00.
+    reg = {"active": [_day_concern("c-pickup", "2026-03-09T03:00:00+00:00"),       # the evening before
+                      _day_concern("c-today", "2026-03-10T17:00:00+00:00"),        # raised today: not ended
+                      _day_concern("c-week", "2026-03-01T17:00:00+00:00", "this_week")],
+           "addressing": []}
+    assert inbox.add_day_ended_events(reg, now_utc=NOW, connect=connect) == 1
+    assert inbox.add_day_ended_events(reg, now_utc=NOW + timedelta(minutes=10), connect=connect) == 0   # once a day
+    with connect(False) as c:
+        rows = [dict(r) for r in c.execute("SELECT * FROM brain_events")]
+    assert [(r["source"], r["gate_status"], r["route"], r["concern_ids"]) for r in rows] == [
+        ("time", "routed", "concern", '["c-pickup"]')]
+    assert "has ended" in rows[0]["text"]
+    # the next day: the pickup is asked again, and the concern raised on the 10th has ended too
+    assert inbox.add_day_ended_events(reg, now_utc=NOW + timedelta(days=1), connect=connect) == 2
+    [group] = conversations.build([{**rows[0], "mark": "E1"}], now_utc=NOW)
+    assert group["heading"] == "The clock"
+    assert brain_step._evidence(rows[0])["kind"] == "time"

@@ -325,6 +325,8 @@ def _evidence(e: Dict[str, Any]) -> Dict[str, Any]:
         return {"kind": "pod", "ref": e["source_ref"], "snippet": e["text"]}
     if e["source"] == "presence":
         return {"kind": "presence", "ref": e["source_ref"], "snippet": e["text"]}
+    if e["source"] == "time":
+        return {"kind": "time", "ref": e["source_ref"], "snippet": e["text"]}
     return {"kind": "chat_msg", "ref": e["source_ref"], "snippet": e["text"]}
 
 
