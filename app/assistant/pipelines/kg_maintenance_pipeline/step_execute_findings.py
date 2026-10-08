@@ -127,9 +127,9 @@ def _execute_duplicate(finding: dict) -> dict:
         if node_a is None and node_b is None:
             return {"executed": True, "detail": "Both nodes already deleted."}
         if node_a is None:
-            return {"executed": True, "detail": f"Node A ({node_a_id[:12]}) already deleted; B remains."}
+            return {"executed": True, "detail": f"Node A ({node_a_id}) already deleted; B remains."}
         if node_b is None:
-            return {"executed": True, "detail": f"Node B ({node_b_id[:12]}) already deleted; A remains."}
+            return {"executed": True, "detail": f"Node B ({node_b_id}) already deleted; A remains."}
 
         winner, loser = _pick_canonical(node_a, node_b, session)
         winner_id = str(winner.id)
@@ -196,7 +196,7 @@ def _execute_duplicate(finding: dict) -> dict:
         "detail": (
             f"Merged '{loser_label}' into '{winner_label}' (LLM). "
             f"Edges rerouted: {edges_rerouted}, dropped (conflict): {edges_dropped}. "
-            f"Merge log id: {merge_log_id[:8]}."
+            f"Merge log id: {merge_log_id}."
         ),
     }
 
@@ -281,6 +281,15 @@ def _pick_canonical(node_a, node_b, session) -> tuple:
 # Series-link execution (link per-occurrence Events to parent Entity)
 # ---------------------------------------------------------------------------
 
+def _instance_of_sentence(event_label: str | None, canonical_label: str) -> str:
+    """The instance_of edge sentence names the Event by label; the edge's
+    endpoints carry the ids."""
+    return (
+        f"Event {(event_label or '?')!r} is an "
+        f"instance of the recurring {canonical_label!r} series."
+    )
+
+
 def _execute_series_link(finding: dict) -> dict:
     """Mint an instance_of edge from a per-occurrence Event to its parent
     Entity. If the parent Entity doesn't exist yet
@@ -319,14 +328,14 @@ def _execute_series_link(finding: dict) -> dict:
     try:
         event_node = session.query(Node).filter_by(id=event_id).first()
         if event_node is None:
-            return {"executed": True, "detail": f"Event {event_id[:8]} already deleted"}
+            return {"executed": True, "detail": f"Event {event_id} already deleted"}
 
         if action == "link_events_to_entity":
             entity_node = session.query(Node).filter_by(id=primary_id).first()
             if entity_node is None:
                 return {
                     "executed": False,
-                    "detail": f"Parent Entity {primary_id[:8]} no longer exists",
+                    "detail": f"Parent Entity {primary_id} no longer exists",
                 }
         elif action == "create_parent_entity_and_link":
             entity_node = (
@@ -363,7 +372,7 @@ def _execute_series_link(finding: dict) -> dict:
                 "executed": True,
                 "detail": (
                     f"instance_of edge already exists "
-                    f"({event_id[:8]} -> {entity_node.id[:8]})"
+                    f"({event_id} -> {entity_node.id})"
                 ),
             }
 
@@ -372,10 +381,7 @@ def _execute_series_link(finding: dict) -> dict:
             source_id=event_node.id,
             target_id=entity_node.id,
             relationship_type="instance_of",
-            sentence=(
-                f"Event {(event_node.label or '?')!r} ({event_id[:8]}) is an "
-                f"instance of the recurring {canonical_label!r} series."
-            ),
+            sentence=_instance_of_sentence(event_node.label, canonical_label),
         )
         session.add(new_edge)
 
@@ -405,7 +411,7 @@ def _execute_series_link(finding: dict) -> dict:
         return {
             "executed": True,
             "detail": (
-                f"Linked Event {event_id[:8]} -> Entity {entity_node.id[:8]} "
+                f"Linked Event {event_id} -> Entity {entity_node.id} "
                 f"via instance_of"
                 + (f" (aliases added: {new_aliases})" if new_aliases else "")
             ),
@@ -539,7 +545,7 @@ def _execute_split_state(finding: dict) -> dict:
     try:
         old = session.query(Node).filter_by(id=old_node_id).first()
         if old is None:
-            return {"executed": False, "detail": f"Old node {old_node_id[:12]} not found (already deleted?)."}
+            return {"executed": False, "detail": f"Old node {old_node_id} not found (already deleted?)."}
         if (old.node_type or "") not in ("State", "Event"):
             return {"executed": False, "detail": f"Refusing to split node_type={old.node_type!r}; only State/Event are splittable."}
 
@@ -567,9 +573,9 @@ def _execute_split_state(finding: dict) -> dict:
             for eid in edge_ids:
                 eid_str = str(eid)
                 if eid_str not in attached_ids:
-                    return {"executed": False, "detail": f"buckets[{i}].edge_ids contains {eid_str[:12]} which is not attached to old node."}
+                    return {"executed": False, "detail": f"buckets[{i}].edge_ids contains {eid_str} which is not attached to old node."}
                 if eid_str in seen_ids:
-                    return {"executed": False, "detail": f"Edge {eid_str[:12]} appears in more than one bucket."}
+                    return {"executed": False, "detail": f"Edge {eid_str} appears in more than one bucket."}
                 seen_ids.add(eid_str)
             try:
                 start_dt = _parse_iso_dt(b.get("start_date"))
@@ -647,7 +653,7 @@ def _execute_split_state(finding: dict) -> dict:
             args_json={"old_node_id": old_node_id, "n_buckets": len(bucket_specs)},
             before_json=before_snapshot,
             after_json=after_snapshot,
-            reason=f"split_state via finding {finding.get('id', '?')[:8]}",
+            reason=f"split_state via finding {finding.get('id', '?')}",
             finding_id=finding.get("id"),
             agent_id="kg_maintenance::_execute_split_state",
             succeeded=1,
@@ -666,7 +672,7 @@ def _execute_split_state(finding: dict) -> dict:
     return {
         "executed": True,
         "detail": (
-            f"Split node {old_node_id[:12]} into {len(new_node_ids)} new {bucket_specs[0]['node_type']} "
+            f"Split node {old_node_id} into {len(new_node_ids)} new {bucket_specs[0]['node_type']} "
             f"nodes ({', '.join(s['label'] for s in bucket_specs)}). Logged as split_state revision."
         ),
     }
@@ -778,13 +784,13 @@ def _execute_batch_text_substitute(finding: dict) -> dict:
             cls = Node if entry["table"] == "kg_node_metadata" else Edge
             row = session.query(cls).filter_by(id=entry["id"]).first()
             if row is None:
-                return {"executed": False, "detail": f"Row {entry['table']}/{entry['id'][:12]} not found."}
+                return {"executed": False, "detail": f"Row {entry['table']}/{entry['id']} not found."}
             live_current = getattr(row, entry["field"], None)
             if live_current != entry["observed_current"]:
                 return {"executed": False, "detail": (
-                    f"Drift detected on {entry['table']}/{entry['id'][:12]}.{entry['field']}: "
+                    f"Drift detected on {entry['table']}/{entry['id']}.{entry['field']}: "
                     f"investigator observed {entry['observed_current']!r} but live value is "
-                    f"{(live_current or '')[:80]!r}. Refusing to overwrite — re-run the investigator."
+                    f"{live_current!r}. Refusing to overwrite — re-run the investigator."
                 )}
 
         # No drift; apply.
@@ -817,7 +823,7 @@ def _execute_batch_text_substitute(finding: dict) -> dict:
             },
             before_json=before_snapshot,
             after_json=after_snapshot,
-            reason=f"batch_text_substitute via finding {finding.get('id', '?')[:8]}",
+            reason=f"batch_text_substitute via finding {finding.get('id', '?')}",
             finding_id=finding.get("id"),
             agent_id="kg_maintenance::_execute_batch_text_substitute",
             succeeded=1,

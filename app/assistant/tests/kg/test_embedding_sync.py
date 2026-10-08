@@ -236,3 +236,28 @@ def test_chokepoint_deletes_vectors_on_node_delete(chokepoint):
         session.close()
     assert ("label", nid) in chokepoint.deleted
     assert ("identity", nid) in chokepoint.deleted
+
+
+def test_a_change_past_the_old_preview_length_is_re_embedded(monkeypatch, fake_embed, status_to_tmp):
+    """Until 2026-10-08 the context was compared by its first 200 characters, so a change after them never
+    re-embedded. The whole text is stored and compared now."""
+    head = "The node observed at length. " * 10                 # well over 200 characters
+    nid = _mk_node("Long", identity_sentence="The long node.", original_sentence=head + "It moved in May.")
+    same = sync_mod.compose_context_text("The long node.", head + "It moved in May.")
+    fake = _FakeChroma(labels={nid: {"label": "Long"}},
+                       identities={nid: {"identity_sentence": "The long node."}},
+                       contexts={nid: {"context_preview": same}})
+    import app.assistant.kg.chroma.chroma_embedding_manager as cem
+    monkeypatch.setattr(cem, "get_chroma_manager", lambda: fake)
+    assert sync_mod.sync_kg_embeddings(mode="diff")["contexts_embedded"] == 0     # unchanged: nothing to do
+
+    session = get_session()
+    try:
+        session.get(Node, nid).original_sentence = head + "It moved in June."
+        session.commit()
+    finally:
+        session.close()
+    fake.node_context_collection.rows[nid] = {"context_preview": same}
+    counts = sync_mod.sync_kg_embeddings(mode="diff")
+    assert counts["contexts_embedded"] == 1
+    assert fake.stored_contexts[nid].endswith("It moved in June.")

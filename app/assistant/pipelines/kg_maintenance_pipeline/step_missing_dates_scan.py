@@ -231,7 +231,7 @@ def run(ctx: PipelineContext) -> dict:
             "label": label,
             "node_type": node_type,
             "category": category,
-            "description": (description or "")[:300],
+            "description": (description or ""),
             "connected_entity_labels": entity_labels[:10],
             "worth": round(worth, 2),
             "connects_primary_user": connects_primary,

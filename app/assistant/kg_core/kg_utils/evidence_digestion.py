@@ -33,7 +33,6 @@ KEEP_RECENT = 15
 # Upper bound on rows folded per node per run: a 700-row tail digests over
 # several nights rather than feeding one giant prompt.
 MAX_FOLD_PER_NODE = 80
-MAX_DIGEST_CHARS = 2000
 
 AGENT_NAME = "kg_maintenance::evidence_digester"
 FAILURE_KIND = "kg_evidence_digest"
@@ -176,7 +175,7 @@ def _generate_digest(item: Dict[str, Any]) -> str:
             scope_id=AGENT_NAME,
             actor_id="evidence_digestion",
         )
-        return str(result.get("digest") or "").strip()[:MAX_DIGEST_CHARS]
+        return str(result.get("digest") or "").strip()
 
     digest = ask()
     if not digest:

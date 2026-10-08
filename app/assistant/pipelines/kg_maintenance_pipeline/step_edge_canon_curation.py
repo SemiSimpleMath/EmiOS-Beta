@@ -314,7 +314,7 @@ def _apply_verdicts(verdicts: List[Dict]) -> Dict[str, int]:
                 """), {
                     "id": new_canon_id,
                     "et": canonical_name,
-                    "desc": f"Promoted from raw predicate (reason: {v.get('reason', '')[:200]})",
+                    "desc": f"Promoted from raw predicate (reason: {v.get('reason', '')})",
                     "now": _utc_now_iso(),
                 })
                 canon_by_type[canonical_name] = new_canon_id

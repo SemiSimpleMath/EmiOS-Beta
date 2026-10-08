@@ -227,10 +227,10 @@ class SegmentMessagesStep:
                     start_timestamp=first_msg["timestamp"],
                     end_timestamp=last_msg["timestamp"],
                     message_count=len(win["member_ids"]),
-                    summary=(analysis_summary or "")[:1000] if not win.get("reasoning") else (win["reasoning"] or "")[:1000],
+                    summary=(analysis_summary or "") if not win.get("reasoning") else (win["reasoning"] or ""),
                     standalone=bool(win["should_process"]),
                     related_previous_window_ids=None,
-                    reason_for_boundary=(win["reasoning"] or "")[:1000],
+                    reason_for_boundary=(win["reasoning"] or ""),
                     segmenter_version=SEGMENTER_VERSION,
                 ))
                 for idx, uid in enumerate(win["member_ids"]):

@@ -155,7 +155,7 @@ class CritiqueAndExtractStep:
         return {
             "extractable": len(kept) > 0,
             "kept_indices": kept,
-            "reason": str(data.get("overall_reason", ""))[:240],
+            "reason": str(data.get("overall_reason", "")),
         }
 
     def _call_fact_extractor(self, payload: Dict[str, Any]) -> Tuple[List[Dict], List[Dict]]:
@@ -183,7 +183,7 @@ class CritiqueAndExtractStep:
             KGWindowExtraction(
                 window_id=window_id,
                 verdict=verdict,
-                verdict_reason=reason[:1000] if reason else None,
+                verdict_reason=reason if reason else None,
                 nodes=nodes if nodes is not None else None,
                 edges=edges if edges is not None else None,
                 extractor_version=EXTRACTOR_VERSION,

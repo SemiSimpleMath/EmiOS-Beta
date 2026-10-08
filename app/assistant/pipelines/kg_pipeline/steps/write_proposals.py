@@ -207,7 +207,7 @@ class WriteProposalsStep:
             status="abandoned",
             claim_type="unknown",
             confidence=0.0,
-            representative_sentence=(status_note or "empty enrichment")[:500],
+            representative_sentence=(status_note or "empty enrichment"),
             observation_count=1,
             first_observed_at=observed_at or now_utc,
             last_observed_at=observed_at or now_utc,

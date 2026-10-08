@@ -165,7 +165,7 @@ def retire_single_referent(session, dis_node_id: str, label: str) -> Dict[str, A
         return out
     referent = referents[0]
     out["referent"] = referent.id
-    reason = (f"Disambiguation retirement: the label {label!r} has one referent ({referent.id[:8]}); the marker "
+    reason = (f"Disambiguation retirement: the label {label!r} has one referent, a {referent.node_type}; the marker "
               f"has no ambiguity left")
 
     def log(op, args, before, after):

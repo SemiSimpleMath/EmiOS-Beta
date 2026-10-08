@@ -229,7 +229,7 @@ def run(ctx: PipelineContext) -> dict:
                 suggested_action="split_succession",
                 reason=(
                     f"Referent change detected for {label!r}: "
-                    f"{str(verdict.get('split_basis') or verdict.get('reasoning') or '')[:400]}"
+                    f"{str(verdict.get('split_basis') or verdict.get('reasoning') or '')}"
                 ),
                 confidence=CONFIDENCE_MAP.get(conf, 0.5),
                 priority="high" if conf == "high" else "medium",
@@ -255,7 +255,7 @@ def run(ctx: PipelineContext) -> dict:
                 primary_node_id=node_id,
                 suggested_action="none",
                 reason=f"succession_judge: {v} ({conf}) — "
-                       f"{str(verdict.get('reasoning') or '')[:300]}",
+                       f"{str(verdict.get('reasoning') or '')}",
                 confidence=CONFIDENCE_MAP.get(conf, 0.5),
                 priority="low",
                 agent_name="role_succession_scan",
@@ -285,8 +285,8 @@ def _promote_to_review(finding_id: str, *, label: str, verdict: Dict[str, Any], 
     recommendation = (
         f"REFERENT SUCCESSION on node `{node_id}` ({label!r}): the evidence shows the "
         f"real-world referent changed around {split_date}. "
-        f"Old era: {str(verdict.get('era_before') or '?')[:200]} "
-        f"New era: {str(verdict.get('era_after') or '?')[:200]}\n"
+        f"Old era: {str(verdict.get('era_before') or '?')} "
+        f"New era: {str(verdict.get('era_after') or '?')}\n"
         f"Apply with kg_split_succession(node_id, split_date={split_date!r}, "
         f"date_confidence='estimated' unless the user stated a precise date). "
         f"Before applying, read the node's edges with kg_query: edges whose facts "
@@ -303,8 +303,8 @@ def _promote_to_review(finding_id: str, *, label: str, verdict: Dict[str, Any], 
         f.investigated_at = utc_now()
         f.investigation_report_json = {
             "recommendation": recommendation,
-            "diagnosis": str(verdict.get("reasoning") or "")[:500],
-            "evidence": [{"kind": "judge_basis", "text": str(verdict.get("split_basis") or "")[:400]}],
+            "diagnosis": str(verdict.get("reasoning") or ""),
+            "evidence": [{"kind": "judge_basis", "text": str(verdict.get("split_basis") or "")}],
             "confidence": str(verdict.get("confidence") or "medium"),
             "disposition": "needs_user_review",
         }

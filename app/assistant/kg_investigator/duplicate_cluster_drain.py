@@ -331,7 +331,7 @@ def _apply_resolution(
                     loser_node=loser,
                     winner_node=winner,
                     merge_actor=ACTOR,
-                    notes=f"cluster merge: {reason}"[:300],
+                    notes=f"cluster merge: {reason}",
                     winner_pre_snapshot=winner_pre,
                 )
                 remap[loser_id] = winner_id

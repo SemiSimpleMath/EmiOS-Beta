@@ -130,8 +130,7 @@ def sync_kg_embeddings(*, mode: str = "diff", max_embeds: Optional[int] = None) 
         # Identity collection: mirrors identity_sentence exactly.
         imeta = identity_state.get(nid)
         if identity_sentence and identity_sentence.strip():
-            preview = identity_sentence[:300]
-            istale = imeta is None or (imeta or {}).get("identity_sentence") != preview
+            istale = imeta is None or (imeta or {}).get("identity_sentence") != identity_sentence
             if istale or mode == "full":
                 cm.store_node_identity_embedding(
                     nid, identity_sentence, embed_text(identity_sentence))
@@ -141,14 +140,15 @@ def sync_kg_embeddings(*, mode: str = "diff", max_embeds: Optional[int] = None) 
             counts["identities_removed"] += 1
 
         # Context (aboutness) collection: identity-sentence head + original
-        # observation. Compared via its stored preview so ANY text drift
+        # observation. Compared with the whole stored text (until 2026-10-08 a 200-character preview,
+        # which missed any change past it) so ANY text drift
         # (identity regen, sentence canonicalization) re-anchors it — the
         # diff covers everything the full mode does, which keeps full mode
         # a weekly floor (20k embeds ≈ 2h+ on this hardware, measured).
         ctx_text = compose_context_text(identity_sentence, original_sentence)
         if ctx_text:
             cmeta = context_state.get(nid)
-            cstale = cmeta is None or (cmeta or {}).get("context_preview") != ctx_text[:200]
+            cstale = cmeta is None or (cmeta or {}).get("context_preview") != ctx_text
             if cstale or mode == "full":
                 cm.store_node_context_embedding(nid, ctx_text, embed_text(ctx_text))
                 counts["contexts_embedded"] += 1

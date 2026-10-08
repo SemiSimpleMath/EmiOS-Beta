@@ -277,6 +277,40 @@ def test_series_link_adds_aliases_instead_of_disambiguation():
         session.close()
 
 
+def test_series_link_edge_sentence_names_the_event_and_carries_no_id():
+    from app.assistant.pipelines.kg_maintenance_pipeline.step_execute_findings import (
+        _execute_series_link,
+    )
+    event_id = _mk_node("Tuesday Swim", node_type="Event")
+    finding = {
+        "primary_node_id": event_id,
+        "secondary_node_id": event_id,
+        "evidence_json": {
+            "action": "create_parent_entity_and_link",
+            "canonical_label": "Tuesday swim lessons",
+            "all_event_ids": [event_id],
+        },
+        "investigation_report_json": {},
+    }
+    assert _execute_series_link(finding)["executed"] is True
+
+    session = get_session()
+    try:
+        edge = (
+            session.query(Edge)
+            .filter(Edge.source_id == event_id)
+            .filter(Edge.relationship_type == "instance_of")
+            .one()
+        )
+        assert edge.sentence == (
+            "Event 'Tuesday Swim' is an instance of the recurring "
+            "'Tuesday swim lessons' series."
+        )
+        assert event_id[:8] not in edge.sentence
+    finally:
+        session.close()
+
+
 # ── kg_repoint_edge ──────────────────────────────────────────────────────
 
 

@@ -176,7 +176,7 @@ def split_succession(
             .first()
         )
         if dup is not None:
-            skipped.append({"edge_id": e.id, "why": f"duplicate of {dup.id[:8]}"})
+            skipped.append({"edge_id": e.id, "why": f"duplicate of {dup.id}"})
             continue
         e.source_id, e.target_id = new_src, new_tgt
         repointed.append(e.id)

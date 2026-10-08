@@ -453,6 +453,19 @@ def test_definable_without_sentence_gets_one_correction(monkeypatch):
     assert seen[0]["correction"] is None and "no identity_sentence" in seen[1]["correction"]
 
 
+def test_long_sentence_and_basis_are_kept_whole(monkeypatch):
+    import app.assistant.kg_core.kg_utils.identity_sentence as mod
+    import app.assistant.routine_handlers.subconscious as sub
+
+    sentence = "The house " + "on the long lane by the river " * 20 + "where Tom lives."
+    basis = "Anchored by " + "the located_in and owns edges, " * 20 + "and the era dates."
+    monkeypatch.setattr(sub, "_run_subconscious_agent",
+                        lambda **kw: {"definable": True, "identity_sentence": sentence, "basis": basis})
+    result = mod.generate_identity_sentence({"label": "Tom's House", "edges": []})
+    assert result["sentence"] == sentence.strip() and len(result["sentence"]) > 220
+    assert result["basis"] == basis
+
+
 # ── semantic tier reads the identity collection ──────────────────────────
 
 

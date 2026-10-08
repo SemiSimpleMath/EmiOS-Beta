@@ -313,10 +313,10 @@ def _mint_disambiguation_on_label_collision(session, new_node) -> None:
         session,
         label=label,
         reason=(
-            f"Minted by the promoter: a new {new_node.node_type} "
-            f"({str(new_node.id)[:8]}) was created at a label already "
-            f"held by {str(collision.id)[:8]} after the resolver "
-            f"declined the match — the label has multiple referents."
+            f"Minted by the promoter: a new {new_node.node_type} was "
+            f"created at the label {label!r}, already held by another "
+            f"{new_node.node_type}, after the resolver declined the "
+            f"match — the label has multiple referents."
         ),
     )
 
@@ -1327,7 +1327,7 @@ def _estimate_state_ttl(
         "duration_class": data.get("duration_class"),
         "estimated_duration_days": int(days) if isinstance(days, (int, float)) else None,
         "confidence": float(data.get("confidence") or 0.0),
-        "reasoning": str(data.get("reasoning") or "")[:500],
+        "reasoning": str(data.get("reasoning") or ""),
         "estimated_at": utc_now().isoformat(),
     }
 
@@ -2753,11 +2753,11 @@ def _evaluate_and_apply(
                 _incoming_era_start(pnodes_by_id, pe),
             )
             src_node = session.get(Node, src_kg)
-            src_label = src_node.label if src_node else src_kg[:8]
+            src_label = src_node.label if src_node else "(missing node)"
             old_tgt_node = session.get(Node, conflict.target_id)
-            old_label = old_tgt_node.label if old_tgt_node else conflict.target_id[:8]
+            old_label = old_tgt_node.label if old_tgt_node else "(missing node)"
             new_tgt_node = session.get(Node, tgt_kg)
-            new_label = new_tgt_node.label if new_tgt_node else tgt_kg[:8]
+            new_label = new_tgt_node.label if new_tgt_node else "(missing node)"
 
             if kind == "closed_era":
                 # The existing era ended — sequential facts coexist

@@ -103,7 +103,7 @@ def run(ctx: PipelineContext) -> dict:
                 flagged.append({
                     "node_id": n.id, "label": n.label,
                     "node_type": n.node_type, "issues": issues,
-                    "sentence": (n.original_sentence or "")[:200],
+                    "sentence": (n.original_sentence or ""),
                 })
     finally:
         session.close()

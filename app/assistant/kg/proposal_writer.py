@@ -390,7 +390,7 @@ def write_one_proposal_group(
     temp_to_uuid: Dict[str, str] = {}
     for n in nodes:
         extractor_tid = str(n.get("temp_id") or "")
-        label = ((n.get("label") or "").strip())[:512] or "(unknown)"
+        label = (n.get("label") or "").strip() or "(unknown)"
         node_type = (n.get("node_type") or "Entity").strip() or "Entity"
 
         # first_observed no longer stored in attributes — it's a first-class
@@ -407,8 +407,10 @@ def write_one_proposal_group(
             if val not in (None, "", []):
                 merged_attrs[fld] = val
 
-        category = (n.get("category") or "")
-        category = category[:128] if category else None
+        category = (n.get("category") or "") or None
+        if category is not None and len(category) > 128:
+            # ClaimProposalNode.category is String(128).
+            raise ValueError(f"[proposal_writer] category is {len(category)} chars; the column holds 128: {category!r}")
 
         vf_parsed, vf_leftover = _parse_ts_or_prose(n.get("valid_from") or n.get("start_date"))
         vt_parsed, vt_leftover = _parse_ts_or_prose(n.get("valid_to") or n.get("end_date"))
@@ -475,11 +477,15 @@ def write_one_proposal_group(
             continue
         raw_predicate = e.get("relationship_type") or e.get("label") or ""
         canonical_pred, _ = normalize_predicate(raw_predicate)
+        predicate = canonical_pred or "related_to"
+        if len(predicate) > 128:
+            # ClaimProposalEdge.predicate is String(128).
+            raise ValueError(f"[proposal_writer] predicate is {len(predicate)} chars; the column holds 128: {predicate!r}")
         session.add(ClaimProposalEdge(
             proposal_id=proposal.id,
             source_node_id=src_uuid,
             target_node_id=tgt_uuid,
-            predicate=(canonical_pred or "related_to")[:128],
+            predicate=predicate,
             bidirectional=bool(e.get("bidirectional", False)),
             sentence=e.get("sentence"),
         ))

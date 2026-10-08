@@ -25,7 +25,6 @@ from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 MAX_EDGES = 12
-MAX_SENTENCE_CHARS = 220
 AGENT_NAME = "kg_maintenance::identity_sentence_writer"
 FAILURE_KIND = "kg_identity_sentence"
 
@@ -147,12 +146,12 @@ def generate_identity_sentence(
         if result.get("definable") and not str(result.get("identity_sentence") or "").strip():
             raise RuntimeError(f"identity_sentence_writer: definable without a sentence for "
                                f"{inputs.get('label')!r} after one correction")
-    sentence = str(result.get("identity_sentence") or "").strip()[:MAX_SENTENCE_CHARS]
+    sentence = str(result.get("identity_sentence") or "").strip()
     definable = bool(result.get("definable")) and bool(sentence)
     return {
         "sentence": sentence if definable else None,
         "definable": definable,
-        "basis": str(result.get("basis") or "")[:200],
+        "basis": str(result.get("basis") or ""),
     }
 
 
@@ -342,12 +341,12 @@ def _raise_undefinable_finding(node_id: str, label: str, basis: str) -> None:
         reason=(
             f"{label!r} could not be given an identity sentence even with its "
             f"source conversation in hand — no coherent real-world referent. "
-            f"Writer: {basis[:200]}"
+            f"Writer: {basis}"
         ),
         confidence=0.7,
         priority="low",
         agent_name="identity_sentence_refresh",
-        evidence={"label": label, "writer_basis": basis[:300]},
+        evidence={"label": label, "writer_basis": basis},
     )
     if not created:
         return
@@ -367,8 +366,8 @@ def _raise_undefinable_finding(node_id: str, label: str, basis: str) -> None:
                 f"(kg_delete_node). If it is genuinely meaningful, the user's "
                 f"notes are ground truth."
             ),
-            "diagnosis": f"Indefinable after window escalation: {basis[:300]}",
-            "evidence": [{"kind": "writer_basis", "text": basis[:300]}],
+            "diagnosis": f"Indefinable after window escalation: {basis}",
+            "evidence": [{"kind": "writer_basis", "text": basis}],
             "confidence": "medium",
             "disposition": "needs_user_review",
         }

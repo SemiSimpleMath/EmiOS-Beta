@@ -1555,7 +1555,7 @@ class KGMutatorTool(BaseTool):
                 )
             before = {"status": f.status, "execution_notes": f.execution_notes}
             f.status = new_status
-            setattr(f, note_field, composed_notes[:2000])
+            setattr(f, note_field, composed_notes)
             f.executed_by = self._agent_id(tool_message) or f.executed_by
             f.executed_at = datetime.now(timezone.utc)
             after = {"status": f.status, "execution_notes": getattr(f, note_field)}

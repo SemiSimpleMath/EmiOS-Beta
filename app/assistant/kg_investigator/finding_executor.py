@@ -329,7 +329,7 @@ def _drift_reason(finding_id: str) -> Optional[str]:
                 {"nid": node_id},
             ).fetchone()
             if row is None:
-                drifts.append(f"node {node_id[:8]} no longer exists")
+                drifts.append(f"node {node_id} no longer exists")
                 continue
             now_vals = {
                 "label": row[0],
@@ -341,7 +341,7 @@ def _drift_reason(finding_id: str) -> Optional[str]:
                 then_v = str(then_v) if then_v is not None else None
                 if then_v != now_vals[field]:
                     drifts.append(
-                        f"node {node_id[:8]} {field} changed "
+                        f"node {node_id} {field} changed "
                         f"({then_v!r} → {now_vals[field]!r})"
                     )
     return "; ".join(drifts) if drifts else None
@@ -543,7 +543,7 @@ def _reclaim_stale_executions() -> int:
                 f"Stale 'executing' claim released after {STALE_CLAIM_HOURS}h "
                 f"(process likely died mid-run). "
                 + (f.execution_notes or "")
-            )[:500]
+            )
         n = len(stale)
     if n:
         logger.warning("[finding_executor] released %d stale 'executing' claim(s)", n)

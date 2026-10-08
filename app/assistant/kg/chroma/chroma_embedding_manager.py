@@ -316,7 +316,9 @@ class ChromaEmbeddingManager:
             self.node_context_collection.upsert(
                 ids=[node_id],
                 embeddings=[embedding],
-                metadatas=[{"context_preview": context_text[:200]}],
+                # The whole text (the key predates 2026-10-08, when it held the first 200 characters):
+                # embedding_sync compares it to detect drift, so a cut copy missed changes past the cut.
+                metadatas=[{"context_preview": context_text}],
             )
             logger.debug("Stored context embedding for node %s", node_id)
         except Exception as e:
@@ -352,7 +354,7 @@ class ChromaEmbeddingManager:
             self.node_identity_collection.upsert(
                 ids=[node_id],
                 embeddings=[embedding],
-                metadatas=[{"identity_sentence": sentence[:300]}],
+                metadatas=[{"identity_sentence": sentence}],
             )
             logger.debug("Stored identity embedding for node %s", node_id)
         except Exception as e:
@@ -376,7 +378,7 @@ class ChromaEmbeddingManager:
             self.edge_collection.upsert(
                 ids=[edge_id],
                 embeddings=[embedding],
-                metadatas=[{"sentence": sentence[:500]}]  # Truncate long sentences
+                metadatas=[{"sentence": sentence}]
             )
             logger.debug(f"Stored embedding for edge {edge_id}")
         except Exception as e:

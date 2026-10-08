@@ -204,7 +204,7 @@ def set_status(
                 s.execution_notes = (
                     f"Cascaded from cluster lead {finding_id} (status={status}). "
                     + (execution_notes or "")
-                )[:500]
+                )
                 cascaded += 1
 
         session.commit()
@@ -259,7 +259,7 @@ def execute_finding(finding_id: str) -> dict:
         set_status(
             finding_id, "execute_error",
             executed_by="ui",
-            execution_notes=str(exc)[:500],
+            execution_notes=str(exc),
         )
         return {
             "action": finding.get("suggested_action", ""),

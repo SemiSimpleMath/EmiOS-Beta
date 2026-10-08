@@ -81,7 +81,7 @@ def process_date_gap_answers() -> Dict[str, Any]:
             recommendation = (
                 f"USER ANSWERED a date-gap question about node `{f.primary_node_id}` "
                 f"({label!r}). Question asked: \"{q.question_text}\". The user's answer "
-                f"({str(q.answered_at)[:10]}): \"{answer[:300]}\".\n"
+                f"({str(q.answered_at)[:10]}): \"{answer}\".\n"
                 f"If the answer contains a usable date, era, or relational anchor: apply "
                 f"start_date (and end_date if mentioned) via kg_update_node_field, per the "
                 f"year-floor doctrine — a precise calendar date the user stated gets "
@@ -97,7 +97,7 @@ def process_date_gap_answers() -> Dict[str, Any]:
             f.investigation_report_json = {
                 "recommendation": recommendation,
                 "diagnosis": "Date gap answered by the user via the question loop.",
-                "evidence": [{"kind": "user_answer", "text": answer[:400]}],
+                "evidence": [{"kind": "user_answer", "text": answer}],
                 "confidence": "high",
                 "disposition": "auto_apply",
                 "question_id": q.id,
@@ -170,7 +170,7 @@ def run_date_gap_drain(*, limit: int = 3, cooldown_days: int = 7) -> Dict[str, A
             if not verdict.get("worthy"):
                 f.status = "rejected"
                 f.execution_notes = (
-                    f"date_gap_gate: {str(verdict.get('skip_reason') or 'not worth a user question')[:300]}"
+                    f"date_gap_gate: {str(verdict.get('skip_reason') or 'not worth a user question')}"
                 )
                 gated_out += 1
                 continue

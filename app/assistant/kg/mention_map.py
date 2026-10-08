@@ -145,7 +145,7 @@ def mint_mention(
             return False, "already mapped to this node"
         existing.revoked_at = utc_now()
         existing.revoked_reason = (
-            f"confirmed bind to a DIFFERENT node ({node_id[:8]}) proved the "
+            f"confirmed bind to a DIFFERENT node ({node_id}) proved the "
             f"form ambiguous"
         )
         logger.info("[mention_map] revoked %r — conflicting confirmed bind", norm)
