@@ -100,9 +100,10 @@ def concern_text(concern: Dict[str, Any], bucket: str) -> str:
     view = {"concern_id": concern["concern_id"], "title": concern.get("title"), "status": bucket, "severity": concern.get("severity"),
             "done_when": concern.get("done_when"), "owner_words": (concern.get("owner_request") or {}).get("words"),
             "brief": concern.get("brief"), "attempts": concern_brief.attempts(concern), "brief_current": True}
-    from app.assistant.subconscious.persist import journal_for_prompt
-    journal = journal_for_prompt(concern.get("reinforcement_notes") or "")
-    return render_view("concern_brief", concerns=[view]).strip() + (f"\n  journal:\n{journal}" if journal else "")
+    from app.assistant.subconscious.persist import history_for_prompt
+    history = history_for_prompt(concern)
+    return render_view("concern_brief", concerns=[view]).strip() + (
+        f"\n  notes and journal, oldest first, each with when it was written:\n{history}" if history else "")
 
 
 def problems(data: Any, now_utc: datetime, entry_ids: List[str]) -> List[str]:

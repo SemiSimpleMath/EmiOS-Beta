@@ -141,7 +141,8 @@ Entity context:
 **This week:**
 {%- for c in _subc.active_concerns_this_week %}
 - [{{ c.severity }}] {{ c.title }} (about: {{ c.subject }}){% if c.last_updated_local %} [updated_at: {{ c.last_updated_local }}]{% endif %}
-  {{ c.notes }}
+  notes, oldest first, each with when it was written:
+  {{ c.history | indent(2) }}
 {%- endfor %}
 {%- endif %}
 {%- if _subc.active_concerns_longer_horizon %}

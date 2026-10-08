@@ -190,7 +190,7 @@ def _concern_view(label: str, c: Dict[str, Any]) -> Dict[str, Any]:
         "evidence": [{"kind": e.get("kind"), "ref": e.get("ref"), "snippet": _evidence_text(e)}
                      for e in c.get("evidence") or []],
         "attached_work": concern_brief.attempts(c),
-        "journal": persist.journal_for_prompt(c.get("reinforcement_notes") or ""),
+        "history": persist.history_for_prompt(c),
     }
 
 

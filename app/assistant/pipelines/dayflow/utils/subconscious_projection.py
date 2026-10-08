@@ -67,8 +67,6 @@ _HIGH_SEVERITIES = frozenset({"high", "critical"})
 # render it into the daily_context, regardless of severity.
 _ACTIVE_REGISTER_KEY = "active"
 
-_NOTES_MAX_CHARS = 200
-
 
 def _load_concerns_register() -> Dict[str, Any]:
     from app.assistant.subconscious.concern_store import load_register
@@ -76,12 +74,11 @@ def _load_concerns_register() -> Dict[str, Any]:
 
 
 def _project_concern(concern: Dict[str, Any]) -> Dict[str, Any]:
-    """Compact projection — drops evidence details (just keeps count),
-    truncates notes. Consumers that need the full concern can read
-    concerns_register directly."""
-    notes = str(concern.get("notes") or "")
-    if len(notes) > _NOTES_MAX_CHARS:
-        notes = notes[: _NOTES_MAX_CHARS - 1].rstrip() + "…"
+    """Compact projection — drops evidence details (just keeps count). The notes go whole and in the order they
+    were written, each with when (persist.history_for_prompt): until 2026-10-08 the note a concern was raised with went
+    alone, cut at 200 characters and undated, and "a doctor appointment at 10:30 today" written on the 7th put the
+    appointment on the 8th's calendar."""
+    from app.assistant.subconscious.persist import history_for_prompt
     addressable = concern.get("addressable_by") or []
     if not isinstance(addressable, list):
         addressable = []
@@ -92,7 +89,7 @@ def _project_concern(concern: Dict[str, Any]) -> Dict[str, Any]:
         "title": str(concern.get("title") or "(untitled)"),
         "subject": str(concern.get("subject") or ""),
         "addressable_by": [str(x) for x in addressable if isinstance(x, str)],
-        "notes": notes,
+        "history": history_for_prompt(concern),
         "evidence_count": len(concern.get("evidence") or [])
         if isinstance(concern.get("evidence"), list) else 0,
         # Freshness signal — parallel to expected_schedule items' updated_at_local.

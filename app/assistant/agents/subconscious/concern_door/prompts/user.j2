@@ -22,8 +22,8 @@
 {% endif -%}
 {% if c.closed_because %}- closed because: {{ c.closed_because }}
 {% endif -%}
-- notes: {{ c.notes }}
-{% if c.journal %}- journal:{{ c.journal }}
+{% if c.history %}- notes and journal, oldest first, each with when it was written:
+{{ c.history }}
 {% endif %}
 {% else -%}
 (the register holds no open, recently closed or dormant concerns)

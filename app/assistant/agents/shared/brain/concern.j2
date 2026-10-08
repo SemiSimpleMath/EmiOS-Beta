@@ -7,7 +7,6 @@
 {% endif -%}
 - done when: {{ c.done_when or "(not stated)" }}
 - first observed: {{ c.first_observed }}
-- notes: {{ c.notes }}
 {% for e in c.evidence -%}
 - evidence ({{ e.kind }} {{ L.get(e.ref, e.ref) }}){% if e.snippet %}: {{ e.snippet }}{% endif %}
 {% endfor -%}
@@ -22,5 +21,6 @@
 {% endfor -%}
 {% endfor -%}
 {% endfor -%}
-{% if c.journal %}- journal:{{ c.journal }}
+{% if c.history %}- notes and journal, oldest first, each with when it was written:
+{{ c.history }}
 {% endif %}

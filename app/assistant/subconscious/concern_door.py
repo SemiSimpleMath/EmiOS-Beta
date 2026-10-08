@@ -80,7 +80,7 @@ def build_payload(candidates: List[Dict[str, Any]], existing: List[Dict[str, Any
             return f"accepted as chronic: {c.get('dormant_reason') or ''}".strip()
         return str(c.get("resolution_reason") or c.get("dormant_reason") or "")
 
-    from app.assistant.subconscious.persist import journal_for_prompt
+    from app.assistant.subconscious.persist import history_for_prompt
     return {
         "candidates": [{
             "label": f"N{i}", "title": c.get("title"), "subject": c.get("subject") or "household",
@@ -93,12 +93,12 @@ def build_payload(candidates: List[Dict[str, Any]], existing: List[Dict[str, Any
         "existing": [{
             "label": f"C{i}", "status": c["_status"], "title": c.get("title"),
             "subject": c.get("subject") or "household", "kind": c.get("kind"), "anchor": c.get("anchor"),
-            "done_when": c.get("done_when"), "notes": c.get("notes") or "",
+            "done_when": c.get("done_when"),
             "owner_words": (c.get("owner_request") or {}).get("words"),
             "first_observed": c.get("first_observed"),
             "closed_on": _local_date(c.get("resolved_at_utc") or c.get("dormant_at_utc")),
             "closed_because": closed_because(c) if c["_status"] in ("resolved", "dormant") else "",
-            "journal": journal_for_prompt(c.get("reinforcement_notes") or ""),
+            "history": history_for_prompt(c),
         } for i, c in enumerate(existing, 1)],
     }
 

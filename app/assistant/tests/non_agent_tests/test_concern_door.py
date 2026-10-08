@@ -26,7 +26,7 @@ NOW = datetime.now(timezone.utc)
 def _open(cid, title, **kw):
     return {"concern_id": cid, "title": title, "subject": "household", "kind": "anticipated_need",
             "evidence": [{"kind": "calendar_event", "ref": "calendar:x", "snippet": "old"}],
-            "notes": "n", "reinforcement_notes": "", **kw}
+            "notes": "n", "first_observed": (NOW - timedelta(hours=3)).isoformat(), "reinforcement_notes": "", **kw}
 
 
 def _candidate(label, title, done_when="it is done", **kw):

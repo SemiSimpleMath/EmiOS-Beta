@@ -28,7 +28,7 @@ BRIEF = {"what": "The book club moved from the 9th to the 16th.", "why_it_matter
 
 def _matter(cid="c-club", **kw):
     return {"concern_id": cid, "title": "Book club meeting", "kind": "anticipated_need", "done_when": "the meeting happens",
-            "notes": "n", "evidence": [], **kw}
+            "notes": "n", "first_observed": (NOW - timedelta(hours=3)).isoformat(), "evidence": [], **kw}
 
 
 def _briefed(concern, bucket="active"):

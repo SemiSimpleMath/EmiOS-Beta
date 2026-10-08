@@ -25,7 +25,23 @@ def test_every_agent_view_of_a_concern_reads_the_local_journal():
     concern = {"concern_id": "c1", "title": "Ring battery", "_status": "active", "evidence": [], "attached_work": {},
                "reinforcement_notes": NOTES}
     local = local_time_text(STAMP)
-    assert local in brain_step._concern_view("C1", concern)["journal"]
+    assert local in brain_step._concern_view("C1", concern)["history"]
     assert local in concern_planner.concern_text(concern, "active")
     assert local in context_builder._render_handling_history(concern)
-    assert local in concern_door.build_payload([], [concern])["existing"][0]["journal"]
+    assert local in concern_door.build_payload([], [concern])["existing"][0]["history"]
+
+
+def test_the_note_a_concern_was_raised_with_comes_first_with_when_it_was_written():
+    """2026-10-08: "She has a doctor appointment at 10:30 today." was written 2026-10-07 and shown undated; on the 8th
+    the daily-context tracker put the appointment on the 8th's calendar. Every reader now sees the notes oldest
+    first, each with when it was written, whole."""
+    from app.assistant.pipelines.dayflow.utils.subconscious_projection import _project_concern
+    raised = "2026-10-07T16:09:19+00:00"
+    note = "She has a doctor appointment at 10:30 today. " + "x" * 300
+    concern = {"concern_id": "c1", "title": "Sick", "_status": "active", "evidence": [], "attached_work": {},
+               "first_observed": raised, "notes": note, "reinforcement_notes": NOTES}
+    lines = persist.history_for_prompt(concern).splitlines()
+    assert lines[0] == f"[{local_time_text(raised)}] {note}"
+    assert lines[1:] == persist.journal_for_prompt(NOTES).strip("\n").splitlines()
+    assert _project_concern(concern)["history"] == persist.history_for_prompt(concern), "the projection passes it whole"
+    assert "notes" not in _project_concern(concern)

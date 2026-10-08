@@ -40,7 +40,8 @@ def fakes(monkeypatch):
 
 def _concern(cid="c-flea", **kw):
     return {"concern_id": cid, "title": "Flea medication due", "subject": "household", "done_when": "dose given",
-            "notes": "n", "evidence": [{"kind": "chat_msg", "ref": "message:m1", "snippet": "given"}],
+            "notes": "n", "first_observed": "2026-09-28T08:00:00+00:00",
+            "evidence": [{"kind": "chat_msg", "ref": "message:m1", "snippet": "given"}],
             "reinforcement_notes": "", **kw}
 
 

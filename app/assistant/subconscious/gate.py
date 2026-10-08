@@ -63,10 +63,10 @@ def _problems(data: Any, event_labels: List[str], concern_labels: List[str]) -> 
 def build_payload(events: List[Dict[str, Any]], concerns: List[Dict[str, Any]]) -> Dict[str, Any]:
     """The gate agent's input for one page: labelled open concerns, and the events labelled inside
     their conversations."""
-    from app.assistant.subconscious import conversations
+    from app.assistant.subconscious import conversations, persist
     return {
         "open_concerns": [{"label": f"C{i}", "title": c.get("title"), "subject": c.get("subject") or "household",
-                           "status": c["_bucket"], "notes": c.get("notes") or ""}
+                           "status": c["_bucket"], "history": persist.history_for_prompt(c)}
                           for i, c in enumerate(concerns, 1)],
         "conversations": conversations.build([{**e, "mark": f"E{i}"} for i, e in enumerate(events, 1)]),
     }

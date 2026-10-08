@@ -3,7 +3,7 @@
 
 {% for c in agent_input.open_concerns -%}
 - [{{ c.label }}] {{ c.title }} (about: {{ c.subject }}; {{ c.status }})
-  {{ c.notes }}
+  {{ c.history | indent(2) }}
 {% else -%}
 (no open concerns)
 {% endfor %}

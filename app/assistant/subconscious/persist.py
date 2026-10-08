@@ -82,6 +82,23 @@ def journal_for_prompt(notes: str) -> str:
     return "\n".join(lines)
 
 
+def history_for_prompt(concern: Dict[str, Any]) -> str:
+    """A concern's notes in the order they were written, each with when, in local time: the note it was raised with,
+    stamped with when it was first observed, then its journal. Owner, 2026-10-08: "all messages that are carried need
+    to carry timestamps"; "we could just have the notes recorded in order of timestamp ... then it has clear history".
+    A concern raised on 2026-10-07 said "She has a doctor appointment at 10:30 today." with no date; read on the 8th,
+    the daily-context tracker put the appointment on the 8th's calendar."""
+    from app.assistant.utils.time_utils import local_time_text, parse_iso_utc
+    lines = []
+    notes = str(concern.get("notes") or "").strip()
+    if notes:
+        lines.append(f"[{local_time_text(parse_iso_utc(concern['first_observed']))}] {notes}")
+    journal = journal_for_prompt(concern.get("reinforcement_notes") or "").strip("\n")
+    if journal:
+        lines.append(journal)
+    return "\n".join(lines)
+
+
 def _trim_journal(existing: Dict[str, Any]) -> None:
     """Cap the reinforcement_notes journal to the newest entries."""
     entries = _journal_entries(existing.get("reinforcement_notes") or "")

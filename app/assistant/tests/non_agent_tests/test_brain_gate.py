@@ -21,8 +21,9 @@ from belief_engine.intake.store import sqlite_file
 NOW = datetime(2026, 3, 10, 18, 0, tzinfo=timezone.utc)
 REGISTER = {
     "active": [{"concern_id": "c-meds", "title": "The cat's worm tablet is due soon", "subject": "household",
-                "notes": "Monthly tablet on the 12th."}],
-    "addressing": [{"concern_id": "c-car", "title": "Car service needs booking", "subject": "owner"}],
+                "notes": "Monthly tablet on the 12th.", "first_observed": "2026-03-10T14:00:00+00:00"}],
+    "addressing": [{"concern_id": "c-car", "title": "Car service needs booking", "subject": "owner",
+                    "first_observed": "2026-03-09T09:00:00+00:00"}],
     "resolved": [], "dormant": [],
 }
 

@@ -62,6 +62,7 @@ def _register(tmp_path, **buckets):
 def _concern(cid, title, **kw):
     return {"concern_id": cid, "title": title, "subject": "household", "kind": "anticipated_need",
             "severity": "medium", "horizon": "this_week", "done_when": "it is done", "notes": "n",
+            "first_observed": (NOW - timedelta(hours=3)).isoformat(),
             "evidence": [{"kind": "chat_msg", "ref": "message:old", "snippet": "old"}], "reinforcement_notes": "", **kw}
 
 
