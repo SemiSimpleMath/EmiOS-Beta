@@ -10,10 +10,11 @@ class EventDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     event: str = Field(description="The event's label exactly as given, e.g. E2.")
-    decision: Literal["used", "tracked_as_new", "not_worth_tracking"] = Field(
-        description="used: it changed or confirmed a concern (it is cited by a concern_update). "
+    decision: Literal["used", "tracked_as_new", "needs_nothing"] = Field(
+        description="used: it changes or confirms a concern you update (it is cited by that concern_update). "
                     "tracked_as_new: a new concern comes from it (it is cited by a new_concern). "
-                    "not_worth_tracking: it needs nothing from the household's concerns.")
+                    "needs_nothing: it changes no open concern and raises nothing new; the reason records what "
+                    "it established.")
     reason: str = Field(description="Why it matters, or why it does not: specific to this event.")
 
 

@@ -174,11 +174,14 @@ def test_decisions_must_agree_with_what_cites_the_events():
     events = {"E1": {"text": "x"}, "E2": {"text": "y"}}
     problems = brain_step._problems(
         {"event_decisions": [{"event": "E1", "decision": "used", "reason": "r"},
-                             {"event": "E2", "decision": "not_worth_tracking", "reason": "r"}],
+                             {"event": "E2", "decision": "needs_nothing", "reason": "r"}],
          "concern_updates": [{"concern": "C1", "action": "note", "events": ["E2"], "note": "n"}]},
         events, ["C1"])
     assert any("E1 is decided used but no concern update cites it" in p for p in problems)
-    assert any("E2 is decided not_worth_tracking but" in p for p in problems)
+    # 2026-10-08: told only that a used event must be cited, the brain cited an unrelated concern (a Nest report on
+    # a school pickup), which attached the Nest work to it. The correction names the honest way out too.
+    assert any("or decide needs_nothing if it changes none" in p for p in problems)
+    assert any("E2 is decided needs_nothing but" in p for p in problems)
 
 
 def test_the_noticer_cannot_close_what_the_owner_asked_for(tmp_path):

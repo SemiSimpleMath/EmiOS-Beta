@@ -29,9 +29,11 @@ Decide what the matter changes:
   open concern covers it. Give it a done-when: the outcome that closes it, not a delivery such as a
   reminder sent. When {{ owner }} asks for something to be done later or watched, raise it, and copy
   {{ owner }}'s own words exactly into owner_words.
-- event_decisions, one per event: used (cited by a concern update), tracked_as_new (cited by a new
-  concern) or not_worth_tracking. The reason is kept as the record of why that event's own words
-  mattered or did not, so make it specific.
+- event_decisions, one per event: used (it changes or confirms a concern you update, and that update cites
+  it), tracked_as_new (a new concern cites it), or needs_nothing (it changes no open concern and raises nothing
+  new, however informative: say in the reason what it established). Cite an event only on a concern it bears
+  on; never on a concern just to say it does not apply. The reason is kept as the record of why that event's
+  own words mattered or did not, so make it specific.
 
 A concern marked "{{ owner }} asked for this" closes only when its done-when is met or {{ owner }} says
 it is over. Someone else's message about it is a note, not a resolution.

@@ -393,7 +393,7 @@ def run_stories(*, call: Optional[Callable[[str], Callable]] = None, connect=Non
 # ── reading, for the page ───────────────────────────────────────────────────
 
 _TAGS = {"used": ("noted", "noted"), "tracked_as_new": ("new concern", "new"),
-         "not_worth_tracking": ("set aside", "aside")}
+         "needs_nothing": ("set aside", "aside")}
 
 
 def _settled(e: Dict[str, Any], matter: Dict[str, Any]) -> bool:

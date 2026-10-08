@@ -299,13 +299,14 @@ def _problems(data: Any, events: Dict[str, Dict[str, Any]], concern_labels: List
 
     for ev, decision in decided.items():
         if decision == "used" and ev not in cited_by_update:
-            out.append(f"{ev} is decided used but no concern update cites it")
+            out.append(f"{ev} is decided used but no concern update cites it: cite it on the concern it changes, "
+                       f"or decide needs_nothing if it changes none")
         if decision == "tracked_as_new" and ev not in cited_by_new:
             out.append(f"{ev} is decided tracked_as_new but no new concern cites it")
-        if decision == "not_worth_tracking" and (ev in cited_by_update or ev in cited_by_new):
-            out.append(f"{ev} is decided not_worth_tracking but an update or new concern cites it")
-        if decision not in ("used", "tracked_as_new", "not_worth_tracking"):
-            out.append(f"{ev}: decision {decision!r} is not used, tracked_as_new or not_worth_tracking")
+        if decision == "needs_nothing" and (ev in cited_by_update or ev in cited_by_new):
+            out.append(f"{ev} is decided needs_nothing but an update or new concern cites it")
+        if decision not in ("used", "tracked_as_new", "needs_nothing"):
+            out.append(f"{ev}: decision {decision!r} is not used, tracked_as_new or needs_nothing")
     return out
 
 
