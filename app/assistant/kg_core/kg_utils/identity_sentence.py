@@ -84,8 +84,8 @@ def gather_identity_inputs(session, node) -> Dict[str, Any]:
         "start_date": start_s,
         "end_date": end_s,
         "edges": edge_lines[: 2 * MAX_EDGES],
-        "original_sentence": (node.original_sentence or "")[:250],
-        "description": (node.description or "")[:300],
+        "original_sentence": node.original_sentence or "",
+        "description": node.description or "",
         # hash inputs ride along so the hash and the prompt can't diverge
         "_edge_keys": sorted(edge_keys),
     }
@@ -127,7 +127,7 @@ def generate_identity_sentence(
     agent_input = {k: v for k, v in inputs.items() if not k.startswith("_")}
     # Always present: the template tests these keys and strict_template
     # raises on undefined variables (prompt guards layer 3).
-    agent_input["source_window"] = source_window[:800] if source_window else None
+    agent_input["source_window"] = source_window or None
     agent_input["correction"] = None
 
     def ask() -> Dict[str, Any]:
