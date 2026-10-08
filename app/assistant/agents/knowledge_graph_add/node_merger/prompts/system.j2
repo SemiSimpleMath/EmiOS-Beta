@@ -20,7 +20,7 @@ You receive `new_node_context` (a node to insert) and `existing_node_candidates`
 
 - `reasoning`: Brief explanation.
 - `merge_nodes`: true/false.
-- `merged_node_id`: UUID of chosen candidate if merging, empty string if not.
+- `merged_candidate`: the label of the chosen candidate (its `candidate` field: N1, N2...) if merging, empty string if not.
 
 ## Special not for mergins states
 States like parenthood, belonging to a family etc. are notoriously difficult. You have to make sure that they actually are referring to same thing or not.

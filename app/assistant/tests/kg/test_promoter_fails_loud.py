@@ -54,13 +54,38 @@ def test_a_missing_merger_raises(agent):
 
 
 def test_a_merge_into_a_non_candidate_raises_and_a_decline_returns_none(agent):
-    agent["agent"] = _Agent(data={"merge_nodes": True, "merged_node_id": "elsewhere"})
+    agent["agent"] = _Agent(data={"merge_nodes": True, "merged_candidate": "N7"})
     with pytest.raises(RuntimeError, match="not a candidate"):
         P._call_node_merger_for_state_match({"label": "Sam"}, CANDS)
     agent["agent"] = _Agent(data={"merge_nodes": False})
     assert P._call_node_merger_for_state_match({"label": "Sam"}, CANDS) is None
-    agent["agent"] = _Agent(data={"merge_nodes": True, "merged_node_id": "n1"})
+    agent["agent"] = _Agent(data={"merge_nodes": True, "merged_candidate": "N1"})
     assert P._call_node_merger_for_state_match({"label": "Sam"}, CANDS) == "n1"
+
+
+def test_the_merger_sees_labels_never_ids_and_its_label_maps_back(agent, monkeypatch):
+    """2026-10-08: shown the candidates' UUIDs and their source window ids, the merger returned the owner's son's node
+    id spliced with his source window's id, four times. It now sees N1, N2... and no id; code maps the label back."""
+    a = "d62686dd-3881-4da9-8dff-83b28ba80c7d"
+    b = "11111111-2222-4333-8444-555555555555"
+    cands = [{"node_id": a, "label": "Sam", "description": "x" * 900},
+             {"node_id": b, "label": "Sam", "description": "a cousin"}]
+    monkeypatch.setattr("app.assistant.kg_maintenance.verdict_store.load_distinct_verdicts_among",
+                        lambda ids: [(a, b, "different people", "investigator")])
+    seen = {}
+
+    class Recording(_Agent):
+        def action_handler(self, msg):
+            seen["input"] = msg.agent_input
+            return super().action_handler(msg)
+    agent["agent"] = Recording(data={"merge_nodes": True, "merged_candidate": "N2"})
+    assert P._call_node_merger_for_state_match({"label": "Sam"}, cands) == b
+    shown = seen["input"]["existing_node_candidates"]
+    assert a not in shown and b not in shown and "d62686dd" not in shown, "no id or id prefix reaches the model"
+    assert '"candidate": "N1"' in shown and '"candidate": "N2"' in shown
+    assert "DISTINCT from candidate N2" in shown and "DISTINCT from candidate N1" in shown
+    assert "x" * 900 in shown, "the description reaches the model whole"
+    assert cands[0]["node_id"] == a and "prior_distinct_verdicts" not in cands[0], "the caller's list is untouched"
 
 
 def test_ttl_and_canonicalizer_failures_raise(agent):

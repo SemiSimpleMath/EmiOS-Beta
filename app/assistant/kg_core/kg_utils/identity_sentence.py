@@ -325,7 +325,7 @@ def _source_window_text(node_id: str) -> Optional[str]:
     from app.models.db_manager import get_db_manager
 
     with get_db_manager().read_session() as s:
-        return _node_window_text(s, node_id, max_chars=800)
+        return _node_window_text(s, node_id)
 
 
 def _raise_undefinable_finding(node_id: str, label: str, basis: str) -> None:

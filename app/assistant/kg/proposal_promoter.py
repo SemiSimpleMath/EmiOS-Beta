@@ -832,7 +832,7 @@ def _first_window_id_for_proposal(session, proposal_id: str) -> Optional[str]:
     return row[0] if row else None
 
 
-def _resolved_window_text(session, window_id: str, max_chars: int = 600) -> Optional[str]:
+def _resolved_window_text(session, window_id: str) -> Optional[str]:
     """Reconstruct the entity-resolved prose for a window.
 
     Walks kg_window_message → kg_resolved_message and returns the
@@ -872,11 +872,10 @@ def _resolved_window_text(session, window_id: str, max_chars: int = 600) -> Opti
         lines.append(f"{who}: {t}")
     if not lines:
         return None
-    out = "\n".join(lines)
-    return out if len(out) <= max_chars else out[:max_chars] + "…"
+    return "\n".join(lines)
 
 
-def _node_window_text(session, node_id: str, max_chars: int = 600) -> Optional[str]:
+def _node_window_text(session, node_id: str) -> Optional[str]:
     """Entity-resolved chat context for the node's earliest evidence window.
 
     Gives the node_data_merger the actual disambiguated chat the node was
@@ -901,16 +900,15 @@ def _node_window_text(session, node_id: str, max_chars: int = 600) -> Optional[s
     if not row:
         return None
     source_text, window_id = row
-    resolved = _resolved_window_text(session, window_id, max_chars=max_chars) if window_id else None
+    resolved = _resolved_window_text(session, window_id) if window_id else None
     if resolved:
         return resolved
     if not source_text:
         return None
-    txt = str(source_text)
-    return txt if len(txt) <= max_chars else txt[:max_chars] + "…"
+    return str(source_text)
 
 
-def _proposal_window_text(session, proposal_id: str, max_chars: int = 600) -> Optional[str]:
+def _proposal_window_text(session, proposal_id: str) -> Optional[str]:
     """Entity-resolved chat context for the proposal's earliest evidence
     window — the new-side counterpart of _node_window_text.
 
@@ -928,13 +926,12 @@ def _proposal_window_text(session, proposal_id: str, max_chars: int = 600) -> Op
     if not row:
         return None
     raw_text, window_id = row
-    resolved = _resolved_window_text(session, window_id, max_chars=max_chars) if window_id else None
+    resolved = _resolved_window_text(session, window_id) if window_id else None
     if resolved:
         return resolved
     if not raw_text:
         return None
-    txt = str(raw_text)
-    return txt if len(txt) <= max_chars else txt[:max_chars] + "…"
+    return str(raw_text)
 
 
 def _participant_labels(session, node_id: str, limit: int = 6) -> List[str]:
@@ -992,6 +989,13 @@ def _call_node_merger_for_state_match(
     second owner Entity, and the label collision then minted a
     Disambiguation marker that captured every later mention of the owner
     (381 edges by 2026-10-05; two family members likewise).
+
+    The merger sees each candidate under a request-local label (N1, N2...) and
+    answers with the label; code maps it back to the node id. It is shown no
+    id at all. Until 2026-10-08 it read the candidates' UUIDs and their source
+    window ids and copied a UUID back: for the owner's son it twice returned
+    his node id spliced with his source window's id, and the promoter rightly
+    refused it.
     """
     import json
     from app.assistant.ServiceLocator.service_locator import DI
@@ -1001,6 +1005,10 @@ def _call_node_merger_for_state_match(
     agent = DI.agent_factory.create_agent("knowledge_graph_add::node_merger")
     if agent is None:
         raise RuntimeError("[promoter] could not create node_merger agent")
+
+    labels = [f"N{i}" for i in range(1, len(candidate_payload) + 1)]
+    id_by_label = {label: str(c["node_id"]) for label, c in zip(labels, candidate_payload)}
+    label_by_id = {node_id: label for label, node_id in id_by_label.items()}
 
     # "Reader #3" (audit P2.5): when the maintenance loop already ruled two
     # of these candidates DISTINCT from each other, tell the merger — it
@@ -1012,32 +1020,30 @@ def _call_node_merger_for_state_match(
     from app.assistant.kg_maintenance.verdict_store import (
         load_distinct_verdicts_among,
     )
-    cand_ids = [str(c.get("node_id") or "") for c in candidate_payload]
-    verdicts = load_distinct_verdicts_among(cand_ids)
+    verdicts = load_distinct_verdicts_among(list(id_by_label.values()))
+    notes_by_id: Dict[str, List[str]] = {}
+    for a, b, memo, decided_by in verdicts:
+        line = f"prior verdict ({decided_by}): DISTINCT from candidate {{other}} — {memo}"
+        notes_by_id.setdefault(a, []).append(line.format(other=label_by_id[b]))
+        notes_by_id.setdefault(b, []).append(line.format(other=label_by_id[a]))
     if verdicts:
-        notes_by_id: Dict[str, List[str]] = {}
-        for a, b, memo, decided_by in verdicts:
-            line = (
-                f"prior verdict ({decided_by}): DISTINCT from candidate "
-                f"{{other}} — {memo}"
-            )
-            notes_by_id.setdefault(a, []).append(line.format(other=b[:8]))
-            notes_by_id.setdefault(b, []).append(line.format(other=a[:8]))
-        for c in candidate_payload:
-            notes = notes_by_id.get(str(c.get("node_id") or ""))
-            if notes:
-                c["prior_distinct_verdicts"] = notes
         logger.info(
             "[promoter] injected %d distinct-verdict note(s) into "
             "node_merger candidates", len(verdicts),
         )
+    shown = []
+    for label, c in zip(labels, candidate_payload):
+        entry = {"candidate": label, **{k: v for k, v in c.items() if k != "node_id"}}
+        if notes_by_id.get(id_by_label[label]):
+            entry["prior_distinct_verdicts"] = notes_by_id[id_by_label[label]]
+        shown.append(entry)
 
     scope = load_scope_for_source(
         kind="pipeline", source_id="kg_pipeline", actor_id="proposal_promoter",
     )
     agent_input = {
         "new_node_context": json.dumps(new_node_ctx, ensure_ascii=True, indent=2),
-        "existing_node_candidates": json.dumps(candidate_payload, ensure_ascii=True, indent=2),
+        "existing_node_candidates": json.dumps(shown, ensure_ascii=True, indent=2),
     }
     resp = agent.action_handler(Message(agent_input=agent_input, scope_context=scope))
     data = resp.data if resp and hasattr(resp, "data") else None
@@ -1048,17 +1054,16 @@ def _call_node_merger_for_state_match(
 
     if not bool(data.get("merge_nodes")):
         return None
-    merged_id = str(data.get("merged_node_id") or "").strip()
-    cand_ids = {c.get("node_id") for c in candidate_payload}
-    if merged_id not in cand_ids:
+    chosen = str(data.get("merged_candidate") or "").strip()
+    if chosen not in id_by_label:
         raise RuntimeError(
-            f"[promoter] node_merger chose to merge {new_node_ctx.get('label')!r} into {merged_id!r}, "
-            f"which is not a candidate"
+            f"[promoter] node_merger chose to merge {new_node_ctx.get('label')!r} into {chosen!r}, "
+            f"which is not a candidate label ({', '.join(labels)})"
         )
+    merged_id = id_by_label[chosen]
     logger.info(
-        "[promoter] LLM merged state %r → %s: %s",
-        new_node_ctx.get("label"), merged_id[:8],
-        (data.get("reasoning") or "")[:120],
+        "[promoter] LLM merged %r → %s (%s): %s",
+        new_node_ctx.get("label"), merged_id, chosen, data.get("reasoning") or "",
     )
     return merged_id
 
@@ -1978,7 +1983,7 @@ def _snapshot_state_candidate(session, cand: Node) -> Dict[str, Any]:
         # merger gets (graph-derived; see identity_sentence.py). NULL until
         # the nightly refresh has covered this node.
         "identity_sentence": getattr(cand, "identity_sentence", None),
-        "description": (cand.description or "")[:500],
+        "description": cand.description or "",
         "original_sentence": cand.original_sentence,
         "start_date": cand.start_date.isoformat() if cand.start_date else None,
         "end_date": cand.end_date.isoformat() if cand.end_date else None,
@@ -1986,7 +1991,6 @@ def _snapshot_state_candidate(session, cand: Node) -> Dict[str, Any]:
         "end_date_prose": cand.end_date_prose,
         "first_observed": cand.first_observed.isoformat() if cand.first_observed else None,
         "ttl_duration_class": (cand_ttl.get("duration_class") if isinstance(cand_ttl, dict) else None),
-        "source_window_id": cand_window,
         "source_window_end_ts": _window_end_ts(session, cand_window),
         # Compact chat-window snippet THIS candidate was extracted from.
         # Lets the merger see the actual context that produced it, instead
@@ -2339,7 +2343,6 @@ def _prepare_proposal_plan(proposal_id: str) -> Optional[_PromoterPlan]:
                 "category": snap["category"],
                 "description": snap["description_draft"],
                 "original_sentence": snap["sentence"],
-                "source_window_id": proposal_window_id,
                 "source_window_text": proposal_window_text,
             }
             match_id = _call_node_merger_for_state_match(
@@ -2377,7 +2380,6 @@ def _prepare_proposal_plan(proposal_id: str) -> Optional[_PromoterPlan]:
                 "valid_to": snap["valid_to"].isoformat() if snap["valid_to"] else None,
                 "valid_from_prose": snap["valid_from_prose"],
                 "valid_to_prose": snap["valid_to_prose"],
-                "source_window_id": proposal_window_id,
                 "source_window_end_ts": proposal_window_end_ts,
                 # Chat-window snippet for the NEW node — paired with
                 # `source_window_text` on each candidate so the merger
