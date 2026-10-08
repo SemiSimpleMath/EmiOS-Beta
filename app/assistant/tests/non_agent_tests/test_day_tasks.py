@@ -183,12 +183,13 @@ def test_the_prompts_carry_the_rules_the_two_groups_and_the_labelled_situation()
     from app.assistant.dayflow_orchestrator.work_context import _ENV
     from app.assistant.utils.time_utils import local_time_text
     res = {"resource_assistant_data": {"name": "the assistant"}, "resource_user_data": {"first_name": "Sam"},
-           "resource_orchestrator_user_prefs": "Wellness nudges are separate cron reminders."}
+           "resource_assistant_capabilities": "Device control: the thermostat.",
+           "resource_owner_standing_directives": "Wellness nudges are separate cron reminders."}
     system = _ENV.get_template("subconscious/day_tasks/prompts/system.j2").render(**res)
     assert "stays as it is when you leave it out" in system and "Name those labels in new_since" in system
     assert "A HEADS-UP is the opposite and belongs exactly on the boundary" in system      # when_to_interrupt.j2
     assert "You are helping the user's day go well" in system                              # stewardship.j2
-    assert "Wellness nudges are separate cron reminders." in system
+    assert "Wellness nudges are separate cron reminders." in system and "Device control: the thermostat." in system
     assert "away from the keyboard" in system and "who acts" not in system.lower()
     items = _new_items()
     items[2]["current"] = {"decision": "needed", "assistant_part": "set the AC to 70", "when": "9:00 PM", "why": "w",

@@ -142,10 +142,11 @@ at all. Reaching them is the shortest path to the answer, not the fallback after
 An account the USER has already connected — their own mail, calendar, files — is inside the
 household: read it freely, and prefer it over the open web when the material would be there.
 
-{% if resource_orchestrator_user_prefs %}
-## The user's standing directions — these override the defaults above and below
-{{ resource_orchestrator_user_prefs }}
-{% endif %}
+{{ resource_assistant_capabilities }}
+
+{{ resource_work_shaping }}
+
+{{ resource_worth_doing }}
 
 ## A result the user asked for ENDS by giving it to them
 If the goal's purpose is to produce something for the USER — a recommendation, a chosen option, research

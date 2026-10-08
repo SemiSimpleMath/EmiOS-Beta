@@ -332,6 +332,12 @@ resources/instructions/*
 !resources/instructions/resource_wellness_proposer_house_rules.md
 !resources/instructions/resource_romantic_proposer_house_rules.md
 !resources/instructions/resource_scheduler_priority_rules.md
+!resources/instructions/resource_assistant_capabilities.md
+!resources/instructions/resource_owner_standing_directives.md
+!resources/instructions/resource_work_shaping.md
+!resources/instructions/resource_worth_doing.md
+!resources/instructions/resource_task_approach.md
+!resources/instructions/resource_owner_escalation.md
 
 # Personal soul/identity doc
 SOUL.md

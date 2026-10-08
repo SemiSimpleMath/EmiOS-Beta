@@ -24,4 +24,5 @@ required_context_items:
 system_context_items:
   - resource_assistant_data
   - resource_user_data
-  - resource_orchestrator_user_prefs
+  - resource_assistant_capabilities
+  - resource_owner_standing_directives

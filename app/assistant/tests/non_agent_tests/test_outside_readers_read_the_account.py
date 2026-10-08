@@ -12,7 +12,8 @@ concern's severity.
 """
 from app.assistant.dayflow_orchestrator.work_context import _ENV, render_view
 
-RES = {"resource_assistant_data": {"name": "the assistant"}, "resource_user_data": {"first_name": "Sam"}}
+RES = {"resource_assistant_data": {"name": "the assistant"}, "resource_user_data": {"first_name": "Sam"},
+       "resource_assistant_capabilities": "", "resource_owner_standing_directives": ""}
 FIN = {"verdict": "unrecoverable", "next_step": "stop", "at": "2026-03-10T10:30:00+00:00",
        "outcome": "The ticket expired unanswered; it does not establish that Sam saw it.",
        "recommendation": "Do not send a reminder or recreate the prompt."}

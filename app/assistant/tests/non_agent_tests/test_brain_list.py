@@ -75,7 +75,8 @@ def test_the_days_tasks_see_each_placements_entry_and_entries_are_not_a_change_o
 
 def test_the_concern_tasks_prompt_carries_the_rules_and_the_entries():
     from app.assistant.dayflow_orchestrator.work_context import _ENV
-    res = {"resource_assistant_data": {"name": "the assistant"}, "resource_user_data": {"first_name": "Sam"}}
+    res = {"resource_assistant_data": {"name": "the assistant"}, "resource_user_data": {"first_name": "Sam"},
+           "resource_assistant_capabilities": "", "resource_owner_standing_directives": ""}
     system = _ENV.get_template("subconscious/concern_tasks/prompts/system.j2").render(**res)
     assert "An entry you leave out stays as it is" in system
     assert "Work already in motion for this concern is not a reason to start more" in system  # concern_rules.j2

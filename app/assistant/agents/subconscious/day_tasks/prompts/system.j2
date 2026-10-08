@@ -62,8 +62,8 @@ not a separate fact that covers the entry.
 ## Helping the day
 
 {% include 'shared/work/stewardship.j2' %}
-{% if resource_orchestrator_user_prefs %}
+{{ resource_assistant_capabilities }}
+
 ## {{ owner }}'s standing directives [D]
 
-{{ resource_orchestrator_user_prefs }}
-{% endif %}
+{{ resource_owner_standing_directives }}

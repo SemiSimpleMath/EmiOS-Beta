@@ -34,16 +34,17 @@ user_context_items:
   - task
   - information
 
-# The node-authoring doctrine lives here. resource_orchestrator_user_prefs carries the
-# notification rule ("If both communication and action are needed, create separate tasks"), the
-# device-control rule, and the escalation policy — all of which are instructions about how to
-# shape NODES. Declaring them here is not enough: a system item is a template VARIABLE, and until
-# 2026-09-18 system.j2 referenced none of these three, so the prefs the user wrote for the
-# orchestrator reached the steward and never the architect. system.j2 renders all three now.
+# The owner's standing directives, split by role on 2026-10-08 (wrong context is worse than none): the architect
+# reads what the assistant can do, how to shape work (goals not methods; notifying apart from acting; the device
+# rule) and whether a task is worth doing at all. The directives about what to do on the owner's behalf go to the
+# brain's deciders, how to approach a task to the workers, escalation to no one yet. Each system item must be
+# rendered by system.j2 (until 2026-09-18 a declared item went unrendered).
 system_context_items:
   - resource_user_data
   - resource_assistant_data
-  - resource_orchestrator_user_prefs
+  - resource_assistant_capabilities
+  - resource_work_shaping
+  - resource_worth_doing
 
 # Who releases a notification and when (owner, 2026-10-08): the architect suggests the time, the state mover decides.
 skills:
