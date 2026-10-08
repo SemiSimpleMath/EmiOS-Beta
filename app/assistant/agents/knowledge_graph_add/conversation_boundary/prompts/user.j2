@@ -4,7 +4,7 @@ Analyze the following window of {{ analysis_window_size }} messages and determin
 
 **Message Window:**
 {% for message in messages %}
-**Message {{ message.id }}** ({{ message.role }}):
+**Message {{ message.label }}** ({{ message.role }}):
 {{ message.message }}
 {% endfor %}
 
@@ -17,9 +17,9 @@ For each message, identify the start and end boundaries of the self-contained co
 5. **Topic boundaries** - when conversations shift to new subjects
 
 Provide bounds for each message in the format:
-- message_id: The message being analyzed
-- bounds.start_message_id: First message in the conversation block
-- bounds.end_message_id: Last message in the conversation block  
+- message_label: The label of the message being analyzed, exactly as shown (e.g. M3)
+- bounds.start_message_label: Label of the first message in the conversation block
+- bounds.end_message_label: Label of the last message in the conversation block
 - bounds.should_process: T if message should be processed, F if it should be dropped
 - bounds.reasoning: Explanation of why this message should be processed or dropped
 

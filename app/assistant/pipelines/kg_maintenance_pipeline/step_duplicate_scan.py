@@ -24,8 +24,9 @@ Phase 2 — Three-tier candidate generation (no DB, no LLM)
 
 Phase 3 — LLM confirmation (no session open)
     Send each candidate pair's rich descriptors (including neighborhood)
-    to kg_maintenance::duplicate_detector.  The agent returns explicit
-    merge_actions with node ID pairs.
+    to kg_maintenance::duplicate_detector.  The agent sees the two nodes as
+    N1 / N2, never their ids, and returns merge_actions naming those refs;
+    code maps the refs back to node ids.
 
 Phase 4 — Write findings (one short-lived session per finding via store)
     For each confirmed pair call upsert_finding() which self-manages its session.
@@ -1047,9 +1048,15 @@ def _confirm_pairs_with_llm(
     anchor entity + edge sentences on both legs in `analysis_context.shared_anchor`
     so the agent can decide via direct edge-sentence comparison.
 
-    Returns (merge_actions, failed_node_ids). Each merge_action is tagged
-    with its source pair under ``_source_pair`` so _write_findings can drop
-    actions naming foreign ids (audit P1.1). failed_node_ids are the nodes
+    The detector sees the pair as request-local refs N1 / N2, never node ids
+    (models garble long ids they copy back), and answers with those refs.
+    Code maps them back to node ids; an action naming any other ref, or the
+    same ref twice, is refused: the pair is counted in the failure ledger and
+    the run raises (there is no correction round for the detector).
+
+    Returns (merge_actions, failed_node_ids). Each merge_action's ``merge``
+    holds node ids and is tagged with its source pair under ``_source_pair``
+    for _write_findings' foreign-id check (audit P1.1). failed_node_ids are the nodes
     of defective-sentence pairs — they were NOT adjudicated and must not be
     stamped as scanned (audit P1.2). A failed triage or detector call
     raises: the run stops and nothing is stamped.
@@ -1089,8 +1096,9 @@ def _confirm_pairs_with_llm(
                 "instantiate — aborting before any nodes get stamped as scanned"
             )
 
+        ref_ids = {"N1": nid_a, "N2": nid_b}
         node_data = []
-        for d in (desc_a, desc_b):
+        for ref, d in zip(ref_ids, (desc_a, desc_b)):
             sentences = d["edge_sentences"]
             context_parts = [d["description"]] + sentences
             if d["aliases"]:
@@ -1108,7 +1116,7 @@ def _confirm_pairs_with_llm(
                 )
 
             node_data.append({
-                "node_id": d["node_id"],
+                "ref": ref,
                 "label": d["label"],
                 "node_type": d["node_type"],
                 "identity_sentence": d.get("identity_sentence") or "",
@@ -1165,6 +1173,7 @@ def _confirm_pairs_with_llm(
             data = getattr(response, "data", None)
             if not isinstance(data, dict) or not isinstance(data.get("merge_actions"), list):
                 raise RuntimeError("[duplicate_scan] duplicate_detector returned no merge_actions list")
+            actions = _map_detector_refs(data["merge_actions"], ref_ids)
         except Exception as exc:
             failure_ledger.record_failure(
                 PAIR_FAILURE_KIND, item_id, exc,
@@ -1172,11 +1181,9 @@ def _confirm_pairs_with_llm(
             )
             raise
         failure_ledger.clear(PAIR_FAILURE_KIND, item_id)
-        actions = data["merge_actions"]
         for a in actions:
-            if isinstance(a, dict):
-                # Provenance for _write_findings' foreign-id check.
-                a["_source_pair"] = [nid_a, nid_b]
+            # Provenance for _write_findings' foreign-id check.
+            a["_source_pair"] = [nid_a, nid_b]
         merge_actions.extend(actions)
         logger.info(
             "[duplicate_scan] Pair %d/%d '%s' vs '%s' [%s] → %d merge actions",
@@ -1186,6 +1193,27 @@ def _confirm_pairs_with_llm(
         )
 
     return merge_actions, failed_node_ids
+
+
+def _map_detector_refs(actions: list, ref_ids: dict[str, str]) -> list[dict]:
+    """Map the detector's N1 / N2 refs in each action's ``merge`` back to node
+    ids. Raises ValueError on an action that is not an object, names a ref the
+    detector was not shown, or names one ref twice; nothing is dropped."""
+    mapped: list[dict] = []
+    for action in actions:
+        if not isinstance(action, dict):
+            raise ValueError(f"[duplicate_scan] duplicate_detector returned a merge action that is not an object: {action!r}")
+        refs = action.get("merge") or []
+        unknown = [r for r in refs if r not in ref_ids]
+        if unknown:
+            raise ValueError(
+                f"[duplicate_scan] duplicate_detector named refs {unknown} it was not shown "
+                f"(shown: {sorted(ref_ids)})"
+            )
+        if len(set(refs)) != len(refs):
+            raise ValueError(f"[duplicate_scan] duplicate_detector named one node twice: {refs}")
+        mapped.append({**action, "merge": [ref_ids[r] for r in refs]})
+    return mapped
 
 
 # ── Phase 4: write findings ───────────────────────────────────────────────────
@@ -1198,10 +1226,10 @@ def _write_findings(merge_actions: list[dict], pipeline_run_id: str) -> int:
     Returns count of new findings created.
 
     Guard (audit P1.1): an action may only name ids from the pair the
-    detector was shown (``_source_pair``, stamped by _confirm_pairs_with_llm).
-    Echoed prompt examples, transposed ids from earlier pairs, and
-    hallucinated UUIDs are dropped here with a warning instead of becoming
-    findings the executor would later launder.
+    detector was shown (``_source_pair``, stamped by _confirm_pairs_with_llm,
+    which already maps the detector's refs back to that pair). An action
+    naming any other id, or carrying no provenance, raises ValueError rather
+    than being dropped.
     """
     new_findings = 0
     for action in merge_actions:
@@ -1214,12 +1242,10 @@ def _write_findings(merge_actions: list[dict], pipeline_run_id: str) -> int:
 
         source_pair = set(action.get("_source_pair") or [])
         if not source_pair or not set(node_ids) <= source_pair:
-            logger.warning(
-                "[duplicate_scan] dropping merge action naming ids outside "
-                "its candidate pair: got %s, pair was %s",
-                node_ids, sorted(source_pair) or "<untagged>",
+            raise ValueError(
+                f"[duplicate_scan] merge action names ids outside its candidate pair: "
+                f"got {node_ids}, pair was {sorted(source_pair) or '<untagged>'}"
             )
-            continue
 
         primary = node_ids[0]
         for secondary in node_ids[1:]:

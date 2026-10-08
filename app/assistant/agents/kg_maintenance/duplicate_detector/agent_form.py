@@ -5,13 +5,13 @@ from pydantic import BaseModel, Field, model_validator
 
 class MergeAction(BaseModel):
     """One confirmed duplicate pair. The detector sees exactly one
-    candidate pair per call, so `merge` is always exactly the two input
-    node ids (echoed verbatim — _write_findings drops actions naming any
-    other id)."""
+    candidate pair per call, shown as N1 and N2, so `merge` is always
+    exactly those two refs (code maps them back to node ids and refuses
+    any other ref)."""
 
     merge: List[str] = Field(
         description=(
-            "Exactly the two node IDs from the input pair, copied verbatim "
+            "Exactly the two refs from the input pair: N1 and N2 "
             "(order doesn't matter - the executor merges into the node with "
             "most connections)"
         ),
@@ -33,7 +33,7 @@ class MergeAction(BaseModel):
     def _labels_align_with_merge(self):
         if len(self.labels) != len(self.merge):
             raise ValueError(
-                "labels must have exactly one entry per id in merge (1:1)."
+                "labels must have exactly one entry per ref in merge (1:1)."
             )
         return self
 

@@ -3,21 +3,21 @@ from typing import List, Dict, Any
 
 class Message(BaseModel):
     """A message in the conversation window"""
-    id: str
+    label: str
     role: str
     message: str
     timestamp: str
 
 class ConversationBounds(BaseModel):
     """Bounds of a self-contained conversation block"""
-    start_message_id: str
-    end_message_id: str
+    start_message_label: str
+    end_message_label: str
     should_process: bool
     reasoning: str
 
 class MessageBounds(BaseModel):
     """Bounds for a specific message"""
-    message_id: str
+    message_label: str
     bounds: ConversationBounds
 
 class ConversationBoundaryInput(BaseModel):

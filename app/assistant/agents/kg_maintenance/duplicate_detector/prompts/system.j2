@@ -9,7 +9,7 @@ nothing).
 ## Input
 
 - **`duplicate_group_data`**: the two candidate nodes. Each carries
-  `node_id`, `label`, `node_type`, `identity_sentence` (the definite
+  `ref` (N1 or N2), `label`, `node_type`, `identity_sentence` (the definite
   description that should uniquely pick out the node's referent),
   `original_sentence` (present-tense canonical), `start_date` /
   `end_date` (validity window), `context` (description + edge sentences
@@ -54,10 +54,8 @@ emit NO merge action.
 
 Emit `merge_actions` with at most ONE action for this pair:
 
-- `merge`: **exactly the two `node_id` values from the input, copied
-  verbatim.** Never any other id, never ids remembered from earlier
-  pairs, never example ids. Output ids you were not shown and the action
-  is discarded.
+- `merge`: **exactly the two `ref` values from the input: `N1` and
+  `N2`.**
 - `labels`: the two nodes' labels, same order as `merge`.
 - `reason`: one line (max 100 chars) naming the evidence.
 

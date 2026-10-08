@@ -5,14 +5,14 @@ For each message in the provided window, identify the start and end boundaries o
 
 ## Input Format:
 You will receive:
-- A list of messages
+- A list of messages, each shown with its label (M1, M2, ...)
 
 ## Output Requirements:
 For each message, provide:
-- `message_id`: The ID of the message being analyzed
+- `message_label`: The label of the message being analyzed, exactly as shown (e.g. M3)
 - `bounds`: Object containing:
-  - `start_message_id`: ID of the first message in the conversation block
-  - `end_message_id`: ID of the last message in the conversation block
+  - `start_message_label`: label of the first message in the conversation block
+  - `end_message_label`: label of the last message in the conversation block
   - `should_process`: T if message should be processed, F if it should be dropped
   - `reasoning`: Clear explanation of why this message should be processed or dropped
 

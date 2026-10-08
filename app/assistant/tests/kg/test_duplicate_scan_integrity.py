@@ -1,7 +1,9 @@
 """P1.1–P1.4 acceptance tests (audit 2026-06-09).
 
-P1.1 — detector output validated against the candidate pair: actions
-naming foreign/echoed/hallucinated ids are dropped; duplicate_node
+P1.1 — detector output validated against the candidate pair: the detector
+sees the pair as N1 / N2 (never node ids) and answers with those refs, which
+code maps back; an unknown ref or an action naming a foreign id raises
+instead of being dropped; duplicate_node
 findings with non-live ids are refused at upsert.
 
 P1.2 — adjudication-aware stamping: detector-agent-None aborts the run
@@ -108,7 +110,7 @@ def _call_tool(tool_name: str, **arguments):
 # ── P1.1: detector output validation ─────────────────────────────────────
 
 
-def test_write_findings_drops_foreign_and_untagged_actions():
+def test_write_findings_refuses_foreign_and_untagged_actions():
     from app.assistant.pipelines.kg_maintenance_pipeline.step_duplicate_scan import (
         _write_findings,
     )
@@ -117,18 +119,18 @@ def test_write_findings_drops_foreign_and_untagged_actions():
     b = _mk_node("Aleks")
     foreign = _mk_node("Bystander")
 
-    actions = [
-        # Valid: ids are exactly the source pair.
-        {"merge": [a, b], "labels": ["Alex", "Aleks"], "reason": "same person",
-         "_source_pair": [a, b]},
-        # Foreign id smuggled in (transposition / echoed example).
-        {"merge": [a, foreign], "labels": ["Alex", "Bystander"], "reason": "x",
-         "_source_pair": [a, b]},
-        # Untagged action (no provenance) — dropped.
-        {"merge": [a, b], "labels": ["Alex", "Aleks"], "reason": "x"},
-    ]
-    created = _write_findings(actions, pipeline_run_id="test-run")
-    assert created == 1
+    valid = {"merge": [a, b], "labels": ["Alex", "Aleks"], "reason": "same person",
+             "_source_pair": [a, b]}
+    assert _write_findings([valid], pipeline_run_id="test-run") == 1
+
+    # Foreign id smuggled in (transposition / echoed example) — refused.
+    with pytest.raises(ValueError, match="outside its candidate pair"):
+        _write_findings([{"merge": [a, foreign], "labels": ["Alex", "Bystander"], "reason": "x",
+                          "_source_pair": [a, b]}], pipeline_run_id="test-run")
+    # Untagged action (no provenance) — refused.
+    with pytest.raises(ValueError, match="outside its candidate pair"):
+        _write_findings([{"merge": [a, b], "labels": ["Alex", "Aleks"], "reason": "x"}],
+                        pipeline_run_id="test-run")
 
     session = get_session()
     try:
@@ -254,14 +256,63 @@ def test_detector_success_tags_actions_and_clears_the_ledger(monkeypatch):
     class _Detector:
         def action_handler(self, msg):
             return SimpleNamespace(data={"merge_actions": [
-                {"merge": [c, d], "labels": ["C", "D"], "reason": "same"},
+                {"merge": ["N1", "N2"], "labels": ["C", "D"], "reason": "same"},
             ]})
 
     _fake_factories(monkeypatch, detector_agent=_Detector())
     actions, failed = _confirm_pairs_with_llm([(c, d, "tier1")], _descs(c, d), None)
     assert failed == set()
+    assert actions[0]["merge"] == [c, d]          # refs mapped back to node ids
     assert actions[0]["_source_pair"] == [c, d]   # provenance tag attached
     assert _ledger_failures(_pair_item_id(c, d)) == 0
+
+
+def test_detector_sees_refs_never_node_ids_and_refs_map_back(monkeypatch):
+    import json
+
+    from app.assistant.pipelines.kg_maintenance_pipeline.step_duplicate_scan import (
+        _confirm_pairs_with_llm,
+    )
+
+    a, b = _mk_node("Sam"), _mk_node("Samuel")
+    seen = []
+
+    class _Detector:
+        def action_handler(self, msg):
+            seen.append(dict(msg.agent_input))
+            return SimpleNamespace(data={"merge_actions": [
+                {"merge": ["N2", "N1"], "labels": ["Samuel", "Sam"], "reason": "same"},
+            ]})
+
+    descs = _descs(a, b)
+    descs[a]["label"], descs[b]["label"] = "Sam", "Samuel"
+    _fake_factories(monkeypatch, detector_agent=_Detector())
+    actions, _failed = _confirm_pairs_with_llm([(a, b, "tier1")], descs, None)
+
+    shown = " ".join(seen[0].values())
+    for part in (*a.split("-"), *b.split("-")):
+        assert part not in shown                  # no id, nor any fragment of one
+    assert [n["ref"] for n in json.loads(seen[0]["duplicate_group_data"])] == ["N1", "N2"]
+    assert actions[0]["merge"] == [b, a]
+
+
+def test_detector_unknown_ref_is_refused_and_counted(monkeypatch):
+    from app.assistant.pipelines.kg_maintenance_pipeline.step_duplicate_scan import (
+        _confirm_pairs_with_llm, _pair_item_id,
+    )
+
+    a, b = _mk_node("A"), _mk_node("B")
+
+    class _Detector:
+        def action_handler(self, msg):
+            return SimpleNamespace(data={"merge_actions": [
+                {"merge": ["N1", "N3"], "labels": ["A", "B"], "reason": "same"},
+            ]})
+
+    _fake_factories(monkeypatch, detector_agent=_Detector())
+    with pytest.raises(ValueError, match=r"refs \['N3'\] it was not shown"):
+        _confirm_pairs_with_llm([(a, b, "tier1")], _descs(a, b), None)
+    assert _ledger_failures(_pair_item_id(a, b)) == 1
 
 
 def test_failed_triage_batch_stops_the_run(monkeypatch):

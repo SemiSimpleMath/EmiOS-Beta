@@ -4,7 +4,8 @@ stop processing").
 Pins: the window critic raises instead of accepting every line; a failed window stops the cycle, writes no verdict row
 and is counted in the failure ledger; the enricher gets one targeted correction for State/Event nodes it left out,
 then raises; the runner treats only SQLite lock errors as transient; the segmenter refuses an answer that leaves
-messages out of every window; the resolver refuses a message with no resolved text.
+messages out of every window and sees message labels (M1, M2...), never unified_log ids, refusing an answer that names an
+unknown or inconsistent label; the resolver refuses a message with no resolved text.
 
 Uses the kg conftest (isolated test DB). Fake agents; invented data only.
 """
@@ -124,12 +125,55 @@ def test_the_segmenter_must_place_every_message(monkeypatch):
              "resolved_text": "x"} for i in range(3)]
     monkeypatch.setattr(step, "_find_next_day_ready_to_segment", lambda: datetime(2026, 10, 5).date())
     monkeypatch.setattr(step, "_load_day_to_segment", lambda day: {"messages": msgs, "unresolved_count": 0})
-    bounds = {"start_message_id": "m0", "end_message_id": "m1", "should_process": True, "reasoning": "r"}
+    bounds = {"start_message_label": "M1", "end_message_label": "M2", "should_process": True, "reasoning": "r"}
     monkeypatch.setattr(step, "_call_segmenter", lambda m: {"message_bounds": [
-        {"message_id": "m0", "bounds": bounds}, {"message_id": "m1", "bounds": bounds}]})
+        {"message_label": "M1", "bounds": bounds}, {"message_label": "M2", "bounds": bounds}]})
     monkeypatch.setattr(step, "_persist_windows", lambda *a: pytest.fail("nothing is written"))
     with pytest.raises(ValueError, match=r"left 1 of 3 messages"):
         step.run_one_cycle(None)
+
+
+def _segment_msgs():
+    from datetime import datetime, timezone
+    return [{"id": f"0b1c2d3e-7a6f-4c1e-9d2b-5e8f0a1b2c3{i}", "role": "user",
+             "timestamp": datetime(2026, 10, 5, 12, i, tzinfo=timezone.utc), "resolved_text": f"line {i}"}
+            for i in range(3)]
+
+
+def _bound(label, start, end):
+    return {"message_label": label, "bounds": {"start_message_label": start, "end_message_label": end,
+                                               "should_process": True, "reasoning": "r"}}
+
+
+def test_the_segmenter_sees_labels_and_its_labels_map_back(agent):
+    step = SM.SegmentMessagesStep()
+    msgs = _segment_msgs()
+    agent["agent"] = _Agent({"message_bounds": [_bound("M1", "M1", "M2"), _bound("M2", "M1", "M2"),
+                                                _bound("M3", "M3", "M3")], "analysis_summary": "s"})
+    data = step._call_segmenter(msgs)
+    shown = repr(agent["agent"].calls[0])
+    for m in msgs:
+        for part in m["id"].split("-"):
+            assert part not in shown, "the segmenter never sees a unified_log id, nor any fragment of one"
+    assert [m["label"] for m in agent["agent"].calls[0]["messages"]] == ["M1", "M2", "M3"]
+    windows = step._collapse_to_windows(msgs, data)
+    assert [(w["start_id"], w["end_id"], w["member_ids"]) for w in windows] == [
+        (msgs[0]["id"], msgs[1]["id"], [msgs[0]["id"], msgs[1]["id"]]),
+        (msgs[2]["id"], msgs[2]["id"], [msgs[2]["id"]]),
+    ]
+
+
+@pytest.mark.parametrize("answer, match", [
+    ([_bound("M1", "M1", "M2"), _bound("M2", "M1", "M9"), _bound("M3", "M3", "M3")], "end_message_label='M9'"),
+    ([_bound("M1", "M0", "M2"), _bound("M2", "M1", "M2"), _bound("M3", "M3", "M3")], "start_message_label='M0'"),
+    ([_bound("M1", "M1", "M2"), _bound("M7", "M1", "M2"), _bound("M3", "M3", "M3")], "message_label='M7'"),
+    ([_bound("M1", "M1", "M1"), _bound("M1", "M1", "M1"), _bound("M3", "M2", "M3")], "more than once"),
+    ([_bound("M1", "M2", "M3"), _bound("M2", "M2", "M3"), _bound("M3", "M2", "M3")], "does not contain it"),
+])
+def test_the_segmenter_refuses_an_unknown_or_inconsistent_label(answer, match):
+    step = SM.SegmentMessagesStep()
+    with pytest.raises(ValueError, match=match):
+        step._collapse_to_windows(_segment_msgs(), {"message_bounds": answer})
 
 
 def test_the_resolver_refuses_a_message_with_no_resolved_text():

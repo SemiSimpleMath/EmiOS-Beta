@@ -65,6 +65,15 @@ def _eligible_filter(query):
     )
 
 
+def _message_labels(messages: List[Dict]) -> List[str]:
+    """Request-local labels the segmenter sees and answers with, one per message in order.
+
+    Models garble long ids they are asked to copy back, so the segmenter never sees a
+    unified_log id; code maps each label back to its message.
+    """
+    return [f"M{i}" for i in range(1, len(messages) + 1)]
+
+
 class SegmentMessagesStep:
     name = "segment_messages"
 
@@ -154,15 +163,16 @@ class SegmentMessagesStep:
         agent = DI.agent_factory.create_agent(SEGMENTER_AGENT_NAME)
         if agent is None:
             raise RuntimeError(f"Failed to create agent: {SEGMENTER_AGENT_NAME}")
+        labels = _message_labels(messages)
         agent_input = {
             "messages": [
                 {
-                    "id": m["id"],
+                    "label": label,
                     "role": m["role"],
                     "message": m["resolved_text"],
                     "timestamp": str(m["timestamp"]),
                 }
-                for m in messages
+                for label, m in zip(labels, messages)
             ],
             "analysis_window_size": len(messages),
         }
@@ -175,34 +185,61 @@ class SegmentMessagesStep:
         return data
 
     def _collapse_to_windows(self, messages: List[Dict], data: Dict) -> List[Dict]:
-        """Convert per-message bounds output into a list of windows with members."""
+        """Convert per-message bounds output into a list of windows with members.
+
+        The segmenter answers with the request-local labels it was shown (M1, M2...),
+        never with unified_log ids. Every label it returns (the message, its start and
+        its end) must name a message of this window; an answer that names an unknown
+        label, places a message twice or puts a message outside its own bounds is
+        refused with ValueError. There is no correction round here: the runner halts.
+        """
         bounds_list = data.get("message_bounds") or []
         if not bounds_list:
             return []
 
+        labels = _message_labels(messages)
+        id_by_label = dict(zip(labels, (m["id"] for m in messages)))
+        position = {label: i for i, label in enumerate(labels)}
+
+        def _known(label, field: str) -> str:
+            if label not in id_by_label:
+                raise ValueError(
+                    f"[kg_pipeline.segment] the segmenter answered {field}={label!r}, which names no message "
+                    f"of this window (labels shown: {labels})"
+                )
+            return label
+
         groups: OrderedDict = OrderedDict()
+        placed = set()
         for entry in bounds_list:
             entry_d = entry if isinstance(entry, dict) else (entry.model_dump() if hasattr(entry, "model_dump") else dict(entry))
-            mid = entry_d.get("message_id")
             b = entry_d.get("bounds") or {}
             b = b if isinstance(b, dict) else (b.model_dump() if hasattr(b, "model_dump") else dict(b))
-            key = (b.get("start_message_id"), b.get("end_message_id"), bool(b.get("should_process", True)))
+            member = _known(entry_d.get("message_label"), "message_label")
+            start = _known(b.get("start_message_label"), "start_message_label")
+            end = _known(b.get("end_message_label"), "end_message_label")
+            if member in placed:
+                raise ValueError(f"[kg_pipeline.segment] the segmenter placed message {member} more than once")
+            if not position[start] <= position[member] <= position[end]:
+                raise ValueError(
+                    f"[kg_pipeline.segment] the segmenter put message {member} in a block {start}..{end} "
+                    f"that does not contain it"
+                )
+            placed.add(member)
+            key = (id_by_label[start], id_by_label[end], bool(b.get("should_process", True)))
             groups.setdefault(key, {"member_ids": [], "reasoning": b.get("reasoning", "")})
-            groups[key]["member_ids"].append(mid)
+            groups[key]["member_ids"].append(id_by_label[member])
 
         msg_index = {m["id"]: m for m in messages}
         ordered = []
         for (start_id, end_id, should_process), info in groups.items():
-            present_members = [mid for mid in info["member_ids"] if mid in msg_index]
-            if not present_members:
-                continue
-            present_members.sort(key=lambda mid: msg_index[mid]["timestamp"])
+            members = sorted(info["member_ids"], key=lambda mid: msg_index[mid]["timestamp"])
             ordered.append({
                 "start_id": start_id,
                 "end_id": end_id,
                 "should_process": should_process,
                 "reasoning": info["reasoning"],
-                "member_ids": present_members,
+                "member_ids": members,
             })
         ordered.sort(key=lambda g: msg_index[g["member_ids"][0]]["timestamp"])
         return ordered
