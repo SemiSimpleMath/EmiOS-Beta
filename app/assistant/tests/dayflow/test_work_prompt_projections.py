@@ -146,6 +146,9 @@ def test_render_actual_architect_and_steward_templates(monkeypatch, tmp_path):
         config = yaml.safe_load((root / name / "config.yaml").read_text(encoding="utf-8"))
         context = {key: None for key in config["user_context_items"] + config["system_context_items"]}
         context.update(date_time="2026-09-19 10:00 AM America/Los_Angeles", day_of_week="Saturday", **overrides)
+        # Bound skills render as the injector renders them: name -> body.
+        from app.assistant.ServiceLocator.service_locator import DI
+        context["skills"] = {n: DI.skill_registry.get(n).body for n in config.get("skills") or []}
         artifact.append("## " + ("Architect" if name == "work_architect" else "Steward"))
         for kind in ("system", "user"):
             rendered = _jinja_env.get_template(f"dayflow_orchestrator/{name}/prompts/{kind}.j2").render(**context)

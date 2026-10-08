@@ -45,6 +45,10 @@ system_context_items:
   - resource_assistant_data
   - resource_orchestrator_user_prefs
 
+# Who releases a notification and when (owner, 2026-10-08): the architect suggests the time, the state mover decides.
+skills:
+  - notification-release
+
 # Log the rendered SYSTEM + USER prompts and the architect's answer to the agents log on every
 # architect call. The architect is invoked directly via work_architect_node, and its prompts are otherwise
 # invisible (suppressed by the prompt_debug gate) - seeing the rendered CONTEXT (ticket
