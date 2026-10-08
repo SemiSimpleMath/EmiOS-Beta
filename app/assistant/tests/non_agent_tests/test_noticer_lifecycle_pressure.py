@@ -80,21 +80,19 @@ def _reinforce(cid, n=1):
     }
 
 
-def test_reinforcement_count_and_evidence_cap(tmp_path):
+def test_reinforcement_count_and_everything_kept(tmp_path):
+    """Owner, 2026-10-08: a concern keeps all its notes and evidence; dropping them loses context."""
     path = _register(tmp_path, active=[_concern("c1")])
-    # 20 reinforcement entries in one tick — evidence must cap, counter must count.
     _apply(tmp_path, path, _reinforce("c1", 20))
 
     reg = _load(path)
     c = reg["active"][0]
     assert c["reinforcement_count"] == 20
-    assert len(c["evidence"]) == 12  # 3 head + 9 tail
-    assert c["evidence"][0]["snippet"] == "origin"  # founding evidence kept
-    assert c["evidence_archived_count"] == 9  # 21 total - 12 kept
-    # Journal capped to 10 entries + the archived marker.
+    assert len(c["evidence"]) == 21  # the founding item and all 20 new ones
+    assert c["evidence"][0]["snippet"] == "origin"
+    assert "evidence_archived_count" not in c
     journal_lines = [ln for ln in c["reinforcement_notes"].splitlines() if ln.strip()]
-    assert len(journal_lines) == 11
-    assert "earlier notes archived" in journal_lines[0]
+    assert len(journal_lines) == 20 and not any("archived" in ln for ln in journal_lines)
 
 
 def test_pressure_fires_at_threshold_and_resets_on_keep_active(tmp_path):
@@ -120,7 +118,7 @@ def test_pressure_fires_at_threshold_and_resets_on_keep_active(tmp_path):
     assert [c["concern_id"] for c in compute_pressure(reg)["needs_disposition"]] == ["c1"]
 
 
-def test_accept_chronic_moves_to_dormant_with_compact_evidence(tmp_path):
+def test_accept_chronic_moves_to_dormant_with_its_whole_record(tmp_path):
     path = _register(tmp_path, active=[_concern("c1")])
     _apply(tmp_path, path, _reinforce("c1", 10))
     _apply(tmp_path, path, {
@@ -135,7 +133,7 @@ def test_accept_chronic_moves_to_dormant_with_compact_evidence(tmp_path):
     c = reg["dormant"][0]
     assert c["chronic"] is True
     assert c["dormant_reason"] == "long-term pattern, user aware"
-    assert len(c["evidence"]) <= 4
+    assert len(c["evidence"]) == 11  # the founding item and all 10 new ones, kept whole (2026-10-08)
     assert "disposition=accept_chronic" in c["reinforcement_notes"]
 
 

@@ -266,7 +266,6 @@ def apply_admission(steps: List[Dict[str, Any]], register: Dict[str, Any], *, so
             persist._bump_reinforcement_count(target)
             target["last_reinforced_utc"] = now_iso
             persist._journal_on(target, now_iso, f"MERGED a re-raise from {source}: {title} ({step['reason']})")
-            persist._trim_evidence(target)
             landed[i] = target_id
         elif action == "suppress_closed":
             prior = _find(register, step["target"])

@@ -46,22 +46,9 @@ DISPOSITION_REINFORCEMENT_THRESHOLD = 8
 # due for review. Age alone is not evidence that handling failed or permission
 # to contact the user again.
 ADDRESSING_STALE_DAYS = 4
-# Evidence list cap per concern: keep the founding items + the freshest.
-_EVIDENCE_KEEP_HEAD = 3
-_EVIDENCE_KEEP_TAIL = 9
-# Reinforcement journal cap (entries, newest kept).
-_JOURNAL_KEEP = 10
-
-
-def _trim_evidence(existing: Dict[str, Any]) -> None:
-    """Cap the evidence list, counting what was dropped."""
-    evidence = existing.get("evidence") or []
-    cap = _EVIDENCE_KEEP_HEAD + _EVIDENCE_KEEP_TAIL
-    if len(evidence) <= cap:
-        return
-    dropped = len(evidence) - cap
-    existing["evidence"] = evidence[:_EVIDENCE_KEEP_HEAD] + evidence[-_EVIDENCE_KEEP_TAIL:]
-    existing["evidence_archived_count"] = int(existing.get("evidence_archived_count") or 0) + dropped
+# A concern keeps its whole journal and all its evidence (owner, 2026-10-08: "Do we lose context if we don't keep
+# all notes? i think we do. so we have to keep em."). Until then the journal kept its newest 10 entries and the
+# evidence its first 3 and newest 9; one deleted note was the record that an appointment had happened.
 
 
 def _journal_entries(notes: str) -> List[str]:
@@ -97,18 +84,6 @@ def history_for_prompt(concern: Dict[str, Any]) -> str:
     if journal:
         lines.append(journal)
     return "\n".join(lines)
-
-
-def _trim_journal(existing: Dict[str, Any]) -> None:
-    """Cap the reinforcement_notes journal to the newest entries."""
-    entries = _journal_entries(existing.get("reinforcement_notes") or "")
-    if len(entries) <= _JOURNAL_KEEP:
-        return
-    dropped = len(entries) - _JOURNAL_KEEP
-    kept = entries[-_JOURNAL_KEEP:]
-    existing["reinforcement_notes"] = "\n" + "\n".join(
-        [f"({dropped} earlier notes archived)"] + kept
-    )
 
 
 def _bump_reinforcement_count(existing: Dict[str, Any]) -> int:
@@ -184,10 +159,9 @@ def apply_noticer_output(
 
 
 def _journal_on(concern: Dict[str, Any], now_iso: str, line: str) -> None:
-    """Append one dated line to a concern's journal, respecting the journal cap."""
+    """Append one dated line to a concern's journal."""
     concern["reinforcement_notes"] = (
         (concern.get("reinforcement_notes") or "") + f"\n[{now_iso}] {line}")
-    _trim_journal(concern)
 
 
 def _settled_anchors(register: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
@@ -257,7 +231,6 @@ def apply_brain_matter(updates: List[Dict[str, Any]], plan: List[Dict[str, Any]]
             if u["action"] == "note":
                 concern["last_reinforced_utc"] = now_iso
                 _journal_on(concern, now_iso, f"[{source}] {u['note']}")
-                _trim_evidence(concern)
             elif u["action"] == "resolve":
                 concern["resolved_at_utc"] = now_iso
                 concern["resolution_reason"] = u["note"]
@@ -428,8 +401,6 @@ def _apply_noticer_output_locked(
         notes = r.get("notes")
         if notes:
             existing["reinforcement_notes"] = (existing.get("reinforcement_notes") or "") + f"\n[{now_utc_iso}] {notes}"
-        _trim_evidence(existing)
-        _trim_journal(existing)
 
     # 2b. Addressing → move active → addressing. Work is in flight (e.g. the dayflow orchestrator
     # already researched it) but the concern is NOT resolved yet (no booking/appointment). Moving
@@ -503,17 +474,10 @@ def _apply_noticer_output_locked(
         if action == "accept_chronic" and _refuse_owner_close(existing, now_utc_iso, f"accept_chronic ({reason})"):
             continue
         if action == "accept_chronic":
-            # Known long-term pattern; stop tracking it tick-by-tick. Keeps a
-            # compact record in `dormant` (founding + freshest evidence only).
+            # Known long-term pattern; stop tracking it tick-by-tick. Its whole record moves to `dormant`.
             existing["chronic"] = True
             existing["dormant_at_utc"] = now_utc_iso
             existing["dormant_reason"] = reason
-            evidence = existing.get("evidence") or []
-            if len(evidence) > 4:
-                existing["evidence_archived_count"] = (
-                    int(existing.get("evidence_archived_count") or 0) + len(evidence) - 4
-                )
-                existing["evidence"] = evidence[:2] + evidence[-2:]
             for status_key in ("active", "addressing"):
                 register[status_key] = [
                     c for c in register.get(status_key, []) if c.get("concern_id") != cid

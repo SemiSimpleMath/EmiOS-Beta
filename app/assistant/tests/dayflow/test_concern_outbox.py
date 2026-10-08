@@ -189,14 +189,15 @@ def test_finalizer_delivers_after_commit(setup,monkeypatch):
     assert len(work_events(inbox))==2
 
 
-def test_handling_history_survives_journal_trimming(setup):
+def test_a_long_journal_is_kept_whole_beside_the_handling_history(setup):
+    """The journal is kept whole (2026-10-08); the handling history renders beside it."""
     store,path,inbox=setup
     wid=graph(store); finish(store,wid)
     concern_feedback.recover_pending_concern_feedback(store)
     c=path.read()['active'][0]
-    c['reinforcement_notes']+='\n'+'\n'.join(f'observation {i}' for i in range(30))
-    persist._trim_journal(c)
-    assert 'I have arranged it.' not in c['reinforcement_notes']
+    for i in range(30):
+        persist._journal_on(c,'2026-10-08T00:00:00+00:00',f'observation {i}')
+    assert 'observation 0' in c['reinforcement_notes'] and 'archived' not in c['reinforcement_notes']
     assert 'I have arranged it.' in context_builder._render_concern_summary(c,status='active')
 
 
