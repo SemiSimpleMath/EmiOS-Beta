@@ -122,13 +122,18 @@ class TimingEngine:
     # were five of each.
     _SECONDS_PER_DAY = 86400
 
-    def _wall_clock_cron(self, interval_seconds, utc_anchor):
+    def _wall_clock_cron(self, interval_seconds, utc_anchor, end_date=None, jitter=None):
         """A cron trigger holding the anchor's LOCAL wall time, or None if not day-aligned.
 
         The anchor is converted with a date-aware zone, so it yields the wall time the
         event was AUTHORED at (a November anchor reads as PST) rather than that instant
         re-read under today's offset. That intent is then pinned to the local zone, and
         the tz database moves it with the clocks from here on.
+
+        The trigger itself carries the event's start (the anchor), end and jitter:
+        APScheduler ignores add_job's trigger arguments when it is handed a trigger
+        object. Until 2026-10-07 they were passed beside it, so an ended daily or weekly
+        reminder fired every day (South Lake registration, ended 2025-08-13, still sent).
 
         Sub-daily intervals (a 5-minute poll, an hourly monitor) are genuinely periodic:
         DST does not apply to them and they stay interval triggers.
@@ -149,7 +154,7 @@ class TimingEngine:
                       "timezone": local_tz}
             if days == 7:
                 fields["day_of_week"] = local.weekday()   # cron: 0 = Monday, as datetime
-            return CronTrigger(**fields)
+            return CronTrigger(**fields, start_date=utc_anchor, end_date=end_date, jitter=jitter)
         except Exception as e:
             # Never lose the job over this: fall through to the interval trigger, loudly.
             self.logger.error(
@@ -191,15 +196,13 @@ class TimingEngine:
                 if end_date:
                     end_date = end_date.replace(tzinfo=timezone.utc) if end_date.tzinfo is None else end_date
 
-                cron = self._wall_clock_cron(event.interval, start_date)
+                cron = self._wall_clock_cron(event.interval, start_date, end_date, event.jitter)
                 if cron is not None:
                     self.scheduler.add_job(
                         func=self._handle_trigger,
                         trigger=cron,
                         args=[event.event_id],
                         id=event.event_id,
-                        end_date=end_date,
-                        jitter=event.jitter,
                         misfire_grace_time=300,
                     )
                     self.logger.debug(

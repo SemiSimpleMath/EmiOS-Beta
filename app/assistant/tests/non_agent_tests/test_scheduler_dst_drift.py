@@ -97,3 +97,43 @@ def test_a_missing_interval_stays_periodic():
     anchor = datetime(2026, 4, 1, 22, 33, tzinfo=LA)
     assert _cron(0, anchor) is None
     assert _cron(None, anchor) is None
+
+
+# ── a wall-clock reminder keeps its start and end (2026-10-07) ──────────────
+# APScheduler ignores add_job's trigger arguments when handed a trigger object, and the cron
+# trigger was built without start or end: South Lake's registration reminder (ended 2025-08-13),
+# omeprazole (ended 2025-08-21) and two more fired every day for months.
+
+def test_an_ended_daily_reminder_never_fires_again():
+    anchor = datetime(2025, 8, 11, 8, 0, tzinfo=LA).astimezone(timezone.utc)
+    end = datetime(2025, 8, 13, 8, 0, tzinfo=LA).astimezone(timezone.utc)
+    trigger = _Engine()._wall_clock_cron(DAY, anchor, end)
+    assert trigger.get_next_fire_time(None, datetime(2025, 8, 12, tzinfo=LA)).astimezone(LA).day == 12
+    assert trigger.get_next_fire_time(None, datetime(2026, 10, 7, tzinfo=LA)) is None
+
+
+def test_a_weekly_reminder_does_not_fire_before_its_start():
+    anchor = datetime(2026, 11, 6, 18, 0, tzinfo=LA)          # a Friday in the future
+    trigger = _cron(WEEK, anchor)
+    first = _next_fire_local(trigger, datetime(2026, 10, 7, tzinfo=LA))
+    assert first == anchor
+
+
+def test_scheduling_an_ended_daily_event_arms_a_job_that_never_fires():
+    from types import SimpleNamespace
+    added = {}
+
+    class Engine(_Engine):
+        scheduler = SimpleNamespace(add_job=lambda **kw: added.update(kw))
+        _handle_trigger = staticmethod(lambda event_id: None)
+
+        class _Log(_Engine._Log):
+            def info(self, *a, **k): pass
+            def debug(self, *a, **k): pass
+        logger = _Log()
+
+    event = SimpleNamespace(event_id="south-lake", event_type="interval", interval=DAY, jitter=None,
+                            start_date="2025-08-11T15:00:00+00:00", end_date="2025-08-13T15:00:00+00:00")
+    TimingEngine.schedule_event(Engine(), event)
+    assert added["id"] == "south-lake" and "end_date" not in added
+    assert added["trigger"].get_next_fire_time(None, datetime(2026, 10, 7, tzinfo=timezone.utc)) is None
