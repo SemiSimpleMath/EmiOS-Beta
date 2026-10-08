@@ -284,7 +284,7 @@ body {
   word-wrap: break-word;
 }
 
-/* ── Directives editor (two-pane: edit + preview) ───────────────────────── */
+/* ── Directives editor (piece picker, then two-pane: edit + preview) ────── */
 
 .pz-shell--wide { max-width: 1400px; }
 
@@ -297,6 +297,33 @@ body {
 @media (max-width: 960px) {
   .pz-dir-grid { grid-template-columns: 1fr; }
 }
+
+.pz-dir-pieces {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.pz-dir-piece {
+  display: flex; flex-direction: column; gap: 4px;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--pz-rule);
+  border-radius: 8px;
+  background: var(--pz-card);
+  color: var(--pz-fg);
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.08s ease, background 0.08s ease;
+}
+.pz-dir-piece:hover { border-color: var(--pz-accent); }
+.pz-dir-piece--active {
+  border-color: var(--pz-accent);
+  background: #e0e9f5;
+}
+.pz-dir-piece__title { font-weight: 600; font-size: 0.92em; }
+.pz-dir-piece__who { color: var(--pz-mute); font-size: 0.8em; }
+.pz-dir-piece__who--none { font-style: italic; color: var(--pz-warn); }
 
 .pz-dir-pane {
   background: var(--pz-card);

@@ -343,14 +343,9 @@ def _build_routine() -> str:
 
 
 def _build_user_directives() -> str:
-    try:
-        from pathlib import Path
-        from app.assistant.utils.path_utils import get_resources_dir
-        directives_path = get_resources_dir() / "instructions" / "resource_orchestrator_user_prefs.md"
-        if directives_path.exists():
-            content = directives_path.read_text(encoding="utf-8").strip()
-            if content:
-                return f"### User Standing Directives\n{content}"
-    except Exception:
-        pass
-    return ""
+    """The owner's standing directives with their personal overlay, read as every agent reads a resource. Until
+    2026-10-08 this read the old combined file's shared template directly: never the overlay, and any error returned
+    nothing; the split of that file by role (2026-10-08) left it holding only the retired steward's copy."""
+    from app.assistant.subconscious.situation import _resource, _scope
+    content = str(_resource(_scope(), "resource_owner_standing_directives") or "").strip()
+    return f"### User Standing Directives\n{content}" if content else ""

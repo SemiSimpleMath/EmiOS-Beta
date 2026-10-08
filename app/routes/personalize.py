@@ -3,9 +3,10 @@ control over the things that shape Emi's day-to-day behavior:
 
 - Beliefs: trending-up / challenged / recently-deprecated views plus
   per-belief evidence drill-down.
-- Directives: edit resource_orchestrator_user_prefs_personal.md (the
-  gitignored personal overlay) with live-rendered preview of the final
-  concatenated prompt section the planner reads.
+- Directives: the owner's standing directives, split by role into six
+  pieces (shared template + gitignored personal overlay each). Pick a
+  piece, edit its overlay, and see a live preview of the concatenation the
+  agents that read it receive.
 
 Planned sibling page (not yet built — placeholder in the menu):
 - Reminder schedule (one-click toggle / retime / delete for
@@ -268,35 +269,94 @@ def api_belief_evidence(belief_id: str):
 
 # ── Directives editor ────────────────────────────────────────────────────────
 #
-# The strategic_planner's "Section 15. User standing directives" reads the
-# concatenation of resource_orchestrator_user_prefs.md (public template) and
-# resource_orchestrator_user_prefs_personal.md (gitignored overlay). Editing
-# the public file is risky — sanitization passes have wiped personal lines
-# off it before. The personal overlay is the safe edit surface; this editor
-# reads + writes it and shows a live preview of the final concatenation.
+# The owner's standing directives are split by role (2026-10-08) into the six
+# pieces below. Each piece is a tracked shared template
+# resources/instructions/<id>.md plus an optional gitignored personal overlay
+# <id>_personal.md, which the ResourceManager appends after the template
+# (ResourceManager._read_with_overlay, joined by a blank line) and reloads on
+# the next prompt build when either file's mtime changes. The template is
+# shown read-only — it is shared and gets reset by sanitization passes; the
+# overlay is the user's edit surface, and many overlays stay empty until the
+# user fills them in here. (The old resource_orchestrator_user_prefs pair now
+# feeds only the retired steward and is not edited here.)
+#
+# Write paths are a strict allowlist: the request names a piece id, never a
+# filename, and only that piece's overlay is ever written.
 
 _INSTR_DIR = "resources/instructions"
-_BASE_FILENAME = "resource_orchestrator_user_prefs.md"
-_PERSONAL_FILENAME = "resource_orchestrator_user_prefs_personal.md"
+
+_DIRECTIVE_PIECES: tuple = (
+    {
+        "id": "resource_assistant_capabilities",
+        "title": "What the assistant can do",
+        "read_by": ["the work architect", "the day's tasks", "the concern planner"],
+    },
+    {
+        "id": "resource_owner_standing_directives",
+        "title": "Your standing directives",
+        "read_by": ["the day's tasks", "the concern planner"],
+    },
+    {
+        "id": "resource_work_shaping",
+        "title": "How to shape work",
+        "read_by": ["the work architect"],
+    },
+    {
+        "id": "resource_worth_doing",
+        "title": "Is this worth doing at all?",
+        "read_by": ["the work architect"],
+    },
+    {
+        "id": "resource_task_approach",
+        "title": "How to approach a task",
+        "read_by": ["dayflow workers (the work_emi_team and work_personal_admin planners)"],
+    },
+    {
+        "id": "resource_owner_escalation",
+        "title": "Reaching you: escalation",
+        "read_by": [],  # no agent reads it yet; the page says so
+    },
+)
+_PIECES_BY_ID: Dict[str, Dict[str, Any]] = {p["id"]: p for p in _DIRECTIVE_PIECES}
 
 # Tracked-activities config + the agent prompt that decides override/veto.
 _TRACKED_REL_PATH = "app/assistant/pipelines/dayflow/step_configs/config_tracked_activities.json"
 _AGENT_PROMPT_REL_PATH = "app/assistant/agents/dayflow_cron_tickets/prompts/system.j2"
 
 
-def _instr_paths() -> Dict[str, Path]:
-    root = Path(get_repo_root())
+def _piece_summary(piece: Dict[str, Any]) -> Dict[str, Any]:
     return {
-        "base": root / _INSTR_DIR / _BASE_FILENAME,
-        "personal": root / _INSTR_DIR / _PERSONAL_FILENAME,
+        "id": piece["id"],
+        "title": piece["title"],
+        "read_by": list(piece["read_by"]),
+        "base_filename": f"{piece['id']}.md",
+        "personal_filename": f"{piece['id']}_personal.md",
     }
 
 
+def _instr_paths(piece: Dict[str, Any]) -> Dict[str, Path]:
+    """The two files of an allowlisted piece (callers pass an entry of
+    _DIRECTIVE_PIECES, never request input)."""
+    root = Path(get_repo_root())
+    summary = _piece_summary(piece)
+    return {
+        "base": root / _INSTR_DIR / summary["base_filename"],
+        "personal": root / _INSTR_DIR / summary["personal_filename"],
+    }
+
+
+def _requested_piece(piece_id: Any):
+    """(piece, None) for an allowlisted id, else (None, 400 response)."""
+    if not isinstance(piece_id, str) or piece_id not in _PIECES_BY_ID:
+        return None, (jsonify({"success": False, "error": f"unknown directive piece: {piece_id!r}"}), 400)
+    return _PIECES_BY_ID[piece_id], None
+
+
 def _render_combined(base_text: str, personal_text: str) -> str:
-    """Same shape as ResourceManager.load_all_from_directory's overlay
-    appender. Public template comes first; personal overlay appended
-    after a blank line so the LLM treats personal lines as later
-    instructions (later wins at LLM read time)."""
+    """Same shape as ResourceManager._read_with_overlay. The shared
+    template comes first; the personal overlay is appended after a blank
+    line so the LLM treats personal lines as later instructions (later
+    wins at LLM read time)."""
     base = (base_text or "").rstrip()
     personal = (personal_text or "").lstrip()
     if not personal:
@@ -311,25 +371,37 @@ def personalize_directives():
 
 @personalize_bp.route("/api/personalize/directives", methods=["GET"])
 def api_directives_get():
-    """Return base (public) text + personal overlay text + the rendered
-    concatenation that actually reaches the planner prompt."""
-    paths = _instr_paths()
+    """Without ?piece: the list of directive pieces (id, title, who reads
+    it, filenames). With ?piece=<id>: that piece's shared template text,
+    its personal overlay text, and the rendered concatenation that reaches
+    the agents that read it. An unknown piece id is a 400."""
+    if "piece" not in request.args:
+        return jsonify({
+            "success": True,
+            "pieces": [_piece_summary(p) for p in _DIRECTIVE_PIECES],
+        })
+
+    piece, error = _requested_piece(request.args.get("piece"))
+    if error:
+        return error
+    paths = _instr_paths(piece)
     try:
         base_text = paths["base"].read_text(encoding="utf-8") if paths["base"].exists() else ""
         personal_text = paths["personal"].read_text(encoding="utf-8") if paths["personal"].exists() else ""
     except Exception as e:
-        logger.error("[personalize] directives read failed: %s", e, exc_info=True)
+        logger.error("[personalize] directives read failed for %s: %s", piece["id"], e, exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
     return jsonify({
         "success": True,
+        "piece": _piece_summary(piece),
         "base": {
-            "filename": _BASE_FILENAME,
+            "filename": paths["base"].name,
             "content": base_text,
             "exists": paths["base"].exists(),
         },
         "personal": {
-            "filename": _PERSONAL_FILENAME,
+            "filename": paths["personal"].name,
             "content": personal_text,
             "exists": paths["personal"].exists(),
         },
@@ -339,17 +411,21 @@ def api_directives_get():
 
 @personalize_bp.route("/api/personalize/directives", methods=["POST"])
 def api_directives_post():
-    """Atomic write of the personal overlay file. Body: {content: str}.
+    """Atomic write of one piece's personal overlay. Body: {piece: str, content: str}.
 
-    Path is hardcoded — the editor only ever writes to the personal
-    overlay, never to the public template (which would be reverted by
-    the next public-repo cleanup pass). After writing, the
-    resource_manager picks up the change via mtime-based reload on the
+    The piece id is checked against the allowlist and the path derived from
+    it server-side — the editor only ever writes a piece's personal overlay,
+    never its shared template (which would be reverted by the next
+    public-repo cleanup pass). An absent overlay is created. After writing,
+    the resource_manager picks up the change via mtime-based reload on the
     next prompt build.
     """
-    paths = _instr_paths()
+    body = request.get_json(silent=True) or {}
+    piece, error = _requested_piece(body.get("piece"))
+    if error:
+        return error
+    paths = _instr_paths(piece)
     try:
-        body = request.get_json(silent=True) or {}
         content = body.get("content")
         if not isinstance(content, str):
             return jsonify({"success": False, "error": "content must be a string"}), 400
@@ -375,8 +451,8 @@ def api_directives_post():
             raise
 
         logger.info(
-            "[personalize] saved personal directives overlay (%d chars) to %s",
-            len(content), target,
+            "[personalize] saved personal directives overlay for %s (%d chars) to %s",
+            piece["id"], len(content), target,
         )
 
         # Read back so client gets the canonical state plus the rendered
@@ -385,15 +461,16 @@ def api_directives_post():
         personal_text = target.read_text(encoding="utf-8")
         return jsonify({
             "success": True,
+            "piece": _piece_summary(piece),
             "personal": {
-                "filename": _PERSONAL_FILENAME,
+                "filename": target.name,
                 "content": personal_text,
                 "exists": True,
             },
             "combined": _render_combined(base_text, personal_text),
         })
     except Exception as e:
-        logger.error("[personalize] directives write failed: %s", e, exc_info=True)
+        logger.error("[personalize] directives write failed for %s: %s", piece["id"], e, exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
 

@@ -12,30 +12,31 @@
       <a class="pz-back" href="/personalize"><i class="fas fa-arrow-left"></i> Personalize</a>
       <h1><i class="fas fa-clipboard-list"></i> Personal Directives</h1>
       <p class="pz-subtitle">
-        Your standing instructions to the orchestrator — what to nudge, when
-        to defer, who to escalate to. Edits here go into your gitignored
-        <code>_personal.md</code> overlay; the public template stays untouched.
+        Your standing instructions to {{ assistant_name }}, split by role: each piece below
+        reaches only the agents that need it. Every piece is a shared template plus your
+        gitignored <code>_personal.md</code> overlay; edits here go into the overlay and
+        the template stays untouched. Many pieces start blank until you fill them in.
         Changes take effect on the next prompt build (within a few seconds).
       </p>
     </header>
+
+    <nav id="pz-dir-pieces" class="pz-dir-pieces" aria-label="Directive pieces">
+      <span class="pz-loading">Loading pieces…</span>
+    </nav>
 
     <div class="pz-dir-grid">
       <!-- Edit pane -->
       <section class="pz-dir-pane pz-dir-pane--edit">
         <div class="pz-dir-pane__head">
-          <h2><i class="fas fa-pen-to-square"></i> Your overlay</h2>
+          <h2><i class="fas fa-pen-to-square"></i> Your overlay: <span id="pz-dir-piece-title">…</span></h2>
           <span class="pz-dir-meta" id="pz-dir-personal-meta">…</span>
         </div>
         <p class="pz-dir-hint">
-          Markdown. Appended <em>after</em> the public template at LLM read time —
+          Markdown. Appended <em>after</em> the shared template at LLM read time —
           so anything you write here overrides the template defaults. Gitignored;
-          stays local.
+          stays local. <span id="pz-dir-read-by"></span>
         </p>
-        <textarea id="pz-dir-textarea" class="pz-dir-textarea" spellcheck="false" placeholder="# Personal directives
-
-## My specific nudge preferences
-- Always notify about context changes...
-"></textarea>
+        <textarea id="pz-dir-textarea" class="pz-dir-textarea" spellcheck="false" placeholder="Empty — write your own lines for this piece here."></textarea>
         <div class="pz-dir-actions">
           <button id="pz-dir-save" class="pz-btn pz-btn--primary">
             <i class="fas fa-save"></i> Save overlay
@@ -50,21 +51,21 @@
       <!-- Preview + base reference pane -->
       <section class="pz-dir-pane pz-dir-pane--preview">
         <div class="pz-dir-pane__head">
-          <h2><i class="fas fa-eye"></i> What the planner reads</h2>
-          <span class="pz-dir-meta">final concatenation, public + your overlay</span>
+          <h2><i class="fas fa-eye"></i> What the agents read</h2>
+          <span class="pz-dir-meta">final concatenation, shared template + your overlay</span>
         </div>
         <p class="pz-dir-hint">
-          This is exactly what gets injected into Section 15 of the strategic
-          planner's system prompt every run. Refreshed live as you save.
+          This is exactly what gets injected into the prompt of every agent that reads
+          this piece. Refreshed live as you save.
         </p>
         <pre id="pz-dir-preview" class="pz-dir-preview">…</pre>
 
         <details class="pz-dir-base">
-          <summary>Show public template (read-only baseline)</summary>
+          <summary>Show shared template (read-only baseline)</summary>
           <p class="pz-dir-hint">
             This file is in the repo and gets reset by sanitization passes. Edit
-            your overlay above, not this — that's the lesson from the May 2026
-            regression.
+            your overlay, not this — that's the lesson from the May 2026
+            regression. <span id="pz-dir-base-name"></span>
           </p>
           <pre id="pz-dir-base" class="pz-dir-preview pz-dir-preview--base">…</pre>
         </details>

@@ -45,12 +45,47 @@ _IMPORTANT_RESOURCE_SPECS = {
         "path": ("assistant", "resource_chat_guidelines_data.json"),
         "kind": "json_blob",
     },
-    "resource_orchestrator_user_prefs": {
-        "title": "Orchestrator Preferences (Dayflow)",
+    # The owner's standing directives, split by role (2026-10-08). These are the
+    # SHARED templates; each one's personal overlay is edited at /personalize/directives.
+    "resource_assistant_capabilities": {
+        "title": "Directives: What the assistant can do",
         "description": (
-            "Personal directives the dayflow orchestrator and chat_gate read as context."
+            "Shared template. Read by the work architect, the day's tasks and the concern planner."
         ),
-        "path": ("instructions", "resource_orchestrator_user_prefs.md"),
+        "path": ("instructions", "resource_assistant_capabilities.md"),
+        "kind": "markdown",
+    },
+    "resource_owner_standing_directives": {
+        "title": "Directives: Your standing directives",
+        "description": "Shared template. Read by the day's tasks and the concern planner.",
+        "path": ("instructions", "resource_owner_standing_directives.md"),
+        "kind": "markdown",
+    },
+    "resource_work_shaping": {
+        "title": "Directives: How to shape work",
+        "description": "Shared template. Read by the work architect.",
+        "path": ("instructions", "resource_work_shaping.md"),
+        "kind": "markdown",
+    },
+    "resource_worth_doing": {
+        "title": "Directives: Is this worth doing at all?",
+        "description": "Shared template. Read by the work architect.",
+        "path": ("instructions", "resource_worth_doing.md"),
+        "kind": "markdown",
+    },
+    "resource_task_approach": {
+        "title": "Directives: How to approach a task",
+        "description": (
+            "Shared template. Read by dayflow workers "
+            "(the work_emi_team and work_personal_admin planners)."
+        ),
+        "path": ("instructions", "resource_task_approach.md"),
+        "kind": "markdown",
+    },
+    "resource_owner_escalation": {
+        "title": "Directives: Reaching you: escalation",
+        "description": "Shared template. No agent reads it yet.",
+        "path": ("instructions", "resource_owner_escalation.md"),
         "kind": "markdown",
     },
     "resource_assistant_guidelines": {
@@ -1169,9 +1204,8 @@ def important_resources_page():
 #   /skills          — overview: three injection patterns + featured editors
 #   /skills/email    — dedicated editor for email user prefs (a SKILL: action
 #                      instructions for the email agent)
-#   /skills/dayflow  — dedicated editor for personal dayflow orchestrator
-#                      preferences (a SKILL: action instructions for the
-#                      strategic_planner)
+#   /skills/dayflow  — redirects to /personalize/directives, the one place the
+#                      owner's standing directives (split by role) are edited
 # ---------------------------------------------------------------------------
 
 # Map of editor-page → underlying instruction file. Strict allowlist —
@@ -1179,7 +1213,6 @@ def important_resources_page():
 # from a request param.
 _EDITABLE_SKILL_PATHS = {
     "email":          "resources/instructions/resource_email_user_prefs.md",
-    "dayflow":        "resources/instructions/resource_orchestrator_user_prefs_personal.md",
     "personal-admin": "resources/instructions/resource_personal_admin_user_prefs.md",
 }
 
@@ -1213,8 +1246,8 @@ def skills_email_page():
 
 @preferences_bp.route('/skills/dayflow', methods=['GET'])
 def skills_dayflow_page():
-    """Dedicated editor for the dayflow-orchestrator skill."""
-    return render_template('skills_dayflow.html')
+    """The owner's directives are edited in one place: the per-piece editor."""
+    return redirect(url_for('personalize.personalize_directives'))
 
 
 @preferences_bp.route('/skills/personal-admin', methods=['GET'])
@@ -1415,7 +1448,7 @@ def skills_list_api():
 
 @preferences_bp.route('/api/skills/<skill_id>', methods=['GET'])
 def skill_get_api(skill_id: str):
-    """Read the markdown body of an editable skill (email or dayflow)."""
+    """Read the markdown body of an editable skill (email or personal-admin)."""
     try:
         path = _skill_path(skill_id)
     except ValueError:
