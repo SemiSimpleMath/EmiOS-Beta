@@ -54,9 +54,14 @@ What a run on 2026-10-09 08:12 showed:
   - `happened`, `moved` (with the new time), `cancelled`, `did_not_happen` — each only with evidence,
   - `unconfirmed` — its time passed and nothing showed either way.
   Every change of state is a relation `shown_by` to its evidence: a message, a ticket reply, a presence span, a
-  finished task (a finalizer judgment), a camera frame, the brain's decision on an event.
+  finished task (a finalizer judgment), a camera frame, the brain's decision on an event. Each state also says its
+  **basis** (owner, 2026-10-09: "there is also inferred evidence if there is no direct confirmation"):
+  - `direct`: something says so (the owner's words, a reply, a finished task, a camera frame);
+  - `inferred`: nothing says so, but signs point to it, named in `shown_by` (away from the computer 9:00-9:35 fits
+    the 9 PM walk; dinner happened, so family time began; the lights work finished at 10:00, so the lights went
+    off). An inferred state is never written without its signs.
 - **Milestones**: dated things that happened ("left for the school pickup 5:12 PM", "back at the computer 7:36 AM
-  after 2 h 38 min away"), each `shown_by` its evidence.
+  after 2 h 38 min away"), each `shown_by` its evidence, with its basis (direct or inferred).
 - **The day theme** and **the current status**: words, rewritten each pass.
 
 The record lives in emi.db (tables for day events and milestones, evidence as relations), not only in a resource
@@ -66,10 +71,12 @@ file; the resources the readers use today are rendered from it.
 
 The owner, 2026-10-09: "if no one did anything should it count as accomplished or not. i can see arguments for
 either." The record does not decide: an event whose time passed with no sign either way is `unconfirmed`, said as
-such. What that means is daily insights' judgment, where the arguments can live: a routine block (work hours, a
-recurring walk) probably happened unless something says otherwise; a one-off appointment, a reminder's act, or
-anything a belief would be built on needs a sign. Daily insights reads "Take out the dogs 8:00-8:30: unconfirmed
-(time passed; no sign)" beside "Dinner 6:30: happened (the wife's message 6:41 PM)" and weighs them.
+such; one with signs pointing to it is `happened`, inferred, with the signs. Daily insights reads "Take out the
+dogs 8:00-8:30: unconfirmed (time passed; no sign)", "Walk the dogs 9:00-9:30: happened, inferred (away from the
+computer 9:00-9:35)" and "Dinner 6:30: happened (the wife's message 6:41 PM)" and weighs them.
+
+Decided (owner, 2026-10-09): daily insights starts by treating `unconfirmed` as **unknown**, routine or not. If it
+then keeps asking whether every routine thing happened, adjust (for example: routine blocks as probably happened).
 
 ### Each pass works on what is new
 
@@ -88,7 +95,8 @@ anything a belief would be built on needs a sign. Daily insights reads "Take out
   last pass (concerns changed, new decisions).
 - **Output** (schema, labels only, see the object design):
   - `changes`: per event (its label K…, or "new" with a title and time) a new state and, for `moved`, the new time;
-    `relies_on`: the labels of what shows it (a concern C, a brain decision B, another event); `note`: words.
+    `relies_on`: the labels of what shows it (a concern C, a brain decision B, another event); `basis`: direct or
+  inferred; `note`: words.
   - `milestones`: new ones, each with its time and `relies_on`.
   - `day_theme`, `current_status`: words.
   A change or milestone with nothing in `relies_on` is malformed (one correction round, as elsewhere). A label in
@@ -126,8 +134,8 @@ anything a belief would be built on needs a sign. Daily insights reads "Take out
 
 ## 5. Decisions for the owner
 
-1. How daily insights should treat `unconfirmed`: routine blocks as probably happened and one-off events as unknown
-   (recommended), or everything unconfirmed as unknown?
+1. (Decided 2026-10-09: `unconfirmed` is unknown to daily insights to start; adjust if it keeps asking about every
+   routine thing. A state with signs but no direct confirmation is `inferred`, with its signs.)
 2. Concerns and the arbiter plan for the chat gate and the situation auditor: their own resource (smallest change),
    or those readers read the brain directly?
 3. (Decided 2026-10-09: the main input is the open concerns and the brain's decisions today; the tracker reads no
