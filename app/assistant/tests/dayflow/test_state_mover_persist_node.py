@@ -224,10 +224,15 @@ class TestAtomicExternalWake:
         assert node.content == "Do the thing"
         assert node.status == "proposed"
 
-    def test_missing_evidence_keeps_task_waiting(self):
-        store = _store()
-        wid = _wo_with_node(store, node_id="empty", wake_kind="event", wake_ref="reply")
-        bb = _wake_board({"node_wakes": [{"task_id": f"{wid}::empty", "evidence": " "}]})
-        _make_node(bb).action_handler(None)
-        assert store.load(wid).nodes["empty"].wake_kind == "event"
-        assert not bb.get_state_value("woken_work_nodes")
+
+def test_a_release_needs_no_evidence():
+    """Owner, 2026-10-09: the state mover's output is whether to release a node; the why is optional. Until then a
+    wake with no evidence was refused ("External wake requires arrival evidence")."""
+    store = _store()
+    wid = _wo_with_node(store, node_id="parked", wake_kind="event", wake_ref="the reply arrives")
+    bb = _wake_board({"node_wakes": [{"task_id": f"{wid}::parked", "evidence": ""}]})
+    _make_node(bb).action_handler(message=None)
+    wo = store.load(wid)
+    assert wo.nodes["parked"].wake_kind is None, "released"
+    [record] = [n for n in wo.nodes.values() if n.parent_id == "parked" and n.type == "evidence"]
+    assert record.payload["external_source"]["item_id"] == "reply-source" and record.pod_ref == "datapod:email:test-reply"

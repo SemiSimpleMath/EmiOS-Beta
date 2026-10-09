@@ -209,9 +209,9 @@ class StateMoverPersistNode(ControlNode):
                     continue  # already woken, or not an event-wait
                 if wo.status in {"done", "abandoned"} or node.status not in {"proposed", "waiting"}:
                     continue
+                # The release is the decision; why it matches is optional (owner, 2026-10-09). The worker reads the
+                # arrival itself (payload.external_source, work_context.source_context), the model's words beside it.
                 evidence = str(m.get("evidence") or "").strip()
-                if not evidence:
-                    raise ValueError("External wake requires arrival evidence")
                 candidate = candidates.get(tid)
                 source = sources.get(str(m.get("source_item_id") or ""))
                 if not candidate or not source:

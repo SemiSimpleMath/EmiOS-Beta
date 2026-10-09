@@ -48,7 +48,7 @@
 ########## WORK-OBJECT WAITS (parked on an external event) ##########
 *Multi-step work parked on an outside event. Time + dependency gates are already handled by the graph —
 your ONLY job here is to decide whether the awaited EVENT has arrived in the RECENT INCOMING below. For
-each that clearly has, emit a `node_wakes` entry (the task's label + the arrival's label + the arrived content). Match conservatively.*
+each that clearly has, emit a `node_wakes` entry (the task's label + the arrival's label; why it matches is optional). Match conservatively.*
 {%- for t in waiting_work_nodes %}
 - [{{ t.label }}]
   waiting for: {{ t.waiting_for }}{% if t.context %}

@@ -7,8 +7,9 @@ class NodeWake(BaseModel):
     task: str = Field(description="The parked task's label (T…) under WORK-OBJECT WAITS.")
     source: str = Field(description="The label (S…) of the arrival under RECENT INCOMING that satisfies its wait.")
     evidence: str = Field(
-        description="The intake content that satisfies the wait — the gist of what arrived, in words — so the "
-        "worker resuming the node has what it needs to act. No labels.")
+        default="",
+        description="Optional: why this arrival satisfies the wait, in words. The worker reads the arrival itself; "
+        "the release is what counts. No labels.")
 
 
 class HeldWorkNode(BaseModel):
@@ -22,7 +23,8 @@ class HeldWorkNode(BaseModel):
 
 
 class AgentForm(BaseModel):
-    state_mover_summary: str = Field(description="One line: what you woke, what you held, and why.")
+    state_mover_summary: str = Field(default="", description="Optional: one line on what you woke or held, and why. "
+                                     "Nothing to say when nothing changes.")
     node_wakes: List[NodeWake] = Field(
         default_factory=list,
         description="Work-object nodes parked on an external event whose event has CLEARLY arrived in "
