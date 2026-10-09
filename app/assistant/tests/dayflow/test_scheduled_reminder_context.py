@@ -82,9 +82,15 @@ def test_all_three_agent_views_render_the_same_full_record():
         data["scheduled_reminder_history"] = history
         text = env.get_template(base + "/prompts/user.j2").render(**data)
         assert TEXT in text and "source-proof" in text
-    from app.assistant.control_nodes.work_architect_node import _situational_context
-    rendered = _situational_context(FakeBlackboard({"scheduled_reminder_history": history}))
-    assert TEXT in rendered and "source-proof" in rendered
+    from app.assistant.control_nodes.work_architect_node import _view
+    from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+    store = get_dayflow_work_store()
+    wo = store.apply("create_work_object", {"title": "Water the garden", "goal_content": "Water the garden",
+                                            "satisfied_when_kind": "all_owned_children_done"})
+    labels, ids, rendered = _view(store, wo, history=history, replan=False)
+    [record] = history["records"]
+    assert TEXT in rendered and "scheduler_reminder" in rendered
+    assert "source-proof" not in rendered and ids["source-proof"] == "R1", "the architect sees the record by label"
 
 
 @pytest.mark.parametrize("path", ["steward", "tick", "wake"])

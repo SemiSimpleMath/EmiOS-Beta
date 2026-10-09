@@ -176,20 +176,17 @@ def render_work_portfolio(wo, now=None) -> str:
     return render_view("portfolio", work=work_data(wo, now))
 
 
-def render_portfolio(work_objects, now=None, shown_above=None) -> str:
+def render_portfolio(work_objects, now=None, shown_above=None, labels=None) -> str:
     """Render each active work object with the shared status definitions. `shown_above` names the work
-    object whose full graph the reader already has (the architect's own goal): it is marked, not repeated."""
+    object whose full graph the reader already has (the architect's own goal): it is marked, not repeated.
+    `labels` (id -> label of the call) shows labels in place of ids (a projection, 2026-10-08)."""
     from app.assistant.dayflow_orchestrator.work_context import render_view, work_data
     return render_view("portfolio_list", works=[work_data(wo, now) for wo in (work_objects or [])],
-                       shown_above=shown_above)
+                       shown_above=shown_above, labels=labels or {})
 
 
-def render_active_portfolio(store, summaries, shown_above=None) -> tuple[str, int, list[str]]:
-    """The portfolio of every non-terminal work object in `summaries`: (text, objects rendered, unreadable ids).
-
-    An object that will not load is logged and NAMED at the top of the text, so the reader is told its
-    view is partial rather than told the work does not exist."""
-    from app.assistant.dayflow_orchestrator.work_context import render_view
+def active_work_objects(store, summaries) -> tuple[list, list[str]]:
+    """Every non-terminal work object in `summaries` that loads, and the ids of those that do not (logged)."""
     active, unreadable = [], []
     for s in summaries:
         if str(s.get("status") or "").lower() in ("done", "abandoned"):
@@ -201,7 +198,17 @@ def render_active_portfolio(store, summaries, shown_above=None) -> tuple[str, in
             logger.error("[work_portfolio] active work object %s could not be loaded — it will be "
                          "MISSING from the portfolio: %s", s.get("id"), e)
             logger.debug("[work_portfolio] work object load exception", exc_info=True)
-    portfolio = render_portfolio(active, shown_above=shown_above)
+    return active, unreadable
+
+
+def render_active_portfolio(store, summaries, shown_above=None, labels=None) -> tuple[str, int, list[str]]:
+    """The portfolio of every non-terminal work object in `summaries`: (text, objects rendered, unreadable ids).
+
+    An object that will not load is logged and NAMED at the top of the text, so the reader is told its
+    view is partial rather than told the work does not exist."""
+    from app.assistant.dayflow_orchestrator.work_context import render_view
+    active, unreadable = active_work_objects(store, summaries)
+    portfolio = render_portfolio(active, shown_above=shown_above, labels=labels)
     if unreadable:
         portfolio = render_view("incomplete_portfolio", unreadable=unreadable, portfolio=portfolio)
     return portfolio, len(active), unreadable

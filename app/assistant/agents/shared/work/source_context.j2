@@ -1,14 +1,17 @@
+{%- set L = labels | default({}) -%}
 {% for source in sources %}
-- source item: {{ source.get('item_id', '') }} | type: {{ source.get('source_type', '') }}
+{% if L.get(source.get('item_id', '')) %}- [{{ L[source.item_id] }}] source | type: {{ source.get('source_type', '') }}
+{% else %}- source item: {{ source.get('item_id', '') }} | type: {{ source.get('source_type', '') }}
+{% endif -%}
   source timestamp: {{ source.get('created_at', '') | local_time or 'unknown' }}
 {% if source.get('sender') %}  sender: {{ source.sender }}
 {% endif %}{% if source.get('subject') %}  subject: {{ source.subject }}
-{% endif %}{% if source.get('message_id') %}  message: {{ source.message_id }}
+{% endif %}{% if not L %}{% if source.get('message_id') %}  message: {{ source.message_id }}
 {% endif %}{% if source.get('thread_id') %}  thread: {{ source.thread_id }}
-{% endif %}  source summary (not a verbatim quote): {{ source.get('summary', '') }}
+{% endif %}{% endif %}  source summary (not a verbatim quote): {{ source.get('summary', '') }}
 {% if source.get('excerpt') and not (compact_sources | default(false)) %}  source excerpt: {{ source.excerpt }}
-{% endif %}  full source: {{ source.get('pod_id') or 'no pod reference recorded' }}
-{% if source.get('matched_condition') %}  task receiving event: {{ source.get('task_id', '') }}
+{% endif %}  full source: {% if source.get('pod_id') and L.get(source.pod_id) %}[{{ L[source.pod_id] }}]{% else %}{{ source.get('pod_id') or 'no pod reference recorded' }}{% endif %}
+{% if source.get('matched_condition') %}  task receiving event: {{ L.get(source.get('task_id', ''), source.get('task_id', '')) }}
   matched waiting condition: {{ source.matched_condition }}
   wake interpretation (agent judgment): {{ source.get('interpretation', '') }}
 {% endif %}{% endfor %}

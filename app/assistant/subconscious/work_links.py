@@ -88,11 +88,21 @@ def work_view(work_id: str, *, link: str, score: Optional[float] = None) -> Dict
         row = store._conn.execute("SELECT title, status, created_at, updated_at FROM work_objects WHERE id=?",
                                   (work_id,)).fetchone()
     summary = {"title": row[0] or "", "status": row[1], "created_at": row[2], "updated_at": row[3]}
+    # The work the architect said already does or did this one (relation covered_by, 2026-10-08), as data a
+    # reader renders whole: what it was, how it stands, when it last changed. Until then the ending named it by
+    # title in its reason, and nobody could tell Wednesday's reminder from tonight's.
+    from app.assistant.subconscious import relations
+    covered = []
+    for _, other in relations.targets(("work", work_id), "covered_by"):
+        with store._lock:
+            o = store._conn.execute("SELECT title, status, updated_at FROM work_objects WHERE id=?", (other,)).fetchone()
+        covered.append({"work_id": other, "title": (o[0] or "") if o else "(no longer stored)",
+                        "status": o[1] if o else "", "updated": _local(o[2]) if o else ""})
     return {
         "work_id": work_id, "title": wo.title or summary["title"], "status": summary["status"],
         "objective": str((wo.constraints or {}).get("objective") or ""),
         "created": _local(summary["created_at"]), "updated": _local(summary["updated_at"]),
-        "ended_because": _goal_epitaph(wo),
+        "ended_because": _goal_epitaph(wo), "covered_by": covered,
         "list_entry": (wo.constraints or {}).get("list_entry_id"),
         "outcomes": [{"title": n.title, "outcome": n.payload["finalizer"].get("outcome"),
                       "at": n.payload["finalizer"].get("at")} for n in nodes.values()

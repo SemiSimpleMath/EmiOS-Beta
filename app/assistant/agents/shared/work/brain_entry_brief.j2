@@ -3,13 +3,13 @@
     times}, `concern_text` (the concern in full, or empty), `belief` {belief_key, statement, related} or None,
     `sources` [text] (each email or message the concern came from, verbatim); the entry's `day` and `updated_at`
     (when it was decided, UTC ISO) date it. Times local. -#}
-FROM THE BRAIN'S LIST (entry {{ entry.id }}): the brain decided this is needed; how is yours.
+FROM THE BRAIN'S LIST: the brain decided this is needed; how is yours.
 - the outcome wanted: {{ entry.what }}
 - the assistant's part: {{ entry.assistant_part }}
 - when: {{ entry.when_local }} (decided {{ entry.updated_at | local_time }})
 - why: {{ entry.why }}
 {% if belief %}
-It comes from the calendar of {{ entry.day }}{% if entry.times %} ({{ entry.times }}){% endif %}, from the owner's belief [belief:{{ belief.belief_key }}]: {{ belief.statement }}
+It comes from the calendar of {{ entry.day }}{% if entry.times %} ({{ entry.times }}){% endif %}, from the owner's belief: {{ belief.statement }}
 {%- for r in belief.related %}
   read with: {{ r }}
 {%- endfor %}

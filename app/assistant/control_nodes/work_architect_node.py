@@ -137,13 +137,176 @@ def _goal_triggers(store) -> tuple[dict[str, list[dict]], dict[str, str]]:
     return instructions, stranded
 
 
-def _finalizer_block(entries) -> tuple[str, str]:
+def _finalizer_block(entries, labels=None) -> tuple[str, str]:
     """Render instructions in Jinja and separately prepare the pruning licence data."""
     entries = [e for e in (entries or []) if str(e.get("next_step") or "").strip()]
     if not entries:
         return "", ""
     licence = " ".join(str(e.get("recommendation") or e.get("outcome") or "").strip() for e in entries)
-    return render_view("instructions", entries=entries), licence
+    return render_view("instructions", entries=entries, labels=labels or {}), licence
+
+
+# ── the projection (docs/design/objects_and_projections_2026-10-08.md, module 3) ─────────────────────────────
+# The architect sees its goal G, every task as T, other work as W, the sources work came from as S and the records
+# they point to as P, reminders as R; never an id. Its answer names existing tasks and other objects only by label
+# (depends_on, uses, abandon_node_ids, duplicate_of, covered_by); a new task keeps the short node_id it chooses.
+
+_USES_KINDS = ("task", "pod", "work", "source_item")
+
+
+def _projection(wo, others, ended_ids):
+    """The labels of one architect call: (labels: label -> [kind, id], ids: id -> label for the templates)."""
+    from app.assistant.dayflow_orchestrator.work_context import source_context
+    from app.assistant.subconscious.projection import Projection
+    p = Projection()
+    p.fixed("G", "work", wo.id)
+
+    def objects_of(w):
+        for n in sorted((n for n in w.nodes.values() if w.is_work_unit(n)), key=lambda n: str(n.created_at)):
+            p.label("T", "task", n.id)
+        for s in source_context(w):
+            if s.get("item_id"):
+                p.label("S", "source_item", s["item_id"])
+            if s.get("pod_id"):
+                p.label("P", "pod", s["pod_id"])
+    objects_of(wo)
+    for other in others:
+        if other.id != wo.id:
+            p.label("W", "work", other.id)
+            objects_of(other)
+    for work_id in ended_ids:
+        p.label("W", "work", work_id)
+    return p, {ref[1]: label for label, ref in p.labels.items()}
+
+
+def _view(store, wo, *, history, replan: bool):
+    """The architect's situational context for one goal, as a projection: (labels, ids, text): the portfolio of
+    active work (on a re-plan this goal is marked, not repeated: its full graph is in the task; until 2026-10-08 it
+    was printed twice in a ~96k-character prompt), the work completed recently, and the reminders sent.
+
+    No tickets: the architect owns one goal, and the user's replies about it are recorded on the step that asked
+    (evidence the finalizer judges). The tick's list of every answered ticket once reached every architect call as
+    "directives"; on 2026-10-01 a reply to a test goal's question ("this task should be aborted") ended the goal that
+    had just emailed a family member."""
+    from app.assistant.control_nodes.strategic_planner_wo_prep_node import recent_ended_items, render_recent_ended
+    from app.assistant.dayflow_orchestrator.work_portfolio import active_work_objects, render_portfolio
+    summaries = store.list_work_objects()
+    active, unreadable = active_work_objects(store, summaries)
+    done, _ = recent_ended_items(summaries, store)
+    p, ids = _projection(wo, active, [item["id"] for item in done])
+    portfolio = render_portfolio(active, shown_above=wo.id if replan else None, labels=ids)
+    if unreadable:
+        portfolio = render_view("incomplete_portfolio", unreadable=unreadable, portfolio=portfolio)
+    completed, _ = render_recent_ended(done, [], labels=ids)
+    reminders = None
+    if history:
+        reminders = {**history, "records": [{**r, "ref": p.label("R", "reminder", r["id"])}
+                                            for r in history.get("records") or []]}
+        ids = {ref[1]: label for label, ref in p.labels.items()}
+    text = render_view("situation", scheduled_reminder_history=reminders, portfolio=portfolio, completed=completed)
+    return p.labels, ids, text
+
+
+def _resolve(d: dict, labels: dict, wo) -> tuple[dict, dict]:
+    """The architect's answer with its labels mapped to ids: (the answer for apply_architect_dag, links to keep as
+    relations: uses per new task, covered_by, duplicates). Raises ValueError naming every problem, which the
+    one correction round shows the architect: a label not given, of the wrong kind, or written into words."""
+    from app.assistant.subconscious.projection import labels_in
+    own = {label: ref[1] for label, ref in labels.items() if ref[0] == "task" and ref[1] in wo.nodes}
+    new = [str(n.get("node_id") or "").strip() for n in d.get("nodes") or [] if isinstance(n, dict)]
+    numbered = [x for x in labels if any(ch.isdigit() for ch in x)]
+    problems: list[str] = []
+
+    def words(where, *texts):
+        found = labels_in(" ".join(str(t or "") for t in texts), numbered)
+        if found:
+            problems.append(f"{where}: {found} written into its words; say it in words and put the reference in "
+                            f"its own field (depends_on, uses, abandon_node_ids, duplicate_of, covered_by)")
+
+    nodes, uses = [], {}
+    for spec in d.get("nodes") or []:
+        if not isinstance(spec, dict):
+            continue
+        slug = str(spec.get("node_id") or "").strip()
+        if slug in labels:
+            problems.append(f"{slug!r}: a new task's node_id is a short name you choose, not a label")
+        deps = []
+        for x in [str(x).strip() for x in spec.get("depends_on") or []]:
+            if x in own:
+                deps.append(own[x])
+            elif x in new:
+                deps.append(x)
+            else:
+                problems.append(f"{slug}: depends_on {x!r} is neither a task of this goal (its T label) nor a new "
+                                f"task of this answer (its node_id)")
+        refs = []
+        for x in [str(x).strip() for x in spec.get("uses") or []]:
+            if x in new:
+                refs.append(("new", x))
+            elif x in labels and labels[x][0] in _USES_KINDS and labels[x][1] != wo.id:   # not the goal itself
+                refs.append((labels[x][0], labels[x][1]))
+            else:
+                problems.append(f"{slug}: uses {x!r} is not a task, record, source or work given")
+        uses[slug] = refs
+        words(slug, spec.get("title"), spec.get("detail"), spec.get("wait_reason"), spec.get("wake_ref"))
+        nodes.append({**spec, "depends_on": deps})
+    abandon = []
+    for x in [str(x).strip() for x in d.get("abandon_node_ids") or []]:
+        if x in own:
+            abandon.append(own[x])
+        else:
+            problems.append(f"abandon_node_ids: {x!r} is not a task of this goal (its T label)")
+    pairs = []
+    for pair in d.get("duplicate_of") or []:
+        dup, keep = str((pair or {}).get("duplicate_node_id") or "").strip(), str((pair or {}).get("keep_node_id") or "").strip()
+        if dup in own and keep in own:
+            pairs.append({"duplicate_node_id": own[dup], "keep_node_id": own[keep]})
+        else:
+            problems.append(f"duplicate_of: {dup!r} and {keep!r} must both be tasks of this goal (their T labels)")
+    covered = []
+    end = d.get("end_goal")
+    if end:
+        for x in [str(x).strip() for x in end.get("covered_by") or []]:
+            if x in labels and labels[x][0] == "work" and labels[x][1] != wo.id:
+                covered.append(labels[x][1])
+            else:
+                problems.append(f"end_goal covered_by: {x!r} is not other work given (its W label)")
+        words("end_goal", end.get("reason"))
+    revision = d.get("revise_objective")
+    if revision:
+        words("revise_objective", revision.get("objective"), revision.get("success_criteria"), revision.get("reason"))
+    words("abandon_reason", d.get("abandon_reason"))
+    words("architect_summary", d.get("architect_summary"))
+    if problems:
+        raise ValueError("; ".join(problems))
+    mapped = {**d, "nodes": nodes, "abandon_node_ids": abandon, "duplicate_of": pairs}
+    if end:
+        mapped["end_goal"] = {k: v for k, v in end.items() if k != "covered_by"}
+    return mapped, {"uses": uses, "covered_by": covered,
+                    "duplicates": [(p["duplicate_node_id"], p["keep_node_id"]) for p in pairs]}
+
+
+def _keep_links(wo, links: dict, added: list) -> None:
+    """After the revision commits: what each new task uses, what the goal's ending was covered by, and each dropped
+    duplicate's kept task, as relations (subconscious/relations.py)."""
+    from datetime import datetime, timezone
+    from app.assistant.dayflow_orchestrator.work_architect_apply import _work_ns
+    from app.assistant.subconscious import relations
+    from app.assistant.subconscious.db import connect
+    ns, existing = _work_ns(wo.id), set(wo.nodes)
+    real = lambda slug: slug if slug in existing else f"{slug}--{ns}"
+    now, by = datetime.now(timezone.utc).isoformat(), f"architect {wo.id}"
+    relations.ensure_schema()
+    with connect(True) as c:
+        for slug, refs in links["uses"].items():
+            if refs and real(slug) in added:
+                relations.replace(c, ("task", real(slug)), "uses",
+                                  [("task", real(x)) if kind == "new" else (kind, x) for kind, x in refs], at=now, by=by)
+        if links["covered_by"]:
+            relations.replace(c, ("work", wo.id), "covered_by", [("work", w) for w in links["covered_by"]],
+                              at=now, by=by)
+        for dup, keep in links["duplicates"]:
+            relations.replace(c, ("task", dup), "duplicate_of", [("task", keep)], at=now, by=by)
 
 
 def _duplicate_pairs(data: dict) -> dict[str, str]:
@@ -174,36 +337,10 @@ def _duplicate_pairs(data: dict) -> dict[str, str]:
     return out
 
 
-def _render_existing_graph(wo) -> str:
-    """Share the complete strategic task view with the steward, excluding provenance."""
+def _render_existing_graph(wo, ids=None) -> str:
+    """The goal's own graph, main tasks only (provenance excluded), each object by its label of the call."""
     from app.assistant.dayflow_orchestrator.work_context import render_view, work_data
-    return render_view("portfolio", work=work_data(wo))
-
-
-def _situational_context(bb, portfolio=None) -> str:
-    """Prepare the tick's situational data for the architect's Jinja context block.
-
-    No tickets: the architect owns one goal, and the user's replies about it are recorded on the
-    step that asked (evidence the finalizer judges). The tick's list of every answered ticket once
-    reached every architect call as "directives"; on 2026-10-01 a reply to a test goal's question
-    ("this task should be aborted") ended the goal that had just emailed a family member.
-
-    `portfolio` replaces the tick's portfolio for a re-plan, whose own work object is already in
-    its task as the existing graph (_goal_portfolio).
-    """
-    return render_view("situation",
-        scheduled_reminder_history=bb.get_state_value("scheduled_reminder_history"),
-        portfolio=(bb.get_state_value("work_portfolio", "") or "") if portfolio is None else portfolio,
-        completed=bb.get_state_value("recent_completed_work", "") or "")
-
-
-def _goal_portfolio(store, work_id: str) -> str:
-    """The portfolio for a re-plan of `work_id`: every active work object, with this goal's own only
-    marked. Its full graph is in the task ("Existing nodes"); the tick's portfolio printed it a second
-    time in full (2026-10-08 read of a ~96k-character architect prompt)."""
-    from app.assistant.dayflow_orchestrator.work_portfolio import render_active_portfolio
-    portfolio, _, _ = render_active_portfolio(store, store.list_work_objects(), shown_above=work_id)
-    return portfolio
+    return render_view("portfolio", work=work_data(wo), labels=ids or {})
 
 
 def _apply_with_correction(agent, data: dict, task: str, information: str, scope, apply):
@@ -267,7 +404,6 @@ class WorkArchitectNode(ControlNode):
 
             if created or replan_ids:
                 scope = self._scope(message)
-                info = _situational_context(self.blackboard)
                 # Its OWN blackboard, never the tick's. Sharing the tick's looks right — it is
                 # what makes blackboard-sourced context items resolve — but the tick's blackboard
                 # already carries `task` = "Dayflow cadence tick" (dayflow_tick builds the
@@ -278,17 +414,19 @@ class WorkArchitectNode(ControlNode):
                 # evening dog walk, two of which failed there and blocked the goal forever.
                 #
                 # The objective reaches the agent through the Message below. Anything else the
-                # architect needs has to arrive the same way (see _situational_context) or as a
+                # architect needs has to arrive the same way (see _view) or as a
                 # resource — never by borrowing a blackboard whose keys it does not own.
                 agent = DI.agent_factory.create_agent("dayflow_orchestrator::work_architect")
 
+                history = self.blackboard.get_state_value("scheduled_reminder_history")
                 # CREATE — decompose each freshly-minted goal.
                 for c in created:
                     work_id = c["work_id"]
                     try:
                         rationale = str(c.get("rationale") or "").strip()
-                        why = render_view("architect_context", rationale=rationale, situation=info)
                         wo = store.load(work_id)
+                        labels, ids, goal_view = _view(store, wo, history=history, replan=False)
+                        why = render_view("architect_context", rationale=rationale, situation=goal_view)
                         goal = wo.nodes.get(wo.goal_node_id)
                         objective = (goal.content or goal.title) if goal else c["objective"]
                         task = render_view("architect_task", mode="create", objective=objective)
@@ -309,12 +447,14 @@ class WorkArchitectNode(ControlNode):
                         # A goal can be moot or need rewording before anything is planned. Until 2026-10-04 only
                         # the re-plan branch passed these on: a task-less goal the architect ended ("its useful
                         # moment has passed") stayed active and was decomposed again every tick, from 10-02 on.
-                        def apply(d, wo=wo, work_id=work_id):
+                        def apply(d, wo=wo, work_id=work_id, labels=labels):
+                            d, _ = _resolve(d, labels, wo)
                             return apply_architect_dag(store, work_id, d.get("nodes", []) or [],
                                                        revise_objective=d.get("revise_objective"),
                                                        end_goal=d.get("end_goal"),
                                                        expected_updated_at=wo.updated_at)
                         data, res = _apply_with_correction(agent, data, task, why, scope, apply)
+                        _keep_links(wo, _resolve(data, labels, wo)[1], res.get("added", []))
                         decomposed.append({"work_id": work_id, "nodes": len(res.get("added", [])),
                                            "ended": res.get("ended")})
                         logger.info("[%s] decomposed %s into %d node(s), revised=%s ended=%s",
@@ -339,21 +479,22 @@ class WorkArchitectNode(ControlNode):
                     try:
                         goal = wo.nodes.get(wo.goal_node_id)
                         objective = (getattr(goal, "content", "") or getattr(goal, "title", "")) if goal else ""
-                        finalizer_block, licence = _finalizer_block(pending.get(work_id))
+                        labels, ids, goal_info = _view(store, wo, history=history, replan=True)
+                        finalizer_block, licence = _finalizer_block(pending.get(work_id), ids)
                         # A stranded goal's prunes are licensed by its state: nothing in it can run. The brain's
                         # re-plan instruction (its list entry revised) is a directive, like the user's.
                         brain_replan = any(e.get("kind") == "replan" for e in instructions.get(work_id, []))
                         licensed = bool(licence) or (work_id in user_directed) or (work_id in stranded) or brain_replan
                         task = render_view("architect_task", mode="replan", objective=objective,
-                                           finalizer_block=finalizer_block, graph=_render_existing_graph(wo),
+                                           finalizer_block=finalizer_block, graph=_render_existing_graph(wo, ids),
                                            goal_instructions=instructions.get(work_id, []),
                                            rationale=str((wo.constraints or {}).get("rationale") or "").strip(),
                                            stranded=work_id in stranded)
-                        goal_info = _situational_context(self.blackboard, portfolio=_goal_portfolio(store, work_id))
                         result = agent.action_handler(Message(task=task, information=goal_info, scope_context=scope))
                         data = getattr(result, "data", {}) or {}
 
-                        def apply(d, wo=wo, work_id=work_id, licensed=licensed):
+                        def apply(d, wo=wo, work_id=work_id, licensed=licensed, labels=labels):
+                            d, _ = _resolve(d, labels, wo)
                             return apply_architect_dag(store, work_id, d.get("nodes", []) or [],
                                                        abandon_reason=str(d.get("abandon_reason") or "").strip(),
                                                        abandon_node_ids=d.get("abandon_node_ids", []) or [],
@@ -366,6 +507,7 @@ class WorkArchitectNode(ControlNode):
                                                        end_goal=d.get("end_goal"),
                                                        expected_updated_at=wo.updated_at)
                         data, res = _apply_with_correction(agent, data, task, goal_info, scope, apply)
+                        _keep_links(wo, _resolve(data, labels, wo)[1], res.get("added", []))
                         replanned.append({"work_id": work_id, "added": len(res.get("added", [])),
                                           "abandoned": len(res.get("abandoned", [])),
                                           "deduplicated": len(res.get("deduplicated", [])),

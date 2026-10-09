@@ -1,5 +1,6 @@
+{%- set L = labels | default({}) -%}
 {% include 'shared/work/legend.j2' %}
-{% for work in works %}{% if shown_above is defined and work.id == shown_above %}=== WORK OBJECT {{ work.id }} === (this goal — its full work graph is shown above)
+{% for work in works %}{% if shown_above is defined and work.id == shown_above %}=== WORK OBJECT {{ L.get(work.id, work.id) }} === (this goal — its full work graph is shown above)
 {% else %}{% include 'shared/work/portfolio.j2' %}
 {% endif %}{% else %}(no active work objects)
 {% endfor %}

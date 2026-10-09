@@ -5,5 +5,7 @@
 {% endif -%}
 {% if w.ended_because %}- ended because: {{ w.ended_because }}
 {% endif -%}
+{% for c in w.covered_by | default([]) %}- covered by: {% if L.get(c.work_id) %}[{{ L[c.work_id] }}] {% endif %}{{ c.title }} ({{ c.status }}, last changed {{ c.updated }})
+{% endfor -%}
 {% for o in w.outcomes %}- task "{{ o.title }}"{% if o.at %} ({{ o.at | local_time }}){% endif %}: {{ o.outcome }}
 {% endfor %}

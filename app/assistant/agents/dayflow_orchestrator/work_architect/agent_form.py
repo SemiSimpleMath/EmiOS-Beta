@@ -18,15 +18,22 @@ from pydantic import BaseModel, Field, model_validator
 
 class WorkNode(BaseModel):
     node_id: str = Field(
-        description="Short slug, unique within this graph, referenced by other nodes' depends_on "
-        "(e.g. 'email_brother'). Reflect the node's job, not a vague verb.")
-    title: str = Field(description="Short title of this unit of work.")
+        description="A NEW task's short name, chosen by you and unique in this answer, used by other new tasks' "
+        "depends_on and uses (e.g. 'email_brother'). Reflect the task's job. Never a label.")
+    title: str = Field(description="Short title of this unit of work, in words.")
     detail: str = Field(
-        description="What this node must accomplish — the objective. The worker decides HOW and which "
-        "tools/managers to use; do NOT write step-by-step instructions here.")
+        description="What this node must accomplish — the objective, in words. The worker decides HOW and which "
+        "tools/managers to use; do NOT write step-by-step instructions here. No labels, ids or node names: what "
+        "it must read goes in uses.")
     depends_on: List[str] = Field(
         default_factory=list,
-        description="node_ids that must COMPLETE before this node can run (ordering / prerequisites).")
+        description="What must COMPLETE before this task can run: existing tasks of this goal by their label (T2), "
+        "new tasks of this answer by their node_id.")
+    uses: List[str] = Field(
+        default_factory=list,
+        description="What this task must read when it runs: an earlier task's result (T label, or a new task's "
+        "node_id), a record or email (P, S), other work (W). The worker is given each one. Empty when it needs "
+        "nothing beyond its goal.")
     wake_at: Optional[str] = Field(
         default=None,
         description="DETERMINISTIC wake — an ISO 8601 datetime with timezone offset. The node parks until this "
@@ -54,10 +61,10 @@ class DuplicatePair(BaseModel):
     renders as `additionalProperties`, which strict mode rejects outright — the whole call 400s).
     Every agent_form field has to be a fixed-shape model or a list of them.
     """
-    duplicate_node_id: str = Field(description="The node_id being abandoned as redundant.")
+    duplicate_node_id: str = Field(description="The label (T…) of the task being abandoned as redundant.")
     keep_node_id: str = Field(
-        description="The node_id doing this same work that is KEPT and will run. Must be a different, "
-        "still-live node in this graph.")
+        description="The label (T…) of the task doing this same work that is KEPT and will run. Must be a "
+        "different, still-live task of this goal.")
 
 
 class GoalEnding(BaseModel):
@@ -66,8 +73,12 @@ class GoalEnding(BaseModel):
         "no longer wanted.")
     reason: str = Field(
         min_length=1,
-        description="Why the goal ends, kept on it as its epitaph for every later planning pass: what "
+        description="Why the goal ends, in words, kept on it as its epitaph for every later planning pass: what "
         "was reached, or what blocks it and what the user was told.")
+    covered_by: List[str] = Field(
+        default_factory=list,
+        description="When other work already does or did this goal: that work's label (W…), so every later reader "
+        "sees exactly which work and when. Empty otherwise.")
 
 
 class ObjectiveRevision(BaseModel):
@@ -96,7 +107,7 @@ class AgentForm(BaseModel):
         description="RE-PLAN ONLY: WHY the abandoned nodes are moot — one sentence, written for the NEXT planning pass to read as the epitaph (e.g. 'deps can never satisfy: research nodes are done but unclosable' or 'user declined this follow-up'). Required whenever abandon_node_ids is non-empty.")
     abandon_node_ids: List[str] = Field(
         default_factory=list,
-        description="RE-PLAN ONLY (leave empty on a fresh decomposition): node_ids of EXISTING nodes the "
+        description="RE-PLAN ONLY (leave empty on a fresh decomposition): labels (T…) of EXISTING tasks the "
         "latest situation makes moot or wrong — each one AND its un-finished sub-steps are abandoned. Use "
         "this to PRUNE a dead branch, not only to add. E.g. evidence showed the unit is under warranty, so "
         "abandon the 'find_contractor' branch and add a 'contact_manufacturer' path. Already-finished "

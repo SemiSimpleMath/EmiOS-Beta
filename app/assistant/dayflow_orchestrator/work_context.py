@@ -85,6 +85,30 @@ def work_data(wo, now=None):
             "actions": [{"when": local_stamp(a.ts), "channel": a.channel, "target": a.target,
                          "summary": a.summary, "outcome": a.outcome} for a in wo.actions]}
 
+def task_uses(wo, task_id):
+    """What the planner said a task must read (relation `uses`, the architect since 2026-10-08), each with the id a
+    worker opens it by: an earlier task (work_graph_peek), a record or the email the work came from (pod_fetch), other
+    work. Until then the architect wrote the slug or the pod id into the task's text."""
+    from app.assistant.subconscious import relations
+    sources = {s.get("item_id"): s for s in source_context(wo)}
+    out = []
+    for kind, obj_id in relations.targets(("task", task_id), "uses"):
+        if kind == "task":
+            node = wo.nodes.get(obj_id)
+            out.append({"kind": "task", "id": obj_id, "what": f'the task "{node.title}"' if node else "a task",
+                        "how": "work_graph_peek, then work_artifact_fetch"})
+        elif kind == "pod":
+            out.append({"kind": "record", "id": obj_id, "what": "a stored record", "how": "pod_fetch"})
+        elif kind == "source_item":
+            s = sources.get(obj_id) or {}
+            out.append({"kind": "source", "id": s.get("pod_id") or obj_id,
+                        "what": f"the source: {s.get('subject') or s.get('summary') or s.get('source_type') or ''}",
+                        "how": "pod_fetch" if s.get("pod_id") else ""})
+        else:
+            out.append({"kind": kind, "id": obj_id, "what": f"a {kind}", "how": ""})
+    return out
+
+
 def worker_data(wo, node_id):
     node = wo.nodes[node_id]
     records = wo.provenance_for(node_id)
@@ -118,7 +142,7 @@ def worker_data(wo, node_id):
     # What the main task's earlier attempts' calls returned (receipts are keyed to the main task).
     earlier_receipts = [row for row in execution.get("recent_results", [])
                         if row.get("node_id") == owner.id and int(row.get("epoch") or 0) < epoch]
-    return {"owning_task": owning_task, "work": work, "task": task_data(wo, node),
+    return {"owning_task": owning_task, "work": work, "task": task_data(wo, node), "uses": task_uses(wo, owner.id),
             "earlier_receipts": earlier_receipts,
             "records": [record_data(n) for n in records],
             "checklist": [record_data(n) for n in records if n.parent_id == node_id and n.type == "subtask"],

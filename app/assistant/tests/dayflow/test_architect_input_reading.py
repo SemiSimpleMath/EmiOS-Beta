@@ -83,4 +83,5 @@ def test_the_goals_own_work_object_appears_once():
     assert prompt.count("GOAL: Tell the user to water the garden") == 1, "the goal's own graph was printed twice"
     assert "(this goal — its full work graph is shown above)" in sink["information"]
     assert "Ask the user which day suits" in sink["information"], "other work must stay in the portfolio"
-    assert other.id in sink["information"]
+    assert "=== WORK OBJECT W1 ===" in sink["information"], "other work by its label of the call (2026-10-08)"
+    assert other.id not in prompt and current.id not in prompt, "no work id reaches the architect"

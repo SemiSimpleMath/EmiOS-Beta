@@ -10,7 +10,8 @@ a link is never invented by a typo or a new caller without a decision here. Link
 links to (`targets`), and what links to an object (`sources`: when a fact changes, what rests on it).
 
 Users: brain-list entries (`relies_on`, 2026-10-08); the brain's updates and new concerns (`relies_on`, `attach`,
-2026-10-08).
+2026-10-08); the architect's tasks and endings (`uses`, `covered_by`, `duplicate_of`, 2026-10-08). A task is
+(`task`, its node id); a work object (`work`, its id).
 """
 from __future__ import annotations
 
@@ -23,8 +24,8 @@ Ref = Tuple[str, str]
 # The kinds of object a relation may name. A brain update is the brain's decision about one concern in one matter
 # (`<matter id>:<concern id>`); a brain new concern is one concern the brain raised in a matter (`<matter id>:<n>`).
 KINDS: FrozenSet[str] = frozenset({
-    "work", "message", "reminder", "concern", "list_entry", "brain_matter", "brain_event", "brain_update",
-    "brain_new_concern", "calendar_event", "schedule_line", "resource", "pod", "source"})
+    "work", "task", "message", "reminder", "concern", "list_entry", "brain_matter", "brain_event", "brain_update",
+    "brain_new_concern", "calendar_event", "schedule_line", "resource", "pod", "source", "source_item"})
 
 # rel -> (kinds it may start from, kinds it may point to)
 RELATIONS: Dict[str, Tuple[FrozenSet[str], FrozenSet[str]]] = {
@@ -32,6 +33,13 @@ RELATIONS: Dict[str, Tuple[FrozenSet[str], FrozenSet[str]]] = {
     "relies_on": (frozenset({"list_entry", "brain_update", "brain_new_concern"}), KINDS),
     # what the brain made part of a concern: an event (kept as the concern's evidence) or a work object
     "attach": (frozenset({"brain_update", "brain_new_concern"}), frozenset({"brain_event", "work"})),
+    # what a task must read when it runs (the architect, 2026-10-08): an earlier task's result, a record, other
+    # work, the email or message the work came from
+    "uses": (frozenset({"task"}), frozenset({"task", "pod", "work", "source_item", "message"})),
+    # a goal ended because other work already does or did it (the architect's ending, 2026-10-08)
+    "covered_by": (frozenset({"work"}), frozenset({"work"})),
+    # a task dropped as a second copy of another task, which is kept
+    "duplicate_of": (frozenset({"task"}), frozenset({"task"})),
 }
 
 SCHEMA = [

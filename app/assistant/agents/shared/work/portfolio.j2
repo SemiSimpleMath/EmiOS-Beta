@@ -1,4 +1,5 @@
-=== WORK OBJECT {{ work.id }} ===
+{%- set L = labels | default({}) -%}
+=== WORK OBJECT {{ L.get(work.id, work.id) }} ===
 goal: {{ work.objective }}
 status: {{ work.status }} | progress: {{ work.completed }}/{{ work.tasks|length }} top-level tasks complete
 {% if work.success_criteria %}success criteria: {{ work.success_criteria }}
@@ -15,11 +16,11 @@ SOURCE CONTEXT
 {% endif %}
 TASKS (main assignments only)
 {% for task in work.tasks %}
-- [{{ task.status }}] {{ task.id }} | {{ task.title }}
+- [{{ task.status }}] {{ L.get(task.id, task.id) }} | {{ task.title }}
   GOAL: {{ task.directive }}
   dispatch attempt: {{ task.epoch }} | finalizer failure count: {{ task.failure_count }}
 {% if task.awaiting_judgment %}  AWAITING JUDGMENT: result exists; completion has not been accepted.
-{% endif %}{% if task.dependencies %}  DEPENDS ON: {% for dep in task.dependencies %}{{ dep.id }} [{{ dep.status }}; {% if dep.satisfied %}satisfied{% else %}BLOCKED{% endif %}]{% if not loop.last %}, {% endif %}{% endfor %}
+{% endif %}{% if task.dependencies %}  DEPENDS ON: {% for dep in task.dependencies %}{{ L.get(dep.id, dep.id) }} [{{ dep.status }}; {% if dep.satisfied %}satisfied{% else %}BLOCKED{% endif %}]{% if not loop.last %}, {% endif %}{% endfor %}
 {% endif %}{% if task.wake_kind %}  WAIT: {{ task.wake_kind }}{% if task.wake_at %} | {{ task.wake_at }}{% endif %}{% if task.wake_ref %} | {{ task.wake_ref }}{% endif %}
 {% endif %}{% if task.terminal %}  REASON: {{ task.terminal.get('reason', '') }}
 {% endif %}{% if task.finalizer or task.awaiting_judgment %}{% set finalizer = task.finalizer %}{% include 'shared/work/finalizer_summary.j2' %}{% endif %}

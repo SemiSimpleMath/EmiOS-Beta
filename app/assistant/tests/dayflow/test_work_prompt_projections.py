@@ -153,10 +153,17 @@ def test_render_actual_architect_and_steward_templates(monkeypatch, tmp_path):
         for kind in ("system", "user"):
             rendered = _jinja_env.get_template(f"dayflow_orchestrator/{name}/prompts/{kind}.j2").render(**context)
             if kind == "user":
-                for marker in ("[closed] audit", "[proposed] repair", "[done] verify", "[actionable] docs",
-                               "[dispatched] compat", "[waiting] review", "[failed] permission",
-                               "[abandoned] old_plan", "[superseded] old_docs", "first change still allowed two workers"):
-                    assert marker in rendered
+                markers = ("[closed] audit", "[proposed] repair", "[done] verify", "[actionable] docs",
+                           "[dispatched] compat", "[waiting] review", "[failed] permission",
+                           "[abandoned] old_plan", "[superseded] old_docs")
+                for marker in markers:
+                    # The architect sees each task by its label of the call (2026-10-08), the steward by id.
+                    status, task_id = marker.split("] ")
+                    if name == "work_architect":
+                        assert status + "] T" in rendered and f"] {task_id} |" not in rendered
+                    else:
+                        assert marker in rendered
+                assert "first change still allowed two workers" in rendered
                 assert "RAW_INTERNAL_EVIDENCE" not in rendered
                 assert "INTERNAL_PROVENANCE_ONLY" not in rendered
             artifact.extend(["### " + kind.capitalize() + " prompt", "```text\n" + rendered + "\n```"])

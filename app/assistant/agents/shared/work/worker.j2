@@ -13,6 +13,9 @@ Echo [id:...] to update an item, omit the id to add one. Mark done only after a 
 {% else %}(no checklist recorded)
 {% endfor %}
 {% set records = view.records %}{% include 'shared/work/provenance.j2' %}
+{% if view.uses %}## WHAT THIS TASK READS — named by the planner (open each with its id)
+{% for u in view.uses %}- {{ u.what }} | {{ u.kind }} id: {{ u.id }}{% if u.how %} ({{ u.how }}){% endif %}
+{% endfor %}{% endif %}
 ## RELEVANT INFO
 {% for fact in view.facts %}- {{ fact.content }}{% if fact.pod_ref %} | {{ fact.pod_ref }}{% endif %}
 {% endfor %}

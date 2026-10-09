@@ -94,7 +94,7 @@ def _ended_item(wo, *, finalizers: bool) -> dict:
     terminal = (goal.payload.get("terminal") if goal is not None else None) or {}
     if not terminal.get("at"):
         raise ValueError(f"ended work object {wo.id} records no end time on its goal")
-    return {"title": (goal.content or goal.title).strip(), "when": local_time_text(terminal["at"]),
+    return {"id": wo.id, "title": (goal.content or goal.title).strip(), "when": local_time_text(terminal["at"]),
             "reason": _goal_epitaph(wo),
             "finalizers": [task.payload["finalizer"] for task in wo.nodes.values()
                            if wo.is_work_unit(task) and task.payload.get("finalizer")] if finalizers else []}
@@ -155,6 +155,47 @@ def _build_recent_dispatch_results(all_items, now_utc, *, max_age_hours=6, limit
         })
     out.sort(key=lambda r: r.get("dispatched_at") or "", reverse=True)
     return out[:limit]
+
+
+def recent_ended_items(summaries, store, window_hours=18):
+    """Two SEPARATE logs of recent terminal work objects — they mean different things to the steward:
+    DONE = finished (do not recreate, esp. recurring routine automations); ABANDONED = DROPPED, not
+    finished. Each abandoned entry is annotated with when it was dropped and why (the user's last
+    recorded reply + the goal node's final content) via ``_abandoned_line`` — the reason is what
+    stops the evaluator from re-minting a goal the user just settled.
+    Every entry shows the full objective and when it ended, in local time (``_ended_item``). The
+    stored WO title is the objective cut at 80 characters (work_persist), so it appears only for a
+    record that cannot be read, which is logged as an ERROR and marked unreadable in the log.
+    Returns (done items, abandoned items) for render_recent_ended; summaries are newest-updated first."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.assistant.utils.time_utils import parse_iso_utc
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=window_hours)
+    done, abandoned = [], []
+    for s in summaries:
+        upd = parse_iso_utc(str(s.get("updated_at") or ""))
+        if upd is not None and upd < cutoff:
+            break   # newest-first → everything after is older than the window
+        status = str(s.get("status") or "").lower()
+        if status not in ("done", "abandoned"):
+            continue
+        try:
+            item = _ended_item(store.load(s["id"]), finalizers=status == "abandoned")
+        except Exception as e:
+            logger.error("[recent work] ended work object %s could not be read for the recent-work log: %s",
+                         s.get("id"), e)
+            item = {"id": str(s.get("id")), "title": str(s.get("title") or "").strip(), "unreadable": str(e)}
+        (done if status == "done" else abandoned).append(item)
+    return done, abandoned
+
+
+def render_recent_ended(done, abandoned, window_hours=18, labels=None):
+    """(done_str, abandoned_str); `labels` (id -> label of the call) shows each work object's label."""
+    return (render_view("recent_work", items=done, dropped=False, window_hours=window_hours,
+                        labels=labels or {}).strip(),
+            render_view("recent_work", items=abandoned, dropped=True, window_hours=window_hours,
+                        labels=labels or {}).strip())
 
 
 class StrategicPlannerWoPrepNode(ControlNode):
@@ -251,38 +292,9 @@ class StrategicPlannerWoPrepNode(ControlNode):
         self.blackboard.update_state_value("last_agent", self.name)
 
     def _render_recent_completed(self, summaries, store, window_hours=18):
-        """Two SEPARATE logs of recent terminal work objects — they mean different things to the steward:
-        DONE = finished (do not recreate, esp. recurring routine automations); ABANDONED = DROPPED, not
-        finished. Each abandoned entry is annotated with when it was dropped and why (the user's last
-        recorded reply + the goal node's final content) via ``_abandoned_line`` — the reason is what
-        stops the evaluator from re-minting a goal the user just settled.
-        Every entry shows the full objective and when it ended, in local time (``_ended_item``). The
-        stored WO title is the objective cut at 80 characters (work_persist), so it appears only for a
-        record that cannot be read, which is logged as an ERROR and marked unreadable in the log.
-        Returns (done_str, abandoned_str); summaries are newest-updated first."""
-        from datetime import datetime, timedelta, timezone
-
-        from app.assistant.utils.time_utils import parse_iso_utc
-
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=window_hours)
-        done, abandoned = [], []
-        for s in summaries:
-            upd = parse_iso_utc(str(s.get("updated_at") or ""))
-            if upd is not None and upd < cutoff:
-                break   # newest-first → everything after is older than the window
-            status = str(s.get("status") or "").lower()
-            if status not in ("done", "abandoned"):
-                continue
-            try:
-                item = _ended_item(store.load(s["id"]), finalizers=status == "abandoned")
-            except Exception as e:
-                logger.error("[%s] ended work object %s could not be read for the recent-work log: %s",
-                             self.name, s.get("id"), e)
-                item = {"id": str(s.get("id")), "title": str(s.get("title") or "").strip(), "unreadable": str(e)}
-            (done if status == "done" else abandoned).append(item)
-        done_str = render_view("recent_work", items=done, dropped=False, window_hours=window_hours).strip()
-        abandoned_str = render_view("recent_work", items=abandoned, dropped=True, window_hours=window_hours).strip()
-        return done_str, abandoned_str
+        """The steward's two logs of recent terminal work objects (recent_ended_items, render_recent_ended)."""
+        done, abandoned = recent_ended_items(summaries, store, window_hours)
+        return render_recent_ended(done, abandoned, window_hours)
 
     def _build_situational_context(self):
         from datetime import datetime, timedelta, timezone

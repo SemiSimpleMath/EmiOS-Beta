@@ -153,8 +153,9 @@ def apply_architect_dag(store, work_id: str, nodes: List[Dict[str, Any]],
             # A verified duplicate licenses its own prune (see _dedupe_prunes); everything
             # else still needs the caller's evidence-backed licence.
             "licensed": True if kept else licensed,
-            "reason": (f"duplicate of {kept}, which is kept and will run — this copy was a "
-                       f"second node for the same work" if kept else
+            # In words; which task is kept is the relation duplicate_of (work_architect_node, 2026-10-08).
+            "reason": (f'a second task for the same work as "{wo.nodes[kept].title}", which is kept and will run'
+                       if kept else
                        (abandon_reason or "architect re-plan pruned this branch (no stated reason)")),
         }, actor="architect")
         abandoned.append(nid)

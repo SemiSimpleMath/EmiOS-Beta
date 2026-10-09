@@ -1,6 +1,8 @@
 {#- The work made from a brain-list entry, as its decider reads it (brain_list_intake.work_of: work_links.work_view,
     the finalizer's prose, never its verdict). Expects `w` and `pad`. Times local. -#}
 {{ pad }}its work {% if w.ref is defined %}[{{ w.ref }}]{% else %}{{ w.work_id }}{% endif %}: {{ w.status }}{% if w.ended_because %}; ended because: {{ w.ended_because }}{% endif %}
+{% for c in w.covered_by | default([]) %}{{ pad }}  covered by: {{ c.title }} ({{ c.status }}, last changed {{ c.updated }})
+{% endfor -%}
 {% for o in w.outcomes -%}
 {{ pad }}  task "{{ o.title }}"{% if o.at %} ({{ o.at | local_time }}){% endif %}: {{ o.outcome }}
 {% endfor -%}
