@@ -18,6 +18,7 @@ user_context_items:
   - ready_work_nodes
   - waiting_work_nodes
   - work_wait_intake
+  - state_mover_ids
   - resource_expected_calendar
   - resource_dayflow_routine
   - resource_afk_statistics_output

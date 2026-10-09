@@ -48,19 +48,19 @@
 ########## WORK-OBJECT WAITS (parked on an external event) ##########
 *Multi-step work parked on an outside event. Time + dependency gates are already handled by the graph —
 your ONLY job here is to decide whether the awaited EVENT has arrived in the RECENT INCOMING below. For
-each that clearly has, emit a `node_wakes` entry (task_id + source_item_id + the arrived content). Match conservatively.*
+each that clearly has, emit a `node_wakes` entry (the task's label + the arrival's label + the arrived content). Match conservatively.*
 {%- for t in waiting_work_nodes %}
-- task_id: {{ t.task_id }}
+- [{{ t.label }}]
   waiting for: {{ t.waiting_for }}{% if t.context %}
   FULL TASK: {{ t.context }}{% endif %}
   OBJECTIVE: {{ t.objective }}
-{% set sources = t.sources %}{% include 'shared/work/source_context.j2' %}
+{% with sources = t.sources, labels = state_mover_ids %}{% include 'shared/work/source_context.j2' %}{% endwith %}
 {%- endfor %}
 {%- if work_wait_intake %}
 
 RECENT INCOMING (match against these):
 {%- for e in work_wait_intake %}
-{% set sources = [e] %}{% include 'shared/work/source_context.j2' %}
+{% with sources = [e], labels = state_mover_ids %}{% include 'shared/work/source_context.j2' %}{% endwith %}
 {%- endfor %}
 {%- endif %}
 {%- endif %}
@@ -70,7 +70,7 @@ RECENT INCOMING (match against these):
 *Gates already clear. Background work and scheduled device actions proceed. Hold only an actual
 user interruption for a concrete conflict, choosing a resume time outside that conflict and sleep.*
 {%- for t in ready_work_nodes %}
-- task_id: {{ t.task_id }}
+- [{{ t.label }}]
   node: {{ t.context }}{% if t.kind %} | kind: {{ t.kind }}{% endif %}
   WORK OBJECTIVE: {{ t.objective }}
   TASK DIRECTIVE: {{ t.task.directive }}

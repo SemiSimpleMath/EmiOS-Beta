@@ -119,9 +119,12 @@ class TestAskPromotion:
         _presurface_ask(store, wid, gid, node_id="ask1")
 
         wake = (datetime.now(timezone.utc) + timedelta(hours=8)).isoformat()
-        bb = FakeBlackboard({"held_work_nodes": [
-            {"task_id": f"{wid}::ask1", "hold_reason": "quiet hours", "reactivate_at": wake},
-        ]})
+        from app.assistant.control_nodes.state_mover_prep_node import StateMoverPrepNode, label_state_mover_view
+        bb = FakeBlackboard()
+        StateMoverPrepNode(name="prep", blackboard=bb, agent_registry={}, tool_registry={})._build_promotion_candidates()
+        label_state_mover_view(bb)
+        held = bb.get_state_value("state_mover_ids")[f"{wid}::ask1"]
+        bb.update_state_value("held_work_nodes", [{"task": held, "hold_reason": "quiet hours", "reactivate_at": wake}])
         _run_promote(bb)
         node = _node(store, wid, "ask1")
         assert node.status == "waiting"

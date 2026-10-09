@@ -4,19 +4,18 @@ from pydantic import BaseModel, Field
 
 
 class NodeWake(BaseModel):
-    task_id: str = Field(description="The parked work-object node id EXACTLY as shown (work_id::node_id).")
-    source_item_id: str = Field(description="Exact item_id of the matching prepared intake source.")
+    task: str = Field(description="The parked task's label (T…) under WORK-OBJECT WAITS.")
+    source: str = Field(description="The label (S…) of the arrival under RECENT INCOMING that satisfies its wait.")
     evidence: str = Field(
-        description="The intake content that satisfies the wait — the gist of what arrived — so the "
-        "worker resuming the node has what it needs to act.")
+        description="The intake content that satisfies the wait — the gist of what arrived, in words — so the "
+        "worker resuming the node has what it needs to act. No labels.")
 
 
 class HeldWorkNode(BaseModel):
-    task_id: str = Field(description="A READY work-object node you are HOLDING this tick, EXACTLY as shown "
-        "in READY WORK NODES (work_id::node_id).")
+    task: str = Field(description="The label (T…) of a READY task you are HOLDING this tick.")
     hold_reason: str = Field(description="Concrete reason now is the wrong moment to surface this to the "
         "user — e.g. 'quiet hours until 07:00', 'user in a meeting until 15:00', 'user away (idle 90m) — "
-        "batch with the next active block'. Never a vague 'maybe later'.")
+        "batch with the next active block'. Never a vague 'maybe later'. Words only; no labels.")
     reactivate_at: str = Field(default="", description="ISO 8601 local datetime with offset for when to "
         "reconsider promoting it (same timezone as Current Time). Leave empty ONLY if you truly cannot "
         "estimate — it is then re-judged next tick.")

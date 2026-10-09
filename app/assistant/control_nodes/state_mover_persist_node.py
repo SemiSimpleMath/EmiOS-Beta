@@ -20,10 +20,21 @@ class StateMoverPersistNode(ControlNode):
     It used to follow state_transition_guard_node, which validated and wrote the state_mover's item
     ``state_mutations``. The item lane is retired (2026-09-16) and the state_mover no longer emits
     mutations, so that node and the ``state_mutations_persisted_tf`` handshake went with it.
+
+    The answer names tasks and arrivals by the labels of the call (state_mover_prep_node.label_state_mover_view);
+    they are mapped back here. A malformed answer (a label not given, of the wrong kind, or written into words) is
+    not applied at all: nothing is woken and nothing promoted that tick, and everything is judged again on the
+    next (owner, 2026-10-08: never send what the answer meant to hold).
     """
 
     def action_handler(self, message):
         self.blackboard.update_state_value("next_agent", None)
+        problems = self._resolve()
+        if problems:
+            logger.error("[%s] the state_mover's answer is malformed; nothing applied this tick: %s",
+                         self.name, problems)
+            self.blackboard.update_state_value("last_agent", self.name)
+            return
         try:
             self._apply_node_wakes()
         except Exception as e:
@@ -35,6 +46,40 @@ class StateMoverPersistNode(ControlNode):
             logger.error("[%s] node promotion failed: %s", self.name, e)
             logger.debug("[%s] node promotion exception", self.name, exc_info=True)
         self.blackboard.update_state_value("last_agent", self.name)
+
+    def _resolve(self) -> list:
+        """Map the answer's labels to tasks and arrivals in place (`task_id`, `source_item_id`), or return every
+        problem with it."""
+        from app.assistant.subconscious.projection import labels_in
+        labels = self.blackboard.get_state_value("state_mover_labels", {}) or {}
+        ready = {t["label"] for t in self.blackboard.get_state_value("ready_work_nodes", []) or []}
+        waiting = {t["label"] for t in self.blackboard.get_state_value("waiting_work_nodes", []) or []}
+        numbered = [x for x in labels if any(ch.isdigit() for ch in x)]
+        problems, wakes, holds = [], [], []
+        for w in self.blackboard.get_state_value("node_wakes", []) or []:
+            task, source = str(w.get("task") or "").strip(), str(w.get("source") or "").strip()
+            if task not in waiting:
+                problems.append(f"node_wakes: {task!r} is not a parked task shown (its T label)")
+            if (labels.get(source) or [None])[0] != "source_item":
+                problems.append(f"node_wakes: {source!r} is not an arrival shown (its S label)")
+            if labels_in(w.get("evidence"), numbered):
+                problems.append(f"node_wakes {task}: labels written into its evidence")
+            if not problems:
+                wakes.append({**w, "task_id": labels[task][1], "source_item_id": labels[source][1]})
+        for h in self.blackboard.get_state_value("held_work_nodes", []) or []:
+            task = str(h.get("task") or "").strip()
+            if task not in ready:
+                problems.append(f"held_work_nodes: {task!r} is not a ready task shown (its T label)")
+            elif labels_in(h.get("hold_reason"), numbered):
+                problems.append(f"held_work_nodes {task}: labels written into its hold_reason")
+            else:
+                holds.append({**h, "task_id": labels[task][1]})
+        if labels_in(self.blackboard.get_state_value("state_mover_summary", ""), numbered):
+            problems.append("state_mover_summary: labels written into it")
+        if not problems:
+            self.blackboard.update_state_value("node_wakes", wakes)
+            self.blackboard.update_state_value("held_work_nodes", holds)
+        return problems
 
     def _promote_ready_nodes(self):
         """Promote architect-born ``proposed`` nodes (and unblocked ``waiting`` ones) to ``actionable`` once
@@ -170,7 +215,7 @@ class StateMoverPersistNode(ControlNode):
                         {"op": "defer_node", "data": {"node_id": node_id, "wake_kind": None}},
                         {"op": "add_node", "data": {
                             "id": "wake_" + uuid4().hex, "parent_id": node_id,
-                            "type": "evidence", "title": source.get("subject") or source["item_id"],
+                            "type": "evidence", "title": source.get("subject") or "what arrived",
                             "content": evidence, "pod_ref": source.get("pod_id") or None,
                             "payload": {"external_source": dict(source),
                                         "context_role": "external_wake",

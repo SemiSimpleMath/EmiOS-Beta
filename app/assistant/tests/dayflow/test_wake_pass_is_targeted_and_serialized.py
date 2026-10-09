@@ -249,9 +249,12 @@ def test_tick_and_wake_render_full_task_context_for_timing():
     tick_candidate = next(c for c in tick.get_state_value("ready_work_nodes") if c["task_id"] == ref)
     wake = FakeBlackboard({"triggered_work_node": ref})
     _prep(wake).action_handler(_activation())
-    assert wake.get_state_value("ready_work_nodes") == [tick_candidate]
+    [woken] = wake.get_state_value("ready_work_nodes")
+    assert woken["label"] == "T1" and {k: v for k, v in woken.items() if k != "label"} == tick_candidate,         "the wake pass shows the same candidate, labelled for its own call"
     assert tick_candidate["task"]["directive"] == directive
-    rendered = env.get_template("dayflow_orchestrator/state_mover/prompts/user.j2").render(ready_work_nodes=[tick_candidate])
+    rendered = env.get_template("dayflow_orchestrator/state_mover/prompts/user.j2").render(
+        ready_work_nodes=[woken], state_mover_ids={ref: "T1"})
+    assert "- [T1]" in rendered and ref not in rendered
     assert directive in rendered
     assert "Previous research found a useful source; reuse it." in rendered
     assert "WORK OBJECTIVE: Research options" in rendered

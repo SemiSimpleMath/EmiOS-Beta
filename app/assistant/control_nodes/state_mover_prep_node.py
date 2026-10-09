@@ -61,6 +61,35 @@ def recent_user_context(all_items, now_utc: datetime):
     return chat_history, responded
 
 
+def label_state_mover_view(bb) -> None:
+    """The state_mover's input as a projection (docs/design/objects_and_projections_2026-10-08.md, module 4): every
+    ready or parked task gets a label T (`label`), every arrival S, every record P, every reminder sent R; the
+    prompt shows labels and never an id. Sets `state_mover_labels` (label -> [kind, id], for the persist node to map
+    the answer back) and `state_mover_ids` (id -> label, for the shared templates). Shared by the planning tick's
+    prep and the wake pass's prep. Until 2026-10-08 the model copied `work_x::slug--abc123` and the persist node
+    matched it exactly: a miscopied hold matched nothing, and the task it meant to hold was promoted."""
+    from app.assistant.subconscious.projection import Projection
+    p = Projection()
+    ready = bb.get_state_value("ready_work_nodes", []) or []
+    waiting = bb.get_state_value("waiting_work_nodes", []) or []
+    intake = bb.get_state_value("work_wait_intake", []) or []
+    for t in [*ready, *waiting]:
+        t["label"] = p.label("T", "task", t["task_id"])
+    for source in [*intake, *(s for t in waiting for s in t.get("sources") or [])]:
+        if source.get("item_id"):
+            p.label("S", "source_item", source["item_id"])
+        if source.get("pod_id"):
+            p.label("P", "pod", source["pod_id"])
+    history = bb.get_state_value("scheduled_reminder_history") or None
+    if history:
+        bb.update_state_value("scheduled_reminder_history", {
+            **history, "records": [{**r, "ref": p.label("R", "reminder", r["id"])} for r in history.get("records") or []]})
+    bb.update_state_value("ready_work_nodes", ready)
+    bb.update_state_value("waiting_work_nodes", waiting)
+    bb.update_state_value("state_mover_labels", p.labels)
+    bb.update_state_value("state_mover_ids", {ref[1]: label for label, ref in p.labels.items()})
+
+
 class StateMoverPrepNode(ControlNode):
     """Pre-LLM node that prepares context for state_mover.
 
@@ -134,6 +163,8 @@ class StateMoverPrepNode(ControlNode):
         except Exception as e:
             logger.error("[%s] promotion candidates build failed: %s", self.name, e)
             logger.debug("[%s] promotion candidates exception", self.name, exc_info=True)
+
+        label_state_mover_view(self.blackboard)
 
         logger.info(
             "[%s] prepared: active=%d synopses=%d chat=%d",

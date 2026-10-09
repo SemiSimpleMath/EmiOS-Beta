@@ -76,6 +76,8 @@ class WorkNodeWakePrepNode(ControlNode):
         self.blackboard.update_state_value("scheduled_reminder_history", scheduled_reminder_history(now_utc))
         for key, value in build_dayflow_blackboard_extras().items():
             self.blackboard.update_state_value(key, value)
+        from app.assistant.control_nodes.state_mover_prep_node import label_state_mover_view
+        label_state_mover_view(self.blackboard)
 
         logger.info("[%s] wake %s staged — the state_mover judges the moment (wake_reason=%s)",
                     self.name, ref, self.blackboard.get_state_value("wake_reason", ""))

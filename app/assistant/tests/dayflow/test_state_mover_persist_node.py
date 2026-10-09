@@ -47,14 +47,27 @@ def _wo_with_node(store, *, node_id, wake_kind=None, wake_ref=None, title="Do th
     return wo.id
 
 
+def _prepared(data=None, items=()):
+    """The state_mover's view as the tick's prep builds it (ready tasks, parked tasks, arrivals), labelled."""
+    from app.assistant.control_nodes.state_mover_prep_node import StateMoverPrepNode, label_state_mover_view
+    bb = FakeBlackboard(data or {})
+    prep = StateMoverPrepNode(name="prep", blackboard=bb, agent_registry={}, tool_registry={})
+    prep._build_work_object_waits(list(items))
+    prep._build_promotion_candidates()
+    label_state_mover_view(bb)
+    return bb
+
+
+def _label(bb, obj_id):
+    return bb.get_state_value("state_mover_ids")[obj_id]
+
+
 def _wake_board(data):
-    from app.assistant.control_nodes.state_mover_prep_node import StateMoverPrepNode
-    bb = FakeBlackboard(data)
-    StateMoverPrepNode(name="prep", blackboard=bb, agent_registry={}, tool_registry={})._build_work_object_waits([
-        {"metadata": {"item_id": "reply-source", "source_type": "email",
-                      "email_body_excerpt": "Yes, approved.", "pod_id": "datapod:email:test-reply"}}])
-    for wake in data["node_wakes"]:
-        wake["source_item_id"] = "reply-source"
+    """A parked task's wake: the answer names the task and the arrival by their labels."""
+    bb = _prepared(items=[{"metadata": {"item_id": "reply-source", "source_type": "email",
+                                        "email_body_excerpt": "Yes, approved.", "pod_id": "datapod:email:test-reply"}}])
+    bb.update_state_value("node_wakes", [{"task": _label(bb, w["task_id"]), "source": _label(bb, "reply-source"),
+                                          "evidence": w["evidence"]} for w in data["node_wakes"]])
     return bb
 
 
@@ -78,15 +91,39 @@ class TestStateMoverPersistNode:
         wid = _wo_with_node(store, node_id="held1", title="Nudge the user")
         wake = (datetime.now(timezone.utc) + timedelta(hours=9)).isoformat()
 
-        bb = FakeBlackboard({"held_work_nodes": [
-            {"task_id": f"{wid}::held1", "hold_reason": "quiet hours until 07:00",
-             "reactivate_at": wake},
-        ]})
+        bb = _prepared()
+        bb.update_state_value("held_work_nodes", [
+            {"task": _label(bb, f"{wid}::held1"), "hold_reason": "quiet hours until 07:00", "reactivate_at": wake}])
         _make_node(bb).action_handler(message=None)
 
         node = store.load(wid).nodes["held1"]
         assert node.status == "waiting"
         assert node.wake_at is not None and node.wake_at > datetime.now(timezone.utc)
+
+    def test_a_malformed_answer_applies_nothing(self):
+        """Option A (owner, 2026-10-08): a hold naming a task not shown is not skipped while the rest is
+        promoted; nothing from the answer is applied, and the next pass judges again. Until then a miscopied
+        hold matched nothing and the task it meant to hold was promoted."""
+        store = _store()
+        wid = _wo_with_node(store, node_id="meant", title="Nudge the user")
+        bb = _prepared()
+        bb.update_state_value("held_work_nodes", [{"task": "T99", "hold_reason": "quiet hours",
+                                                   "reactivate_at": datetime.now(timezone.utc).isoformat()}])
+        _make_node(bb).action_handler(message=None)
+        assert store.load(wid).nodes["meant"].status == "proposed", "not promoted, not held: judged again"
+        leaked = _prepared()
+        leaked.update_state_value("held_work_nodes", [{"task": _label(leaked, f"{wid}::meant"),
+                                                       "hold_reason": "T1 is noisy", "reactivate_at": ""}])
+        _make_node(leaked).action_handler(message=None)
+        assert store.load(wid).nodes["meant"].status == "proposed", "a label in words is malformed too"
+
+    def test_the_view_shows_labels_not_ids(self):
+        store = _store()
+        wid = _wo_with_node(store, node_id="shown", title="Nudge the user")
+        bb = _prepared()
+        [task] = [t for t in bb.get_state_value("ready_work_nodes") if t["task_id"] == f"{wid}::shown"]
+        assert task["label"].startswith("T") and bb.get_state_value("state_mover_labels")[task["label"]] == \
+            ["task", f"{wid}::shown"]
 
     def test_node_wake_clears_the_event_wait(self):
         """The state_mover's real judgment: the awaited thing arrived. Clearing the wait is
@@ -153,7 +190,9 @@ class TestAtomicExternalWake:
             raise RuntimeError("simulated commit failure")
         monkeypatch.setattr(store, "_persist", fail_after_write)
         bb = _wake_board({"node_wakes": [{"task_id": f"{wid}::storage", "evidence": "Reply received"}]})
-        _make_node(bb)._apply_node_wakes()
+        node = _make_node(bb)
+        assert node._resolve() == [] and bb.get_state_value("node_wakes")[0]["task_id"] == f"{wid}::storage"
+        node._apply_node_wakes()
         assert store.load(wid).model_dump(mode="json") == before
         assert store.events(wid) == events_before
 
