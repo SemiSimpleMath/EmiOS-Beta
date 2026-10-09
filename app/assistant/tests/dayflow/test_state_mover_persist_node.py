@@ -111,11 +111,23 @@ class TestStateMoverPersistNode:
                                                    "reactivate_at": datetime.now(timezone.utc).isoformat()}])
         _make_node(bb).action_handler(message=None)
         assert store.load(wid).nodes["meant"].status == "proposed", "not promoted, not held: judged again"
-        leaked = _prepared()
+
+    def test_a_label_in_prose_does_not_throw_the_decisions_away(self):
+        """Owner, 2026-10-09: "We cant throw away something because prose contains something." At 14:28 the
+        summary said "T1 is promoted" and the whole answer was refused; a ready step waited a tick for it."""
+        store = _store()
+        wid = _wo_with_node(store, node_id="meant", title="Nudge the user")
+        wake = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+        leaked = _prepared({"state_mover_summary": "T1 is held for quiet hours."})
         leaked.update_state_value("held_work_nodes", [{"task": _label(leaked, f"{wid}::meant"),
-                                                       "hold_reason": "T1 is noisy", "reactivate_at": ""}])
+                                                       "hold_reason": "T1 is noisy", "reactivate_at": wake}])
         _make_node(leaked).action_handler(message=None)
-        assert store.load(wid).nodes["meant"].status == "proposed", "a label in words is malformed too"
+        assert store.load(wid).nodes["meant"].status == "waiting", "the hold applies"
+        label = _label(leaked, f"{wid}::meant")
+        assert leaked.get_state_value("state_mover_summary").startswith(f"{wid}::meant is held"),             "a label in prose is translated to the id it names"
+        from app.assistant.subconscious.projection import translate
+        labels = {"T1": ["task", "w::n"], "S12": ["source_item", "s-1"], "D": ["resource", "r"]}
+        assert translate("T1 woke on S12; T12 and vitamin D stay; (T1).", labels) ==             "w::n woke on s-1; T12 and vitamin D stay; (w::n)."
 
     def test_the_view_shows_labels_not_ids(self):
         store = _store()
