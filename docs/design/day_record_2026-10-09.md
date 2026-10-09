@@ -119,8 +119,13 @@ then keeps asking whether every routine thing happened, adjust (for example: rou
 - **Dayflow agents** ("today's schedule"): the same events with their lived state, labelled per their own
   projection: "Work Hours 9:00-4:30 (scheduled now)", "Dinner 6:30 (happened)". A state they read is never a
   guess.
-- **The chat gate and the situation auditor**: they read concerns and the arbiter plan from this resource today.
-  Those move to their own resource (or the readers read the brain directly); the day's record stops carrying them.
+- **The chat gate** (master_room::chat_gate, the first agent on every message in the main chat; the situation
+  auditor's prompts turned out not to read these fields): it reads every open concern's whole journal, a longer-horizon
+  list and the week's arbiter plan from this resource today. Owner, 2026-10-09: "This is a lot of context for the
+  master room. I would not worry about previous days concerns, it already does rag search over old conversations."
+  It gets its own small resource instead: the concerns that changed today (title and today's notes, dated) and
+  today's items from the arbiter plan; no journals, no longer-horizon list, no other days. The day's record stops
+  carrying any of it.
 
 ## 4. Order of work
 
@@ -128,7 +133,8 @@ then keeps asking whether every routine thing happened, adjust (for example: rou
    milestones by code, `unconfirmed` by code; the resources rendered from it (readers unchanged in shape).
 2. The tracker's new input (the open concerns with today's notes, the brain's decisions today, the record; labelled)
    and schema (changes and milestones with relies_on); the merge.
-3. Move the concerns and the arbiter plan out of the day's resource to their readers.
+3. The chat gate's own resource (concerns changed today with today's notes; today's arbiter items), the concerns and
+   the arbiter plan out of the day's resource.
 4. The archive (`daily_context.md`) with each line's basis; daily insights' prompt told what `unconfirmed` means
    and how to weigh it (the owner's call on routine versus one-off).
 
@@ -136,8 +142,8 @@ then keeps asking whether every routine thing happened, adjust (for example: rou
 
 1. (Decided 2026-10-09: `unconfirmed` is unknown to daily insights to start; adjust if it keeps asking about every
    routine thing. A state with signs but no direct confirmation is `inferred`, with its signs.)
-2. Concerns and the arbiter plan for the chat gate and the situation auditor: their own resource (smallest change),
-   or those readers read the brain directly?
+2. (Decided 2026-10-09: the chat gate gets its own resource with today only: concerns changed today, today's notes,
+   today's arbiter items. Older context is its conversation search's.)
 3. (Decided 2026-10-09: the main input is the open concerns and the brain's decisions today; the tracker reads no
    raw signal. The record and the brain read the day the same way, and every state points back to a concern or a
    decision.)
