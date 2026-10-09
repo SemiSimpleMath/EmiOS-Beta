@@ -562,7 +562,31 @@ def get_significant_activity_segments(
     merge_gap_minutes: float = 10.0,
 ) -> List[str]:
     """
-    Get significant ACTIVE and AFK segments since a given time.
+    Get significant ACTIVE and AFK segments since a given time, as the lines the daily context tracker reads
+    (activity_spans, formatted).
+    """
+    now_utc = datetime.now(timezone.utc)
+    result: List[str] = []
+    for span in activity_spans(since_utc, noise_threshold_minutes, merge_gap_minutes):
+        start_local = utc_to_local(span["start_utc"]).strftime(_DATED)
+        if span["ongoing"]:
+            duration_mins = int((now_utc - span["start_utc"]).total_seconds() / 60)
+            result.append(f"{start_local} {span['type']} ({duration_mins} min, ongoing)")
+        else:
+            end_local = utc_to_local(span["end_utc"]).strftime(_DATED)
+            result.append(f"{start_local} - {end_local} {span['type']}")
+    return result
+
+
+def activity_spans(
+    since_utc: datetime,
+    noise_threshold_minutes: float = 5.0,
+    merge_gap_minutes: float = 10.0,
+) -> List[Dict[str, Any]]:
+    """
+    Significant ACTIVE, AFK and Intermittent spans since a given time, as data: each with start_utc, end_utc, type
+    and ongoing (the last span, still going). Shared by the daily context tracker (get_significant_activity_segments)
+    and the day's record (subconscious/day_record.py, 2026-10-09).
 
     Computes AFK from gaps between active segments to ensure consistency (no overlaps).
 
@@ -570,9 +594,6 @@ def get_significant_activity_segments(
         since_utc: Start time (UTC)
         noise_threshold_minutes: Filter out segments shorter than this (default 5 min)
         merge_gap_minutes: Merge active segments if gap between them is < this (default 10 min)
-
-    Returns:
-        List of formatted strings describing significant segments
     """
     from app.assistant.afk_manager.afk_db import get_active_segments_overlapping_range
 
@@ -720,27 +741,13 @@ def get_significant_activity_segments(
                     exc_info=True,
                 )
 
-        if not merged:
-            return []
-
-        # Format as strings
-        result: List[str] = []
+        spans: List[Dict[str, Any]] = []
         for i, seg in enumerate(merged):
-            start_local = utc_to_local(seg["start_utc"]).strftime(_DATED)
-
             is_last = i == len(merged) - 1
-            is_current = seg.get("is_current", False)
             seconds_from_now = abs((now_utc - seg["end_utc"]).total_seconds())
-            is_ongoing = is_last and (is_current or seconds_from_now < 120)
-
-            if is_ongoing:
-                duration_mins = int((now_utc - seg["start_utc"]).total_seconds() / 60)
-                result.append(f"{start_local} {seg['type']} ({duration_mins} min, ongoing)")
-            else:
-                end_local = utc_to_local(seg["end_utc"]).strftime(_DATED)
-                result.append(f"{start_local} - {end_local} {seg['type']}")
-
-        return result
+            spans.append({"start_utc": seg["start_utc"], "end_utc": seg["end_utc"], "type": seg["type"],
+                          "ongoing": is_last and (seg.get("is_current", False) or seconds_from_now < 120)})
+        return spans
 
     except Exception as e:
         logger.warning(f"Could not get significant activity segments: {e}")

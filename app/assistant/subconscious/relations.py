@@ -25,7 +25,8 @@ Ref = Tuple[str, str]
 # (`<matter id>:<concern id>`); a brain new concern is one concern the brain raised in a matter (`<matter id>:<n>`).
 KINDS: FrozenSet[str] = frozenset({
     "work", "task", "message", "reminder", "concern", "list_entry", "brain_matter", "brain_event", "brain_update",
-    "brain_new_concern", "calendar_event", "schedule_line", "resource", "pod", "source", "source_item"})
+    "brain_new_concern", "calendar_event", "schedule_line", "resource", "pod", "source", "source_item", "day_event",
+    "milestone"})
 
 # rel -> (kinds it may start from, kinds it may point to)
 RELATIONS: Dict[str, Tuple[FrozenSet[str], FrozenSet[str]]] = {
@@ -40,6 +41,9 @@ RELATIONS: Dict[str, Tuple[FrozenSet[str], FrozenSet[str]]] = {
     "covered_by": (frozenset({"work"}), frozenset({"work"})),
     # a task dropped as a second copy of another task, which is kept
     "duplicate_of": (frozenset({"task"}), frozenset({"task"})),
+    # what showed a state of the day's record or a milestone (the day record, 2026-10-09): a concern, the brain's
+    # decision, an event of the brain's inbox, another event of the day
+    "shown_by": (frozenset({"day_event", "milestone"}), KINDS),
 }
 
 SCHEMA = [

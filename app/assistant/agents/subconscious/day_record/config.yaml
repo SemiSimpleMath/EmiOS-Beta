@@ -1,0 +1,25 @@
+name: subconscious::day_record
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  model_tier: "smart"
+
+# The day's record, in shadow (subconscious/day_record.py, docs/design/day_record_2026-10-09.md): applies the open
+# concerns and the brain's decisions today to today's calendar and records what happened, each state and milestone
+# with what showed it. Feeds nothing yet; compared with the daily context tracker. Context fully pre-injected; code
+# validates and merges.
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+accept_auto_skills: false
+
+user_context_items:
+  - agent_input
+
+required_context_items:
+  - agent_input
+
+system_context_items:
+  - resource_assistant_data
+  - resource_user_data

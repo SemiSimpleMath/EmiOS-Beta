@@ -1,0 +1,54 @@
+{#- The day's record input (subconscious/day_record.py), a projection: every object shows its label of this call and
+    its data, never its id; times local. Expects agent_input: day, now, events [{ref, title, start_utc, end_utc, state,
+    basis, note, shown_by}], milestones [{at_utc, description, basis, origin, shown_by}], concerns [{ref, title,
+    subject, what, today [{at, text}]}], matters (day_tasks.matters_today, each with ref), correction. -#}
+{%- set A = agent_input -%}
+Now: {{ A.now | local_time }}{% if A.current %}; {{ A.current.words }}{% endif %}
+
+## The day's record ({{ A.day }})
+
+Events:
+{% for e in A.events -%}
+- [{{ e.ref }}] {{ e.title }}{% if e.start_utc %}, {{ e.start_utc | local_time }}{% endif %}{% if e.end_utc %} to {{ e.end_utc | local_time }}{% endif %}: {{ e.state | replace("_", " ") }}{% if e.time_is_now %} (its time is now){% endif %}{% if e.basis %} ({{ e.basis }}){% endif %}{% if e.note %}: {{ e.note }}{% endif %}{% if e.shown_by %} [shown by {{ e.shown_by | select | join(", ") }}]{% endif %}
+{% else -%}
+(nothing on the record yet)
+{% endfor %}
+Milestones recorded:
+{% for m in A.milestones -%}
+- {{ m.at_utc | local_time }}: {{ m.description }} ({{ m.basis }}{% if m.origin == "sleep" %}, from the sleep data{% elif m.origin == "activity" %}, from the activity data{% endif %})
+{% else -%}
+(none yet)
+{% endfor %}
+## The open concerns
+{% for c in A.concerns -%}
+### [{{ c.ref }}] {{ c.title }} (about {{ c.subject }})
+{{ c.what }}
+{% for n in c.today -%}
+- today {{ n.at | local_time }}: {{ n.text }}
+{% else -%}
+(no notes today)
+{% endfor %}
+{% else -%}
+(none)
+{% endfor %}
+## What the brain read and decided today
+{% for m in A.matters -%}
+### [{{ m.ref }}] {{ m.at | local_time }}
+{% for e in m.events -%}
+- {{ e.source }} at {{ e.at | local_time }}: {{ e.text }}
+  the brain: {{ e.decision | replace("_", " ") }}: {{ e.reason }}
+{% endfor -%}
+{% for n in m.notes -%}
+- note on a concern: {{ n.note }}
+{% endfor -%}
+{% for n in m.new_concerns -%}
+- raised a concern: {{ n.title }}
+{% endfor %}
+{% else -%}
+(nothing yet today)
+{% endfor %}
+{% if A.correction %}
+## Your previous answer was refused
+{{ A.correction }}
+{% endif %}
+Record what the day as now known changes, and what happened that is not yet recorded.

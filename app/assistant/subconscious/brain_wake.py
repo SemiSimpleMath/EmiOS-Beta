@@ -95,8 +95,18 @@ def run_brain() -> Dict[str, Any]:
             config["calendar"]["mode"], config["concern"]["mode"]):
         from app.assistant.subconscious.concern_handoff import _poke_dayflow
         _poke_dayflow()
+    # Last, in shadow: the day's record (subconscious/day_record.py, docs/design/day_record_2026-10-09.md), compared
+    # with the daily context tracker before it replaces it. It feeds nothing, so its failure is logged and does not
+    # fail the brain's pass.
+    from app.assistant.subconscious.day_record import run_day_record
+    try:
+        with trace(stage="day_record"):
+            recorded = run_day_record()
+    except Exception as exc:
+        logger.error("[brain_wake] the day's record (shadow) failed: %s", exc, exc_info=True)
+        recorded = {"day_record": f"failed: {type(exc).__name__}"}
     return {**gate, **{f"brain_{k}": v for k, v in brain.items()}, **briefs, **plans, **handoffs, **day, **occurrences,
-            **stories, **decided, "closed_concern_entries": closed_entries,
+            **stories, **decided, **recorded, "closed_concern_entries": closed_entries,
             "next_wake_at": min(due) if due else None}
 
 
