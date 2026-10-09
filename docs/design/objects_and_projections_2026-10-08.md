@@ -79,9 +79,12 @@ object (relation) instead of storing a snapshot of a report with ids in it.
 **Dates.** Times are data on the object (`when` as the model wrote it + `decided_at`, `day`, `ended_at`), rendered
 by the projection. The objective stops carrying them baked in (supersedes e2c260f2's objective string).
 
-**Tools.** Workers call tools that take object ids (pod_fetch, work_graph_peek, read_work_object). In a call, the
-tool layer accepts the call's labels and maps them to ids, so a worker reads "[P2] School notice" and calls
-pod_fetch(P2). Tool results are projected the same way (a fetched object gets a label).
+**Tools (owner, 2026-10-08: "no tools don't take short ids, this would be way more massive refactor").** Tools
+keep taking real ids (pod_fetch, work_graph_peek, read_work_object). A worker's projection shows the id of an object
+it may pass to a tool, as a tool argument it can use ("[P2] School notice email ... (pod_fetch id:
+datapod:email:...)"); deciders that call no tools (the brain's agents, the architect, state_mover, action_selector,
+the finalizer) see labels only. Ids still never go into prose: a worker's findings and a finalizer's outcome name
+things in words and put the objects they rely on in `relies_on`.
 
 ## 3. Object types (initial list, from the inventories)
 
@@ -115,7 +118,7 @@ pod_fetch(P2). Tool results are projected the same way (a fetched object gets a 
    `superseded_by` relations to other work; directives reference earlier outputs and pods by `relies_on`, rendered
    to the worker as labelled objects; objective and dates as data.
 4. state_mover, action_selector, intake_triage: labels in, labels out.
-5. Finalizer and worker: outcome in words, `relies_on` for outputs and pods; tool layer accepts labels.
+5. Finalizer and worker: outcome and findings in words, `relies_on` for outputs and pods; tools unchanged (ids).
 6. Brief writer, concern door, concern planner, stories, noticer, routine writer, belief work_outcome, ticket
    planner, daily context tracker.
 
@@ -124,5 +127,5 @@ pod_fetch(P2). Tool results are projected the same way (a fetched object gets a 
 1. One relation store for every link (recommended: one shape, one query path), or relation fields kept per object?
 2. Stored history (today's ~1,000 prose fields with labels or ids): leave as history and render it as-is, or render
    it marked as old text? No backfill rewriting is proposed.
-3. Tools taking labels inside a call (recommended), or tools keep ids and workers see ids?
+3. (Decided 2026-10-08: tools keep ids; workers see the ids they pass to tools.)
 4. The noticer copies raw ids and miscopies them: rebuild on the model, or retire it (the brain covers most of it)?
