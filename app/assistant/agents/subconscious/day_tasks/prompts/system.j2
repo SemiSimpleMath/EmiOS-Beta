@@ -57,9 +57,11 @@ what prompted it: a schedule line (K1...), a chat message (M), work (W), a remin
 entry (E), what the brain decided today (B), the standing directives (D).
 An entry that serves an open concern names it in concern (its C label): the entry then belongs to that concern,
 the concern's own planning sees it and can change or cancel it, and what its work achieves reaches the concern.
-Your own entries made earlier today are listed with their labels (O1, O2...), the reason each was made, what it
-relies on, and their work. Each stays as it is when the day still needs it as it is; modify or cancel it by its
-label when it does not, with what shows it in relies_on.
+Your own entries made earlier today, and every earlier day's entry whose work is still in motion, are listed with
+their labels (O1, O2...), the reason each was made, what it relies on, and their work. Each stays as it is when the
+day still needs it as it is; modify or cancel it by its label when it does not, with what shows it in relies_on.
+To change work already in motion (its time, what it does), modify the entry that owns that work: the change reaches
+the work, and dayflow re-plans it. A new entry makes new work; it never changes work that exists.
 Work shown as "made from your entry" or "made from your own entry" is that entry's own work, carrying it out; it is
 not a separate fact that covers the entry.
 

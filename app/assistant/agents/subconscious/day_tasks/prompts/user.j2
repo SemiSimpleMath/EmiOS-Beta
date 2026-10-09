@@ -28,8 +28,8 @@
 {% else %}
 (none)
 {% endfor %}
-### Your own entries today (each stays as it is unless the day now needs it changed)
-{% for e in A.own %}- [{{ e.ref }}] {{ e.what }} | the assistant: {{ e.assistant_part }} | when: {{ e.when_local }}{% if e.concern_ref %} | serves [{{ e.concern_ref }}]{% endif %} | {{ e.status }}, made {{ e.updated_at | local_time }}: {{ e.why }}{{ relied(e.relies_on_labels, "    ") }}
+### Your own entries, and earlier days' entries whose work is still in motion (each stays as it is unless the day now needs it changed)
+{% for e in A.own %}- [{{ e.ref }}]{% if e.day != A.day %} (from {{ e.day }}, its work still in motion){% endif %} {{ e.what }} | the assistant: {{ e.assistant_part }} | when: {{ e.when_local }}{% if e.concern_ref %} | serves [{{ e.concern_ref }}]{% endif %} | {{ e.status }}, made {{ e.updated_at | local_time }}: {{ e.why }}{{ relied(e.relies_on_labels, "    ") }}
 {% if e.work %}{% with w = e.work, pad = "    " %}{% include 'shared/brain/entry_work.j2' %}{% endwith %}{% endif -%}
 {% else %}
 (none)

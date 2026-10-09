@@ -440,3 +440,39 @@ def test_an_own_entry_for_a_concern_belongs_to_it(tmp_path, monkeypatch):
     labels = {"C1": ["concern", "c-sleep"], "W1": ["work", "w"], "D": ["resource", "r"]}
     assert "concern 'W1' is not an open concern given" in D.own_problems(
         {"own_entries": [_own() | {"concern": "W1"}]}, [], labels)[0]
+
+
+def test_an_all_day_placement_is_past_once_its_date_is_over():
+    """2026-10-09: an all-day placement never passed, so between midnight and the 05:00 boundary Thursday's all-day
+    placements were still offered, and the day's tasks turned Thursday's entries into Friday's work."""
+    from app.assistant.subconscious.belief_occurrences import passed
+    evening = datetime(2026, 3, 11, 5, 0, tzinfo=timezone.utc)        # 10:00 PM on the 10th, local
+    after_midnight = datetime(2026, 3, 11, 9, 0, tzinfo=timezone.utc)  # 2:00 AM on the 11th, still the 10th's day
+    assert not passed(DAY, "all day", evening)
+    assert passed(DAY, "all day", after_midnight)
+    assert not passed(DAY, "11:30 PM", evening), "clock times keep their own rule"
+
+
+def test_earlier_entries_whose_work_is_in_motion_are_the_deciders_to_rewrite(tmp_path):
+    """2026-10-09: to move a check-in that was a step of work made from Thursday's entry, the day's tasks (seeing only
+    Friday's entries) re-decided Friday's entry, and intake made new work asking a worker to move the check-in.
+    Earlier days' open entries are listed with the decider's own; to change live work it rewrites its entry."""
+    from app.assistant.dayflow_orchestrator.work_context import _ENV
+    conn = sqlite_file(tmp_path / "d.db")
+    L.apply_calendar("2026-03-09", [{"label": "I1", "belief_key": "B162", "times": ["10:00 AM"],
+                                     "statement": "Hourly encouragement."}],
+                     [_d("I1", "needed", "hourly check-ins", "10:00 AM")], cause="test", at=NOW, connect=conn)
+    L.apply_calendar("2026-03-09", [{"label": "I2", "belief_key": "B8", "times": ["8:00 AM"], "statement": "Dogs."}],
+                     [_d("I2", "not_needed")], cause="test", at=NOW, connect=conn)
+    assert [e["id"] for e in L.open_before(DAY, connect=conn)] == ["cal:2026-03-09:B162"], "open ones only"
+    carried = {**L.open_before(DAY, connect=conn)[0], "work": None, "relies_on": []}
+    projected = D.project(DAY, situation(), [], _new_items(), [carried])
+    user = _ENV.get_template("subconscious/day_tasks/prompts/user.j2").render(agent_input={
+        "day": DAY, "items": _new_items(), "own": [carried], "situation": situation(), "matters": [],
+        "correction": None, **projected})
+    assert "- [O1] (from 2026-03-09, its work still in motion) hourly check-ins" in user
+    L.apply_day_own(DAY, [{"entry": carried["id"], "action": "modify", "what": "hourly check-ins from 10:20",
+                           "assistant_part": "hourly check-ins", "when": "10:20 AM", "why": "after the standup",
+                           "relies_on": []}], cause="test", at=NOW + timedelta(minutes=5), connect=conn)
+    [entry] = [e for e in L.open_before(DAY, connect=conn) if e["id"] == carried["id"]]
+    assert entry["when_local"] == "10:20 AM" and entry["day"] == "2026-03-09", "the owning entry changed, so its work will"

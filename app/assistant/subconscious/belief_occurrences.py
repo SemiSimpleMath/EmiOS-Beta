@@ -35,11 +35,15 @@ def item_id(belief_key: str, day: str, time: str) -> str:
 
 
 def passed(day: str, when: str, now_utc: datetime) -> bool:
-    """True when a clock-time placement today was more than an hour ago."""
+    """True when a clock-time placement today was more than an hour ago, or an all-day placement's date is over (the
+    local date has moved past the day). 2026-10-09: an all-day placement never passed, so between midnight and the
+    05:00 boundary the old day's all-day placements were still offered, and the day's tasks turned Thursday's
+    entries into Friday's work, which Friday's own day could then not reach."""
     from app.assistant.pipelines.context import day_window_local
     from app.assistant.subconscious.day_pass import _clock_hour_minute
     if when == "all day":
-        return False
+        from app.assistant.utils.time_utils import utc_to_local
+        return utc_to_local(now_utc).date().isoformat() > day
     hour, minute = _clock_hour_minute(when)
     start, _ = day_window_local(day)
     at = start.replace(hour=hour, minute=minute)

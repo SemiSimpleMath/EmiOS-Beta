@@ -106,6 +106,17 @@ def entries(*, day: Optional[str] = None, concern_id: Optional[str] = None, incl
     return [_row(r) for r in rows]
 
 
+def open_before(day: str, *, connect=None) -> List[Dict[str, Any]]:
+    """Open calendar and day entries of days before `day` (needed, not cancelled), oldest first: the ones whose work
+    may still be in motion (the day's tasks lists those whose work is, day_tasks.gather)."""
+    connect = connect or _connect
+    ensure_schema(connect)
+    with connect(False) as c:
+        rows = c.execute("SELECT * FROM brain_list_entries WHERE kind IN ('calendar', 'day') AND day < ? "
+                         "AND status = 'open' ORDER BY created_at, rowid", (day,)).fetchall()
+    return [_row(r) for r in rows]
+
+
 def changes(entry_id: str, *, connect=None) -> List[Dict[str, Any]]:
     connect = connect or _connect
     ensure_schema(connect)

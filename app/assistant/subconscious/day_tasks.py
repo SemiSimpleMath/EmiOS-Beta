@@ -443,8 +443,14 @@ def gather(now_utc: datetime, *, plan_connect=None) -> Optional[Dict[str, Any]]:
     items = offered(day, with_current(day, every), now_utc)
     with_work(day, items)
     from app.assistant.dayflow_orchestrator.brain_list_intake import work_of
+    # Its own entries today, and every earlier day's entry whose work is still in motion (2026-10-09): to change live
+    # work the decider rewrites the entry that owns it, and intake carries the change to the work. Until then it could
+    # reach only today's entries, and a change to work made from yesterday's entry became new work instead (a
+    # worker asked to move a check-in that was a step of another work).
     own = brain_list.entries(day=day, kind="day")
-    own_work = work_of([e["id"] for e in own])
+    earlier = brain_list.open_before(day)
+    own_work = work_of([e["id"] for e in own + earlier])
+    own = own + [e for e in earlier if (own_work.get(e["id"]) or {}).get("status") == "active"]
     own = [{**e, "work": own_work.get(e["id"]), "relies_on": [list(r) for r in brain_list.relies_on(e["id"])]}
            for e in own]
     # On 2026-10-06 the decider called an item's own work "already covered by W8" and decided the item not needed,
