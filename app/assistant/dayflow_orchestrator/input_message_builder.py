@@ -111,7 +111,10 @@ def _build_email_message(*, email_data: Dict[str, Any], now_utc: datetime) -> Me
 
     account_id = str(email_data.get("account_id") or "").strip()
     subject = str(email_data.get("subject") or "").strip() or "[No Subject]"
-    sender = str(email_data.get("sender") or "").strip() or "Unknown"
+    # "Name <address>", as the brain reads email (email_pods.email_sender_line). Until 2026-10-09 the item carried the
+    # display name only, and a work step waiting for an email from an address never matched the email when it came.
+    from app.assistant.pod_store.email_pods import email_sender_line
+    sender = email_sender_line(email_data) or "Unknown"
     summary = str(email_data.get("summary") or "").strip()
     # First ~2000 chars of the email body — enough to capture the salutation
     # ("Dear Parent of <name>", account IDs, first paragraph of context) which

@@ -121,3 +121,14 @@ def test_the_shared_macro_renders_the_handle_only_when_present():
     assert "pod_fetch" in src
     # Guarded by an if, so an item without a pod renders no dead handle.
     assert '{%- if meta.get("pod_id") %}' in src
+
+
+def test_an_email_item_names_its_sender_with_the_address():
+    """2026-10-09: a step waiting for "an email from <address>" saw the email as "sender: <name>" and never woke; the
+    item carried the display name only while the record held the address."""
+    record = {**EMAIL, "sender_display": "Owner Name", "sender_email": "owner@example.com"}
+    msg = _build_email_message(email_data=record, now_utc=NOW)
+    assert msg.metadata["email_sender"] == "Owner Name <owner@example.com>"
+    assert msg.metadata["summary"] == "Owner Name <owner@example.com>: The Warrior Way"
+    from app.assistant.dayflow_orchestrator.work_intake import intake_source
+    assert intake_source({"metadata": msg.metadata})["sender"] == "Owner Name <owner@example.com>"
