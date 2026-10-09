@@ -73,14 +73,22 @@ anything a belief would be built on needs a sign. Daily insights reads "Take out
 
 ### Each pass works on what is new
 
-- **Input**: the record as it stands (each event and milestone labelled, dated, with its state and what showed it),
-  and only the signals since the last pass, labelled and dated: chat messages, ticket replies, presence changes,
-  finished work (finalizer judgments), the brain's decisions today, health changes, desktop activity, camera frames.
-  No concern journals, no previous output as JSON, no meal plans: a concern reaches the record only as the day's
-  facts about it (a message, a decision), the way the brain's decisions on events already carry it.
+- **Input** (owner, 2026-10-09: the main input is the concerns: "[the daughter] is out sick -> leads to [her] late
+  start at school being cancelled"): the brain's picture of the day, applied to the calendar.
+  1. **The open concerns as they stand now**: what each is about and what is known (the brief), with the notes made
+     today, dated; never the whole journal. Applying them to today's events is the tracker's main work: a concern
+     changes every event on the day that depends on it (the impact analysis the brain's facts were always meant to
+     have; memory: brain association = impact analysis).
+  2. **The brain's decisions today**: each event (chat, email, ticket reply, work report, presence, camera, the
+     clock) in its own words, with what the brain made of it, including the ones it decided needed nothing ("the AC
+     was set at 6 AM", "the Chromebook reminder was acknowledged 7:36 AM"): the day's small facts that never become
+     concerns. The brain reads every signal, so the tracker reads none raw.
+  3. **The record as it stands**: each event and milestone labelled, dated, with its state and what showed it.
+  Presence milestones and the calendar enter by code (below). Each pass gets the record and what changed since the
+  last pass (concerns changed, new decisions).
 - **Output** (schema, labels only, see the object design):
   - `changes`: per event (its label K…, or "new" with a title and time) a new state and, for `moved`, the new time;
-    `relies_on`: the labels of what shows it; `note`: words.
+    `relies_on`: the labels of what shows it (a concern C, a brain decision B, another event); `note`: words.
   - `milestones`: new ones, each with its time and `relies_on`.
   - `day_theme`, `current_status`: words.
   A change or milestone with nothing in `relies_on` is malformed (one correction round, as elsewhere). A label in
@@ -110,8 +118,8 @@ anything a belief would be built on needs a sign. Daily insights reads "Take out
 
 1. The record in emi.db (day events, milestones, relations `shown_by`), Google events entering by code, presence
    milestones by code, `unconfirmed` by code; the resources rendered from it (readers unchanged in shape).
-2. The tracker's new input (record + new signals, labelled) and schema (changes and milestones with relies_on);
-   the merge.
+2. The tracker's new input (the open concerns with today's notes, the brain's decisions today, the record; labelled)
+   and schema (changes and milestones with relies_on); the merge.
 3. Move the concerns and the arbiter plan out of the day's resource to their readers.
 4. The archive (`daily_context.md`) with each line's basis; daily insights' prompt told what `unconfirmed` means
    and how to weigh it (the owner's call on routine versus one-off).
@@ -122,5 +130,6 @@ anything a belief would be built on needs a sign. Daily insights reads "Take out
    (recommended), or everything unconfirmed as unknown?
 2. Concerns and the arbiter plan for the chat gate and the situation auditor: their own resource (smallest change),
    or those readers read the brain directly?
-3. Should the brain's decisions on today's events (each with its event in words) be the tracker's main signal, so the
-   day's record and the brain read the day the same way, or should the tracker keep reading the raw signals itself?
+3. (Decided 2026-10-09: the main input is the open concerns and the brain's decisions today; the tracker reads no
+   raw signal. The record and the brain read the day the same way, and every state points back to a concern or a
+   decision.)
