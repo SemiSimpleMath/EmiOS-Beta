@@ -1,8 +1,11 @@
 {#- The work made from a brain-list entry, as its decider reads it (brain_list_intake.work_of: work_links.work_view,
-    the finalizer's prose, never its verdict). Expects `w` and `pad`. Times local. -#}
+    the finalizer's prose, never its verdict). While the work is active, where it stands (work_progress.j2): the steps
+    to come and what each waits for, so an arrival a step is waiting for is not read as new (2026-10-09). Expects `w`
+    and `pad`. Times local. -#}
 {{ pad }}its work {% if w.ref is defined %}[{{ w.ref }}]{% else %}{{ w.work_id }}{% endif %}: {{ w.status }}{% if w.ended_because %}; ended because: {{ w.ended_because }}{% endif %}
 {% for c in w.covered_by | default([]) %}{{ pad }}  covered by: {{ c.title }} ({{ c.status }}, last changed {{ c.updated }})
 {% endfor -%}
 {% for o in w.outcomes -%}
 {{ pad }}  task "{{ o.title }}"{% if o.at %} ({{ o.at | local_time }}){% endif %}: {{ o.outcome }}
 {% endfor -%}
+{% if w.status in ("active", "blocked") %}{% with p = w.progress, pad = pad ~ "  " %}{% include 'shared/work/work_progress.j2' %}{% endwith %}{% endif -%}

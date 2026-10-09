@@ -310,14 +310,10 @@ def set_concern_brief(concern_id: str, written_from: str, *, brief: Optional[Dic
 
 
 def set_concern_plan(concern_id: str, from_brief: str, *, plan: Optional[Dict[str, Any]] = None,
-                     error: Optional[str] = None, before_store=None, connect=None) -> bool:
+                     error: Optional[str] = None, connect=None) -> bool:
     """Store a matter concern's plan (subconscious/concern_planner.py), or the error that stopped it, against
     the brief it was made from. Returns False, writing nothing, when the brief changed meanwhile: the next
-    run plans again.
-
-    `before_store` (the plan's changes to the brain's list) runs under the lock once the brief is known current,
-    before the plan is saved: a failure there stores no plan, so the next run plans again (2026-10-05; until then
-    the plan was saved first, and a failure applying its entries left a current plan whose entries never landed)."""
+    run plans again."""
     with _REGISTER_LOCK:
         register = _load_register(connect)
         for bucket in ("active", "addressing", "resolved", "dormant"):
@@ -326,8 +322,6 @@ def set_concern_plan(concern_id: str, from_brief: str, *, plan: Optional[Dict[st
                     continue
                 if (concern.get("brief") or {}).get("basis") != from_brief:
                     return False
-                if before_store is not None:
-                    before_store()
                 now_iso = datetime.now(timezone.utc).isoformat()
                 if error is None:
                     concern["plan"] = {**plan, "basis": from_brief, "written_at": now_iso}

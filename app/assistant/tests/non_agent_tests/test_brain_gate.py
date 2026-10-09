@@ -358,8 +358,9 @@ def test_the_wake_sleeps_until_a_room_goes_quiet_or_a_hold_passes_whichever_is_f
     monkeypatch.setattr(day_pass, "run_day_pass", lambda: {"day_pass": "unchanged"})
     monkeypatch.setattr(belief_occurrences, "run_occurrence_handoffs", lambda: {"occurrences_handed": 0})
     monkeypatch.setattr(concern_planner, "run_planners", lambda **kw: {})
-    from app.assistant.subconscious import brain_stories
+    from app.assistant.subconscious import brain_stories, day_tasks
     monkeypatch.setattr(brain_stories, "run_stories", lambda: {})
+    monkeypatch.setattr(day_tasks, "run_day_tasks", lambda: {"day_tasks": "unchanged"})
     monkeypatch.setattr(gate, "run_gate", lambda: {"next_ready_at": quiet})
     monkeypatch.setattr(brain_step, "run_brain_step", lambda: {"matters": 0})
     from app.assistant.subconscious import brain_list

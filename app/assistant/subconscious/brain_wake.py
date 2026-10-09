@@ -82,8 +82,8 @@ def run_brain() -> Dict[str, Any]:
     from app.assistant.subconscious.brain_stories import run_stories
     with trace(stage="stories"):
         stories = run_stories()
-    # Last: the day's tasks (subconscious/day_tasks.py; docs/design/brain_delegates_work_2026-10-04.md), which read
-    # the concern entries the planner made earlier in this pass.
+    # Last: the day's tasks (subconscious/day_tasks.py), the list's one decider (docs/design/hub_and_spokes_2026-10-09.md),
+    # which reads the concerns the brain step changed and the plans the planner proposed earlier in this pass.
     from app.assistant.subconscious.day_tasks import run_day_tasks
     with trace(stage="day_tasks"):
         decided = run_day_tasks()
@@ -91,7 +91,7 @@ def run_brain() -> Dict[str, Any]:
     # list changed (dayflow_orchestrator/brain_list_intake.py).
     from app.assistant.dayflow_orchestrator.brain_list_intake import lanes
     config = lanes()
-    if (closed_entries or plans.get("plans_written") or decided.get("day_list_changes")) and "live" in (
+    if (closed_entries or decided.get("day_list_changes")) and "live" in (
             config["calendar"]["mode"], config["concern"]["mode"]):
         from app.assistant.subconscious.concern_handoff import _poke_dayflow
         _poke_dayflow()

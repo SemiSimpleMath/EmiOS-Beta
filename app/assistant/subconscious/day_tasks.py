@@ -1,4 +1,11 @@
-"""The day's tasks: the brain decides what today's calendar needs.
+"""The day's tasks: the brain decides what today's calendar needs, and since 2026-10-09 the whole list.
+
+One decider (owner, 2026-10-09; docs/design/hub_and_spokes_2026-10-09.md): this decides every entry on the brain's
+list, the calendar's, the day's own and every concern's (each concern's planner, subconscious/concern_planner.py,
+looks things up and proposes them). It is woken only by the stages before it, the day pass's placements and the
+concerns with their plans (fingerprint), and what was said reaches it through the concerns the brain made of it.
+Until then the concern planner wrote a concern's entries and this the rest, neither could change the other's, and
+chat the brain had already turned into concerns woke this a second time.
 
 Design: docs/design/brain_delegates_work_2026-10-04.md. The brain decides what work exists and dayflow how. Until the
 calendar lane went live (configs/brain_lanes.json, calendar.from_day: 2026-10-06) the calendar's placements reached
@@ -83,14 +90,16 @@ def placements(plan: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def fingerprint(inputs: Dict[str, Any]) -> str:
-    """What the decision read, minus the clock and minus the list's own entries (they change because of a run, so
-    counting them would make every run trigger the next): a run is repeated only when one of these changed. The
-    situation counts without what moves with the clock alone (situation.fingerprint_view)."""
-    from app.assistant.subconscious.situation import fingerprint_view
-    read = {k: v for k, v in inputs.items()
-            if k not in ("now", "correction", "items", "situation", "labels", "earlier", "source_labels", "own")}
-    read["items"] = [{k: v for k, v in it.items() if k != "current"} for it in inputs["items"]]
-    read["situation"] = fingerprint_view(inputs["situation"])
+    """What wakes the decider: the stages before it (docs/design/hub_and_spokes_2026-10-09.md, "each stage is woken
+    only by the stage before it"). The day's placements without their entries (the day pass), and each open concern's
+    record and plan (the brain step and the concern planner). Everything else it reads (the situation, the chat, what
+    the brain decided today, the list's own entries and their work) is context, never a reason to run. Until
+    2026-10-09 the situation counted: chat the brain had already turned into concerns woke this decider a second time,
+    and the work its own entries made changed the situation and woke it again."""
+    read = {"day": inputs["day"],
+            "items": [{k: v for k, v in it.items() if k != "current"} for it in inputs["items"]],
+            "concerns": [(c["concern_id"], c["basis"], (c.get("plan") or {}).get("written_at"))
+                         for c in inputs["situation"]["concerns"]]}
     return hashlib.sha256(json.dumps(read, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 
@@ -132,17 +141,29 @@ def offered(day: str, items: List[Dict[str, Any]], now_utc: datetime) -> List[Di
 
 def with_concerns(situation: Dict[str, Any], *, connect=None) -> None:
     """Each open concern of the situation, in place, with its whole record as the brain's agents read it (`text`,
-    concern_planner.concern_text) and its entries on the brain's list (`entries`)."""
+    concern_planner.concern_text), the record's basis (`basis`, concern_brief.basis: what the fingerprint counts), its
+    planner's plan (`plan`: the decision, why, until when, when it was written, and the changes it proposes, or None),
+    its entries on the brain's list (`entries`) and the ones cancelled, with why (`cancelled`; 2026-10-06: a decider
+    re-created a question it had cancelled the night before, not seeing it)."""
     from app.assistant.subconscious import brain_list
+    from app.assistant.subconscious.concern_brief import basis
     from app.assistant.subconscious.concern_planner import concern_text
     from app.assistant.subconscious.concern_store import load_register
     register = load_register()
     by_id = {c["concern_id"]: c for b in ("active", "addressing") for c in register.get(b) or []}
     for c in situation["concerns"]:
-        c["text"] = concern_text(by_id[c["concern_id"]], c["bucket"])
-        c["entries"] = [{k: e[k] for k in ("id", "what", "decision", "assistant_part", "when_local", "status",
+        concern = by_id[c["concern_id"]]
+        c["text"] = concern_text(concern, c["bucket"])
+        c["basis"] = basis(concern, c["bucket"])
+        plan = concern.get("plan")
+        c["plan"] = None if not plan else {
+            **{k: plan.get(k) for k in ("decision", "why", "hold_until", "written_at")},
+            "proposals": [dict(x) for x in plan.get("proposals") or []]}
+        every = brain_list.entries(concern_id=c["concern_id"], include_cancelled=True, connect=connect)
+        c["entries"] = [{k: e[k] for k in ("id", "kind", "what", "decision", "assistant_part", "when_local", "status",
                                            "updated_at")}
-                        for e in brain_list.entries(concern_id=c["concern_id"], connect=connect)]
+                        for e in every if e["status"] != "cancelled"]
+        c["cancelled"] = [{k: e[k] for k in ("what", "why", "updated_at")} for e in every if e["status"] == "cancelled"]
     from app.assistant.dayflow_orchestrator.brain_list_intake import work_of
     work = work_of([e["id"] for c in situation["concerns"] for e in c["entries"]])
     for c in situation["concerns"]:
@@ -214,6 +235,9 @@ def project(day: str, situation: Dict[str, Any], matters: List[Dict[str, Any]], 
         c["ref"] = p.label("C", "concern", c["concern_id"])
     for e in [e for c in situation["concerns"] for e in c.get("entries") or []]:
         e["ref"] = p.label("E", "list_entry", e["id"])
+    # A planner's proposal to change an entry names it by its label (None: the entry is no longer open).
+    for x in [x for c in situation["concerns"] for x in (c.get("plan") or {}).get("proposals") or []]:
+        x["ref"] = None if x["entry"] == "new" else p.label_of("list_entry", x["entry"])
     for m in matters:
         m["ref"] = p.label("B", "brain_matter", str(m["id"]))
     for e in situation["calendar_today"]:
@@ -302,51 +326,65 @@ def _in_prose(labels: Dict[str, Any], *texts: Any) -> List[str]:
     return labels_in(" ".join(str(t or "") for t in texts), [x for x in labels if any(ch.isdigit() for ch in x)])
 
 
-def own_problems(data: Dict[str, Any], own: List[Dict[str, Any]], labels: Dict[str, Any]) -> List[str]:
-    """The own entries: a new one is entry "new"; a modify or cancel names one of today's own entries by its label;
-    new and modify name the outcome, the assistant's part and when; every one says why, in words, and lists in
-    relies_on the labels of what prompted it."""
-    changes = data.get("own_entries")
+def changeable(own: List[Dict[str, Any]], concerns: List[Dict[str, Any]]) -> Dict[str, Optional[str]]:
+    """The entries an answer may modify or cancel by label: its own (O) and every open concern's (E). Label -> the
+    label of the concern a concern's own entry belongs to (it stays with it), or None for a day's entry."""
+    out: Dict[str, Optional[str]] = {e["ref"]: None for e in own}
+    for c in concerns:
+        for e in c.get("entries") or []:
+            if e["ref"] not in out:
+                out[e["ref"]] = c["ref"] if e["kind"] == "concern" else None
+    return out
+
+
+def entries_problems(data: Dict[str, Any], entries: Dict[str, Optional[str]], labels: Dict[str, Any]) -> List[str]:
+    """The entries beyond the calendar: a new one is entry "new"; a modify or cancel names one of the entries given
+    (`changeable`) by its label; new and modify name the outcome, the assistant's part and when; every one says why,
+    in words, and lists in relies_on the labels of what prompted it; the concern an entry serves is an open concern's
+    C label, and a concern's own entry stays with its concern."""
+    changes = data.get("entries")
     if changes is None:
         return []
     if not isinstance(changes, list):
-        return ["own_entries is not a list"]
-    by_label = {e["ref"]: e for e in own}
+        return ["entries is not a list"]
     out, seen = [], []
     for c in changes:
         entry, action = str((c or {}).get("entry") or "").strip(), (c or {}).get("action")
         if action not in ("new", "modify", "cancel"):
-            out.append(f"own entry {entry!r}: action {action!r} is not new, modify or cancel")
+            out.append(f"entry {entry!r}: action {action!r} is not new, modify or cancel")
             continue
         if action == "new" and entry != "new":
-            out.append(f'a new own entry is written as entry "new", got {entry!r}')
+            out.append(f'a new entry is written as entry "new", got {entry!r}')
         if action != "new":
-            if entry not in by_label:
-                out.append(f"{entry!r} is not one of your own entries today (O1, O2...)")
+            if entry not in entries:
+                out.append(f"{entry!r} is not one of the entries given (your own O, a concern's E)")
                 continue
             seen.append(entry)
         if action in ("new", "modify"):
             missing = [f for f in ("what", "assistant_part", "when") if not str(c.get(f) or "").strip()]
             if missing:
-                out.append(f"own entry {entry}: {action} names {', '.join(missing)}")
+                out.append(f"entry {entry}: {action} names {', '.join(missing)}")
         if not str(c.get("why") or "").strip():
-            out.append(f"own entry {entry}: why is empty")
+            out.append(f"entry {entry}: why is empty")
         relied = [str(x).strip() for x in c.get("relies_on") or []]
         unknown = [x for x in relied if x not in labels]
         if not relied:
-            out.append(f"own entry {entry}: relies_on names nothing; name what prompted it")
+            out.append(f"entry {entry}: relies_on names nothing; name what prompted it")
         elif unknown:
-            out.append(f"own entry {entry}: relies_on {unknown}, which are not labels given")
+            out.append(f"entry {entry}: relies_on {unknown}, which are not labels given")
         written = _in_prose(labels, c.get("what"), c.get("assistant_part"), c.get("why"))
         if written:
-            out.append(f"own entry {entry}: {written} written into what, assistant_part or why; write it in words "
+            out.append(f"entry {entry}: {written} written into what, assistant_part or why; write it in words "
                        f"and put the reference in relies_on")
         concern = str(c.get("concern") or "").strip()
         if concern and (labels.get(concern) or [None])[0] != "concern":
-            out.append(f"own entry {entry}: concern {concern!r} is not an open concern given (its C label)")
+            out.append(f"entry {entry}: concern {concern!r} is not an open concern given (its C label)")
+        owner = entries.get(entry) if action == "modify" else None
+        if owner and concern and concern != owner:
+            out.append(f"entry {entry}: it is {owner}'s entry and stays with it; leave concern empty or name {owner}")
     twice = sorted({x for x in seen if seen.count(x) > 1})
     if twice:
-        out.append(f"own entries changed more than once: {twice}")
+        out.append(f"entries changed more than once: {twice}")
     return out
 
 
@@ -424,18 +462,17 @@ def _last_fingerprint(day: str, connect) -> Optional[str]:
     return row["fingerprint"] if row else None
 
 
-def gather(now_utc: datetime, *, plan_connect=None) -> Optional[Dict[str, Any]]:
-    """Everything the decision reads for the current day, or None when the day has no plan yet."""
+def gather(now_utc: datetime, *, plan_connect=None) -> Dict[str, Any]:
+    """Everything the decision reads for the current day. A day the day pass has not placed yet has no items: the
+    concerns are decided all the same (since 2026-10-09 their entries are this decider's)."""
     from app.assistant.pipelines.context import boundary_date_local_str
     from app.assistant.subconscious import day_plan
     from app.assistant.utils.time_utils import get_local_timezone
     day = boundary_date_local_str(now_utc.astimezone(get_local_timezone()))
     plan = day_plan.load_plan(day, connect=plan_connect)
-    if plan is None:
-        return None
     from app.assistant.dayflow_orchestrator.brain_list_intake import calendar_live
     from app.assistant.subconscious import brain_list, situation
-    every = placements(plan)
+    every = placements(plan) if plan is not None else []
     # Calendar-made work is the brain's own on a live day; on a steward day it is left out (module docstring).
     s = situation.gather(now_utc, calendar_work=calendar_live(day))
     with_concerns(s)
@@ -460,29 +497,28 @@ def gather(now_utc: datetime, *, plan_connect=None) -> Optional[Dict[str, Any]]:
 
 
 def run_day_tasks(*, now_utc: Optional[datetime] = None, connect=None,
-                  gather_inputs: Callable[[datetime], Optional[Dict[str, Any]]] = None,
+                  gather_inputs: Callable[[datetime], Dict[str, Any]] = None,
                   call: Callable[[Dict[str, Any]], Any] = None) -> Dict[str, Any]:
-    """Decide today's placements when anything read has changed since the last run; record the run. The
-    keyword arguments are test seams. Raises when the answer is still invalid after one correction."""
+    """Decide the list (today's placements, the entries beyond them, every open concern's entries) when a stage before
+    it changed since the last run (fingerprint); record the run. The keyword arguments are test seams. Raises when the
+    answer is still invalid after one correction."""
     from app.assistant.subconscious.brain_trace import step
     now = now_utc or datetime.now(timezone.utc)
     connect = connect or _connect
     ensure_schema(connect)
     inputs = (gather_inputs or gather)(now)
-    if inputs is None:
-        return {"day_tasks": "no plan"}
-    if not inputs["items"]:
-        return {"day_tasks": "no placements"}
+    if not (inputs["items"] or inputs["situation"]["concerns"] or inputs.get("own")):
+        return {"day_tasks": "nothing to decide"}
     fp = fingerprint(inputs)
     if fp == _last_fingerprint(inputs["day"], connect):
         return {"day_tasks": "unchanged"}
     call = call or _agent_call
     labels = [it["label"] for it in inputs["items"]]
-    own = inputs.get("own") or []
+    entries = changeable(inputs.get("own") or [], inputs["situation"]["concerns"])
 
     def check(answer):
         found = problems(answer, inputs["items"], inputs["labels"])
-        return found + (own_problems(answer, own, inputs["labels"]) if isinstance(answer, dict) else [])
+        return found + (entries_problems(answer, entries, inputs["labels"]) if isinstance(answer, dict) else [])
     data = call(inputs)
     found = check(data)
     if found:
@@ -502,15 +538,16 @@ def run_day_tasks(*, now_utc: Optional[datetime] = None, connect=None,
                  for d in data["decisions"]]
     changed = brain_list.apply_calendar(inputs["day"], inputs["items"], decisions,
                                         cause=f"day's tasks {now.isoformat()}", at=now, connect=connect)
-    own_changes = [{**{k: str(c.get(k) or "").strip() for k in ("action", "what", "assistant_part", "when", "why")},
-                    "entry": "new" if c.get("action") == "new" else resolve(call_labels, c["entry"])[1],
-                    "concern_id": resolve(call_labels, c["concern"])[1] if str(c.get("concern") or "").strip() else None,
-                    "relies_on": [resolve(call_labels, x) for x in c.get("relies_on") or []]}
-                   for c in data.get("own_entries") or []]
-    if own_changes:
-        changed = {**changed, "own": brain_list.apply_day_own(inputs["day"], own_changes,
-                                                             cause=f"day's tasks {now.isoformat()}", at=now,
-                                                             connect=connect)}
+    entry_changes = [{**{k: str(c.get(k) or "").strip() for k in ("action", "what", "assistant_part", "when", "why")},
+                      "entry": "new" if c.get("action") == "new" else resolve(call_labels, c["entry"])[1],
+                      "concern_id": resolve(call_labels, c["concern"])[1] if str(c.get("concern") or "").strip()
+                      else None,
+                      "relies_on": [resolve(call_labels, x) for x in c.get("relies_on") or []]}
+                     for c in data.get("entries") or []]
+    if entry_changes:
+        changed = {**changed, "entries": brain_list.apply_entries(inputs["day"], entry_changes,
+                                                                  cause=f"day's tasks {now.isoformat()}", at=now,
+                                                                  connect=connect)}
     with connect(True) as c:
         c.execute("INSERT INTO brain_day_decisions (day, decided_at_utc, fingerprint, items, decisions) "
                   "VALUES (?,?,?,?,?)",

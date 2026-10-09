@@ -1,6 +1,6 @@
 name: concern_planner_manager
 class_name: MultiAgentManager
-description: "Works out what one matter concern needs now (docs/design/day_items_have_owners_2026-10-02.md, the reasoning layer). A read-only planner looks things up: the concern's own record, the email threads and calendar entries it names, reminders and to-dos, the work done for it, pods, the knowledge graph. Then subconscious::concern_tasks writes the decision (act now, hold until a date, no action) and changes the concern's entries on the brain's list. It changes nothing in the world; dayflow carries the entries out."
+description: "Works out what one matter concern needs now (docs/design/day_items_have_owners_2026-10-02.md, the reasoning layer). A read-only planner looks things up: the concern's own record, the email threads and calendar entries it names, reminders and to-dos, the work done for it, pods, the knowledge graph. Then subconscious::concern_tasks writes the decision (act now, hold until a date, no action) and proposes changes to the concern's entries on the brain's list, which the list decider (subconscious::day_tasks) decides. It changes nothing in the world or on the list."
 max_cycles: 16
 
 role_bindings:

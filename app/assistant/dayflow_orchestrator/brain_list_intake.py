@@ -1,7 +1,8 @@
 """Work from the brain's list (docs/design/brain_delegates_work_2026-10-04.md, section 3, "The list-item intake node").
 
-The brain decides what work exists and keeps it as entries on its list (subconscious/brain_list.py): the day's tasks
-for today's calendar, concern_tasks for each concern. This turns the list's changes into work, by code, in each
+The brain decides what work exists and keeps it as entries on its list (subconscious/brain_list.py), decided by one
+decider, the day's tasks: today's calendar, every concern's entries (each concern's planner proposes them), and the
+day's own. This turns the list's changes into work, by code, in each
 planning tick (control_nodes/brain_list_intake_node.py, between the steward's persist node and the architect). It
 judges nothing; the entry already says what is needed:
 

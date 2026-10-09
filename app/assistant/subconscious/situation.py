@@ -163,19 +163,3 @@ def gather(now_utc: datetime, *, calendar_work: bool = True) -> Dict[str, Any]:
         "concerns": open_concerns(),
     }
 
-
-def fingerprint_view(s: Dict[str, Any]) -> Dict[str, Any]:
-    """The situation minus what moves with the clock alone (the time, minutes away or at the keyboard, the
-    temperature, the reminder window's bounds) and minus the health assessment, so a decider runs again when something
-    changed, not every pass. The health prose is reworded on every inference run; a change in health alone waits for
-    the next change of anything else, and the decider then reads the whole assessment (owner, 2026-10-05: health out
-    of the fingerprint, no field list of the inference's output). Until 2026-10-05 the calendar's window and the
-    health prose changed every pass, and the day's tasks called the model about every ten minutes to decide
-    nothing."""
-    presence = s["presence"]
-    reminders = s["reminders"]
-    return {**{k: v for k, v in s.items() if k not in ("now", "presence", "weather", "reminders", "health")},
-            "presence": presence.get("status_label"),
-            "weather": s["weather"].get("condition"),
-            "reminders": {"status": reminders.get("status"),
-                          "records": [(r["id"], r["text"]) for r in reminders.get("records") or []]}}

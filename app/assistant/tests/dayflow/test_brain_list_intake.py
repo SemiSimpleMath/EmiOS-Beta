@@ -42,6 +42,12 @@ def _decide(lst, decision="needed", when="9:00 PM", day=DAY, at=NOW, belief="B3"
     return L.apply_calendar(day, [item], [d], cause="test", at=at, connect=lst)
 
 
+def _ring(lst, changes, at=NOW):
+    """The list decider's changes to the doorbell concern's entries (brain_list.apply_entries)."""
+    return L.apply_entries(DAY, [{**c, "concern_id": "c-ring", "relies_on": []} for c in changes], cause="decided",
+                           at=at, connect=lst)
+
+
 def _deliver(scratch, config=LIVE, at=NOW):
     lst, dl = scratch
     return B.deliver(_store(), now_utc=at, connect=dl, list_connect=lst, lane_config=config)
@@ -137,9 +143,9 @@ def test_a_concern_entry_carries_its_concern(scratch, monkeypatch):
     lst, _ = scratch
     from app.assistant.subconscious import concern_feedback
     monkeypatch.setattr(concern_feedback, "propagate_work_outcome", lambda store, work_id, outcome: None)
-    L.apply_concern("c-ring", [{"entry": "new", "action": "new", "what": "The doorbell battery is recharged",
-                                "assistant_part": "tell the owner and ask him to confirm", "when": "9:00 AM",
-                                "why": "Ring sent a low-battery notice."}], cause="plan", at=NOW, connect=lst)
+    _ring(lst, [{"entry": "new", "action": "new", "what": "The doorbell battery is recharged",
+                 "assistant_part": "tell the owner and ask him to confirm", "when": "9:00 AM",
+                 "why": "Ring sent a low-battery notice."}])
     config = {"calendar": {"mode": "off", "from_day": None}, "concern": {"mode": "live", "since": NOW.isoformat()}}
     [work_id] = _deliver(scratch, config)["created"]
     assert _store().load(work_id).constraints["concern_refs"] == ["concern:c-ring"]
@@ -154,13 +160,13 @@ def test_a_concern_entrys_part_changed_alone_revises_its_work(scratch, monkeypat
     monkeypatch.setattr(concern_feedback, "propagate_work_outcome", lambda store, work_id, outcome: None)
     entry = {"entry": "new", "action": "new", "what": "The doorbell battery is recharged",
              "assistant_part": "ask the owner to confirm", "when": "9:00 AM", "why": "Ring sent a low-battery notice."}
-    L.apply_concern("c-ring", [entry], cause="plan", at=NOW, connect=lst)
+    _ring(lst, [entry])
     config = {"calendar": {"mode": "off", "from_day": None}, "concern": {"mode": "live", "since": NOW.isoformat()}}
     [work_id] = _deliver(scratch, config)["created"]
     [listed] = L.entries(concern_id="c-ring", connect=lst)
-    L.apply_concern("c-ring", [{**entry, "entry": listed["id"], "action": "modify",
-                                "assistant_part": "wait for the Ring confirmation without contacting the owner"}],
-                    cause="plan", at=NOW + timedelta(minutes=5), connect=lst)
+    _ring(lst, [{**entry, "entry": listed["id"], "action": "modify",
+                 "assistant_part": "wait for the Ring confirmation without contacting the owner"}],
+          at=NOW + timedelta(minutes=5))
     assert _deliver(scratch, config, at=NOW + timedelta(minutes=6))["revised"] == [work_id]
 
 
@@ -170,9 +176,8 @@ def test_a_closed_concern_cancels_its_open_entries_and_its_work_ends(scratch, mo
     lst, _ = scratch
     from app.assistant.subconscious import concern_feedback
     monkeypatch.setattr(concern_feedback, "propagate_work_outcome", lambda store, work_id, outcome: None)
-    L.apply_concern("c-ring", [{"entry": "new", "action": "new", "what": "The doorbell battery is recharged",
-                                "assistant_part": "ask the owner to confirm", "when": "9:00 AM", "why": "Low battery."}],
-                    cause="plan", at=NOW, connect=lst)
+    _ring(lst, [{"entry": "new", "action": "new", "what": "The doorbell battery is recharged",
+                 "assistant_part": "ask the owner to confirm", "when": "9:00 AM", "why": "Low battery."}])
     config = {"calendar": {"mode": "off", "from_day": None}, "concern": {"mode": "live", "since": NOW.isoformat()}}
     [work_id] = _deliver(scratch, config)["created"]
     register = {"active": [], "addressing": [], "dormant": [],

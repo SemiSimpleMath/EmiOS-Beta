@@ -76,11 +76,14 @@ def _local(value: Any) -> str:
 
 
 def work_view(work_id: str, *, link: str, score: Optional[float] = None) -> Dict[str, Any]:
-    """One work object as the brain reads it: what it was for, how it ended, and what each task found, in the
-    finalizer's own account. The verdict, recommendation and next step stay with dayflow: they are the finalizer's
-    instructions to the architect for that work object, and read outside it they became household rules
-    (2026-10-03: "do not send a reminder" for one expired ticket held a concern until its date had passed)."""
+    """One work object as the brain reads it: what it was for, how it ended, what each task found, in the
+    finalizer's own account, and where it stands (`progress`: the steps to come and what each waits for). The verdict,
+    recommendation and next step stay with dayflow: they are the finalizer's instructions to the architect for that
+    work object, and read outside it they became household rules (2026-10-03: "do not send a reminder" for one expired
+    ticket held a concern until its date had passed). Until 2026-10-09 the deciders saw an entry's work without its
+    steps to come, so an email the work was waiting for read as new and could become a second entry for it."""
     from app.assistant.control_nodes.strategic_planner_wo_prep_node import _goal_epitaph
+    from work_objects.progress import work_progress
     wo = _store().load(work_id)
     nodes = getattr(wo, "nodes", {}) or {}
     store = _store()
@@ -107,6 +110,7 @@ def work_view(work_id: str, *, link: str, score: Optional[float] = None) -> Dict
         "outcomes": [{"title": n.title, "outcome": n.payload["finalizer"].get("outcome"),
                       "at": n.payload["finalizer"].get("at")} for n in nodes.values()
                      if wo.is_work_unit(n) and (n.payload or {}).get("finalizer")],
+        "progress": work_progress(wo),
         "link": link, "score": round(score, 2) if score is not None else None,
     }
 

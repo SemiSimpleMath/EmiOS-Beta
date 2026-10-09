@@ -13,13 +13,14 @@ Owner, 2026-10-02: "it breaks it into bullet points under the concern like: thes
 be done. its up to consumers to interpret those." It replaced the brief's own readiness decision for
 matter concerns; a standing concern (a recurring part of the day) keeps its brief's per-occurrence rule.
 
-Since 2026-10-05 the decider is `subconscious::concern_tasks` (docs/design/brain_delegates_work_2026-10-04.md, "Two
-task deciders, one list"): the things that should be done are the concern's entries on the brain's list
-(subconscious/brain_list.py), each one outcome with its deadline and constraints, the assistant's part and when.
-It reads the concern's entries now, and answers only the changes: new entries, and entries modified or cancelled
-by id; an entry it leaves out stays as it is. The plan keeps its shape for its readers (the concern view every
-dayflow agent reads, the stories, the handoff): `todo` is the concern's open entries after the change. The shadow
-list decider that ran beside the live decider (2026-10-04) is gone.
+The decider is `subconscious::concern_tasks`: it reads the concern's entries on the brain's list (subconscious/
+brain_list.py), each one outcome with its deadline and constraints, the assistant's part and when, and answers only
+the changes it proposes: new entries, and entries modified or cancelled by id. Since 2026-10-09 it proposes and the
+list decider (subconscious/day_tasks.py) decides (owner: one decider, docs/design/hub_and_spokes_2026-10-09.md);
+from 2026-10-05 until then its changes went onto the list directly, and the day's tasks, which could not change a
+concern's entries, decided the rest of the list beside it. The proposed changes are stored with the plan
+(`proposals`); `todo` keeps its shape for the plan's readers (the concern view every dayflow agent reads, the
+stories): the concern's open entries as the proposals would leave them.
 
 It runs for a matter concern whose brief is current and that has no plan written from that brief, or
 whose plan holds until a time that has passed. A plan that could not be written carries `plan_error` with
@@ -180,9 +181,9 @@ def _invoke(task: str, information: str) -> Optional[Dict[str, Any]]:
 
 
 def write_plan(concern: Dict[str, Any], bucket: str, *, invoke: Optional[Callable[[str, str], Any]] = None,
-               list_connect=None) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
-    """The plan for one matter concern and the changes to its entries on the brain's list; raises when the
-    decider's answer is invalid. The plan's `todo` is the concern's open entries after the changes."""
+               list_connect=None) -> Dict[str, Any]:
+    """The plan for one matter concern, with the changes to its entries it proposes (`proposals`); raises when the
+    decider's answer is invalid. The plan's `todo` is the concern's open entries as the proposals would leave them."""
     from app.assistant.dayflow_orchestrator.work_context import _ENV
     from app.assistant.subconscious import brain_list
     from app.assistant.subconscious.concern_brief import hold_until_utc
@@ -204,16 +205,16 @@ def write_plan(concern: Dict[str, Any], bucket: str, *, invoke: Optional[Callabl
     modified = {c["entry"]: c for c in changes if c["action"] == "modify"}
     todo = [modified.get(e["id"], e)["what"] for e in current if e["id"] not in cancelled] + \
            [c["what"] for c in changes if c["action"] == "new"]
-    plan = {"decision": data["decision"], "todo": todo, "why": data["why"],
+    plan = {"decision": data["decision"], "todo": todo, "why": data["why"], "proposals": changes,
             "hold_until": data.get("hold_until") if data["decision"] == "hold" else None}
     if plan["decision"] == "hold":
         plan["hold_until_utc"] = hold_until_utc(plan["hold_until"], now).isoformat()
-    return plan, changes
+    return plan
 
 
 def run_planners(*, invoke=None, register_connect=None, list_connect=None) -> Dict[str, Any]:
-    """Plan every matter concern that needs it, and apply each plan's changes to the concern's entries on the
-    brain's list, then store the plan. Free when none does."""
+    """Plan every matter concern that needs it and store the plan, its proposals for the list decider. Free when
+    none does."""
     from app.assistant.subconscious import persist
     from app.assistant.subconscious.concern_store import load_register
     todo = stale(load_register(connect=register_connect))
@@ -227,7 +228,7 @@ def run_planners(*, invoke=None, register_connect=None, list_connect=None) -> Di
         step("plan", "stale", subject=cid, title=concern.get("title"), reason=stale_reason(concern))
         try:
             with trace(stage="plan", concern_id=cid):
-                plan, changes = write_plan(concern, bucket, invoke=invoke, list_connect=list_connect)
+                plan = write_plan(concern, bucket, invoke=invoke, list_connect=list_connect)
         except Exception as exc:
             logger.error("[plan] could not plan %s; not retried until it changes: %s", cid, exc, exc_info=True)
             step("plan", "failed: not retried until the brief changes", subject=cid,
@@ -235,27 +236,8 @@ def run_planners(*, invoke=None, register_connect=None, list_connect=None) -> Di
             persist.set_concern_plan(cid, from_brief, error=f"{type(exc).__name__}: {exc}", connect=register_connect)
             failed += 1
             continue
-        from app.assistant.subconscious import brain_list
-        now = datetime.now(timezone.utc)
-        listed = {}
-
-        def apply_entries(cid=cid, changes=changes, now=now):
-            listed.update(brain_list.apply_concern(cid, changes, cause=f"concern plan {now.isoformat()}", at=now,
-                                                   connect=list_connect))
-        # The entries land before the plan is stored (persist.set_concern_plan): a plan is current only once
-        # its entries are on the list. A failure applying them stores nothing: the concern is planned again.
-        try:
-            stored = persist.set_concern_plan(cid, from_brief, plan=plan, before_store=apply_entries,
-                                              connect=register_connect)
-        except Exception as exc:
-            logger.error("[plan] %s: its entries could not be put on the list; no plan stored, planned again next "
-                         "pass: %s", cid, exc, exc_info=True)
-            step("plan", "entries not applied: no plan stored, planned again", subject=cid,
-                 error=f"{type(exc).__name__}: {exc}")
-            failed += 1
-            continue
-        if stored:
-            step("plan", "written", subject=cid, plan=plan, entries=changes, list_changes=listed)
+        if persist.set_concern_plan(cid, from_brief, plan=plan, connect=register_connect):
+            step("plan", "written", subject=cid, plan=plan, proposals=plan["proposals"])
             written += 1
         else:
             step("plan", "not stored: the brief changed while it was planned", subject=cid)

@@ -1,8 +1,7 @@
 """The brain's situation (subconscious/situation.py; docs/design/brain_delegates_work_2026-10-04.md, section 2).
 
 Pins: a conversation still going is left out until the room goes quiet (the gate's rule), a finished one is read
-whole; what moves with the clock alone (the time, minutes away, the temperature, the reminder window) does not
-count as a change, a change of presence, chat or schedule does; work made from the calendar is left out when
+whole (what wakes a decider is not the situation, day_tasks.fingerprint); work made from the calendar is left out when
 asked (shadow), work from elsewhere stays; the template shows every time local and says plainly what is not known.
 Invented data; no database.
 """
@@ -25,20 +24,6 @@ def test_a_conversation_still_going_waits_and_a_finished_one_is_read_whole():
     assert S.finished_conversations(earlier + going, NOW + 6 * MIN) == earlier + going
     assert S.finished_conversations(going, NOW) == []
     assert S.finished_conversations([], NOW) == []
-
-
-def test_only_what_changed_counts_not_the_clock():
-    base = S.fingerprint_view(situation())
-    clock = situation(now=(NOW + 9 * MIN).isoformat(),
-                      presence={**situation()["presence"], "duration_minutes": 51.0, "start_time_local": "07:19 AM"},
-                      weather={"city": "Springfield", "temperature": 64, "condition": "Clear"},
-                      reminders={"status": "available", "since": "x", "through": "y", "records": []})
-    assert S.fingerprint_view(clock) == base
-    back = situation(presence={"is_afk": False, "status_label": "AT_KEYBOARD", "duration_minutes": 1.0,
-                               "start_time_local": "08:01 AM", "most_recent_afk": None})
-    assert S.fingerprint_view(back) != base
-    assert S.fingerprint_view(situation("never mind, leave it at 9")) != base
-    assert S.fingerprint_view(situation(calendar_today=[])) != base
 
 
 def test_calendar_work_is_left_out_in_shadow_and_ended_work_is_the_brains_view(monkeypatch):

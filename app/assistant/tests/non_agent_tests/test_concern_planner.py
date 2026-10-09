@@ -3,10 +3,11 @@
 Pins: it runs for an open matter concern whose brief is current and has no plan made from that brief, or
 whose plan's hold has passed; never for a standing concern or before the brief; a plan that failed on this
 brief waits for a change. concern_tasks reads the concern and its entries on the brain's list and answers only
-the changes; the answer is checked (act_now changes an entry, only act_now adds or modifies, changes name entries
-on the list, hold has a future time) and stored against the brief it was made from, its changes applied to the
-list; a brief that changed meanwhile refuses it. The plan's todo is the open entries, and reaches every reader of
-the concern. Scratch register and list; the manager call is a fake. Invented data only.
+the changes it proposes; the answer is checked (act_now changes an entry, only act_now adds or modifies, changes name
+entries on the list, hold has a future time) and stored against the brief it was made from, its proposals with it;
+the list is not touched (2026-10-09: the list decider decides them, subconscious/day_tasks.py); a brief that changed
+meanwhile refuses it. The plan's todo is the open entries as the proposals would leave them, and reaches every reader
+of the concern. Scratch register and list; the manager call is a fake. Invented data only.
 """
 from __future__ import annotations
 
@@ -42,6 +43,12 @@ def _later(hours):
 
 def _new(what, part="tell the owner", when="now", why="It moved."):
     return {"entry": "new", "action": "new", "what": what, "assistant_part": part, "when": when, "why": why}
+
+
+def _decided(lst, changes, cid="c-club"):
+    """The list decider's changes to a concern's entries (brain_list.apply_entries)."""
+    return brain_list.apply_entries("2026-03-10", [{**c, "concern_id": cid, "relies_on": []} for c in changes],
+                                    cause="decided", at=NOW, connect=lst)
 
 
 def test_it_plans_a_briefed_matter_concern_once_per_brief():
@@ -93,7 +100,7 @@ def test_the_answer_is_checked(answer, problem):
     assert concern_planner.problems(cancel, NOW, ["con:a"]) == [], "a cancel comes with any decision"
 
 
-def test_a_plan_is_stored_against_its_brief_its_entries_go_on_the_list_and_reach_the_readers(tmp_path):
+def test_a_plan_is_stored_against_its_brief_with_its_proposals_and_reaches_the_readers(tmp_path):
     reg = ScratchRegister(tmp_path).write({**EMPTY, "active": [_briefed(_matter())]})
     lst = sqlite_file(tmp_path / "list.db")
     seen = []
@@ -110,8 +117,9 @@ def test_a_plan_is_stored_against_its_brief_its_entries_go_on_the_list_and_reach
     [c] = reg.read()["active"]
     assert c["plan"]["todo"][1] == "The eight guests know the new date by September 9"
     assert c["plan"]["basis"] == c["brief"]["basis"]
-    entries = brain_list.entries(concern_id="c-club", connect=lst)
-    assert [e["what"] for e in entries] == c["plan"]["todo"] and all(e["id"].startswith("con:") for e in entries)
+    assert [x["what"] for x in c["plan"]["proposals"]] == c["plan"]["todo"]
+    assert [x["action"] for x in c["plan"]["proposals"]] == ["new", "new"]
+    assert brain_list.entries(concern_id="c-club", connect=lst) == [], "the planner proposes; the list is untouched"
     assert concern_brief.stale(reg.read(), NOW) == [], "storing the plan does not make the brief stale"
     assert concern_planner.run_planners(invoke=invoke, register_connect=reg.connect,
                                         list_connect=lst)["plans_written"] == 0
@@ -135,22 +143,20 @@ def test_a_hold_is_stored_with_its_time_and_an_invalid_answer_is_recorded(tmp_pa
     assert "needs at least one new or modified entry" in b["plan_error"]["error"] and "plan" not in b
 
 
-def test_a_changed_plan_keeps_modifies_and_cancels_entries_by_id(tmp_path):
+def test_a_changed_plan_proposes_modifies_and_cancels_by_id(tmp_path):
     lst = sqlite_file(tmp_path / "list.db")
-    brain_list.apply_concern("c-club", [_new("The guests know the date is the 9th"), _new("The food is ordered")],
-                             cause="first", at=NOW, connect=lst)
+    _decided(lst, [_new("The guests know the date is the 9th"), _new("The food is ordered")])
     guests, food = brain_list.entries(concern_id="c-club", connect=lst)
     seen = []
     answer = {"decision": "act_now", "why": "It moved to the 16th.", "entries": [
         {"entry": guests["id"], "action": "modify", "what": "The guests know the date is the 16th",
          "assistant_part": "email the guests with the owner's go", "when": "now", "why": "The date moved."}]}
-    plan, changes = concern_planner.write_plan(_briefed(_matter()), "active", list_connect=lst,
-                                               invoke=lambda t, i: seen.append(i) or answer)
+    plan = concern_planner.write_plan(_briefed(_matter()), "active", list_connect=lst,
+                                      invoke=lambda t, i: seen.append(i) or answer)
     assert f"[{guests['id']}] The guests know the date is the 9th" in seen[0]
     assert plan["todo"] == ["The guests know the date is the 16th", "The food is ordered"], "the food entry is kept"
-    brain_list.apply_concern("c-club", changes, cause="second", at=NOW, connect=lst)
-    assert [c["change"] for c in brain_list.changes(guests["id"], connect=lst)] == ["created", "modified"]
-    assert [c["change"] for c in brain_list.changes(food["id"], connect=lst)] == ["created"]
+    assert plan["proposals"][0]["entry"] == guests["id"] and plan["proposals"][0]["action"] == "modify"
+    assert [c["change"] for c in brain_list.changes(guests["id"], connect=lst)] == ["created"], "proposed, not applied"
 
 
 def test_a_plan_for_a_brief_that_changed_meanwhile_is_refused(tmp_path):
@@ -165,36 +171,13 @@ def test_the_brief_decides_nothing():
     assert concern_brief._problems(brief, {}) == []
 
 
-def test_a_plan_whose_entries_fail_is_not_stored_and_is_planned_again(tmp_path, monkeypatch):
-    """Until 2026-10-05 the plan was stored first: a failure applying its entries left a current plan whose entries
-    never reached the list, and nothing planned it again."""
-    reg = ScratchRegister(tmp_path).write({**EMPTY, "active": [_briefed(_matter())]})
-    lst = sqlite_file(tmp_path / "list.db")
-    invoke = lambda task, information: {"decision": "act_now", "why": "It moved.", "entries": [_new("Guests told")]}
-
-    def broken(*a, **k):
-        raise OSError("list unavailable")
-    real = brain_list.apply_concern
-    monkeypatch.setattr(brain_list, "apply_concern", broken)
-    assert concern_planner.run_planners(invoke=invoke, register_connect=reg.connect, list_connect=lst) == \
-        {"plans_written": 0, "plans_failed": 1}
-    [c] = reg.read()["active"]
-    assert "plan" not in c and "plan_error" not in c
-    monkeypatch.setattr(brain_list, "apply_concern", real)
-    assert concern_planner.run_planners(invoke=invoke, register_connect=reg.connect,
-                                        list_connect=lst)["plans_written"] == 1
-    assert [e["what"] for e in brain_list.entries(concern_id="c-club", connect=lst)] == ["Guests told"]
-
-
 def test_the_decider_sees_what_it_cancelled_and_why(tmp_path):
     """2026-10-06: the decider re-created a question it had cancelled the night before; it saw only open entries."""
     reg = ScratchRegister(tmp_path).write({**EMPTY, "active": [_briefed(_matter())]})
     lst = sqlite_file(tmp_path / "list.db")
-    brain_list.apply_concern("c-club", [_new("Guests told", part="ask the owner whether the guests were told")],
-                             cause="plan", at=NOW, connect=lst)
+    _decided(lst, [_new("Guests told", part="ask the owner whether the guests were told")])
     [e] = brain_list.entries(concern_id="c-club", connect=lst)
-    brain_list.apply_concern("c-club", [{"entry": e["id"], "action": "cancel", "why": "The evening has passed."}],
-                             cause="plan", at=NOW, connect=lst)
+    _decided(lst, [{"entry": e["id"], "action": "cancel", "why": "The evening has passed."}])
     seen = []
     concern_planner.run_planners(invoke=lambda task, info: seen.append(info) or {"decision": "no_action", "why": "w"},
                                  register_connect=reg.connect, list_connect=lst)

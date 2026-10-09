@@ -80,6 +80,15 @@ On the brain's list for this concern:
 {% else -%}
 (nothing)
 {% endfor %}
+{%- for e in c.cancelled %}{% if loop.first %}Cancelled earlier (decisions already made):
+{% endif %}- {{ e.what }}: cancelled {{ e.updated_at | local_time }}: {{ e.why }}
+{% endfor -%}
+{% if c.plan %}Its planner's proposal, written {{ c.plan.written_at | local_time }}: {{ c.plan.decision | replace("_", " ") }}{% if c.plan.hold_until %} until {{ c.plan.hold_until }}{% endif %}. Why: {{ c.plan.why }}
+{% for x in c.plan.proposals -%}
+- {% if x.action == "new" %}add: {{ x.what }} (the assistant: {{ x.assistant_part }}), {{ x.when }}{% elif x.action == "modify" %}change {% if x.ref %}[{{ x.ref }}]{% else %}an entry no longer open{% endif %} to: {{ x.what }} (the assistant: {{ x.assistant_part }}), {{ x.when }}{% else %}cancel {% if x.ref %}[{{ x.ref }}]{% else %}an entry no longer open{% endif %}{% endif %}. Why: {{ x.why }}
+{% endfor -%}
+{% else %}(its planner has not proposed anything yet)
+{% endif %}
 {% else -%}
 - {% if c.ref is defined %}[{{ c.ref }}] {% endif %}{{ c.title }}{% if c.severity %} (severity: {{ c.severity }}){% endif %}; record last changed {{ c.changed_at | local_time }}
 {% endif -%}

@@ -2,7 +2,8 @@
     this call (`ref`, day_tasks.project) and its data, never its id. Expects agent_input: day, items [{label, times,
     statement, related: [statement], current: the item's entry on the brain's list {decision, assistant_part, when,
     why, decided_at (UTC ISO), covered_by, relies_on_labels, work}, or None}], own [entry with ref, relies_on_labels,
-    work], situation (subconscious/situation.py, rendered by shared/brain/situation.j2), matters (each with `ref`),
+    work], situation (subconscious/situation.py, rendered by shared/brain/situation.j2; each concern with its plan
+    and cancelled entries, day_tasks.with_concerns), matters (each with `ref`),
     earlier (objects an entry relies on that are not otherwise shown), source_labels, correction. Times local. -#}
 {%- set A = agent_input -%}
 {%- macro item(it) %}
@@ -68,5 +69,5 @@
 ## Your previous answer was refused
 {{ A.correction }}
 {% endif %}
-Decide every item not yet on the list, and an item on the list when the day now needs its entry changed. Add your own
-entries for what the day needs that no item asks for.
+Decide every item not yet on the list, and an item on the list when the day now needs its entry changed. Decide each
+concern planner's proposal, and give in entries every other change to the list.
