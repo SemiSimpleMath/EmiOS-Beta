@@ -409,3 +409,34 @@ def test_a_label_written_into_prose_is_malformed():
     assert any("['W3'] written into why" in p for p in D.problems(leaked, _new_items(), labels))
     vitamin = {"decisions": [*GOOD["decisions"][:2], _d("I3", "needed", "remind about vitamin D", "9:00 PM")]}
     assert D.problems(vitamin, _new_items(), labels) == [], "the single letter D is also a word"
+
+
+def test_an_own_entry_for_a_concern_belongs_to_it(tmp_path, monkeypatch):
+    """2026-10-08: an own entry made for a concern carried no link to it. The concern's planner could not see it and
+    made the billing question a second time; the work's outcome did not reach the concern; after its day the entry
+    had no owner. An entry names the concern it serves (its C label); the concern's planner sees it, intake attaches
+    its work to the concern, and it is cancelled when the concern closes."""
+    conn = sqlite_file(tmp_path / "d.db")
+    answer = {**GOOD, "own_entries": [_own(what="Ask whether he slept", part="ask the owner",
+                                           why="His sleep concern is open.") | {"concern": "C1"}]}
+    D.run_day_tasks(now_utc=NOW, connect=conn, gather_inputs=_gather(conn), call=lambda p: answer)
+    [own] = L.entries(day=DAY, kind="day", connect=conn)
+    assert own["concern_id"] == "c-sleep"
+    assert [e["id"] for e in L.entries(concern_id="c-sleep", connect=conn)] == [own["id"]], "the concern sees it"
+    from app.assistant.dayflow_orchestrator import brain_list_intake as B
+    from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+    live = {"calendar": {"mode": "live", "from_day": DAY}, "concern": {"mode": "off", "since": None},
+            "steward": {"mode": "retired"}}
+    monkeypatch.setattr(B, "brief", lambda entry: f"BRIEF of {entry['id']}")
+    out = B.deliver(get_dayflow_work_store(), now_utc=NOW, connect=sqlite_file(tmp_path / "dl.db"), list_connect=conn,
+                    lane_config=live)
+    [work] = [get_dayflow_work_store().load(w) for w in out["created"]
+              if get_dayflow_work_store().load(w).constraints["list_entry_id"] == own["id"]]
+    assert work.constraints["concern_refs"] == ["concern:c-sleep"], "its work is attached to the concern"
+    closed = L.cancel_for_closed_concerns({"active": [], "addressing": [],
+                                           "resolved": [{"concern_id": "c-sleep", "resolution_reason": "sleeps well"}]},
+                                          at=NOW, connect=conn)
+    assert closed == [own["id"]] and L.entries(day=DAY, kind="day", connect=conn) == []
+    labels = {"C1": ["concern", "c-sleep"], "W1": ["work", "w"], "D": ["resource", "r"]}
+    assert "concern 'W1' is not an open concern given" in D.own_problems(
+        {"own_entries": [_own() | {"concern": "W1"}]}, [], labels)[0]

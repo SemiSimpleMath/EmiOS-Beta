@@ -118,7 +118,7 @@ def brief(entry: Dict[str, Any]) -> str:
     entry saw them (day_tasks.decided_placement)."""
     from app.assistant.dayflow_orchestrator.work_context import render_view
     concern_text, belief, sources = "", None, []
-    if entry["kind"] == "concern":
+    if entry.get("concern_id"):            # a concern's entry, or a day's entry made for a concern (2026-10-08)
         from app.assistant.subconscious.brain_step import _evidence_text
         from app.assistant.subconscious.concern_planner import concern_text as render_concern
         from app.assistant.subconscious.concern_store import load_register
@@ -142,7 +142,7 @@ def _shell(entry: Dict[str, Any]) -> Dict[str, Any]:
     goal = objective(entry)
     constraints = {"objective": goal, "success_criteria": entry["what"], "rationale": brief(entry),
                    "source_intake": [], "list_entry_id": entry["id"],
-                   "concern_refs": [f"concern:{entry['concern_id']}"] if entry["kind"] == "concern" else [],
+                   "concern_refs": [f"concern:{entry['concern_id']}"] if entry.get("concern_id") else [],
                    "belief_refs": [entry["belief_key"]] if entry["kind"] == "calendar" else []}
     return {"title": goal, "satisfied_when_kind": "all_owned_children_done", "constraints": constraints,
             "goal_content": render_view("goal_content", objective=goal, sources=[], success_criteria=entry["what"])}

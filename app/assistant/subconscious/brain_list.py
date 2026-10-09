@@ -202,7 +202,10 @@ def apply_day_own(day: str, changes: List[Dict[str, Any]], *, cause: str, at: da
     """The day's tasks' own entries onto the list (2026-10-06): something today needs that no calendar item asks for
     (a calendar event starting, something said, a standing directive applying to the moment). New ones get an id
     (`day:<day>:<hex>`); modify and cancel name it (resolved to its id by the caller); `relies_on` as in
-    apply_calendar. Kind "day": the calendar lane delivers them by their day. Until
+    apply_calendar. An entry that serves a concern carries its `concern_id` (2026-10-08): the concern's planner
+    sees it among the concern's entries and may change or cancel it, intake attaches its work to the concern, and
+    it ends when the concern closes. Until then such an entry was the day's alone, so the concern planner could
+    not see it (it made the billing question a second time) and the work's outcome did not reach the concern. Kind "day": the calendar lane delivers them by their day. Until
     then the decider could only fill a belief's entry, and put other acts into unrelated beliefs' entries."""
     connect = connect or _connect
     ensure_schema(connect)
@@ -217,9 +220,11 @@ def apply_day_own(day: str, changes: List[Dict[str, Any]], *, cause: str, at: da
             entry_id = a["entry"] if a["action"] == "modify" else f"day:{day}:{uuid.uuid4().hex[:8]}"
             result = upsert(c, {
                 "id": entry_id, "kind": "day", "day": day, "belief_key": None, "placement_time": None,
-                "concern_id": None, "what": a["what"], "decision": "needed", "who_acts": "",
+                "concern_id": a.get("concern_id"), "what": a["what"], "decision": "needed", "who_acts": "",
                 "assistant_part": a["assistant_part"], "when_local": a["when"], "covers": [], "why": a["why"]},
                 cause=cause, at=when)
+            # The concern it serves is the entry's own link, kept as the decider last named it.
+            c.execute("UPDATE brain_list_entries SET concern_id = ? WHERE id = ?", (a.get("concern_id"), entry_id))
             if result != "unchanged":
                 _relies_on(c, entry_id, a.get("relies_on"), cause=cause, at=when)
             counts[result] += 1
@@ -263,7 +268,8 @@ def cancel_for_closed_concerns(register: Dict[str, Any], *, at: datetime, connec
     open_ids = {c["concern_id"] for b in ("active", "addressing") for c in register.get(b) or []}
     closed = {c["concern_id"]: (b, c) for b in ("resolved", "dormant") for c in register.get(b) or []}
     with connect(False) as c:
-        rows = c.execute("SELECT id, concern_id FROM brain_list_entries WHERE kind = 'concern' "
+        # Every entry serving a concern: the concern's own, and a day's entry made for it (2026-10-08).
+        rows = c.execute("SELECT id, concern_id FROM brain_list_entries WHERE concern_id IS NOT NULL "
                          "AND status != 'cancelled'").fetchall()
     stale = [(r["id"], r["concern_id"]) for r in rows if r["concern_id"] not in open_ids]
     if not stale:

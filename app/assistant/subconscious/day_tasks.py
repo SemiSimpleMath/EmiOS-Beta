@@ -244,6 +244,7 @@ def project(day: str, situation: Dict[str, Any], matters: List[Dict[str, Any]], 
                                       and cur["entry_id"] in (o["current"].get("covers") or [])), None)
     for e in own:
         e["relies_on_labels"] = [label_of(k, i) for k, i in e.get("relies_on") or []]
+        e["concern_ref"] = label_of("concern", e["concern_id"]) if e.get("concern_id") else None
     for w in [*situation["work"]["in_motion"], *situation["work"]["ended"]]:
         entry = w.get("list_entry")
         label = p.label_of("list_entry", entry) if entry else None
@@ -340,6 +341,9 @@ def own_problems(data: Dict[str, Any], own: List[Dict[str, Any]], labels: Dict[s
         if written:
             out.append(f"own entry {entry}: {written} written into what, assistant_part or why; write it in words "
                        f"and put the reference in relies_on")
+        concern = str(c.get("concern") or "").strip()
+        if concern and (labels.get(concern) or [None])[0] != "concern":
+            out.append(f"own entry {entry}: concern {concern!r} is not an open concern given (its C label)")
     twice = sorted({x for x in seen if seen.count(x) > 1})
     if twice:
         out.append(f"own entries changed more than once: {twice}")
@@ -494,6 +498,7 @@ def run_day_tasks(*, now_utc: Optional[datetime] = None, connect=None,
                                         cause=f"day's tasks {now.isoformat()}", at=now, connect=connect)
     own_changes = [{**{k: str(c.get(k) or "").strip() for k in ("action", "what", "assistant_part", "when", "why")},
                     "entry": "new" if c.get("action") == "new" else resolve(call_labels, c["entry"])[1],
+                    "concern_id": resolve(call_labels, c["concern"])[1] if str(c.get("concern") or "").strip() else None,
                     "relies_on": [resolve(call_labels, x) for x in c.get("relies_on") or []]}
                    for c in data.get("own_entries") or []]
     if own_changes:

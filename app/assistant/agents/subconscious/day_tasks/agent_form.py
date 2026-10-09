@@ -37,6 +37,9 @@ class OwnEntry(BaseModel):
                                             "reminds or asks the owner. Empty for a cancel.")
     when: str = Field(description="The local time it makes sense (e.g. 6:00 PM), or now. Empty for a cancel.")
     why: str = Field(description="Why, in one or two sentences of words; no labels.")
+    concern: str = Field(description="The label (C…) of the open concern this entry serves, when it serves one: "
+                                     "its work then belongs to that concern, and its outcome reaches it. Empty when "
+                                     "it serves no concern.")
     relies_on: List[str] = Field(description="The labels of what prompted it: schedule lines (K), chat (M), work "
                                              "(W), reminders sent (R), concerns (C), concern entries (E), the brain's "
                                              "decisions (B), the standing directives (D).")
