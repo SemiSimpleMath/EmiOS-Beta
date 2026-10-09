@@ -58,13 +58,17 @@ def _last_user_reply(wo) -> dict:
 
 
 def _reply_line(reply: dict) -> str:
-    """One recorded owner reply as the brain reads it: the question, the choice, the words."""
+    """One recorded owner reply as the brain reads it: the question, the choice, the words, and when (local)."""
+    from app.assistant.utils.time_utils import local_time_text
     details = reply.get("response_details") or {}
     history = details.get("response_history") or []
     latest = history[-1] if history else details
     said = str(reply.get("user_text") or latest.get("typed_text") or "").strip()
     choice = str(latest.get("label") or reply.get("action") or "").strip()
+    when = latest.get("responded_at") or reply.get("responded_at")
     parts = [f'The owner was asked: "{reply.get("question")}"'] if reply.get("question") else []
+    if when:
+        parts.append(f"replied {local_time_text(when)}")
     if choice:
         parts.append(f"chose: {choice}")
     if said:
@@ -95,7 +99,7 @@ def _event_text(receipt, concern_titles=()) -> str:
     done and what is still to come), so a reader sees whether the work goes on."""
     payload, kind = receipt['payload'], receipt['outcome']
     work = payload.get('work') or {'title': (payload.get('context') or {}).get('title')}
-    report = {'kind': kind, 'work_id': receipt['work_id'], 'title': work['title'],
+    report = {'kind': kind, 'work_id': receipt['work_id'], 'title': work['title'], 'at': receipt['created_at'],
               'objective': work.get('objective') or work['title'], 'concern_titles': list(concern_titles),
               'progress': payload.get('progress')}
     if kind == 'judged':
@@ -118,6 +122,7 @@ def report_earlier_endings(reopened) -> int:
         added += brain_inbox.add_work_event(
             work_id=w["work_id"], receipt_id=f"rederive-{r['concern_id']}", occurred_at=w["ended"]["at"],
             text=_report_text({'kind': w["ended"]["outcome"], 'work_id': w["work_id"], 'title': w.get("title"),
+                               'at': w["ended"]["at"],
                                'objective': w.get("objective") or w.get("title"),
                                'concern_titles': [r["title"]] if r.get("title") else [],
                                'reason': w["ended"].get("reason"), 'progress': None}))

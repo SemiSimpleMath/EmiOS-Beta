@@ -20,7 +20,7 @@ Health today: {{ s.health or "(no assessment yet)" }}
 ## Today
 {% if s.day_theme %}Day theme: {{ s.day_theme }}
 {% endif %}{% if s.current_status %}Status: {{ s.current_status }}
-{% endif %}Today's schedule:
+{% endif %}Today's schedule ({{ s.day }}):
 {% for e in s.calendar_today -%}
 - {% if e.ref is defined %}[{{ e.ref }}] {% endif %}{{ e.title }} {{ e.start_local }}{% if e.end_local %} - {{ e.end_local }}{% endif %}{% if e.status %} ({{ e.status }}){% endif %}
 {% else -%}

@@ -16,7 +16,7 @@ Health: {{ health_status_summary }}
 {%- endif %}
 {%- if resource_expected_calendar and resource_expected_calendar.expected_schedule %}
 
-## TODAY'S SCHEDULE
+## TODAY'S SCHEDULE ({{ resource_expected_calendar.date }})
 {%- for entry in resource_expected_calendar.expected_schedule %}
 - {{ entry.title }} {{ entry.start_local }}{% if entry.end_local %} - {{ entry.end_local }}{% endif %} ({{ entry.status }})
 {%- endfor %}

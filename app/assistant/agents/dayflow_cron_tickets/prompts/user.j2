@@ -29,7 +29,7 @@
 {%- endif %}
 
 ########## DAILY CONTEXT ##########
-**Expected Schedule:**
+**Expected Schedule ({{ resource_expected_calendar.date }}):**
 {%- for item in resource_expected_calendar.expected_schedule %}
 - {{ item.title }} {{ item.start_local }}{% if item.end_local %} - {{ item.end_local }}{% endif %} ({{ item.status }})
 {%- endfor %}

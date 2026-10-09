@@ -7,7 +7,7 @@
 {% endif %}
 {% endif %}
 {% if resource_expected_calendar and resource_expected_calendar.expected_schedule %}
-**Upcoming schedule:**
+**Upcoming schedule ({{ resource_expected_calendar.date }}):**
 {% for entry in resource_expected_calendar.expected_schedule %}
 - {{ entry.title }} {{ entry.start_local }}{% if entry.end_local %} - {{ entry.end_local }}{% endif %} ({{ entry.status }})
 {% endfor %}

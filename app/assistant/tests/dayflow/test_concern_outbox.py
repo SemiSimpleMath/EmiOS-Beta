@@ -91,7 +91,8 @@ def test_every_judgment_and_the_ending_reach_the_concern_and_the_brain(setup):
         assert f'Made for the concerns: "{concern["title"]}"' in e['text']
     assert 'I have arranged it. Stop asking.' in judged['text']
     assert 'User has arranged maintenance; no further contact.' in judged['text'] and 'achieved' not in judged['text']
-    assert 'ended: done' in ended['text']
+    from app.assistant.utils.time_utils import local_time_text
+    assert f"ended {local_time_text(work['ended']['at'])}: done" in ended['text'], 'the report carries its date'
     for view in (context_builder._render_concern_summary(concern,status='active'),
                  context_builder._render_closed_concern(concern,status='dormant',why='user ownership')):
         assert 'I have arranged it. Stop asking.' in view
@@ -246,7 +247,9 @@ def test_a_concern_whose_work_already_ended_goes_back_to_the_brain(tmp_path,monk
         assert concern_feedback.report_earlier_endings(reopened)==1
         assert concern_feedback.report_earlier_endings(reopened)==0
         [event]=work_events(inbox)
-        assert 'ended: done' in event['text'] and event['gate_status']=='pending'
+        from app.assistant.utils.time_utils import local_time_text
+        ended_at=reg['active'][0]['attached_work'][wid]['ended']['at']
+        assert f'ended {local_time_text(ended_at)}: done' in event['text'] and event['gate_status']=='pending'
         assert 'Made for the concerns:' in event['text']
     finally:
         store.close()

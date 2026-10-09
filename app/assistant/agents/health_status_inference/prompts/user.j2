@@ -38,6 +38,7 @@
 
 **Calendar:**
 {% if resource_expected_calendar and resource_expected_calendar.expected_schedule %}
+({{ resource_expected_calendar.date }})
 {% for event in resource_expected_calendar.expected_schedule %}
 - {{ event.start_local }}{% if event.end_local %}-{{ event.end_local }}{% endif %}: {{ event.title }}{% if event.status %} ({{ event.status }}){% endif %}
 {% endfor %}

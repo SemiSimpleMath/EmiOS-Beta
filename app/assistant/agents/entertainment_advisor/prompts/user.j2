@@ -24,7 +24,7 @@
 ########## SCHEDULE & ROUTINE ##########
 {% if resource_daily_context_generator_output %}
 {% if resource_expected_calendar and resource_expected_calendar.expected_schedule %}
-**Today's Schedule:**
+**Today's Schedule ({{ resource_expected_calendar.date }}):**
 {% for item in resource_expected_calendar.expected_schedule %}
 - {{ item.title }} {{ item.start_local }}{% if item.end_local %} - {{ item.end_local }}{% endif %} ({{ item.status }})
 {% endfor %}

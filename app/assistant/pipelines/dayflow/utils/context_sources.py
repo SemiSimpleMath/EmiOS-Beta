@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -162,14 +162,17 @@ def _load_sleep_output() -> Dict[str, Any]:
         return {}
 
 
-def _format_local_time(dt: Optional[datetime], *, reference_date: Optional[date] = None) -> str:
+# Every time these sources hand a model carries its date (owner: "all messages that are carried need to carry
+# timestamps"). Until 2026-10-08 they were clock times only, and at 5:13 AM the daily context tracker read last
+# night's "9:12 PM - 12:10 AM" activity and "Away Since: 12:07 AM" as the day already lived, and marked the day's
+# 8 AM-5 PM events completed.
+_DATED = "%a %m-%d %I:%M %p"
+
+
+def _format_local_time(dt: Optional[datetime]) -> str:
     if not dt:
         return ""
-    local_dt = utc_to_local(dt)
-    time_str = local_dt.strftime("%I:%M %p")
-    if reference_date and local_dt.date() != reference_date:
-        time_str = local_dt.strftime("%b %d, %I:%M %p")
-    return time_str
+    return utc_to_local(dt).strftime(_DATED)
 
 
 def _is_meeting_event(summary: str, attendees: List[Any]) -> bool:
@@ -179,7 +182,6 @@ def _is_meeting_event(summary: str, attendees: List[Any]) -> bool:
 
 def get_calendar_events_upcoming_for_daily_context(hours: float = 12) -> List[Dict[str, Any]]:
     now = datetime.now(timezone.utc)
-    today_local = utc_to_local(now).date()
     window_end = now + timedelta(hours=hours)
     result: List[Dict[str, Any]] = []
 
@@ -191,8 +193,8 @@ def get_calendar_events_upcoming_for_daily_context(hours: float = 12) -> List[Di
         if start > now and start < window_end:
             entry: Dict[str, Any] = {
                 "summary": event.get("summary", "Untitled"),
-                "start": _format_local_time(start, reference_date=today_local),
-                "end": _format_local_time(end, reference_date=today_local),
+                "start": _format_local_time(start),
+                "end": _format_local_time(end),
             }
             raw_id = str(event.get("id") or "").strip()
             if raw_id:
@@ -427,10 +429,10 @@ def get_recent_afk_intervals(
                         duration = current_afk_minutes
 
             start_local = utc_to_local(trimmed_start)
-            end_local = "ongoing" if is_ongoing else utc_to_local(trimmed_end).strftime("%I:%M %p")
+            end_local = "ongoing" if is_ongoing else utc_to_local(trimmed_end).strftime(_DATED)
             result.append(
                 {
-                    "start_local": start_local.strftime("%I:%M %p"),
+                    "start_local": start_local.strftime(_DATED),
                     "end_local": end_local,
                     "duration_minutes": round(duration, 1),
                     "end_utc": trimmed_end.isoformat(),
@@ -476,7 +478,7 @@ def get_current_presence_status() -> Dict[str, Any]:
                     result["duration_minutes"] = round(float(idle_mins), 1)
                     if idle_mins > 0:
                         start_utc = now_utc - timedelta(minutes=float(idle_mins))
-                        result["start_time_local"] = utc_to_local(start_utc).strftime("%I:%M %p")
+                        result["start_time_local"] = utc_to_local(start_utc).strftime(_DATED)
                 else:
                     active_start_iso = snapshot.get("active_start_utc")
                     if active_start_iso:
@@ -484,7 +486,7 @@ def get_current_presence_status() -> Dict[str, Any]:
                         if active_start and active_start < now_utc:
                             active_mins = (now_utc - active_start).total_seconds() / 60.0
                             result["duration_minutes"] = round(active_mins, 1)
-                            result["start_time_local"] = utc_to_local(active_start).strftime("%I:%M %p")
+                            result["start_time_local"] = utc_to_local(active_start).strftime(_DATED)
 
         # Most recent completed AFK interval (best-effort)
         try:
@@ -507,8 +509,8 @@ def get_current_presence_status() -> Dict[str, Any]:
                         duration = (end_utc - start_utc).total_seconds() / 60.0
                         if duration >= 5:
                             result["most_recent_afk"] = {
-                                "start_local": utc_to_local(start_utc).strftime("%I:%M %p"),
-                                "end_local": utc_to_local(end_utc).strftime("%I:%M %p"),
+                                "start_local": utc_to_local(start_utc).strftime(_DATED),
+                                "end_local": utc_to_local(end_utc).strftime(_DATED),
                                 "duration_minutes": round(duration, 0),
                             }
                             break
@@ -724,7 +726,7 @@ def get_significant_activity_segments(
         # Format as strings
         result: List[str] = []
         for i, seg in enumerate(merged):
-            start_local = utc_to_local(seg["start_utc"]).strftime("%I:%M %p").lstrip("0")
+            start_local = utc_to_local(seg["start_utc"]).strftime(_DATED)
 
             is_last = i == len(merged) - 1
             is_current = seg.get("is_current", False)
@@ -735,7 +737,7 @@ def get_significant_activity_segments(
                 duration_mins = int((now_utc - seg["start_utc"]).total_seconds() / 60)
                 result.append(f"{start_local} {seg['type']} ({duration_mins} min, ongoing)")
             else:
-                end_local = utc_to_local(seg["end_utc"]).strftime("%I:%M %p").lstrip("0")
+                end_local = utc_to_local(seg["end_utc"]).strftime(_DATED)
                 result.append(f"{start_local} - {end_local} {seg['type']}")
 
         return result
@@ -791,9 +793,9 @@ def _format_ticket_for_context(ticket) -> Dict[str, Any]:
         "title": ticket.title or "",
         "message": ticket.message or "",
         "suggestion_type": ticket.suggestion_type or "",
-        "responded_at_local": responded_local.strftime("%I:%M %p") if responded_local else "",
+        "responded_at_local": responded_local.strftime(_DATED) if responded_local else "",
         "responded_at_iso": responded_at.isoformat() if responded_at else "",
-        "snooze_until_local": snooze_until_local.strftime("%I:%M %p") if snooze_until_local else "",
+        "snooze_until_local": snooze_until_local.strftime(_DATED) if snooze_until_local else "",
         "user_comment": ticket.user_text or "",
         "response_details": getattr(ticket, "user_response_parsed", None) or {},
         "user_action": (getattr(ticket, "user_action", "") or "").lower(),

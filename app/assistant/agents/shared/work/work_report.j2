@@ -1,13 +1,14 @@
 {#- A report on work the assistant did, as the brain inbox holds it (subconscious/concern_feedback.py):
     one finalizer judgment or the work's ending, what the work was made for, and where the work stands.
-    Expects `report`: kind (judged | done | abandoned), work_id, title, objective, concern_titles, and
+    Expects `report`: kind (judged | done | abandoned), work_id, title, at (when it was judged or ended, UTC ISO;
+    the text is stored as concern evidence and read on later days, so it carries its date), objective, concern_titles, and
     for judged: task_title, outcome (the finalizer's account), replies (lines), findings (the research
     findings the task recorded, each pod_id, title, body); for an ending: reason;
     progress (work_objects/progress.work_progress) when the report carries it. -#}
 {% if report.kind == "judged" -%}
-Work "{{ report.title }}" ({{ report.work_id }}): the finalizer judged the task "{{ report.task_title }}".
+Work "{{ report.title }}" ({{ report.work_id }}): the finalizer judged the task "{{ report.task_title }}" on {{ report.at | local_time }}.
 {% else -%}
-Work "{{ report.title }}" ({{ report.work_id }}) ended: {{ report.kind }}.
+Work "{{ report.title }}" ({{ report.work_id }}) ended {{ report.at | local_time }}: {{ report.kind }}.
 {% endif -%}
 Objective: {{ report.objective }}
 {% if report.concern_titles %}Made for the concerns: {% for t in report.concern_titles %}"{{ t }}"{% if not loop.last %}; {% endif %}{% endfor %}

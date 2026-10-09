@@ -60,7 +60,9 @@ def test_a_needed_entry_becomes_a_shell_once(scratch):
     wo = _store().load(work_id)
     c = wo.constraints
     assert c["list_entry_id"] == L.calendar_id(DAY, "B3") and c["belief_refs"] == ["B3"] and c["concern_refs"] == []
-    assert c["objective"] == "set the AC to 70 (when: 9:00 PM)" and c["rationale"] == f"BRIEF of {c['list_entry_id']}"
+    # dated (2026-10-08): the calendar day, and when the entry was decided
+    assert c["objective"] == "set the AC to 70 (for Tue 03-10; when: 9:00 PM; decided Tue 03-10 08:00 AM)"
+    assert c["rationale"] == f"BRIEF of {c['list_entry_id']}"
     assert wo.status == "active" and not any(wo.is_work_unit(n) for n in wo.nodes.values()), "the architect plans it"
     assert _deliver(scratch)["created"] == [], "a change is acted on once"
 
@@ -72,7 +74,7 @@ def test_a_changed_entry_revises_its_work_and_leaves_a_durable_replan(scratch):
     out = _deliver(scratch, at=NOW + timedelta(minutes=6))
     assert out["revised"] == [work_id]
     c = _store().load(work_id).constraints
-    assert c["objective"] == "set the AC to 70 (when: 8:30 PM)"
+    assert c["objective"] == "set the AC to 70 (for Tue 03-10; when: 8:30 PM; decided Tue 03-10 08:05 AM)"
     [instruction] = c["architect_instructions"]
     assert instruction["kind"] == "replan" and instruction["from"] == "brain" and not instruction.get("consumed_at")
 

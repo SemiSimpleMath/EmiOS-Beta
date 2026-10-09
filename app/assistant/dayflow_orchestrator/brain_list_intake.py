@@ -99,7 +99,17 @@ def _lane_mode(entry: Dict[str, Any], config: Dict[str, Any]) -> str:
 # ── what a shell carries ─────────────────────────────────────────────────────
 
 def objective(entry: Dict[str, Any]) -> str:
-    return f"{entry['what']} (when: {entry['when_local']})" if entry["when_local"] else entry["what"]
+    """The outcome with its moment, dated: a calendar entry names its day, and every entry when it was decided, which
+    anchors a bare or relative when ("9:00 PM", "now", "Thursday, 7:00 PM"). Until 2026-10-08 it was `what (when:
+    9:00 PM)`, and the architect ended that evening's phone-charge reminder as already achieved by the day before's."""
+    from app.assistant.utils.time_utils import local_time_text
+    parts = []
+    if entry["kind"] == "calendar":
+        parts.append(f"for {datetime.strptime(entry['day'], '%Y-%m-%d').strftime('%a %m-%d')}")
+    if entry["when_local"]:
+        parts.append(f"when: {entry['when_local']}")
+    parts.append(f"decided {local_time_text(entry['updated_at'])}")
+    return f"{entry['what']} ({'; '.join(parts)})"
 
 
 def brief(entry: Dict[str, Any]) -> str:
