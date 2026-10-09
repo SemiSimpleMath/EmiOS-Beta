@@ -2,8 +2,8 @@
 
 Pins: each placement is offered once (belief and time), labelled in order; one done elsewhere or more than an hour
 past is not offered; every item not yet on the list is decided once, a needed one names the assistant's part and
-when, and covers only name other items; an item on the list keeps its entry when the answer leaves it out, and a
-change to it must cite a fact newer than the entry (refused otherwise: one correction round, then raised); a run is
+when, and covers only name other items; an item on the list keeps its entry when the answer leaves it out, and the
+answer's change to it goes through (2026-10-08: no newer-fact gate); a run is
 recorded, and repeated only when something it read has changed; nothing is handed to dayflow; the comparison sets
 the list's entries beside what dayflow did with the same beliefs; the prompts render the rules, the two groups of
 items, the labelled facts and the brain's situation, times local. Scratch database; fake agent; invented data only.
@@ -59,9 +59,9 @@ def _gather(conn, chat="I'll start the report at 5", refs=None):
     return gather
 
 
-def _d(item, decision, part="", when="", covers=(), why="w", new_since=()):
+def _d(item, decision, part="", when="", covers=(), why="w"):
     return {"item": item, "decision": decision, "assistant_part": part, "when": when, "covers": list(covers),
-            "why": why, "new_since": list(new_since)}
+            "why": why}
 
 
 GOOD = {"decisions": [
@@ -108,22 +108,17 @@ def test_every_new_item_is_decided_once(change, problem):
     assert D.problems(GOOD, _new_items(), {}) == []
 
 
-def test_an_item_on_the_list_changes_only_with_something_newer():
+def test_an_item_on_the_list_is_kept_when_left_out_and_changed_when_decided():
     items = _new_items()
     items[2]["current"] = {"decision": "needed", "assistant_part": "set the AC to 70", "when": "9:00 PM", "why": "w",
                            "decided_at": NOW.isoformat()}
-    refs = {"M1": (NOW - timedelta(hours=1)).isoformat(), "M2": (NOW + timedelta(minutes=5)).isoformat()}
     keep = {"decisions": GOOD["decisions"][:2]}
-    assert D.problems(keep, items, refs) == [], "left out is kept"
-    moved = lambda since: {"decisions": [*GOOD["decisions"][:2],
-                                          _d("I3", "needed", "set the AC to 70", "8:30 PM", new_since=since)]}
-    assert any("nothing cited is newer" in p for p in D.problems(moved([]), items, refs))
-    assert any("nothing cited is newer" in p for p in D.problems(moved(["M1"]), items, refs)), "older than the entry"
-    assert any("not labels given" in p for p in D.problems(moved(["M9"]), items, refs))
-    assert D.problems(moved(["M2"]), items, refs) == []
+    assert D.problems(keep, items, {}) == [], "left out is kept"
+    moved = {"decisions": [*GOOD["decisions"][:2], _d("I3", "needed", "set the AC to 70", "8:30 PM")]}
+    assert D.problems(moved, items, {}) == [], "the decision goes through"
 
 
-def test_a_run_decides_the_new_keeps_the_rest_and_changes_only_on_something_newer(tmp_path):
+def test_a_run_decides_the_new_keeps_the_rest_and_applies_a_change(tmp_path):
     conn = sqlite_file(tmp_path / "d.db")
     calls = []
     call = lambda answer: (lambda payload: calls.append(payload) or answer)
@@ -137,8 +132,7 @@ def test_a_run_decides_the_new_keeps_the_rest_and_changes_only_on_something_newe
                           call=call({"decisions": []}))
     assert out["day_list_changes"] == {"created": 0, "modified": 0, "unchanged": 0, "kept": 3}
     assert calls[-1]["items"][2]["current"]["when"] == "9:00 PM", "the decider sees each entry it would keep"
-    move = {"decisions": [_d("I3", "needed", "set the AC to 70", "8:30 PM", new_since=["M1"],
-                             why="The owner asked for 8:30 today.")]}
+    move = {"decisions": [_d("I3", "needed", "set the AC to 70", "8:30 PM", why="The owner asked for 8:30 today.")]}
     out = D.run_day_tasks(now_utc=later + timedelta(minutes=10), connect=conn,
                           gather_inputs=_gather(conn, "AC at 8:30 today", refs={"M1": (later + timedelta(minutes=5)).isoformat()}),
                           call=call(move))
@@ -147,18 +141,20 @@ def test_a_run_decides_the_new_keeps_the_rest_and_changes_only_on_something_newe
     assert ac["when_local"] == "8:30 PM" and ac["who_acts"] == ""
 
 
-def test_a_change_with_nothing_new_is_refused_after_one_correction(tmp_path):
+def test_a_re_decision_with_nothing_newer_goes_through(tmp_path):
+    """2026-10-08: an entry re-decided at 06:12 could never change again, because the only fact about it (its work's
+    ending) was older than the entry; 40 answers were refused and 11 brain passes failed. The decision goes through
+    in one call."""
     conn = sqlite_file(tmp_path / "d.db")
     D.run_day_tasks(now_utc=NOW, connect=conn, gather_inputs=_gather(conn), call=lambda p: GOOD)
     rejudge = {"decisions": [_d("I2", "not_needed", why="On reflection the heads-up is not needed.")]}
     seen = []
-    with pytest.raises(ValueError, match="still invalid"):
-        D.run_day_tasks(now_utc=NOW + timedelta(minutes=10), connect=conn,
-                        gather_inputs=_gather(conn, "something else"),
-                        call=lambda p: seen.append(p.get("correction")) or rejudge)
-    assert seen[0] is None and "I2 is on the list since" in seen[1] and "leave it out to keep it" in seen[1]
+    out = D.run_day_tasks(now_utc=NOW + timedelta(minutes=10), connect=conn,
+                          gather_inputs=_gather(conn, "something else"),
+                          call=lambda p: seen.append(p.get("correction")) or rejudge)
+    assert seen == [None] and out["day_list_changes"]["modified"] == 1
     [dinner] = [e for e in L.entries(day=DAY, connect=conn) if e["belief_key"] == "B2"]
-    assert dinner["decision"] == "needed", "the refused change wrote nothing"
+    assert dinner["decision"] == "not_needed"
 
 
 def test_no_plan_or_no_placements_costs_nothing(tmp_path):
@@ -186,7 +182,8 @@ def test_the_prompts_carry_the_rules_the_two_groups_and_the_labelled_situation()
            "resource_assistant_capabilities": "Device control: the thermostat.",
            "resource_owner_standing_directives": "Wellness nudges are separate cron reminders."}
     system = _ENV.get_template("subconscious/day_tasks/prompts/system.j2").render(**res)
-    assert "stays as it is when you leave it out" in system and "Name those labels in new_since" in system
+    assert "stays as it is when you leave it out" in system and "for the reason shown" in system
+    assert "new_since" not in system
     assert "A HEADS-UP is the opposite and belongs exactly on the boundary" in system      # when_to_interrupt.j2
     assert "You are helping the user's day go well" in system                              # stewardship.j2
     assert "Wellness nudges are separate cron reminders." in system and "Device control: the thermostat." in system
@@ -203,7 +200,7 @@ def test_the_prompts_carry_the_rules_the_two_groups_and_the_labelled_situation()
     assert "[I1] All day: The owner sometimes starts the weekly report on Sunday." in new_part
     assert "    read with: The owner likes it quiet." in new_part
     assert "[I3] At 9:00 PM" in listed_part
-    assert f"on the list since {local_time_text(NOW.isoformat())}: needed: set the AC to 70, 9:00 PM" in listed_part
+    assert f"on the list since {local_time_text(NOW.isoformat())}: needed: set the AC to 70, 9:00 PM. Why: w" in listed_part
     assert f"[M1] [{local_time_text(NOW.isoformat())}] Owner: I'll start the report at 5" in user
     assert "- [C1] Sleep is poor (severity: medium); record last changed" in user
     assert "The owner is away from the keyboard, since 07:18 AM (42 minutes)." in user
@@ -243,8 +240,8 @@ def test_the_brain_s_view_concerns_in_full_with_their_entries_and_today_s_decisi
     items[1]["current"] = {"decision": "needed", "assistant_part": "tell the owner dinner is starting", "when": "6:00 PM",
                            "why": "w", "decided_at": NOW.isoformat()}
     drop = {"decisions": [GOOD["decisions"][0], GOOD["decisions"][2],
-                          _d("I2", "not_needed", why="E1 covers it: the family eats out.", new_since=["E1"])]}
-    assert D.problems(drop, items, refs) == [], "a concern's newer entry licenses the change"
+                          _d("I2", "not_needed", why="E1 covers it: the family eats out.")]}
+    assert D.problems(drop, items, refs) == []
     user = _ENV.get_template("subconscious/day_tasks/prompts/user.j2").render(
         agent_input={"day": DAY, "items": items, "own": [], "situation": s, "matters": matters, "correction": None})
     assert "### [C1] Dinner out tonight" in user and "THE WHOLE RECORD of c-dinner (active)" in user
@@ -302,18 +299,17 @@ def _own(entry="new", action="new", what="Ask whether the owner is clocked in", 
             "cites": list(cites)}
 
 
-def test_an_own_entry_cites_what_prompted_it_and_changes_only_on_something_newer():
+def test_an_own_entry_cites_what_prompted_it():
     """On 2026-10-06 the decider, with nowhere to put an act no belief asked for, wrote a clock-in check into the
-    encouragement belief's entry and a dinner question into family time's. An own entry carries such an act; it cites
-    a label given; the schedule (K) and the standing directives (D) date from the day's start, so they justify a new
-    entry but never a change to one made today."""
+    encouragement belief's entry and a dinner question into family time's. An own entry carries such an act and
+    cites a label given; a modify or cancel goes through (2026-10-08: no newer-fact gate)."""
     refs = {"K1": "2026-03-10T12:00:00+00:00", "D": "2026-03-10T12:00:00+00:00", "M1": NOW.isoformat()}
     assert D.own_problems({"own_entries": [_own()]}, [], refs) == []
     assert "cites names nothing" in D.own_problems({"own_entries": [_own(cites=())]}, [], refs)[0]
     assert "not labels given" in D.own_problems({"own_entries": [_own(cites=("X9",))]}, [], refs)[0]
     made = {"id": "day:2026-03-10:ab", "updated_at": (NOW - timedelta(minutes=30)).isoformat()}
-    stale = D.own_problems({"own_entries": [_own(entry=made["id"], action="modify", cites=("K1", "D"))]}, [made], refs)
-    assert "nothing cited is newer" in stale[0]
+    assert D.own_problems({"own_entries": [_own(entry=made["id"], action="modify", cites=("K1", "D"))]},
+                          [made], refs) == []
     assert D.own_problems({"own_entries": [_own(entry=made["id"], action="cancel", what="", part="", when="",
                                                 cites=("M1",))]}, [made], refs) == []
     assert "not one of your own entries" in D.own_problems({"own_entries": [_own(entry="day:x", action="modify")]},

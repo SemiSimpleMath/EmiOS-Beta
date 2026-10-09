@@ -18,14 +18,14 @@
 {% else %}
 (none)
 {% endfor %}
-### Already on the list (each stays as it is unless something new since it was decided changes it)
+### Already on the list (each stays as it is unless the day now needs it changed)
 {% for it in A["items"] if it.current %}{{ item(it) }}
-    on the list since {{ it.current.decided_at | local_time }}: {% if it.current.decision == "needed" %}needed: {{ it.current.assistant_part }}, {{ it.current.when }}{% else %}{{ it.current.decision | replace("_", " ") }}: {{ it.current.why }}{% endif %}
+    on the list since {{ it.current.decided_at | local_time }}: {% if it.current.decision == "needed" %}needed: {{ it.current.assistant_part }}, {{ it.current.when }}. Why: {{ it.current.why }}{% else %}{{ it.current.decision | replace("_", " ") }}: {{ it.current.why }}{% endif %}
 {% if it.current.work is defined and it.current.work %}{% with w = it.current.work, pad = "    " %}{% include 'shared/brain/entry_work.j2' %}{% endwith %}{% endif -%}
 {% else %}
 (none)
 {% endfor %}
-### Your own entries today (each stays as it is unless something new since it was made changes it)
+### Your own entries today (each stays as it is unless the day now needs it changed)
 {% for e in A.own %}- [{{ e.id }}] {{ e.what }} | the assistant: {{ e.assistant_part }} | when: {{ e.when_local }} | {{ e.status }}, made {{ e.updated_at | local_time }}: {{ e.why }}
 {% if e.work %}{% with w = e.work, pad = "    " %}{% include 'shared/brain/entry_work.j2' %}{% endwith %}{% endif -%}
 {% else %}
@@ -53,5 +53,5 @@
 ## Your previous answer was refused
 {{ A.correction }}
 {% endif %}
-Decide every item not yet on the list, and an item on the list only when something new changes it. Add your own
+Decide every item not yet on the list, and an item on the list when the day now needs its entry changed. Add your own
 entries for what the day needs that no item asks for.

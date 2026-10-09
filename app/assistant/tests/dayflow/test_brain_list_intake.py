@@ -4,8 +4,8 @@ Pins: with every lane off nothing happens; in a live lane an entry decided neede
 code (objective = the outcome and when, the brief, the entry id and its belief or concern in the constraints) and
 each change is acted on once; a changed entry with active work is revised and a re-plan instruction left on it in
 the same commit (any change the list records, the assistant's part included); an entry
-decided not needed, or cancelled, sends an end instruction with the brain's reason; an entry changed after its work
-ended is recorded only; an entry before the lane's start is left to the steward; a dry run makes nothing and leaves
+decided not needed, or cancelled, sends an end instruction with the brain's reason; an entry still decided needed
+after its work ended gets new work (2026-10-08); an entry before the lane's start is left to the steward; a dry run makes nothing and leaves
 the changes for the live run. Scratch list and deliveries; the dayflow test store; the brief is a fake.
 """
 from __future__ import annotations
@@ -38,7 +38,7 @@ def scratch(tmp_path, monkeypatch):
 def _decide(lst, decision="needed", when="9:00 PM", day=DAY, at=NOW, belief="B3", part="set the AC to 70"):
     item = {"label": "I1", "belief_key": belief, "times": ["9:00 PM"], "statement": "The owner wants the AC at 70."}
     d = {"item": "I1", "decision": decision, "assistant_part": part if decision == "needed" else "",
-         "when": when if decision == "needed" else "", "covers": [], "why": "A standing wish.", "new_since": []}
+         "when": when if decision == "needed" else "", "covers": [], "why": "A standing wish."}
     return L.apply_calendar(day, [item], [d], cause="test", at=at, connect=lst)
 
 
@@ -49,8 +49,7 @@ def _deliver(scratch, config=LIVE, at=NOW):
 
 def test_with_every_lane_off_nothing_happens(scratch):
     _decide(scratch[0])
-    assert _deliver(scratch, OFF) == {"created": [], "revised": [], "ended": [], "recorded": [], "dry_run": [],
-                                      "failed": []}
+    assert _deliver(scratch, OFF) == {"created": [], "revised": [], "ended": [], "dry_run": [], "failed": []}
     assert _store().list_work_objects() == []
 
 
@@ -102,15 +101,19 @@ def test_not_needed_or_cancelled_ends_the_work_with_the_brains_reason(scratch):
     assert _deliver(scratch)["ended"] == [other], "a cancelled entry ends its work"
 
 
-def test_a_change_after_the_work_ended_is_recorded_only(scratch):
+def test_an_entry_still_needed_after_its_work_ended_gets_new_work(scratch):
+    """2026-10-08: the architect ended the evening's phone-charge reminder as a duplicate of the day before's, the
+    brain re-decided the entry needed, and intake only recorded it: no work, no reminder. The brain's decision goes
+    through."""
     lst, _ = scratch
     _decide(lst)
     [work_id] = _deliver(scratch)["created"]
     store = _store()
-    store.apply("set_work_status", {"work_id": work_id, "status": "done", "reason": "set at 9 PM"}, actor="test")
+    store.apply("set_work_status", {"work_id": work_id, "status": "abandoned", "reason": "duplicate"}, actor="test")
     _decide(lst, when="8:30 PM", at=NOW + timedelta(minutes=5))
     out = _deliver(scratch)
-    assert out["recorded"] == [L.calendar_id(DAY, "B3")] and out["created"] == [] and out["revised"] == []
+    assert out["revised"] == [] and len(out["created"]) == 1 and out["created"][0] != work_id
+    assert "8:30 PM" in store.load(out["created"][0]).title
 
 
 def test_a_day_before_the_lane_starts_stays_the_stewards(scratch):

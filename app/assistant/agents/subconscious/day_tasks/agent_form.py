@@ -18,9 +18,6 @@ class Decision(BaseModel):
                                           "also covers. Every other decision leaves it empty; a covered item names the "
                                           "item that covers it in why.")
     why: str = Field(description="Why, in one or two sentences. For an item another task covers, name that item.")
-    new_since: List[str] = Field(description="Only for an item already on the list: the labels (M, W, R, C, E, B) of what "
-                                             "you read that is new since its entry was decided and changes it. Empty "
-                                             "for an item not yet on the list.")
 
 
 class OwnEntry(BaseModel):
@@ -35,16 +32,15 @@ class OwnEntry(BaseModel):
     why: str = Field(description="Why, naming what prompted it, in one or two sentences.")
     cites: List[str] = Field(description="The labels of what prompted it: schedule lines (K), chat (M), work (W), "
                                          "reminders sent (R), concerns (C), concern entries (E), the brain's decisions "
-                                         "(B), the standing directives (D). A modify or cancel names something new "
-                                         "since the entry was made.")
+                                         "(B), the standing directives (D).")
 
 
 class AgentForm(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     decisions: List[Decision] = Field(description="A decision for every item not yet on the list, and one for each "
-                                                  "item on the list that something new changes. An item on the list "
-                                                  "you leave out keeps its entry as it is.")
+                                                  "item on the list whose entry the day now needs changed. An item on "
+                                                  "the list you leave out keeps its entry as it is.")
     own_entries: List[OwnEntry] = Field(description="Your own entries for the day: something today needs that no item "
                                                     "asks for, and changes to your own entries made earlier. Empty when "
                                                     "nothing is needed.")

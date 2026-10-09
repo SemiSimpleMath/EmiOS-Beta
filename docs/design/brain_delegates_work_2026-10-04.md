@@ -193,9 +193,10 @@ key-dates builder speaks for the romance proposer. The table `brain_day_decision
 text: 43 modifications, of which about 30 were rewordings ("the assistant" become "assistant"; covers dropped in one
 run and restored in the next; a reminder that grew a clause each run) and about 6 were re-judgments with nothing
 new ("The existing rationale incorrectly says…"). Now, as the steward and the architect: an item not yet on the list
-is decided; an item on the list keeps its entry when the answer leaves it out; a change must name in `new_since` a
-fact it read that is newer than the entry (each chat message, work, reminder sent and concern carries a label, M1,
-W1, R1, C1; `day_tasks.label_refs`), or it is refused like an unlicensed prune; a placement done elsewhere or more than
+is decided; an item on the list keeps its entry when the answer leaves it out; a change goes through (2026-10-05
+to 2026-10-08 a change had to name in `new_since` a fact newer than the entry or was refused; removed when the gate
+refused a correct re-decision 40 times in a day: the decider now reads each entry with its reason and its work's
+ending instead); a placement done elsewhere or more than
 an hour past is not offered again; an entry is cancelled only when its placement leaves the day's plan. `who_acts` is
 gone from day_tasks (an entry is the assistant's own task). Three runs on the live inputs against a copy of the day's
 42 entries: no list change in any (one decision restated with the same meaning, kept).
@@ -693,8 +694,8 @@ notice the moment as the steward did ("ah, time to send a reminder, a context sw
 - Own entries (kind `day`, id `day:<day>:<hex>`, brain_list.apply_day_own): what today needs that no item asks for,
   each citing what prompted it: a schedule line (K), chat (M), work (W), a reminder (R), a concern (C) or its entry (E),
   the brain's decision (B), the standing directives (D). The calendar lane delivers them by their day.
-- K and D date from the day's start: they justify a new entry, never a change to one made today; a change or a cancel
-  cites something newer (day_tasks.own_problems).
+- A change or a cancel of an own entry cites what shows it; since 2026-10-08 nothing requires the cited fact to be
+  newer than the entry (day_tasks.own_problems).
 - Work in the situation is marked with the entry it was made from (day_tasks.mark_list_work), so a decider never takes
   an entry's own work for a separate fact that covers it.
 Next (owner, 2026-10-06): AFK/presence transitions as brain events, which an own entry can cite.

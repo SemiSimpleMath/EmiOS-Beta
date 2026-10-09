@@ -21,9 +21,9 @@ ITEMS = [{"label": "I1", "belief_key": "B3", "times": ["9:00 PM"], "statement": 
 
 def _decision(when="9:00 PM", why="A standing wish."):
     return [{"item": "I1", "decision": "needed", "assistant_part": "set the AC to 70",
-             "when": when, "covers": ["I2"], "why": why, "new_since": []},
+             "when": when, "covers": ["I2"], "why": why},
             {"item": "I2", "decision": "not_needed", "assistant_part": "", "when": "", "covers": [],
-             "why": "Covered by I1.", "new_since": []}]
+             "why": "Covered by I1."}]
 
 
 def test_a_changed_decision_is_a_modification_of_the_same_entry(tmp_path):

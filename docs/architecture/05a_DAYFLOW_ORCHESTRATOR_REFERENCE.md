@@ -419,8 +419,8 @@ and before `work_architect_node`; logic in `dayflow_orchestrator/brain_list_inta
 For each brain-list entry with undelivered changes in a non-off lane (`configs/brain_lanes.json`):
 create a work-object shell (goal only, `constraints.list_entry_id`, `concern_refs` from a concern
 entry, `belief_refs` from a calendar entry), revise active work (one batch: `revise_goal` +
-`instruct_goal kind=replan`), end active work (`instruct_goal kind=end`), or record a change to
-ended work (`work_ended_not_reopened`). Each change is recorded once in `brain_list_deliveries`;
+`instruct_goal kind=replan`), or end active work (`instruct_goal kind=end`); an entry still needed
+after its work ended gets new work (2026-10-08). Each change is recorded once in `brain_list_deliveries`;
 `dry_run` records and does nothing. One entry's failure is logged and retried next tick; failing to
 read the list raises. Full description: 05_DAYFLOW, "Brain list intake".
 

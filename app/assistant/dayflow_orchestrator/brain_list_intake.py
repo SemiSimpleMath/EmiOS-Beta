@@ -13,8 +13,11 @@ judges nothing; the entry already says what is needed:
   the same commit, licensed as the brain's directive (until 2026-10-05 only a changed what or when counted, and the
   re-plan request lived on the tick's blackboard);
 - an entry cancelled, or decided not needed, while its work is active: an end instruction with the brain's reason;
-- an entry changed after its work ended: recorded only. A done entry runs again only by a new decision, never by a
-  rewording (the design's rule for a modified entry whose work ended).
+- an entry still decided needed after its work ended: new work is made from it. Until 2026-10-08 such a change was
+  recorded only ("a done entry runs again only by a new decision, never by a rewording"); on 10-08 the architect
+  ended the evening's phone-charge reminder as a duplicate of the day before's, the brain re-decided it needed with
+  the reason, and nothing could make the work again (owner: "you have a gate keeper not letting a decision
+  through"). The decider reads each entry with its work's ending, so a needed entry over ended work is its decision.
 
 Which entries are the brain's to delegate is set per lane in configs/brain_lanes.json (off, dry_run, live): the
 calendar lane from a day on, the concern lane from a moment on. A lane that is live stops reaching the steward
@@ -39,7 +42,7 @@ SCHEMA = """CREATE TABLE IF NOT EXISTS brain_list_deliveries (
     action TEXT NOT NULL,
     work_id TEXT,
     PRIMARY KEY (change_id, mode))"""
-# action: create | revise | end | none | work_ended_not_reopened. mode: live | dry_run.
+# action: create | revise | end | none (work_ended_not_reopened in rows before 2026-10-08). mode: live | dry_run.
 
 _ACTIVE = ("active", "blocked")
 
@@ -154,17 +157,15 @@ def _decide(entry: Dict[str, Any], work: Optional[Dict[str, Any]]) -> str:
     active = work is not None and work["status"] in _ACTIVE
     if entry["status"] == "cancelled" or entry["decision"] != "needed":
         return "end" if active else "none"
-    if work is None:
-        return "create"
     if not active:
-        return "work_ended_not_reopened"
+        return "create"
     return "revise"
 
 
 def deliver(store, *, now_utc: Optional[datetime] = None, connect=None, list_connect=None,
             lane_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Act on every change on the brain's list not yet delivered in its lane's mode, one entry at a time (its newest
-    state stands for all its changes). Returns {created, revised, ended, recorded, dry_run} work and entry ids, and
+    state stands for all its changes). Returns {created, revised, ended, dry_run} work and entry ids, and
     `failed`: entries whose action raised. Reading the list raises; one entry's failure is logged ERROR and left
     undelivered for the next tick, and the other entries go on (2026-10-05: until then one entry that could not be
     briefed stopped every planning tick)."""
@@ -175,8 +176,7 @@ def deliver(store, *, now_utc: Optional[datetime] = None, connect=None, list_con
     ensure_schema(connect)
     brain_list.ensure_schema(list_connect)
     config = lane_config or lanes()
-    out: Dict[str, List[Any]] = {"created": [], "revised": [], "ended": [], "recorded": [], "dry_run": [],
-                                 "failed": []}
+    out: Dict[str, List[Any]] = {"created": [], "revised": [], "ended": [], "dry_run": [], "failed": []}
     if config["calendar"]["mode"] == "off" and config["concern"]["mode"] == "off":
         return out
     with (list_connect or _connect)(False) as c:
@@ -201,8 +201,8 @@ def deliver(store, *, now_utc: Optional[datetime] = None, connect=None, list_con
                          entry_id, exc, exc_info=True)
             step("list_intake", "failed: left for the next tick", subject=entry_id, error=f"{type(exc).__name__}: {exc}")
             out["failed"].append(entry_id)
-    logger.info("[brain_list_intake] created=%s revised=%s ended=%s recorded=%s dry_run=%s failed=%s", out["created"],
-                out["revised"], out["ended"], out["recorded"], out["dry_run"], out["failed"])
+    logger.info("[brain_list_intake] created=%s revised=%s ended=%s dry_run=%s failed=%s", out["created"],
+                out["revised"], out["ended"], out["dry_run"], out["failed"])
     return out
 
 
@@ -240,8 +240,6 @@ def _deliver_entry(store, entry: Dict[str, Any], change_ids: List[int], work: Op
         store.apply("instruct_goal", {"work_id": work_id, "kind": "end", "reason": f"The brain: {reason}"},
                     actor="brain")
         out["ended"].append(work_id)
-    elif action == "work_ended_not_reopened":
-        out["recorded"].append(entry_id)
     if mode == "live":
         step("list_intake", action, subject=entry_id, work_id=work_id, outcome=entry["what"])
     with connect(True) as c:

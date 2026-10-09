@@ -18,12 +18,15 @@ On a day the steward still holds, the situation leaves out work made from the ca
 and the brain must not copy it. On a live day it is the brain's own and is shown.
 
 A run decides as the steward and the architect do (2026-10-04): once, then only what changes. A placement not yet on
-the list is decided; a placement on the list keeps its entry unless the answer changes it, and a change must cite a
-fact it read that is newer than the entry (a chat message, work, a reminder sent, a concern; each labelled in the
-input). Until then every run re-decided the whole day and code compared the text: of 43 changes on 2026-10-05
-morning about 30 were rewordings, dropped and restored covers, or "the assistant" become "assistant", and about 6
-were re-judgments with nothing new. A placement done elsewhere, or a clock-time one more than an hour past, is not
-offered again.
+the list is decided; a placement on the list keeps its entry unless the answer changes it. Until then every run
+re-decided the whole day and code compared the text: of 43 changes on 2026-10-05 morning about 30 were rewordings,
+dropped and restored covers, or "the assistant" become "assistant", and about 6 were re-judgments with nothing new.
+From 2026-10-05 a change had to cite a fact newer than the entry, or the answer was refused. Removed 2026-10-08 (owner:
+"you have a gate keeper not letting a decision through"): an entry re-decided at 06:12 because the architect had ended
+its work as a duplicate of the day before's reminder could never be changed again, since the only fact about it, the
+work's ending, was older than the entry; 40 answers were refused and 11 brain passes failed that day. The decider now
+reads each entry with the reason it was decided and what became of its work, and its decision goes through. A
+placement done elsewhere, or a clock-time one more than an hour past, is not offered again.
 
 It reads what the brain knows, not a part of it (owner, 2026-10-04: it "sees less than brain"): besides the
 situation, every open concern in full as the brain's agents read it (its record, brief, attempts and journal,
@@ -201,9 +204,7 @@ def label_refs(situation: Dict[str, Any], matters: List[Dict[str, Any]] = ()) ->
 
 def own_problems(data: Dict[str, Any], own: List[Dict[str, Any]], refs: Dict[str, str]) -> List[str]:
     """The own entries: a new one is entry "new"; a modify or cancel names one of today's own entries; new and modify
-    name the outcome, the assistant's part and when; every one says why and cites labels given; a modify or cancel
-    cites something newer than the entry."""
-    from app.assistant.utils.time_utils import local_time_text, parse_iso_utc
+    name the outcome, the assistant's part and when; every one says why and cites labels given."""
     changes = data.get("own_entries")
     if changes is None:
         return []
@@ -235,11 +236,6 @@ def own_problems(data: Dict[str, Any], own: List[Dict[str, Any]], refs: Dict[str
             out.append(f"own entry {entry}: cites names nothing; name what prompted it")
         elif unknown:
             out.append(f"own entry {entry}: cites {unknown}, which are not labels given")
-        elif action != "new":
-            since = parse_iso_utc(by_id[entry]["updated_at"])
-            if not any(parse_iso_utc(refs[x]) > since for x in cites):
-                out.append(f"own entry {entry} was made {local_time_text(by_id[entry]['updated_at'])} and nothing cited is "
-                           f"newer: leave it as it is, or cite what is new since then")
     twice = sorted({x for x in seen if seen.count(x) > 1})
     if twice:
         out.append(f"own entries changed more than once: {twice}")
@@ -247,9 +243,7 @@ def own_problems(data: Dict[str, Any], own: List[Dict[str, Any]], refs: Dict[str
 
 
 def problems(data: Any, items: List[Dict[str, Any]], refs: Dict[str, str]) -> List[str]:
-    """Every item not yet on the list decided, once; an item on the list decided only with a fact newer than its
-    entry (new_since, by label); needed names the part and when; covers name other items."""
-    from app.assistant.utils.time_utils import local_time_text, parse_iso_utc
+    """Every item not yet on the list decided, once; needed names the part and when; covers name other items."""
     if not isinstance(data, dict) or not isinstance(data.get("decisions"), list):
         return ["no decisions list"]
     labels = [it["label"] for it in items]
@@ -272,15 +266,6 @@ def problems(data: Any, items: List[Dict[str, Any]], refs: Dict[str, str]) -> Li
         bad = [x for x in d.get("covers") or [] if x not in labels or x == label]
         if bad:
             out.append(f"{label}: covers {bad}, which are not other items given")
-        if label in listed:
-            cited = [str(x).strip() for x in d.get("new_since") or []]
-            unknown = [x for x in cited if x not in refs]
-            since = parse_iso_utc(listed[label])
-            if unknown:
-                out.append(f"{label}: new_since names {unknown}, which are not labels given")
-            elif not any(parse_iso_utc(refs[x]) > since for x in cited):
-                out.append(f"{label} is on the list since {local_time_text(listed[label])} and nothing cited is newer: "
-                           f"leave it out to keep it, or name in new_since what you read that is new since then")
     twice = sorted({x for x in seen if seen.count(x) > 1})
     if twice:
         out.append(f"decided more than once: {twice}")

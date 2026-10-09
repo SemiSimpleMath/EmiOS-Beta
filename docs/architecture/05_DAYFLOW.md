@@ -116,8 +116,9 @@ judges nothing):
 - **revise** — changed while its work is active: one batch of `revise_goal` + `instruct_goal`
   `kind=replan` with the brain's reason;
 - **end** — cancelled or decided not needed while its work is active: `instruct_goal` `kind=end`;
-- **work_ended_not_reopened** — changed after its work ended: recorded only; a done entry runs again
-  only by a new decision.
+- **create** also when the entry is still decided needed after its work ended: new work is made from it
+  (until 2026-10-08 such a change was recorded only, `work_ended_not_reopened`, and an entry whose work the
+  architect had ended by mistake could never get work again).
 
 Each change is recorded once per mode in `brain_list_deliveries`; a dry run records its own marker and
 acts on nothing. One entry's failure is logged ERROR and left for the next tick; a failure to read the
