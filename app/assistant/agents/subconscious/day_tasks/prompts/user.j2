@@ -36,6 +36,13 @@
 (none)
 {% endfor %}
 {% with s = A.situation %}{% include 'shared/brain/situation.j2' %}{% endwith %}
+
+## What is believed about the household, closest in meaning to the open concerns
+{% for b in A.beliefs -%}
+- {{ b.statement }}
+{% else -%}
+(no belief comes close in meaning)
+{% endfor %}
 {% if A.earlier %}
 ## Earlier things your entries rely on
 {% for x in A.earlier -%}

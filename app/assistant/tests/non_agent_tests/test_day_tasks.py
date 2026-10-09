@@ -65,6 +65,7 @@ def _gather(conn, chat="I'll start the report at 5", s=None, basis="record-1"):
         for c in sit["concerns"]:
             c.setdefault("basis", basis)
         return {"day": DAY, "now": now.isoformat(), "items": items, "own": own, "situation": sit, "matters": [],
+                "beliefs": [],
                 **D.project(DAY, sit, [], items, own, connect=conn), "correction": None}
     return gather
 
@@ -208,7 +209,7 @@ def test_the_prompts_carry_the_rules_the_two_groups_and_the_labelled_situation()
     s = situation()
     projected = D.project(DAY, s, [], items, [])
     user = _ENV.get_template("subconscious/day_tasks/prompts/user.j2").render(
-        agent_input={"day": DAY, "items": items, "own": [], "situation": s, "matters": [], "correction": None,
+        agent_input={"day": DAY, "items": items, "own": [], "situation": s, "matters": [], "beliefs": [], "correction": None,
                      **projected})
     new_part, listed_part = user.split("### Already on the list", 1)
     assert "[I1] All day: The owner sometimes starts the weekly report on Sunday." in new_part
@@ -276,9 +277,11 @@ def test_the_brain_s_view_concerns_in_full_with_their_entries_and_today_s_decisi
     assert D.problems(drop, items, projected["labels"]) == []
     user = _ENV.get_template("subconscious/day_tasks/prompts/user.j2").render(
         agent_input={"day": DAY, "items": items, "own": [], "situation": s, "matters": matters, "correction": None,
+                     "beliefs": [{"belief_key": "B7", "statement": "The family eats out on Fridays.", "score": 0.4}],
                      **projected})
     assert "### [C1] Dinner out tonight" in user and "THE WHOLE RECORD of c-dinner (active)" in user
     assert "- [E1] the owner knows the family eats out tonight (the assistant: tell the owner the table is at 6), 5:30 PM; open" in user
+    assert "closest in meaning to the open concerns\n- The family eats out on Fridays." in user
     assert "- the owner books the table: cancelled" in user and ": He booked it himself." in user
     assert ": act now. Why: The table is at 6." in user
     assert "- change [E1] to: the owner knows the table is at 6:30 (the assistant: tell the owner), 5:30 PM. Why: The restaurant moved it." in user
@@ -516,7 +519,7 @@ def test_earlier_entries_whose_work_is_in_motion_are_the_deciders_to_rewrite(tmp
     projected = D.project(DAY, situation(), [], _new_items(), [carried])
     user = _ENV.get_template("subconscious/day_tasks/prompts/user.j2").render(agent_input={
         "day": DAY, "items": _new_items(), "own": [carried], "situation": situation(), "matters": [],
-        "correction": None, **projected})
+        "beliefs": [], "correction": None, **projected})
     assert "- [O1] (from 2026-03-09, its work still in motion) hourly check-ins" in user
     L.apply_entries(DAY, [{"entry": carried["id"], "action": "modify", "what": "hourly check-ins from 10:20",
                            "assistant_part": "hourly check-ins", "when": "10:20 AM", "why": "after the standup",

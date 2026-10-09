@@ -48,6 +48,8 @@ def fakes(monkeypatch):
     monkeypatch.setattr(kg_links, "find_entities", lambda texts: [])
     monkeypatch.setattr(kg_links, "shared", lambda ids: {"links": [], "entities": []})
     monkeypatch.setattr(kg_links, "facts_by_meaning", lambda texts: [])
+    from app.assistant.subconscious import belief_links
+    monkeypatch.setattr(belief_links, "beliefs_by_meaning", lambda texts: [])
 
 
 @pytest.fixture
@@ -221,6 +223,7 @@ def test_the_brain_prompt_renders_every_section():
                "entities": [{"label": "Karjalohja", "description": "A place the family travels to."}],
                "shared": {"links": [{"type": "Event", "label": "Summer Trip", "start": "2019-07-01", "end": "",
                                      "description": "At the cottage."}], "entities": []},
+               "beliefs": [{"belief_key": "B7", "statement": "Someone else sometimes walks the dogs.", "score": 0.4}],
                "correction": None}
     user = work_context._ENV.get_template("subconscious/brain/prompts/user.j2").render(agent_input=payload)
     assert "## Earlier in the chat room" in user and "About master_room." in user and "Talked about the dose." in user
@@ -235,6 +238,8 @@ def test_the_brain_prompt_renders_every_section():
     assert "- [K1] Bake sale @ Fri 08:00" in user and "calendar:bake" not in user
     assert "- Karjalohja: A place the family travels to." in user
     assert '- Event "Summer Trip" (2019-07-01): At the cottage.' in user
+    assert "## What is believed about the household, closest in meaning" in user
+    assert "- Someone else sometimes walks the dogs." in user and "B7" not in user
     system = work_context._ENV.get_template("subconscious/brain/prompts/system.j2").render(
         resource_assistant_data={"name": "the assistant"}, resource_user_data={"first_name": "Sam"})
     assert "closes only when its done-when is met or Sam says" in system

@@ -25,7 +25,9 @@ For each matter `subconscious::brain` gets:
   CALENDAR_DAYS, so the brain can name everything that depends on a fact that changed;
 - the people, places and things the events name, from the knowledge graph, each with its ties to the
   household's people, and what joins them; and the knowledge graph's facts closest in meaning to the
-  events, which say whose school or club an event is about when it does not (subconscious/kg_links.py).
+  events, which say whose school or club an event is about when it does not (subconscious/kg_links.py);
+- the household's beliefs closest in meaning to the events and their concerns (subconscious/belief_links.py,
+  2026-10-09): what was learned about the household's habits, routines and wishes, as context.
 
 It answers with notes and resolutions on concerns, new concerns (with done-when, and the owner's
 words verbatim when the owner asked for it), and a decision on every event. Code validates the
@@ -235,7 +237,7 @@ def build_payload(events: List[Dict[str, Any]], register: Dict[str, Any],
     reminders R, calendar lines K. Returns (payload, event by label, concern_id by label, the call's labels: label ->
     [kind, id]). `calendar` is the run's calendar lines (_calendar_lines), read once per run; omitted, read here."""
     from app.assistant.subconscious.projection import Projection
-    from app.assistant.subconscious import conversations, kg_links, work_links
+    from app.assistant.subconscious import belief_links, conversations, kg_links, work_links
     from app.assistant.utils.time_utils import utc_to_local
     now = now_utc or datetime.now(timezone.utc)
     open_concerns = [{**c, "_status": b} for b in ("active", "addressing") for c in register.get(b) or []]
@@ -303,6 +305,10 @@ def build_payload(events: List[Dict[str, Any]], register: Dict[str, Any],
         "entities": entities,
         "shared": kg_links.shared([x["node_id"] for x in entities]),
         "facts": kg_links.facts_by_meaning([e["text"] for e in events]),
+        # What the household's beliefs say, closest in meaning to the events and the concerns they bear on
+        # (subconscious/belief_links.py, 2026-10-09): context, never an instruction.
+        "beliefs": belief_links.beliefs_by_meaning([e["text"] for e in events] +
+                                                   [by_id[cid].get("title") for cid in named]),
     }
     return payload, {e["mark"]: e for e in marked}, labels, p.labels
 

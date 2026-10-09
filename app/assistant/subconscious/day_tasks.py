@@ -493,7 +493,19 @@ def gather(now_utc: datetime, *, plan_connect=None) -> Dict[str, Any]:
     # On 2026-10-06 the decider called an item's own work "already covered by W8" and decided the item not needed,
     # which would have ended that work: work names the entry it was made from (project, `from_list`).
     return {"day": day, "now": now_utc.isoformat(), "items": items, "own": own, "situation": s, "matters": matters,
-            **project(day, s, matters, items, own), "correction": None}
+            "beliefs": concern_beliefs(s["concerns"]), **project(day, s, matters, items, own), "correction": None}
+
+
+def concern_beliefs(concerns: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The household's beliefs closest in meaning to the open concerns (their titles and what their briefs say they
+    are; subconscious/belief_links.py, 2026-10-09): who usually does what, what the owner prefers, as context. The
+    calendar's own beliefs come as its items."""
+    from app.assistant.subconscious import belief_links
+    from app.assistant.subconscious.concern_store import load_register
+    register = load_register()
+    briefs = {c["concern_id"]: (c.get("brief") or {}).get("what") for b in ("active", "addressing")
+              for c in register.get(b) or []}
+    return belief_links.beliefs_by_meaning([t for c in concerns for t in (c.get("title"), briefs.get(c["concern_id"]))])
 
 
 def run_day_tasks(*, now_utc: Optional[datetime] = None, connect=None,
