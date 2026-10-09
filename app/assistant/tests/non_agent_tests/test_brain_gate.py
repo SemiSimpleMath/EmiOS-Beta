@@ -135,6 +135,10 @@ def test_gate_prompts_render_with_every_event_and_concern():
     system = work_context._ENV.get_template("subconscious/gate/prompts/system.j2").render(
         resource_assistant_data={"name": "the assistant"})
     assert "You route; the noticer judges." in system
+    # 2026-10-09: "Today only i want to get a notification every time i get a new email." was routed none as "a
+    # one-day notification preference"; the chat gate had promised it would be handled, and nothing ever saw it.
+    assert "A task the owner gives the assistant is the brain's to decide" in system
+    assert "is a promise to the owner, not a sign that anything picked it" in system
 
 
 def _event(i, minutes, text, room="master_room", speaker="Owner"):
