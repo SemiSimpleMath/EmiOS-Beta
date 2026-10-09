@@ -147,7 +147,8 @@ def _chat_groups(events: List[Dict[str, Any]], now: datetime) -> List[Dict[str, 
                 segments[-1].append(t)
             else:
                 segments.append([t])
-        groups.append({"heading": f"Room {room_id}", "description": _describe(room_id), "first_at": min(times),
+        # The heading names no id (docs/design/objects_and_projections_2026-10-08.md): the description says which.
+        groups.append({"heading": "Chat room", "description": _describe(room_id), "first_at": min(times),
                        "conversations": [{"label": "Conversation", "turns": _render_turns(seg)}
                                          for seg in segments if any(t["mark"] for t in seg)]})
     return groups
@@ -180,20 +181,20 @@ def _email_groups(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                                   "first_at": min(_utc(e["occurred_at"]) for e in evs),
                                   "turns": _render_turns(turns)})
         conversations.sort(key=lambda c: c["first_at"])
-        groups.append({"heading": f"Email inbox {account}", "description": _describe_account(account),
+        groups.append({"heading": "Email inbox", "description": _describe_account(account),
                        "first_at": conversations[0]["first_at"],
                        "conversations": [{"label": c["label"], "turns": c["turns"]} for c in conversations]})
     return groups
 
 
-def _work_groups(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _work_groups(events: List[Dict[str, Any]], work_labels: Dict[str, str]) -> List[Dict[str, Any]]:
     by_work: Dict[str, List[Dict[str, Any]]] = {}
     for e in events:
         by_work.setdefault(e["source_ref"].split(":")[1], []).append(e)
     groups = []
     for work_id, evs in by_work.items():
         turns = sorted((_event_turn(e) for e in evs), key=lambda t: t["at"])
-        groups.append({"heading": f"Work {work_id}",
+        groups.append({"heading": f"Work [{work_labels[work_id]}]" if work_id in work_labels else "Work",
                        "description": "What the assistant did: each entry is a finalizer judgment of one of "
                                       "the work's tasks, or the work's ending, with the objective and the "
                                       "concerns the work was made for.",
@@ -240,9 +241,12 @@ def _time_group(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
              "conversations": [{"label": "Day ended", "turns": _render_turns(turns)}]}]
 
 
-def build(events: List[Dict[str, Any]], *, now_utc: Optional[datetime] = None) -> List[Dict[str, Any]]:
+def build(events: List[Dict[str, Any]], *, now_utc: Optional[datetime] = None,
+          work_labels: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
     """Group events (brain_events rows, each with a `mark` and optionally a `note`) into chat rooms,
     email inboxes, work objects, cameras and presence, each with its conversations; groups ordered by their first event.
+    A work object's group is headed by its label of the call (`work_labels`, work id -> label) when the reader has
+    one; no heading shows an id.
     Raises on an unknown source, a chat event with no room, or a room or account with no description: the
     reader must know where something was said and to whom."""
     now = now_utc or datetime.now(timezone.utc)
@@ -252,7 +256,7 @@ def build(events: List[Dict[str, Any]], *, now_utc: Optional[datetime] = None) -
             raise ValueError(f"brain event {e['source_ref']} has unknown source {e['source']!r}")
         by_source[e["source"]].append(e)
     groups = (_chat_groups(by_source["chat"], now) + _email_groups(by_source["email"])
-              + _work_groups(by_source["work"]) + _camera_groups(by_source["camera"])
+              + _work_groups(by_source["work"], work_labels or {}) + _camera_groups(by_source["camera"])
               + _presence_group(by_source["presence"]) + _time_group(by_source["time"]))
     groups.sort(key=lambda g: g["first_at"])
     for g in groups:

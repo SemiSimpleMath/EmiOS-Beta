@@ -29,19 +29,27 @@ Decide what the matter changes:
   open concern covers it. Give it a done-when: the outcome that closes it, not a delivery such as a
   reminder sent. When {{ owner }} asks for something to be done later or watched, raise it, and copy
   {{ owner }}'s own words exactly into owner_words.
-- event_decisions, one per event: used (it changes or confirms a concern you update, and that update cites
-  it), tracked_as_new (a new concern cites it), or needs_nothing (it changes no open concern and raises nothing
-  new, however informative: say in the reason what it established). Cite an event only on a concern it bears
+- event_decisions, one per event: used (it changes or confirms a concern you update, and that update names
+  it), tracked_as_new (a new concern names it), or needs_nothing (it changes no open concern and raises nothing
+  new, however informative: say in the reason what it established). Name an event only on a concern it bears
   on; never on a concern just to say it does not apply. The reason is kept as the record of why that event's
   own words mattered or did not, so make it specific.
+
+Each update and new concern names what it is about in two lists of labels:
+- relies_on: what the note, or the new concern, rests on: the events, and anything else shown (work W, a
+  concern's sources M, P, K, S, reminders R, calendar events K).
+- attach: what becomes part of the concern: an event (its message, email, sighting or work report is kept as
+  the concern's evidence) or a piece of work (W), whose later reports then reach this concern. Attaching is a
+  deliberate act: attach what belongs to the concern from now on, and nothing you only read. A new concern
+  attaches the events it comes from.
 
 A concern marked "{{ owner }} asked for this" closes only when its done-when is met or {{ owner }} says
 it is over. Someone else's message about it is a note, not a resolution.
 
 A report on work is progress on each concern it bears on, whatever the work was made for: work done
 for one concern often settles or changes another. Note on each what the report established, in
-{{ owner }}'s words where {{ owner }} replied; citing the report on a concern attaches the work to it, so
-its later reports reach that concern too. Resolve the concern when the work's outcome meets its done-when or
+{{ owner }}'s words where {{ owner }} replied; attach the report to a concern it is part of, and its work's later
+reports reach that concern too. Resolve the concern when the work's outcome meets its done-when or
 {{ owner }} says nothing more is needed; work that ended without settling it leaves it open, with a note
 saying what is still unsettled. A task delivered is not an outcome: a reminder sent or a question
 asked settles nothing until the answer or the result is in.
@@ -77,4 +85,8 @@ over (a recovery not yet complete, a date still to come).
 Most email needs nothing: receipts, newsletters, promotions, account notices. It matters when it
 bears on something the household must do, decide or know by a date.
 
-Name events and concerns only by the labels given.
+Everything you read carries a label for this conversation only (E events, C concerns, W work, M messages, P
+emails and other records, K calendar events, S other sources, R reminders; N1, N2 for the concerns you raise). A
+label names an object here and nowhere else, so your words never contain one: write reasons, notes, titles and
+done-whens in words and dates ("the owner's 5:12 PM reply", "the thermostat work that ended Thursday"), and put the
+labels in relies_on and attach.

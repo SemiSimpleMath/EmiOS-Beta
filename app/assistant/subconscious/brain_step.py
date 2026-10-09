@@ -119,12 +119,15 @@ def group_matters(events: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
 
 # ── what the brain reads ────────────────────────────────────────────────────
 
-def _gate_note(e: Dict[str, Any], titles: Dict[str, str]) -> str:
+def _gate_note(e: Dict[str, Any], titles: Dict[str, str], closed: Dict[str, str]) -> str:
+    """The gate's routing, in words: open concerns (`titles`) and closed ones (`closed`) by title, never by id."""
     if e.get("gate_status") == "failed":
         return "gate: could not route this one; read it against every concern and as a new matter"
     if e.get("route") == "new_matter":
         return "gate: new matter, no open concern covers it"
-    return "gate: bears on " + "; ".join(titles.get(cid, f"{cid} (no longer open)") for cid in e["concern_ids"])
+    return "gate: bears on " + "; ".join(
+        f'"{titles[cid]}"' if cid in titles else f'"{closed.get(cid) or "a concern no longer kept"}" (no longer open)'
+        for cid in e["concern_ids"])
 
 
 def _message_text(message_id: str) -> str:
@@ -172,6 +175,15 @@ def _room_history(room_id: str, before: datetime) -> List[Dict[str, Any]]:
              "title": p.one_liner, "body": p.body or "", "pod_id": p.pod_id} for p in pods]
 
 
+def _calendar_lines(now_utc: datetime) -> List[Dict[str, Any]]:
+    """The calendar from now through CALENDAR_DAYS as lines of data (context_builder.fetch_calendar_lines), for a
+    projection to label."""
+    from app.assistant.subconscious.context_builder import fetch_calendar_lines
+    from app.assistant.utils.time_utils import utc_to_local
+    start = utc_to_local(now_utc.isoformat())
+    return fetch_calendar_lines(start, start + timedelta(days=CALENDAR_DAYS), label=f"next {CALENDAR_DAYS} days")
+
+
 def _calendar(now_utc: datetime) -> str:
     """The calendar from now through CALENDAR_DAYS, each event line with its calendar:<id> anchor."""
     from app.assistant.subconscious.context_builder import _fetch_calendar_text
@@ -194,11 +206,35 @@ def _concern_view(label: str, c: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+# A concern's evidence as the object it points to (kind, id), and the label prefix of each kind.
+_EVIDENCE_PREFIX = {"work": "W", "message": "M", "pod": "P", "calendar_event": "K", "source": "S"}
+# What `attach` may name: an event (its message, email, frame or work report) or a work object.
+_ATTACHABLE = ("brain_event", "work")
+
+
+def _evidence_object(e: Dict[str, Any]) -> Tuple[str, str]:
+    ref, kind = str(e.get("ref") or ""), str(e.get("kind") or "")
+    if ref.startswith("work:"):
+        return "work", ref.split(":")[1]
+    if ref.startswith("message:"):
+        return "message", ref[len("message:"):]
+    if ref.startswith("datapod:"):
+        return "pod", ref
+    if kind == "calendar_event":
+        return "calendar_event", ref[len("calendar:"):] if ref.startswith("calendar:") else ref
+    return "source", f"{kind}:{ref}"
+
+
 def build_payload(events: List[Dict[str, Any]], register: Dict[str, Any],
                   now_utc: Optional[datetime] = None,
-                  calendar: Optional[str] = None) -> Tuple[Dict[str, Any], Dict[str, Dict], Dict[str, str]]:
-    """The brain's input for one matter. Returns (payload, event by label, concern_id by label).
-    `calendar` is the run's calendar text, read once per run; omitted, it is read here."""
+                  calendar: Optional[List[Dict[str, Any]]] = None
+                  ) -> Tuple[Dict[str, Any], Dict[str, Dict], Dict[str, str], Dict[str, List[str]]]:
+    """The brain's input for one matter, a projection of objects (docs/design/objects_and_projections_2026-10-08.md):
+    each object it shows carries a label of the call and never its id: events E, concerns C, work W, a concern's
+    evidence by what it points to (messages M, emails and other pods P, calendar events K, other sources S),
+    reminders R, calendar lines K. Returns (payload, event by label, concern_id by label, the call's labels: label ->
+    [kind, id]). `calendar` is the run's calendar lines (_calendar_lines), read once per run; omitted, read here."""
+    from app.assistant.subconscious.projection import Projection
     from app.assistant.subconscious import conversations, kg_links, work_links
     from app.assistant.utils.time_utils import utc_to_local
     now = now_utc or datetime.now(timezone.utc)
@@ -208,8 +244,16 @@ def build_payload(events: List[Dict[str, Any]], register: Dict[str, Any],
     ordered = [by_id[cid] for cid in named] + [c for c in open_concerns if c["concern_id"] not in named]
     labels = {f"C{i}": c["concern_id"] for i, c in enumerate(ordered, 1)}
     titles = {c["concern_id"]: c.get("title") for c in open_concerns}
+    closed = {c["concern_id"]: c.get("title") for b in ("resolved", "dormant") for c in register.get(b) or []}
 
-    marked = [{**e, "mark": f"E{i}", "note": _gate_note(e, titles)} for i, e in enumerate(events, 1)]
+    marked = [{**e, "mark": f"E{i}", "note": _gate_note(e, titles, closed)} for i, e in enumerate(events, 1)]
+    p = Projection()
+    for e in marked:
+        p.fixed(e["mark"], "brain_event", str(e["id"]))
+    for label, cid in labels.items():
+        p.fixed(label, "concern", cid)
+    work_labels = {e["source_ref"].split(":")[1]: p.label("W", "work", e["source_ref"].split(":")[1])
+                   for e in marked if e["source"] == "work"}
     first = min(_utc(e["occurred_at"]) for e in events)
     rooms = list(dict.fromkeys(e["room_id"] for e in events if e["source"] == "chat"))
     threads = []
@@ -221,24 +265,46 @@ def build_payload(events: List[Dict[str, Any]], register: Dict[str, Any],
     linked = work_links.linked_work(named, threads)
     similar = work_links.similar_work([e["text"] for e in events] + [by_id[cid].get("title") for cid in named],
                                       exclude=[w["work_id"] for w in linked])
+    concern_views = [_concern_view(f"C{i}", c) for i, c in enumerate(ordered[:len(named)], 1)]
+    active = work_links.active_work()
+    reminders = work_links.live_reminders(now)
+    lines = [dict(line) for line in (calendar if calendar is not None else _calendar_lines(now))]
+    # ref -> label, read by shared/brain/concern.j2 and work_and_motion.j2 in place of an id.
+    source_labels: Dict[str, str] = dict(work_labels)
+    for c in concern_views:
+        for ev in c["evidence"]:
+            if ev.get("ref"):
+                kind, obj_id = _evidence_object(ev)
+                source_labels[ev["ref"]] = p.label(_EVIDENCE_PREFIX[kind], kind, obj_id)
+        for w in c["attached_work"]:
+            source_labels[w["work_id"]] = p.label("W", "work", w["work_id"])
+    for w in [*linked, *similar, *active]:
+        source_labels[w["work_id"]] = p.label("W", "work", w["work_id"])
+    for r in reminders:
+        source_labels[r["ref"]] = p.label("R", "reminder", r["ref"].split(":", 1)[1])
+    for line in lines:
+        if line["anchor"]:
+            line["ref"] = p.label("K", "calendar_event", line["anchor"][len("calendar:"):])
     payload = {
         "now": utc_to_local(now.isoformat()).strftime("%a %Y-%m-%d %H:%M"),
-        "events": conversations.render(conversations.build(marked, now_utc=now)),
-        "room_history": [{"room": r, "summaries": _room_history(r, first)} for r in rooms],
-        "concerns": [_concern_view(f"C{i}", c) for i, c in enumerate(ordered[:len(named)], 1)],
+        "events": conversations.render(conversations.build(marked, now_utc=now, work_labels=work_labels)),
+        "room_history": [{"description": conversations._describe(r), "summaries": _room_history(r, first)}
+                         for r in rooms],
+        "concerns": concern_views,
         "other_concerns": [{"label": f"C{i}", "title": c.get("title"), "status": c["_status"],
                             "subject": c.get("subject") or "household", "done_when": c.get("done_when")}
                            for i, c in enumerate(ordered, 1) if i > len(named)],
         "linked_work": linked,
         "similar_work": similar,
-        "active_work": work_links.active_work(),
-        "reminders": work_links.live_reminders(now),
-        "calendar": calendar if calendar is not None else _calendar(now),
+        "active_work": active,
+        "reminders": reminders,
+        "calendar_lines": lines,
+        "source_labels": source_labels,
         "entities": entities,
         "shared": kg_links.shared([x["node_id"] for x in entities]),
         "facts": kg_links.facts_by_meaning([e["text"] for e in events]),
     }
-    return payload, {e["mark"]: e for e in marked}, labels
+    return payload, {e["mark"]: e for e in marked}, labels, p.labels
 
 
 # ── checking the answer ─────────────────────────────────────────────────────
@@ -247,11 +313,33 @@ def _squash(text: str) -> str:
     return " ".join(str(text or "").split())
 
 
-def _problems(data: Any, events: Dict[str, Dict[str, Any]], concern_labels: List[str]) -> List[str]:
+def _refs(things: Any, call_labels: Dict[str, List[str]], where: str, *, attach: bool) -> List[str]:
+    """Problems with one reference field: every label given in the call; `attach` names events and work only."""
+    out = []
+    names = [str(x).strip() for x in things or []]
+    unknown = [x for x in names if x not in call_labels]
+    if unknown:
+        out.append(f"{where}: {unknown} are not labels given")
+    if attach:
+        wrong = [x for x in names if x in call_labels and call_labels[x][0] not in _ATTACHABLE]
+        if wrong:
+            out.append(f"{where}: attach names events (E) and work (W) only, got {wrong}")
+    return out
+
+
+def _in_prose(call_labels: Dict[str, Any], new_labels: List[str], *texts: Any) -> List[str]:
+    from app.assistant.subconscious.projection import labels_in
+    return labels_in(" ".join(str(t or "") for t in texts), [*call_labels, *new_labels])
+
+
+def _problems(data: Any, events: Dict[str, Dict[str, Any]], concern_labels: List[str],
+              call_labels: Dict[str, List[str]]) -> List[str]:
     if not isinstance(data, dict) or not isinstance(data.get("event_decisions"), list):
         return ["no event_decisions list"]
     out: List[str] = []
     decided: Dict[str, str] = {}
+    new_labels = [str(n.get("label") or "").strip() for n in data.get("new_concerns") or []]
+    prose = "write it in words and put the reference in relies_on or attach"
     for d in data["event_decisions"]:
         ev = str((d or {}).get("event") or "").strip()
         if ev not in events:
@@ -260,6 +348,9 @@ def _problems(data: Any, events: Dict[str, Dict[str, Any]], concern_labels: List
             out.append(f"{ev} decided more than once")
         else:
             decided[ev] = d.get("decision")
+        written = _in_prose(call_labels, new_labels, d.get("reason"))
+        if written:
+            out.append(f"{ev}: {written} written into its reason; write it in words")
     missing = [e for e in events if e not in decided]
     if missing:
         out.append(f"not decided: {missing}")
@@ -274,12 +365,17 @@ def _problems(data: Any, events: Dict[str, Dict[str, Any]], concern_labels: List
         updated.add(label)
         if u.get("action") not in ("note", "resolve"):
             out.append(f"{label}: action {u.get('action')!r} is not note or resolve")
-        refs = u.get("events") or []
-        if not refs or any(r not in events for r in refs):
-            out.append(f"{label}: events must be labels of events given, got {refs}")
+        relied, attached = u.get("relies_on") or [], u.get("attach") or []
+        if not relied and not attached:
+            out.append(f"{label}: relies_on and attach name nothing; name the events it rests on")
+        out += _refs(relied, call_labels, f"{label} relies_on", attach=False)
+        out += _refs(attached, call_labels, f"{label} attach", attach=True)
         if not str(u.get("note") or "").strip():
             out.append(f"{label}: note is empty")
-        cited_by_update.update(refs)
+        written = _in_prose(call_labels, new_labels, u.get("note"))
+        if written:
+            out.append(f"{label}: {written} written into its note; {prose}")
+        cited_by_update.update(x for x in [*relied, *attached] if x in events)
 
     seen_new = set()
     for n in data.get("new_concerns") or []:
@@ -289,22 +385,28 @@ def _problems(data: Any, events: Dict[str, Dict[str, Any]], concern_labels: List
         seen_new.add(label)
         if not str(n.get("title") or "").strip() or not str(n.get("done_when") or "").strip():
             out.append(f"{label}: a new concern needs a title and done_when")
-        refs = n.get("events") or []
-        if not refs or any(r not in events for r in refs):
-            out.append(f"{label}: events must be labels of events given, got {refs}")
+        relied, attached = n.get("relies_on") or [], n.get("attach") or []
+        if not any(x in events for x in attached):
+            out.append(f"{label}: attach names no event; attach the events it comes from")
+        out += _refs(relied, call_labels, f"{label} relies_on", attach=False)
+        out += _refs(attached, call_labels, f"{label} attach", attach=True)
+        refs = [x for x in [*relied, *attached] if x in events]
         words = _squash(n.get("owner_words") or "")
-        if words and not any(words in _squash(events[r]["text"]) for r in refs if r in events):
+        if words and not any(words in _squash(events[r]["text"]) for r in refs):
             out.append(f"{label}: owner_words must be copied exactly from one of its events")
+        written = _in_prose(call_labels, new_labels, n.get("title"), n.get("done_when"), n.get("notes"))
+        if written:
+            out.append(f"{label}: {written} written into its title, done_when or notes; {prose}")
         cited_by_new.update(refs)
 
     for ev, decision in decided.items():
         if decision == "used" and ev not in cited_by_update:
-            out.append(f"{ev} is decided used but no concern update cites it: cite it on the concern it changes, "
-                       f"or decide needs_nothing if it changes none")
+            out.append(f"{ev} is decided used but no concern update names it in relies_on or attach: name it on the "
+                       f"concern it changes, or decide needs_nothing if it changes none")
         if decision == "tracked_as_new" and ev not in cited_by_new:
-            out.append(f"{ev} is decided tracked_as_new but no new concern cites it")
+            out.append(f"{ev} is decided tracked_as_new but no new concern names it")
         if decision == "needs_nothing" and (ev in cited_by_update or ev in cited_by_new):
-            out.append(f"{ev} is decided needs_nothing but an update or new concern cites it")
+            out.append(f"{ev} is decided needs_nothing but an update or new concern names it")
         if decision not in ("used", "tracked_as_new", "needs_nothing"):
             out.append(f"{ev}: decision {decision!r} is not used, tracked_as_new or needs_nothing")
     return out
@@ -347,23 +449,31 @@ def _work_record(work_id: str) -> Dict[str, Any]:
     return record
 
 
-def _attach_cited_work(data: Dict[str, Any], by_label: Dict[str, Dict], labels: Dict[str, str],
-                       admitted: Dict[str, Optional[str]], work_record, register_connect) -> List[tuple]:
-    """Attach the work behind every work report the brain cited on a concern (an update, or a new concern
-    raised from it) to that concern, unless the concern holds it already. Returns (concern_id, work_id)."""
+def _attach_work(data: Dict[str, Any], by_label: Dict[str, Dict], labels: Dict[str, str],
+                 call_labels: Dict[str, List[str]], admitted: Dict[str, Optional[str]], work_record,
+                 register_connect) -> List[tuple]:
+    """Attach the work the brain named in `attach` (a work report's work, or a work object directly) to that concern,
+    unless the concern holds it already. Only `attach` attaches: until 2026-10-08 every work report cited on a
+    concern was attached, and a report cited on the pickup concern to say it did not apply attached the Nest work
+    to it. Returns (concern_id, work_id)."""
     from app.assistant.subconscious import persist
-    cited = [(labels[u["concern"]], r) for u in data.get("concern_updates") or [] for r in u["events"]]
-    cited += [(admitted.get(n["label"]), r) for n in data.get("new_concerns") or [] for r in n["events"]]
+    named = [(labels[u["concern"]], x) for u in data.get("concern_updates") or [] for x in u.get("attach") or []]
+    named += [(admitted.get(n["label"]), x) for n in data.get("new_concerns") or [] for x in n.get("attach") or []]
     attached = []
-    for concern_id, label in cited:
-        event = by_label[label]
-        if not concern_id or event["source"] != "work":
-            continue
-        work_id = event["source_ref"].split(":")[1]
-        if concern_id in persist.concerns_holding_work(work_id, connect=register_connect):
+    for concern_id, label in named:
+        kind, obj_id = call_labels[label]
+        if kind == "brain_event":
+            event = by_label[label]
+            if event["source"] != "work":
+                continue
+            work_id, receipt = event["source_ref"].split(":")[1], f"brain:{event['id']}:{concern_id}"
+        else:
+            work_id = obj_id
+            receipt = f"brain:{'-'.join(str(e['id']) for e in by_label.values())}:{concern_id}:{work_id}"
+        if not concern_id or concern_id in persist.concerns_holding_work(work_id, connect=register_connect):
             continue
         result = persist.attach_seen_work(concern_id, work_id=work_id, work=work_record(work_id),
-                                          receipt_id=f"brain:{event['id']}:{concern_id}", connect=register_connect)
+                                          receipt_id=receipt, connect=register_connect)
         if result == "attached":
             attached.append((concern_id, work_id))
     return attached
@@ -378,49 +488,55 @@ def process_matter(events: List[Dict[str, Any]], *, call: Optional[Callable[[Dic
     from app.assistant.subconscious.concern_store import load_register
     now = datetime.now(timezone.utc)
     register = load_register(connect=register_connect)
-    payload, by_label, labels = build_payload(events, register, now, calendar)
+    payload, by_label, labels, call_labels = build_payload(events, register, now, calendar)
     call = call or _agent_call
     data = call(payload)
-    problems = _problems(data, by_label, list(labels))
+    problems = _problems(data, by_label, list(labels), call_labels)
     if problems:
         from app.assistant.subconscious.brain_trace import step
         logger.warning("[brain] invalid answer, one correction: %s", problems)
         step("brain", "answer refused, one correction", subject=[e["id"] for e in events], problems=problems)
         data = call({**payload, "correction": "; ".join(problems)})
-        problems = _problems(data, by_label, list(labels))
+        problems = _problems(data, by_label, list(labels), call_labels)
         if problems:
             raise ValueError(f"brain answer still invalid after one correction: {problems}")
 
+    # The answer's labels back to objects (docs/design/objects_and_projections_2026-10-08.md): what a note rests on
+    # is kept by id in the decision; what it attaches becomes the concern's evidence (an event) or attached work.
+    ids = lambda names: [list(call_labels[x]) for x in names or []]
+    attached_events = lambda names: [by_label[x] for x in names or [] if x in by_label]
     updates = [{"concern_id": labels[u["concern"]], "action": u["action"], "note": u["note"],
-                "evidence": [_evidence(by_label[r]) for r in u["events"]]}
+                "evidence": [_evidence(e) for e in attached_events(u.get("attach"))]}
                for u in data.get("concern_updates") or []]
     candidates = []
     for n in data.get("new_concerns") or []:
-        source_events = [by_label[r] for r in n["events"]]
+        source_events = attached_events(n.get("attach"))
+        relied_events = [*source_events, *attached_events(n.get("relies_on"))]
         candidate = {"label": n["label"], "title": n["title"], "subject": n.get("subject"), "kind": n.get("kind"),
                      "severity": n.get("severity"), "horizon": n.get("horizon"), "done_when": n["done_when"],
                      "notes": n.get("notes") or "", "domain_tags": [], "addressable_by": [],
                      "first_observed": now.isoformat(), "evidence": [_evidence(e) for e in source_events]}
         words = _squash(n.get("owner_words") or "")
         if words:
-            said = next(e for e in source_events if words in _squash(e["text"]))
+            said = next(e for e in relied_events if words in _squash(e["text"]))
             candidate["owner_request"] = {"words": n["owner_words"], "at": said["occurred_at"],
                                           "ref": said["source_ref"]}
         candidates.append(candidate)
     plan = concern_door.plan_admission(candidates, load_register(connect=register_connect), judge=judge)
     admitted = persist.apply_brain_matter(updates, plan, connect=register_connect)
-    attached = _attach_cited_work(data, by_label, labels, admitted or {}, work_record or _work_record,
-                                  register_connect)
+    attached = _attach_work(data, by_label, labels, call_labels, admitted or {}, work_record or _work_record,
+                            register_connect)
     decisions = {
         "events": {by_label[d["event"]]["source_ref"]: {"decision": d["decision"], "reason": d["reason"]}
                    for d in data["event_decisions"]},
         "concern_updates": [{"concern_id": u["concern_id"], "action": u["action"], "note": u["note"],
-                             "events": [by_label[r]["source_ref"] for r in d["events"]]}
+                             "relies_on": ids(d.get("relies_on")), "attach": ids(d.get("attach"))}
                             for u, d in zip(updates, data.get("concern_updates") or [])],
         # door: what the concern door made of it (create | merge_open | suppress_closed | merge_candidate)
         "new_concerns": [{"label": c["label"], "title": c["title"], "owner_request": c.get("owner_request"),
-                          "door": s["action"], "door_reason": s["reason"]}
-                         for c, s in zip(candidates, plan)],
+                          "door": s["action"], "door_reason": s["reason"],
+                          "relies_on": ids(n.get("relies_on")), "attach": ids(n.get("attach"))}
+                         for c, s, n in zip(candidates, plan, data.get("new_concerns") or [])],
     }
     if attached:
         decisions["attached_work"] = [{"concern_id": c, "work_id": w} for c, w in attached]
@@ -449,7 +565,7 @@ def run_brain_step(*, connect=None, register_connect=None, call=None, judge=None
         return {"matters": 0, "applied": 0, "failed": 0}
     applied = failed = 0
     matters = group_matters(events)
-    calendar = _calendar(datetime.now(timezone.utc))
+    calendar = _calendar_lines(datetime.now(timezone.utc))
     for matter in matters:
         from app.assistant.subconscious.brain_trace import step, trace
         try:

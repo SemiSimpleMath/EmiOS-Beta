@@ -133,7 +133,7 @@ def gather(now_utc: datetime, *, calendar_work: bool = True) -> Dict[str, Any]:
     from app.assistant.location_manager.location_manager import get_user_location_summary
     from app.assistant.pipelines.context import boundary_date_local_str, day_window_local
     from app.assistant.pipelines.dayflow.utils.context_sources import get_current_presence_status
-    from app.assistant.subconscious.brain_step import _calendar
+    from app.assistant.subconscious.brain_step import _calendar_lines
     from app.assistant.subconscious.romantic_context_builder import _build_key_dates
     from app.assistant.utils.time_utils import get_local_timezone
     scope = _scope()
@@ -147,7 +147,7 @@ def gather(now_utc: datetime, *, calendar_work: bool = True) -> Dict[str, Any]:
         "calendar_today": calendar_today(scope),
         # From the day's start, not now: the text's header names its window, and a window starting now changed every
         # minute, so the day's tasks saw new input on every pass (2026-10-05).
-        "calendar_ahead": _calendar(day_window_local(day)[0].astimezone(timezone.utc)),
+        "calendar_ahead": _calendar_lines(day_window_local(day)[0].astimezone(timezone.utc)),
         "day_theme": str(daily.get("day_theme") or ""), "current_status": str(daily.get("current_status") or ""),
         "presence": get_current_presence_status(),
         "location": get_user_location_summary(hours_ahead=24),

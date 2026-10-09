@@ -388,6 +388,34 @@ def _anchor_for_calendar_event(event: Dict[str, Any]) -> str:
     return f"calendar:{str(event.get('id') or '').strip()}"
 
 
+def _calendar_lines(content: str, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The tool's rendered calendar as lines of data: each event line's text (its `- ` taken off) with its anchor
+    (`calendar:<id>`, or None) and `event` True; header and blank lines as text with `event` False. A projection
+    labels each anchor (docs/design/objects_and_projections_2026-10-08.md, 2026-10-08); the noticer and the brief
+    writer read the anchored text (_with_calendar_anchors)."""
+    by_title: Dict[str, str] = {}
+    for ev in events:
+        title = str(ev.get("summary") or "").strip()
+        anchor = _anchor_for_calendar_event(ev)
+        if title and anchor != "calendar:" and title.lower() not in by_title:
+            by_title[title.lower()] = anchor
+    out: List[Dict[str, Any]] = []
+    for line in content.split("\n"):
+        if not line.startswith("- "):
+            out.append({"anchor": None, "text": line, "event": False})
+            continue
+        # The tool writes "- <title> @ <start>…"; split on the first " @ " it added, and fall
+        # through to the whole remainder when an event had no start to render.
+        body = line[2:]
+        out.append({"anchor": by_title.get(body.split(" @ ", 1)[0].strip().lower()), "text": body, "event": True})
+    return out
+
+
+def _anchored_text(lines: List[Dict[str, Any]]) -> str:
+    return "\n".join(f"- [{l['anchor']}] {l['text']}" if l["anchor"] else (f"- {l['text']}" if l["event"] else l["text"])
+                     for l in lines)
+
+
 def _with_calendar_anchors(content: str, events: List[Dict[str, Any]]) -> str:
     """Prefix each rendered event line with its anchor token.
 
@@ -400,42 +428,17 @@ def _with_calendar_anchors(content: str, events: List[Dict[str, Any]]) -> str:
     meeting link, attendees and description, all of which the noticer reads. Building our own
     line would silently drop them.
     """
-    by_title: Dict[str, str] = {}
-    for ev in events:
-        title = str(ev.get("summary") or "").strip()
-        anchor = _anchor_for_calendar_event(ev)
-        if title and anchor != "calendar:" and title.lower() not in by_title:
-            by_title[title.lower()] = anchor
-    if not by_title:
-        return content
-
-    out: List[str] = []
-    for line in content.split("\n"):
-        if not line.startswith("- "):
-            out.append(line)
-            continue
-        # The tool writes "- <title> @ <start>…"; split on the first " @ " it added, and fall
-        # through to the whole remainder when an event had no start to render.
-        body = line[2:]
-        title = body.split(" @ ", 1)[0].strip()
-        anchor = by_title.get(title.lower())
-        out.append(f"- [{anchor}] {body}" if anchor else line)
-    return "\n".join(out)
+    return _anchored_text(_calendar_lines(content, events))
 
 
-def _fetch_calendar_text(start_local: datetime, end_local: datetime, *, label: str) -> str:
-    """Invoke the get_calendar_events tool and format the result.
-
-    Each event line is prefixed with its ``calendar:<id>`` anchor so a concern about a dated
-    event can cite the event itself. The tool's human-readable `content` carries no id (it is
-    written for planners reading prose), while the ids ride on `data_list` — so the anchors are
-    added here rather than by changing a tool every other agent shares.
-    """
+def fetch_calendar_lines(start_local: datetime, end_local: datetime, *, label: str) -> List[Dict[str, Any]]:
+    """The calendar from start to end as lines of data (_calendar_lines); one text line saying there is no data
+    when the fetch fails or is empty."""
     try:
         from app.assistant.utils.pydantic_classes import ToolMessage
         cls = DI.tool_registry.get_tool_class("get_calendar_events")
         if cls is None:
-            return _NO_DATA_FMT.format(kind=f"calendar ({label})")
+            return [{"anchor": None, "text": _NO_DATA_FMT.format(kind=f"calendar ({label})"), "event": False}]
         tool = cls()
         tm = ToolMessage(
             tool_name="get_calendar_events",
@@ -450,11 +453,11 @@ def _fetch_calendar_text(start_local: datetime, end_local: datetime, *, label: s
         result = tool.execute(tm)
     except Exception as e:
         logger.warning("[noticer.context] calendar fetch (%s) failed: %s", label, e)
-        return _NO_DATA_FMT.format(kind=f"calendar ({label})")
+        return [{"anchor": None, "text": _NO_DATA_FMT.format(kind=f"calendar ({label})"), "event": False}]
 
     content = (getattr(result, "content", None) or "").strip()
     if not content:
-        return _NO_DATA_FMT.format(kind=f"calendar ({label})")
+        return [{"anchor": None, "text": _NO_DATA_FMT.format(kind=f"calendar ({label})"), "event": False}]
 
     events = getattr(result, "data_list", None)
     if not isinstance(events, list):
@@ -466,8 +469,19 @@ def _fetch_calendar_text(start_local: datetime, end_local: datetime, *, label: s
             "[noticer.context] calendar (%s) returned no data_list — concerns from this "
             "fetch will carry NO anchor and cannot be matched against a declined one", label,
         )
-        return content
-    return _with_calendar_anchors(content, events)
+        events = []
+    return _calendar_lines(content, events)
+
+
+def _fetch_calendar_text(start_local: datetime, end_local: datetime, *, label: str) -> str:
+    """Invoke the get_calendar_events tool and format the result.
+
+    Each event line is prefixed with its ``calendar:<id>`` anchor so a concern about a dated
+    event can cite the event itself. The tool's human-readable `content` carries no id (it is
+    written for planners reading prose), while the ids ride on `data_list` — so the anchors are
+    added here rather than by changing a tool every other agent shares.
+    """
+    return _anchored_text(fetch_calendar_lines(start_local, end_local, label=label))
 
 
 def _build_sleep_log() -> str:

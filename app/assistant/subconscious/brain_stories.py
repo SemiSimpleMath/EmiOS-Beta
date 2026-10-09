@@ -400,6 +400,9 @@ def _settled(e: Dict[str, Any], matter: Dict[str, Any]) -> bool:
     """The event settled a concern: a resolve cites it. Matters recorded before updates kept their events
     (2026-10-02) count when every update in them is a resolve."""
     updates = (matter["decisions"] or {}).get("concern_updates") or []
+    if any("relies_on" in u for u in updates):       # since 2026-10-08: events named as objects (relies_on, attach)
+        ref = ["brain_event", str(e["id"])]
+        return any(u["action"] == "resolve" and (ref in u["relies_on"] or ref in u["attach"]) for u in updates)
     if any("events" in u for u in updates):
         return any(u["action"] == "resolve" and e["source_ref"] in u.get("events", []) for u in updates)
     return bool(updates) and all(u["action"] == "resolve" for u in updates)

@@ -38,7 +38,7 @@ def situation(chat="I'll start the report at 5", **changes):
             "key_dates": "- 2026-03-12 (2d away): Sam's birthday",
             "calendar_today": [{"title": "Work Hours", "start_local": "09:00 AM", "end_local": "04:30 PM",
                                 "status": "scheduled"}],
-            "calendar_ahead": "(nothing in the next 30 days)", "day_theme": "A work day", "current_status": "At the desk",
+            "calendar_ahead": [{"anchor": None, "text": "(nothing in the next 30 days)", "event": False}], "day_theme": "A work day", "current_status": "At the desk",
             "presence": {"is_afk": True, "status_label": "AWAY", "duration_minutes": 42.0, "start_time_local": "07:18 AM",
                          "most_recent_afk": None},
             "location": "Currently: Home", "weather": {"city": "Springfield", "temperature": 61, "condition": "Clear"},

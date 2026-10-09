@@ -30,7 +30,9 @@ Dates that matter coming up:
 {{ s.key_dates }}
 
 The calendar ahead:
-{{ s.calendar_ahead }}
+{% for l in s.calendar_ahead -%}
+{% if l.ref is defined %}- [{{ l.ref }}] {{ l.text }}{% elif l.event %}- {{ l.text }}{% else %}{{ l.text }}{% endif %}
+{% endfor %}
 
 ## The owner's chat today
 {% for m in s.chat -%}

@@ -129,7 +129,7 @@ def test_gate_prompts_render_with_every_event_and_concern():
     payload = {**gate.build_payload([event], gate.open_concerns(REGISTER)), "correction": "not answered: ['E1']"}
     user = work_context._ENV.get_template("subconscious/gate/prompts/user.j2").render(agent_input=payload)
     assert "[C1] The cat's worm tablet is due soon" in user
-    assert "### Room master_room\nAbout master_room." in user
+    assert "### Chat room\nAbout master_room." in user and "master_room\n" not in user.split("About")[0]
     assert user.index("assistant: Did the cat get the tablet?") < user.index("[E1] Owner: done!")
     assert "not answered: ['E1']" in user and "Route every labelled event." in user
     system = work_context._ENV.get_template("subconscious/gate/prompts/system.j2").render(
@@ -158,7 +158,8 @@ def test_events_sit_inside_their_whole_conversation_and_nothing_else():
     ])
     rooms = conversations.build([_event(1, 60, "Vet moved to Friday."), _event(2, 30, "yes", room="slack/C1")],
                                 now_utc=NOW)
-    assert [r["heading"] for r in rooms] == ["Room master_room", "Room slack/C1"]     # by first event
+    assert [r["heading"] for r in rooms] == ["Chat room", "Chat room"]                # by first event; no id
+    assert [r["description"] for r in rooms] == ["About master_room.", "About slack/C1."]
     # 120 min back is more than the gap before the event at 60: its conversation holds only the
     # event and the reply after it; the days-old line and the later chat are other conversations.
     assert _lines(rooms[:1]) == [("E1", "Owner", "Vet moved to Friday."), (None, "assistant", "Noted.")]
@@ -207,13 +208,13 @@ def test_an_email_is_read_inside_its_thread_under_its_inbox():
                "text": f"Subject: {MAIL[pid]['subject']}\n\n{MAIL[pid]['body']}", "mark": f"E{i}"}
               for i, pid in enumerate(["datapod:email:b", "datapod:email:c"], 1)]
     [inbox_group] = conversations.build(events, now_utc=NOW)
-    assert inbox_group["heading"] == "Email inbox acct" and inbox_group["description"] == "Inbox of acct."
+    assert inbox_group["heading"] == "Email inbox" and inbox_group["description"] == "Inbox of acct."
     thread, single = inbox_group["conversations"]
     assert thread["label"] == "Email thread" and single["label"] == "Email"
     assert [(t["mark"], t["text"].splitlines()[0]) for t in thread["turns"]] == [
         (None, "Subject: Bake sale Friday"), ("E1", "Subject: Re: Bake sale Friday")]
     text = conversations.render([inbox_group])
-    assert "### Email inbox acct\nInbox of acct." in text and "Change of plan: the sale moved to Monday." in text
+    assert "### Email inbox\nInbox of acct." in text and "Change of plan: the sale moved to Monday." in text
 
 
 def test_chat_and_email_share_one_view_and_an_unknown_source_is_refused():
@@ -221,7 +222,7 @@ def test_chat_and_email_share_one_view_and_an_unknown_source_is_refused():
     email_event = {"source": "email", "source_ref": "datapod:email:a", "occurred_at": MAIL["datapod:email:a"]["received_at_utc"],
                    "room_id": None, "speaker": "School Office", "text": "Subject: Form due\n\nSign the form.", "mark": "E2"}
     groups = conversations.build([_event(1, 60, "Signed it already."), email_event], now_utc=NOW)
-    assert [g["heading"] for g in groups] == ["Room master_room", "Email inbox acct"]
+    assert [g["heading"] for g in groups] == ["Chat room", "Email inbox"]
     with pytest.raises(ValueError, match="unknown source"):
         conversations.build([{**email_event, "source": "sms"}], now_utc=NOW)
 
@@ -325,7 +326,9 @@ def test_work_reports_render_under_their_work_and_attached_work_under_its_concer
              "room_id": None, "speaker": "dayflow", "mark": "E1",
              "text": 'Work "Check in" (work_a): the finalizer judged the task "Ask": achieved.'}
     text = conversations.render(conversations.build([event], now_utc=NOW))
-    assert "### Work work_a" in text and '[E1] dayflow: Work "Check in"' in text
+    assert "### Work\n" in text and '[E1] dayflow: Work "Check in"' in text, "the gate has no work labels"
+    labelled = conversations.render(conversations.build([event], now_utc=NOW, work_labels={"work_a": "W1"}))
+    assert "### Work [W1]" in labelled and "### Work work_a" not in labelled
     monkeypatch.setattr(brain_step, "_evidence_text", lambda e: e.get("snippet") or "")
     from app.assistant.subconscious import work_links
     monkeypatch.setattr(work_links, "progress", lambda work_id: {

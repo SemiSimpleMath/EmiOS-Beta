@@ -218,6 +218,9 @@ def project(day: str, situation: Dict[str, Any], matters: List[Dict[str, Any]], 
         m["ref"] = p.label("B", "brain_matter", str(m["id"]))
     for e in situation["calendar_today"]:
         e["ref"] = p.label("K", *_schedule_ref(day, e))
+    for line in situation["calendar_ahead"]:
+        if line["anchor"]:
+            line["ref"] = p.label("K", "calendar_event", line["anchor"][len("calendar:"):])
     entry_work = [it["current"].get("work") for it in items if it["current"]] + [e.get("work") for e in own] + \
         [e.get("work") for c in situation["concerns"] for e in c.get("entries") or []]
     for w in entry_work:

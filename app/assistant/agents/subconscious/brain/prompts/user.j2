@@ -4,7 +4,8 @@ Now: {{ agent_input.now }}
 
 {{ agent_input.events }}
 {% for r in agent_input.room_history -%}
-## Earlier in {{ r.room }} (chat summaries, from 48 hours before these events)
+## Earlier in the chat room (chat summaries, from 48 hours before these events)
+{{ r.description }}
 
 {% for s in r.summaries -%}
 - {{ s.when }}: {{ s.title }}

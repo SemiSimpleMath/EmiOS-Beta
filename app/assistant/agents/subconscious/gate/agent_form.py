@@ -16,7 +16,8 @@ class Decision(BaseModel):
         default_factory=list,
         description="For route=concern: the label of every open concern the event bears on (e.g. C2). "
                     "Empty for the other routes.")
-    reasoning: str = Field(description="One sentence: what in the event led to this route.")
+    reasoning: str = Field(description="One sentence, in words: what in the event led to this route. No labels: "
+                                       "name concerns and events in words.")
 
 
 class AgentForm(BaseModel):

@@ -327,5 +327,6 @@ def test_a_judgment_carries_the_research_findings_its_task_recorded_whole(setup,
     assert judged['payload']['task']['finding_refs']==['datapod:research_finding:abc']   # the email is not a finding
     concern_feedback.recover_pending_concern_feedback(store)
     text=work_events(inbox)[0]['text']
-    assert ('Research finding this task recorded (datapod:research_finding:abc): Two shops service the boiler\n'
+    assert ('Research finding this task recorded: Two shops service the boiler\n'
             'Shop A: Tuesdays. Shop B: any weekday, call first.') in text
+    assert 'datapod:' not in text and wid not in text, "no id in the report's words (2026-10-08)"
