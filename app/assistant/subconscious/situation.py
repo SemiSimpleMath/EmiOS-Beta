@@ -42,8 +42,10 @@ def _resource(scope, resource_id: str) -> Any:
 
 def calendar_today(scope) -> List[Dict[str, str]]:
     """Today's schedule as the daily context tracker keeps it (the steward's TODAY'S SCHEDULE), long blocks such
-    as work hours included: they say what kind of day it is."""
-    return [{"title": str(e.get("title") or ""), "start_local": str(e.get("start_local") or ""),
+    as work hours included: they say what kind of day it is. `id` is the line's calendar event, empty for a line the
+    tracker added from chat or a concern."""
+    return [{"id": str(e.get("calendar_item_id") or ""), "title": str(e.get("title") or ""),
+             "start_local": str(e.get("start_local") or ""),
              "end_local": str(e.get("end_local") or ""), "status": str(e.get("status") or "")}
             for e in _resource(scope, "resource_expected_calendar").get("expected_schedule") or []]
 

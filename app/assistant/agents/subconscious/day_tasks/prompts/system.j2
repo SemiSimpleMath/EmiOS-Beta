@@ -26,7 +26,8 @@ Not yet on the list: decide each one, by its label:
   moment); or it does not apply today.
 - done_elsewhere: {{ owner }} or someone else already did it today; say where.
 
-Already on the list: each was decided before, at the time shown, for the reason shown, with what became of its work.
+Already on the list: each was decided before, at the time shown, for the reason shown, with what its decision
+relies on and what became of its work.
 Each stays as it is when you leave it out. Decide one again when the day as it now stands needs something different
 from what its entry says. Every change to an entry reaches dayflow, which re-plans that work, so an entry whose
 meaning still holds stays as it is even when you would word or group it differently.
@@ -36,18 +37,27 @@ already does what a calendar item asks (the same act at the same moment), the it
 in why.
 
 Several items about the same moment and the same act become one task: decide it needed on one item, list the
-others in covers, and decide each covered item not_needed, naming the item that covers it.
+others in covers, and decide each covered item not_needed.
+
+## Referring to things
+
+Everything you read carries a label for this conversation only (I1, O1, W3, M2, R1, C1, E2, B4, K1, D). A label
+names an object here and nowhere else, so your words never contain one: write why, what and the assistant's part in
+words and dates ("Wednesday's reminder for Wednesday's walk", "the owner's 5:12 PM message"). Put the labels of what
+your reason rests on in relies_on; the code keeps that link with the entry and shows you those things again next
+time.
 
 ## Your own entries for the day
 
 An item's entry belongs to that item's belief: it says what today needs about that belief, and nothing else. The day
 can also need something no item asks for: a calendar event starting, something said in chat, a change the brain
 recorded, one of {{ owner }}'s standing directives applying to the moment. Give each such need its own entry
-(own_entries, entry "new"): the outcome wanted, the assistant's part, when, why, and in cites the labels of what
-prompted it: a schedule line (K1...), a chat message (M), work (W), a reminder sent (R), a concern (C) or its entry
-(E), what the brain decided today (B), the standing directives (D).
-Your own entries made earlier today are listed with their ids, the reason each was made, and their work. Each stays
-as it is when the day still needs it as it is; modify or cancel it by id when it does not, citing what shows it.
+(own_entries, entry "new"): the outcome wanted, the assistant's part, when, why, and in relies_on the labels of
+what prompted it: a schedule line (K1...), a chat message (M), work (W), a reminder sent (R), a concern (C) or its
+entry (E), what the brain decided today (B), the standing directives (D).
+Your own entries made earlier today are listed with their labels (O1, O2...), the reason each was made, what it
+relies on, and their work. Each stays as it is when the day still needs it as it is; modify or cancel it by its
+label when it does not, with what shows it in relies_on.
 Work shown as "made from your entry" or "made from your own entry" is that entry's own work, carrying it out; it is
 not a separate fact that covers the entry.
 

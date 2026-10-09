@@ -1,8 +1,9 @@
-{#- The day's tasks input (subconscious/day_tasks.py). Expects agent_input: day, items [{label, times, statement,
-    related: [statement], current: the item's entry on the brain's list {decision, assistant_part, when, why,
-    decided_at (UTC ISO)}, or None}], situation (subconscious/situation.py, rendered by shared/brain/situation.j2;
-    its concerns carry their whole record and their entries; its citable facts carry `ref` labels), matters (what
-    the brain decided today, day_tasks.matters_today, each with `ref`), correction. Times are shown local. -#}
+{#- The day's tasks input (subconscious/day_tasks.py), a projection of objects: every object shows its label of
+    this call (`ref`, day_tasks.project) and its data, never its id. Expects agent_input: day, items [{label, times,
+    statement, related: [statement], current: the item's entry on the brain's list {decision, assistant_part, when,
+    why, decided_at (UTC ISO), covered_by, relies_on_labels, work}, or None}], own [entry with ref, relies_on_labels,
+    work], situation (subconscious/situation.py, rendered by shared/brain/situation.j2), matters (each with `ref`),
+    earlier (objects an entry relies on that are not otherwise shown), source_labels, correction. Times local. -#}
 {%- set A = agent_input -%}
 {%- macro item(it) %}
 {%- set clock = it.times | reject("equalto", "all day") | list %}
@@ -11,6 +12,8 @@
     read with: {{ r }}
 {%- endfor %}
 {%- endmacro -%}
+{%- macro relied(labels, pad) %}{% if labels %}
+{{ pad }}relies on: {% for x in labels %}[{{ x }}]{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}{% endmacro -%}
 ## Today's calendar ({{ A.day }})
 
 ### Not yet on the list (decide each)
@@ -20,18 +23,30 @@
 {% endfor %}
 ### Already on the list (each stays as it is unless the day now needs it changed)
 {% for it in A["items"] if it.current %}{{ item(it) }}
-    on the list since {{ it.current.decided_at | local_time }}: {% if it.current.decision == "needed" %}needed: {{ it.current.assistant_part }}, {{ it.current.when }}. Why: {{ it.current.why }}{% else %}{{ it.current.decision | replace("_", " ") }}: {{ it.current.why }}{% endif %}
+    on the list since {{ it.current.decided_at | local_time }}: {% if it.current.decision == "needed" %}needed: {{ it.current.assistant_part }}, {{ it.current.when }}. Why: {{ it.current.why }}{% else %}{{ it.current.decision | replace("_", " ") }}{% if it.current.covered_by %} (covered by [{{ it.current.covered_by }}]){% endif %}: {{ it.current.why }}{% endif %}{{ relied(it.current.relies_on_labels, "    ") }}
 {% if it.current.work is defined and it.current.work %}{% with w = it.current.work, pad = "    " %}{% include 'shared/brain/entry_work.j2' %}{% endwith %}{% endif -%}
 {% else %}
 (none)
 {% endfor %}
 ### Your own entries today (each stays as it is unless the day now needs it changed)
-{% for e in A.own %}- [{{ e.id }}] {{ e.what }} | the assistant: {{ e.assistant_part }} | when: {{ e.when_local }} | {{ e.status }}, made {{ e.updated_at | local_time }}: {{ e.why }}
+{% for e in A.own %}- [{{ e.ref }}] {{ e.what }} | the assistant: {{ e.assistant_part }} | when: {{ e.when_local }} | {{ e.status }}, made {{ e.updated_at | local_time }}: {{ e.why }}{{ relied(e.relies_on_labels, "    ") }}
 {% if e.work %}{% with w = e.work, pad = "    " %}{% include 'shared/brain/entry_work.j2' %}{% endwith %}{% endif -%}
 {% else %}
 (none)
 {% endfor %}
 {% with s = A.situation %}{% include 'shared/brain/situation.j2' %}{% endwith %}
+{% if A.earlier %}
+## Earlier things your entries rely on
+{% for x in A.earlier -%}
+{% if x.missing is defined %}- [{{ x.ref }}] (no longer stored)
+{% elif x.kind == "work" %}{% with w = x.work %}{% include 'shared/brain/past_work.j2' %}{% endwith %}
+{% elif x.kind in ("message", "reminder") %}- [{{ x.ref }}] [{{ x.at | local_time }}] {{ x.speaker }}: {{ x.text }}
+{% elif x.kind == "concern" %}- [{{ x.ref }}] concern: {{ x.title }} ({{ x.bucket }})
+{% elif x.kind == "list_entry" %}- [{{ x.ref }}] an entry on the list of {{ x.entry.day or "a concern" }}: {{ x.entry.what }}; {{ x.entry.decision | replace("_", " ") }}{% if x.entry.when_local %}, {{ x.entry.when_local }}{% endif %}; {{ x.entry.status }}, decided {{ x.entry.updated_at | local_time }}
+{% elif x.kind == "brain_matter" %}- [{{ x.ref }}] the brain decided at {{ x.at | local_time }}: {% for r in x.reasons %}{{ r }}{% if not loop.last %} / {% endif %}{% endfor %}
+{% elif x.gone_from_schedule is defined %}- [{{ x.ref }}] a line no longer on today's schedule
+{% endif -%}
+{% endfor %}{% endif %}
 
 ## What the brain read and decided today
 {% for m in A.matters -%}

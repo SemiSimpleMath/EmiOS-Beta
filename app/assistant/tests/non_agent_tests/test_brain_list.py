@@ -66,9 +66,12 @@ def test_the_days_tasks_see_each_placements_entry_and_entries_are_not_a_change_o
     base = {"day": "2026-03-10", "now": NOW.isoformat(), "situation": situation(), "matters": [], "own": []}
     assert D.fingerprint({**base, "items": ITEMS}) == D.fingerprint({**base, "items": seen})
     from app.assistant.dayflow_orchestrator.work_context import _ENV
+    items = [{**it, "related": []} for it in seen]
+    projected = D.project("2026-03-10", base["situation"], [], items, [], connect=conn)
     user = _ENV.get_template("subconscious/day_tasks/prompts/user.j2").render(
-        agent_input={**base, "items": [{**it, "related": []} for it in seen], "correction": None})
-    assert ": needed: set the AC to 70, 9:00 PM" in user and ": not needed: Covered by I1." in user
+        agent_input={**base, "items": items, "correction": None, **projected})
+    assert ": needed: set the AC to 70, 9:00 PM" in user
+    assert ": not needed (covered by [I1]): Covered by I1." in user, "covered by, from the covering entry, by label"
 
 
 # ── concerns ───────────────────────────────────────────────────────────────

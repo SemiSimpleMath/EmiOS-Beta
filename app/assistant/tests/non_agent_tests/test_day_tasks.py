@@ -6,7 +6,10 @@ when, and covers only name other items; an item on the list keeps its entry when
 answer's change to it goes through (2026-10-08: no newer-fact gate); a run is
 recorded, and repeated only when something it read has changed; nothing is handed to dayflow; the comparison sets
 the list's entries beside what dayflow did with the same beliefs; the prompts render the rules, the two groups of
-items, the labelled facts and the brain's situation, times local. Scratch database; fake agent; invented data only.
+items, the labelled objects and the brain's situation, times local. The prompt is a projection (2026-10-08): every
+object shows a label of the call, never its id; the answer refers only by labels in relies_on, covers and entry,
+code maps them back and keeps what an entry relies on as relations, shown again on the next run; a label written
+into prose is a malformed answer. Scratch database; fake agent; invented data only.
 """
 from datetime import datetime, timedelta, timezone
 
@@ -44,18 +47,21 @@ def situation(chat="I'll start the report at 5", **changes):
             "todos": [{"title": "Weekly report", "status": "needsAction", "due": ""}],
             "work": {"in_motion": [], "ended": []},
             "reminders": {"status": "available", "since": NOW.isoformat(), "through": NOW.isoformat(), "records": []},
-            "tickets": [], "concerns": [{"title": "Sleep is poor", "severity": "medium",
+            "tickets": [], "concerns": [{"concern_id": "c-sleep", "title": "Sleep is poor", "severity": "medium",
                                          "changed_at": (NOW - timedelta(days=1)).isoformat()}], **changes}
 
 
-def _gather(conn, chat="I'll start the report at 5", refs=None):
-    """day_tasks.gather's shape, on a scratch list: the plan's placements with their entries, offered as of NOW."""
+def _gather(conn, chat="I'll start the report at 5", s=None):
+    """day_tasks.gather's shape, on a scratch list: the plan's placements with their entries, offered as of NOW,
+    and the call's labels (day_tasks.project)."""
     def gather(now):
         every = D.placements(_plan())
-        return {"day": DAY, "now": now.isoformat(),
-                "items": D.offered(DAY, D.with_current(DAY, every, connect=conn), now),
-                "situation": situation(chat), "matters": [], "refs": refs or {"M1": NOW.isoformat()}, "own": [],
-                "correction": None}
+        items = D.offered(DAY, D.with_current(DAY, every, connect=conn), now)
+        own = [{**e, "work": None, "relies_on": [list(r) for r in L.relies_on(e["id"], connect=conn)]}
+               for e in L.entries(day=DAY, kind="day", connect=conn)]
+        sit = s or situation(chat)
+        return {"day": DAY, "now": now.isoformat(), "items": items, "own": own, "situation": sit, "matters": [],
+                **D.project(DAY, sit, [], items, own, connect=conn), "correction": None}
     return gather
 
 
@@ -134,8 +140,7 @@ def test_a_run_decides_the_new_keeps_the_rest_and_applies_a_change(tmp_path):
     assert calls[-1]["items"][2]["current"]["when"] == "9:00 PM", "the decider sees each entry it would keep"
     move = {"decisions": [_d("I3", "needed", "set the AC to 70", "8:30 PM", why="The owner asked for 8:30 today.")]}
     out = D.run_day_tasks(now_utc=later + timedelta(minutes=10), connect=conn,
-                          gather_inputs=_gather(conn, "AC at 8:30 today", refs={"M1": (later + timedelta(minutes=5)).isoformat()}),
-                          call=call(move))
+                          gather_inputs=_gather(conn, "AC at 8:30 today"), call=call(move))
     assert out["day_list_changes"]["modified"] == 1 and out["day_list_changes"]["kept"] == 2
     [ac] = [e for e in L.entries(day=DAY, connect=conn) if e["belief_key"] == "B3"]
     assert ac["when_local"] == "8:30 PM" and ac["who_acts"] == ""
@@ -189,13 +194,13 @@ def test_the_prompts_carry_the_rules_the_two_groups_and_the_labelled_situation()
     assert "Wellness nudges are separate cron reminders." in system and "Device control: the thermostat." in system
     assert "away from the keyboard" in system and "who acts" not in system.lower()
     items = _new_items()
-    items[2]["current"] = {"decision": "needed", "assistant_part": "set the AC to 70", "when": "9:00 PM", "why": "w",
-                           "decided_at": NOW.isoformat()}
+    items[2]["current"] = {"entry_id": f"cal:{DAY}:B3", "decision": "needed", "assistant_part": "set the AC to 70",
+                           "when": "9:00 PM", "why": "w", "decided_at": NOW.isoformat(), "covers": [], "relies_on": []}
     s = situation()
-    s["chat"][0]["ref"] = "M1"
-    s["concerns"][0]["ref"] = "C1"
+    projected = D.project(DAY, s, [], items, [])
     user = _ENV.get_template("subconscious/day_tasks/prompts/user.j2").render(
-        agent_input={"day": DAY, "items": items, "own": [], "situation": s, "matters": [], "correction": None})
+        agent_input={"day": DAY, "items": items, "own": [], "situation": s, "matters": [], "correction": None,
+                     **projected})
     new_part, listed_part = user.split("### Already on the list", 1)
     assert "[I1] All day: The owner sometimes starts the weekly report on Sunday." in new_part
     assert "    read with: The owner likes it quiet." in new_part
@@ -234,16 +239,21 @@ def test_the_brain_s_view_concerns_in_full_with_their_entries_and_today_s_decisi
                    '{"events": {"message:9": {"decision": "tracked_as_new", "reason": "Dinner plans changed."}}, '
                    '"concern_updates": [], "new_concerns": [{"title": "Dinner out tonight"}]}'))
     matters = D.matters_today(DAY, NOW + timedelta(minutes=5), connect=conn)
-    refs = D.label_refs(s, matters)
-    assert refs["E1"] == (NOW + timedelta(minutes=3)).isoformat() and refs["B1"] == (NOW + timedelta(minutes=2)).isoformat()
     items = _new_items()
-    items[1]["current"] = {"decision": "needed", "assistant_part": "tell the owner dinner is starting", "when": "6:00 PM",
-                           "why": "w", "decided_at": NOW.isoformat()}
+    items[1]["current"] = {"entry_id": f"cal:{DAY}:B2", "decision": "needed",
+                           "assistant_part": "tell the owner dinner is starting", "when": "6:00 PM", "why": "w",
+                           "decided_at": NOW.isoformat(), "covers": [], "relies_on": []}
+    projected = D.project(DAY, s, matters, items, [], connect=conn)
+    [entry] = L.entries(concern_id="c-dinner", connect=conn)
+    assert projected["labels"]["E1"] == ["list_entry", entry["id"]] and projected["labels"]["B1"] == ["brain_matter", "1"]
+    assert projected["labels"]["C1"] == ["concern", "c-dinner"]
     drop = {"decisions": [GOOD["decisions"][0], GOOD["decisions"][2],
-                          _d("I2", "not_needed", why="E1 covers it: the family eats out.")]}
-    assert D.problems(drop, items, refs) == []
+                          _d("I2", "not_needed", why="The concern's entry covers it: the family eats out.") |
+                          {"relies_on": ["E1"]}]}
+    assert D.problems(drop, items, projected["labels"]) == []
     user = _ENV.get_template("subconscious/day_tasks/prompts/user.j2").render(
-        agent_input={"day": DAY, "items": items, "own": [], "situation": s, "matters": matters, "correction": None})
+        agent_input={"day": DAY, "items": items, "own": [], "situation": s, "matters": matters, "correction": None,
+                     **projected})
     assert "### [C1] Dinner out tonight" in user and "THE WHOLE RECORD of c-dinner (active)" in user
     assert "- [E1] the owner knows the family eats out tonight (the assistant: tell the owner the table is at 6), 5:30 PM; open" in user
     assert "- chat at" in user and ": we are eating out tonight" in user
@@ -294,34 +304,35 @@ def test_the_health_assessment_alone_is_not_new_input():
 # ── the decider's own entries (2026-10-06) ──────────────────────────────────
 
 def _own(entry="new", action="new", what="Ask whether the owner is clocked in", part="ask the owner", when="now",
-         why="He is back at the desk in work hours (directive D).", cites=("D",)):
+         why="He is back at the desk in work hours, as his directives ask.", relies_on=("D",)):
     return {"entry": entry, "action": action, "what": what, "assistant_part": part, "when": when, "why": why,
-            "cites": list(cites)}
+            "relies_on": list(relies_on)}
 
 
-def test_an_own_entry_cites_what_prompted_it():
+def test_an_own_entry_names_what_prompted_it_by_label():
     """On 2026-10-06 the decider, with nowhere to put an act no belief asked for, wrote a clock-in check into the
-    encouragement belief's entry and a dinner question into family time's. An own entry carries such an act and
-    cites a label given; a modify or cancel goes through (2026-10-08: no newer-fact gate)."""
-    refs = {"K1": "2026-03-10T12:00:00+00:00", "D": "2026-03-10T12:00:00+00:00", "M1": NOW.isoformat()}
-    assert D.own_problems({"own_entries": [_own()]}, [], refs) == []
-    assert "cites names nothing" in D.own_problems({"own_entries": [_own(cites=())]}, [], refs)[0]
-    assert "not labels given" in D.own_problems({"own_entries": [_own(cites=("X9",))]}, [], refs)[0]
-    made = {"id": "day:2026-03-10:ab", "updated_at": (NOW - timedelta(minutes=30)).isoformat()}
-    assert D.own_problems({"own_entries": [_own(entry=made["id"], action="modify", cites=("K1", "D"))]},
-                          [made], refs) == []
-    assert D.own_problems({"own_entries": [_own(entry=made["id"], action="cancel", what="", part="", when="",
-                                                cites=("M1",))]}, [made], refs) == []
-    assert "not one of your own entries" in D.own_problems({"own_entries": [_own(entry="day:x", action="modify")]},
-                                                           [made], refs)[0]
+    encouragement belief's entry and a dinner question into family time's. An own entry carries such an act and lists
+    in relies_on the labels of what prompted it; a modify or cancel names the entry by its label (O1), never its id."""
+    labels = {"K1": ["calendar_event", "k"], "D": ["resource", "r"], "M1": ["message", "m1"],
+              "O1": ["list_entry", "day:2026-03-10:ab"]}
+    assert D.own_problems({"own_entries": [_own()]}, [], labels) == []
+    assert "relies_on names nothing" in D.own_problems({"own_entries": [_own(relies_on=())]}, [], labels)[0]
+    assert "not labels given" in D.own_problems({"own_entries": [_own(relies_on=("X9",))]}, [], labels)[0]
+    made = {"id": "day:2026-03-10:ab", "ref": "O1", "updated_at": (NOW - timedelta(minutes=30)).isoformat()}
+    assert D.own_problems({"own_entries": [_own(entry="O1", action="modify", relies_on=("K1", "D"))]},
+                          [made], labels) == []
+    assert D.own_problems({"own_entries": [_own(entry="O1", action="cancel", what="", part="", when="",
+                                                relies_on=("M1",))]}, [made], labels) == []
+    assert "not one of your own entries" in D.own_problems({"own_entries": [_own(entry=made["id"],
+                                                                                 action="modify")]}, [made], labels)[0]
+    leaked = D.own_problems({"own_entries": [_own(why="M1 says he is back.")]}, [], labels)
+    assert "['M1'] written into" in leaked[0], "a label in prose is malformed"
 
 
 def test_a_run_puts_an_own_entry_on_the_list_and_the_calendar_lane_makes_work_from_it(tmp_path, monkeypatch):
     conn = sqlite_file(tmp_path / "d.db")
     answer = {**GOOD, "own_entries": [_own()]}
-    out = D.run_day_tasks(now_utc=NOW, connect=conn, gather_inputs=_gather(conn, refs={"M1": NOW.isoformat(),
-                                                                                      "D": NOW.isoformat()}),
-                          call=lambda p: answer)
+    out = D.run_day_tasks(now_utc=NOW, connect=conn, gather_inputs=_gather(conn), call=lambda p: answer)
     assert out["day_list_changes"]["own"]["created"] == 1
     [own] = L.entries(day=DAY, kind="day", connect=conn)
     assert own["id"].startswith(f"day:{DAY}:") and own["assistant_part"] == "ask the owner" and own["kind"] == "day"
@@ -340,14 +351,61 @@ def test_a_run_puts_an_own_entry_on_the_list_and_the_calendar_lane_makes_work_fr
     assert "the assistant's part: ask the owner" in mine[0].constraints["rationale"]
 
 
-def test_work_is_marked_with_the_entry_it_was_made_from():
+def test_work_is_marked_with_the_entry_it_was_made_from_by_label():
     """The decider cited W8, the family-time entry's own work, as covering that entry, and decided it not needed."""
     s = situation(work={"in_motion": [{"work_id": "w8", "list_entry": f"cal:{DAY}:B2"},
                                       {"work_id": "w9", "list_entry": "day:2026-03-10:ab"},
-                                      {"work_id": "w10", "list_entry": None}],
+                                      {"work_id": "w10", "list_entry": None},
+                                      {"work_id": "w11", "list_entry": "day:2026-03-09:cd"}],
                         "ended": [{"work_id": "w7", "list_entry": "con:42"}]})
-    items = [{"label": "I2", "belief_key": "B2"}]
-    D.mark_list_work(s, DAY, items, [{"id": "day:2026-03-10:ab"}])
-    assert [w["from_list"] for w in s["work"]["in_motion"]] == ["your entry for I2", "your own entry day:2026-03-10:ab",
-                                                                None]
-    assert s["work"]["ended"][0]["from_list"] == "list entry con:42"
+    items = [{"label": "I2", "belief_key": "B2", "current": None}]
+    D.project(DAY, s, [], items, [{"id": "day:2026-03-10:ab"}])
+    assert [w["from_list"] for w in s["work"]["in_motion"]] == [
+        "your entry for I2", "your own entry O1", None, "an entry on the list of 2026-03-09"]
+    assert s["work"]["ended"][0]["from_list"] == "a concern's entry not shown here", "never an id"
+
+
+def test_what_an_entry_relies_on_is_kept_by_id_and_shown_again_by_label(tmp_path, monkeypatch):
+    """2026-10-08: the decider's reason "W21 abandoned the reminder ..., but W29 records that reminder for Wednesday's
+    walk" was stored with its labels; the next run read W21/W29 that named nothing, could not check the claim, and
+    dropped the evening's reminder. relies_on is mapped to ids and kept as relations; the next run shows those objects
+    under its own labels, an object no longer in view among the earlier things."""
+    from app.assistant.dayflow_orchestrator.work_context import _ENV
+    from app.assistant.subconscious import relations
+    conn = sqlite_file(tmp_path / "d.db")
+    s1 = situation(chat="the AC can wait until 9", work={"in_motion": [], "ended": [
+        {"work_id": "work_yesterday", "title": "Set the AC yesterday", "status": "done", "objective": "",
+         "created": "Mon 2026-03-09", "updated": "Mon 2026-03-09", "ended_because": "done", "outcomes": [],
+         "link": "ended", "score": None, "list_entry": None}]})
+    answer = {"decisions": [*GOOD["decisions"][:2],
+                            _d("I3", "needed", "set the AC to 70", "9:00 PM",
+                               why="Yesterday's setting was for yesterday; the owner asked again today.") |
+                            {"relies_on": ["W1", "M1"]}]}
+    D.run_day_tasks(now_utc=NOW, connect=conn, gather_inputs=_gather(conn, s=s1), call=lambda p: answer)
+    entry = f"cal:{DAY}:B3"
+    assert relations.targets(("list_entry", entry), "relies_on", connect=conn) == [("work", "work_yesterday"),
+                                                                                    ("message", "m1")]
+    monkeypatch.setattr(D, "describe", lambda kind, obj_id, connect=None: {
+        "work": {**s1["work"]["ended"][0]}} if kind == "work" else {"missing": True})
+    seen = []
+    later = NOW + timedelta(minutes=10)
+    s2 = situation(chat="something else")
+    s2["chat"][0]["id"] = "m2"
+    D.run_day_tasks(now_utc=later, connect=conn, gather_inputs=_gather(conn, s=s2),
+                    call=lambda p: seen.append(p) or {"decisions": []})
+    [ac] = [it for it in seen[0]["items"] if it["belief_key"] == "B3"]
+    assert ac["current"]["relies_on_labels"] == ["W1", "M2"], "relabelled in the new call"
+    assert seen[0]["labels"]["W1"] == ["work", "work_yesterday"] and seen[0]["labels"]["M2"] == ["message", "m1"]
+    user = _ENV.get_template("subconscious/day_tasks/prompts/user.j2").render(agent_input=seen[0])
+    assert "relies on: [W1], [M2]" in user and "## Earlier things your entries rely on" in user
+    assert "### Set the AC yesterday [W1; done;" in user and "[M2] (no longer stored)" in user
+    assert "work_yesterday" not in user and f"cal:{DAY}" not in user, "no id is shown"
+
+
+def test_a_label_written_into_prose_is_malformed():
+    labels = {"I1": ["list_entry", "a"], "I2": ["list_entry", "b"], "I3": ["list_entry", "c"], "W3": ["work", "w"],
+              "D": ["resource", "r"]}
+    leaked = {"decisions": [*GOOD["decisions"][:2], _d("I3", "needed", "set the AC", "9:00 PM", why="W3 did it")]}
+    assert any("['W3'] written into why" in p for p in D.problems(leaked, _new_items(), labels))
+    vitamin = {"decisions": [*GOOD["decisions"][:2], _d("I3", "needed", "remind about vitamin D", "9:00 PM")]}
+    assert D.problems(vitamin, _new_items(), labels) == [], "the single letter D is also a word"

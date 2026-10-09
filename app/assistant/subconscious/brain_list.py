@@ -15,13 +15,16 @@ again), the times being a field; concern entries get an id when first created an
 Tables in emi.db (subconscious/db.py):
     brain_list_entries  one row per entry, its current state.
     brain_list_changes  one row per created, modified or cancelled entry: before, after, the cause.
+What an entry's decision rests on is held as relations (subconscious/relations.py, rel `relies_on`), written with the
+entry in the same transaction when it is created or changed (2026-10-08: until then the decider wrote its reasons'
+references as labels inside `why`, and a later prompt read "W21 ... W29" that named nothing).
 """
 from __future__ import annotations
 
 import json
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.assistant.subconscious.db import connect as _connect
 
@@ -58,9 +61,22 @@ _TERMINAL = ("cancelled",)
 
 
 def ensure_schema(connect=None) -> None:
+    from app.assistant.subconscious import relations
     with (connect or _connect)(True) as c:
         for statement in SCHEMA:
             c.execute(statement)
+    relations.ensure_schema(connect)
+
+
+def relies_on(entry_id: str, *, connect=None) -> List[Tuple[str, str]]:
+    """What the entry's current decision rests on: (kind, id) of each object, in the order given."""
+    from app.assistant.subconscious import relations
+    return relations.targets(("list_entry", entry_id), "relies_on", connect=connect)
+
+
+def _relies_on(c, entry_id: str, refs, *, cause: str, at: str) -> None:
+    from app.assistant.subconscious import relations
+    relations.replace(c, ("list_entry", entry_id), "relies_on", [tuple(r) for r in refs or []], at=at, by=cause)
 
 
 def calendar_id(day: str, belief_key: str) -> str:
@@ -150,7 +166,9 @@ def cancel(c, entry_id: str, *, reason: str, cause: str, at: str) -> None:
 def apply_calendar(day: str, items: List[Dict[str, Any]], decisions: List[Dict[str, Any]], *, cause: str,
                    at: datetime, connect=None) -> Dict[str, int]:
     """A day's-tasks answer onto the list: each decided placement's entry created or changed, keyed by code; a
-    placement it did not decide keeps its entry as it is (silence is keep); covers become entry ids. An entry whose
+    placement it did not decide keeps its entry as it is (silence is keep); covers become entry ids; a decision's
+    `relies_on` ((kind, id) pairs, resolved by the caller) becomes the entry's relations when the entry is created or
+    changed. An entry whose
     placement is no longer in the day's plan is kept: the day pass re-places the day as its inputs change and a
     belief can drop out of one run and return in the next (2026-10-05: the clock-in reminder was in 2 of 9 runs), so
     a drop is not the brain's decision to stop the work; an entry ends only by a decision. (Until 2026-10-05 a dropped
@@ -173,6 +191,8 @@ def apply_calendar(day: str, items: List[Dict[str, Any]], decisions: List[Dict[s
                 "what": d["assistant_part"] if needed else it["statement"], "decision": d["decision"],
                 "who_acts": "", "assistant_part": d["assistant_part"], "when_local": d["when"],
                 "covers": [ids[x] for x in d.get("covers") or []], "why": d["why"]}, cause=cause, at=when)
+            if result != "unchanged":
+                _relies_on(c, ids[d["item"]], d.get("relies_on"), cause=cause, at=when)
             counts[result] += 1
     return counts
 
@@ -181,7 +201,8 @@ def apply_day_own(day: str, changes: List[Dict[str, Any]], *, cause: str, at: da
                   connect=None) -> Dict[str, int]:
     """The day's tasks' own entries onto the list (2026-10-06): something today needs that no calendar item asks for
     (a calendar event starting, something said, a standing directive applying to the moment). New ones get an id
-    (`day:<day>:<hex>`); modify and cancel name it. Kind "day": the calendar lane delivers them by their day. Until
+    (`day:<day>:<hex>`); modify and cancel name it (resolved to its id by the caller); `relies_on` as in
+    apply_calendar. Kind "day": the calendar lane delivers them by their day. Until
     then the decider could only fill a belief's entry, and put other acts into unrelated beliefs' entries."""
     connect = connect or _connect
     ensure_schema(connect)
@@ -199,6 +220,8 @@ def apply_day_own(day: str, changes: List[Dict[str, Any]], *, cause: str, at: da
                 "concern_id": None, "what": a["what"], "decision": "needed", "who_acts": "",
                 "assistant_part": a["assistant_part"], "when_local": a["when"], "covers": [], "why": a["why"]},
                 cause=cause, at=when)
+            if result != "unchanged":
+                _relies_on(c, entry_id, a.get("relies_on"), cause=cause, at=when)
             counts[result] += 1
     return counts
 

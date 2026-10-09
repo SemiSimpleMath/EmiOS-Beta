@@ -1,6 +1,6 @@
 {#- The brain's situation (subconscious/situation.py): one picture of the moment, the same for every brain decider
-    (docs/design/brain_delegates_work_2026-10-04.md, section 2). Expects `s`; times are shown local. A fact a
-    decider can cite carries `ref` (set by the decider's code, e.g. day_tasks.label_refs) and shows it. -#}
+    (docs/design/brain_delegates_work_2026-10-04.md, section 2). Expects `s`; times are shown local. Each object
+    shows its label of the call (`ref`, set by the decider's code: day_tasks.project), never its id. -#}
 ## The moment
 Now: {{ s.now | local_time }} ({{ s.weekday }})
 {% set p = s.presence -%}
@@ -53,8 +53,8 @@ The calendar ahead:
 {% endfor %}
 ## Work that ended in the last 18 hours
 {% for w in s.work.ended -%}
-{% if w.ref is defined %}[{{ w.ref }}]{% if w.from_list is defined and w.from_list %} made from {{ w.from_list }}{% endif %}
-{% endif %}{% include 'shared/brain/past_work.j2' %}
+{% include 'shared/brain/past_work.j2' %}{% if w.from_list is defined and w.from_list %}- made from {{ w.from_list }}
+{% endif %}
 {% else -%}
 (none)
 {% endfor %}

@@ -5,8 +5,12 @@ Window: {{ scheduled_reminder_history.since | local_time }} through {{ scheduled
 These are outbound records saved BEFORE delivery by the independent fixed reminder scheduler.
 They do not establish delivery, reading, acknowledgement, or completion of the activity.
 {% for record in scheduled_reminder_history.records %}
-- {% if record.ref is defined %}[{{ record.ref }}] {% endif %}Record: {{ record.id }} | source: {{ record.source }} | at: {{ record.timestamp | local_time }}
+{% if record.ref is defined -%}
+- [{{ record.ref }}] at: {{ record.timestamp | local_time }} | surface: {{ record.surface }}
+{%- else -%}
+- Record: {{ record.id }} | source: {{ record.source }} | at: {{ record.timestamp | local_time }}
   Room: {{ record.room_id }} | surface: {{ record.surface }}
+{%- endif %}
   Delivery: {{ record.delivery_status }} | read: {{ record.read_status }}
   Full recorded message:
 {{ record.text }}

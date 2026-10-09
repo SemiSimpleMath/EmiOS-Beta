@@ -87,23 +87,25 @@ def fingerprint(inputs: Dict[str, Any]) -> str:
     counting them would make every run trigger the next): a run is repeated only when one of these changed. The
     situation counts without what moves with the clock alone (situation.fingerprint_view)."""
     from app.assistant.subconscious.situation import fingerprint_view
-    read = {k: v for k, v in inputs.items() if k not in ("now", "correction", "items", "situation", "refs", "own")}
+    read = {k: v for k, v in inputs.items()
+            if k not in ("now", "correction", "items", "situation", "labels", "earlier", "source_labels", "own")}
     read["items"] = [{k: v for k, v in it.items() if k != "current"} for it in inputs["items"]]
     read["situation"] = fingerprint_view(inputs["situation"])
     return hashlib.sha256(json.dumps(read, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 
 def with_current(day: str, items: List[Dict[str, Any]], *, connect=None) -> List[Dict[str, Any]]:
-    """Each placement with its entry on the brain's list (decision, the assistant's part, when, why, when it was
-    decided), or None."""
+    """Each placement with its entry on the brain's list (its id, decision, the assistant's part, when, why, when it
+    was decided, the entries it covers, and what its decision relies on as (kind, id)), or None."""
     from app.assistant.subconscious import brain_list
     now_on = {e["id"]: e for e in brain_list.entries(day=day, connect=connect)}
     out = []
     for it in items:
         e = now_on.get(brain_list.calendar_id(day, it["belief_key"]))
         out.append({**it, "current": None if e is None else {
-            "decision": e["decision"], "assistant_part": e["assistant_part"], "when": e["when_local"],
-            "why": e["why"], "decided_at": e["updated_at"]}})
+            "entry_id": e["id"], "decision": e["decision"], "assistant_part": e["assistant_part"],
+            "when": e["when_local"], "why": e["why"], "decided_at": e["updated_at"], "covers": e["covers"],
+            "relies_on": [list(r) for r in brain_list.relies_on(e["id"], connect=connect)]}})
     return out
 
 
@@ -155,7 +157,7 @@ def matters_today(day: str, now_utc: datetime, *, connect=None) -> List[Dict[str
     connect = connect or _connect
     start = day_window_local(day)[0].astimezone(timezone.utc).isoformat()
     with connect(False) as c:
-        rows = c.execute("SELECT created_at, decisions FROM brain_matters WHERE status = 'applied' AND created_at >= ? "
+        rows = c.execute("SELECT id, created_at, decisions FROM brain_matters WHERE status = 'applied' AND created_at >= ? "
                          "AND created_at <= ? ORDER BY id", (start, now_utc.isoformat())).fetchall()
         out = []
         for r in rows:
@@ -165,52 +167,147 @@ def matters_today(day: str, now_utc: datetime, *, connect=None) -> List[Dict[str
                 e = c.execute("SELECT source, occurred_at, text FROM brain_events WHERE source_ref = ?", (ref,)).fetchone()
                 events.append({"source": e["source"], "at": e["occurred_at"], "text": e["text"],
                                "decision": decided["decision"], "reason": decided["reason"]})
-            out.append({"at": r["created_at"], "events": events, "notes": d.get("concern_updates") or [],
+            out.append({"id": r["id"], "at": r["created_at"], "events": events, "notes": d.get("concern_updates") or [],
                         "new_concerns": d.get("new_concerns") or []})
     return out
 
 
-def label_refs(situation: Dict[str, Any], matters: List[Dict[str, Any]] = ()) -> Dict[str, str]:
-    """Labels the facts a change can cite, in place (each gets `ref`, shown by shared/brain/situation.j2 and the
-    day's tasks prompt): today's chat messages M1.., work W1.. (in motion, then ended), reminders sent R1.., open
-    concerns C1.., the concerns' entries on the list E1.., what the brain decided today B1... Returns label -> when
-    it happened (UTC ISO): for work, when it last changed; for a concern, when its record last changed; for an
-    entry, when it was last decided."""
+# The kinds of object the day's tasks reads, by label prefix (docs/design/objects_and_projections_2026-10-08.md).
+_PREFIX = {"work": "W", "message": "M", "reminder": "R", "concern": "C", "list_entry": "E", "brain_matter": "B",
+           "calendar_event": "K", "schedule_line": "K", "resource": "D"}
+_DIRECTIVES = ("resource", "resource_owner_standing_directives")
+
+
+def _schedule_ref(day: str, e: Dict[str, Any]):
+    """A schedule line's object: its calendar event, or for a line the tracker added from chat or a concern (it has
+    no id; docs/design/objects_and_projections_2026-10-08.md, the gap), the line itself by day, start and title."""
+    if e.get("id"):
+        return "calendar_event", e["id"]
+    return "schedule_line", f"{day}|{e['start_local']}|{e['title']}"
+
+
+def project(day: str, situation: Dict[str, Any], matters: List[Dict[str, Any]], items: List[Dict[str, Any]],
+            own: List[Dict[str, Any]], *, connect=None) -> Dict[str, Any]:
+    """The labels of this call, in place: each object the decider reads gets `ref` (placements keep their I labels;
+    own entries O; work W; chat M; reminders sent R; concerns C; concerns' entries E; the brain's decisions B; the
+    schedule's lines K; the standing directives D). An entry's work gets its label (`ref` on the work view); an entry
+    that covers another shows it as `covered_by`; what an entry's decision relies on is shown by label
+    (`relies_on_labels`), and each such object not otherwise in view is labelled too and listed in `earlier`, with
+    its data. Work made from a list entry names that entry by its label (`from_list`). Returns `labels` (label ->
+    [kind, id], for mapping the answer back), `earlier`, and `source_labels` (work id -> label, read by
+    shared/brain/past_work.j2)."""
+    from app.assistant.subconscious import brain_list
+    from app.assistant.subconscious.projection import Projection
+    p = Projection()
+    for it in items:
+        p.fixed(it["label"], "list_entry", brain_list.calendar_id(day, it["belief_key"]))
+    p.fixed("D", *_DIRECTIVES)
+    for e in own:
+        e["ref"] = p.label("O", "list_entry", e["id"])
+    for m in situation["chat"]:
+        m["ref"] = p.label("M", "message", m["id"])
+    for w in [*situation["work"]["in_motion"], *situation["work"]["ended"]]:
+        w["ref"] = p.label("W", "work", w["work_id"])
+    for r in situation["reminders"].get("records") or []:
+        r["ref"] = p.label("R", "reminder", r["id"])
+    for c in situation["concerns"]:
+        c["ref"] = p.label("C", "concern", c["concern_id"])
+    for e in [e for c in situation["concerns"] for e in c.get("entries") or []]:
+        e["ref"] = p.label("E", "list_entry", e["id"])
+    for m in matters:
+        m["ref"] = p.label("B", "brain_matter", str(m["id"]))
+    for e in situation["calendar_today"]:
+        e["ref"] = p.label("K", *_schedule_ref(day, e))
+    entry_work = [it["current"].get("work") for it in items if it["current"]] + [e.get("work") for e in own] + \
+        [e.get("work") for c in situation["concerns"] for e in c.get("entries") or []]
+    for w in entry_work:
+        if w:
+            w["ref"] = p.label("W", "work", w["work_id"])
+    earlier: List[Dict[str, Any]] = []
+
+    def label_of(kind: str, obj_id: str) -> str:
+        label = p.label_of(kind, obj_id)
+        if label is None:
+            label = p.label(_PREFIX[kind], kind, obj_id)
+            earlier.append({"ref": label, "kind": kind, **describe(kind, obj_id, connect=connect)})
+        return label
+
+    by_entry = {it["current"]["entry_id"]: it["label"] for it in items if it["current"]}
+    for it in items:
+        cur = it["current"]
+        if cur:
+            cur["relies_on_labels"] = [label_of(k, i) for k, i in cur.get("relies_on") or []]
+            cur["covered_by"] = next((by_entry[o["current"]["entry_id"]] for o in items if o["current"]
+                                      and cur["entry_id"] in (o["current"].get("covers") or [])), None)
+    for e in own:
+        e["relies_on_labels"] = [label_of(k, i) for k, i in e.get("relies_on") or []]
+    for w in [*situation["work"]["in_motion"], *situation["work"]["ended"]]:
+        entry = w.get("list_entry")
+        label = p.label_of("list_entry", entry) if entry else None
+        w["from_list"] = None if not entry else (
+            f"your entry for {label}" if label and label.startswith("I") else
+            f"your own entry {label}" if label and label.startswith("O") else
+            f"the concern's entry {label}" if label else
+            f"an entry on the list of {entry.split(':')[1]}" if entry.startswith(("cal:", "day:")) else
+            "a concern's entry not shown here")
+    return {"labels": p.labels, "earlier": earlier,
+            "source_labels": {i: lab for lab, (k, i) in p.labels.items() if k == "work"}}
+
+
+def describe(kind: str, obj_id: str, *, connect=None) -> Dict[str, Any]:
+    """An object an entry relies on that is not otherwise in the decider's view, as data for the prompt: `missing`
+    when it is no longer stored."""
     from app.assistant.subconscious import work_links
-    changed = {r["id"]: r["updated_at"] for r in work_links._rows()}
-    refs: Dict[str, str] = {}
-
-    def mark(things, prefix, at):
-        for i, thing in enumerate(things, 1):
-            thing["ref"] = f"{prefix}{i}"
-            refs[thing["ref"]] = at(thing)
-
-    mark(situation["chat"], "M", lambda m: m["at"])
-    mark([*situation["work"]["in_motion"], *situation["work"]["ended"]], "W", lambda w: changed[w["work_id"]])
-    mark(situation["reminders"].get("records") or [], "R", lambda r: r["timestamp"])
-    mark(situation["concerns"], "C", lambda c: c["changed_at"])
-    mark([e for c in situation["concerns"] for e in c.get("entries") or []], "E", lambda e: e["updated_at"])
-    mark(list(matters), "B", lambda m: m["at"])
-    # The day's schedule lines (K) and the standing directives (D) are what prompts an own entry (2026-10-06). They
-    # date from the day's start, so they can justify a new entry but never a change to one made today.
-    from app.assistant.pipelines.context import day_window_local
-    day_start = day_window_local(situation["day"])[0].astimezone(timezone.utc).isoformat()
-    mark(situation["calendar_today"], "K", lambda e: day_start)
-    refs["D"] = day_start
-    return refs
+    connect = connect or _connect
+    if kind == "work":
+        return {"work": work_links.work_view(obj_id, link="relied on")}
+    if kind in ("message", "reminder"):
+        with connect(False) as c:
+            r = c.execute("SELECT timestamp, role, message FROM unified_log_2026 WHERE id = ?", (obj_id,)).fetchone()
+        return {"missing": True} if r is None else {
+            "at": str(r["timestamp"]).replace(" ", "T") + "+00:00",
+            "speaker": "Owner" if r["role"] == "user" else "Assistant", "text": r["message"]}
+    if kind == "concern":
+        from app.assistant.subconscious.concern_store import load_register
+        register = load_register()
+        found = [(b, c) for b in ("active", "addressing", "resolved", "dormant") for c in register.get(b) or []
+                 if c["concern_id"] == obj_id]
+        return {"missing": True} if not found else {"title": found[0][1].get("title"), "bucket": found[0][0]}
+    if kind == "list_entry":
+        with connect(False) as c:
+            r = c.execute("SELECT * FROM brain_list_entries WHERE id = ?", (obj_id,)).fetchone()
+        return {"missing": True} if r is None else {"entry": {k: r[k] for k in (
+            "kind", "day", "what", "decision", "when_local", "status", "updated_at")}}
+    if kind == "brain_matter":
+        with connect(False) as c:
+            r = c.execute("SELECT created_at, decisions FROM brain_matters WHERE id = ?", (obj_id,)).fetchone()
+        return {"missing": True} if r is None else {
+            "at": r["created_at"], "reasons": [d["reason"] for d in json.loads(r["decisions"])["events"].values()]}
+    if kind in ("calendar_event", "schedule_line"):
+        return {"gone_from_schedule": True}
+    if kind == "resource":
+        return {}
+    raise ValueError(f"day_tasks: no description for object kind {kind!r}")
 
 
 # ── the answer ─────────────────────────────────────────────────────────────
 
-def own_problems(data: Dict[str, Any], own: List[Dict[str, Any]], refs: Dict[str, str]) -> List[str]:
-    """The own entries: a new one is entry "new"; a modify or cancel names one of today's own entries; new and modify
-    name the outcome, the assistant's part and when; every one says why and cites labels given."""
+def _in_prose(labels: Dict[str, Any], *texts: Any) -> List[str]:
+    """Labels of this call written into prose. The single letter D is left out: it is also a word ("vitamin D")."""
+    from app.assistant.subconscious.projection import labels_in
+    return labels_in(" ".join(str(t or "") for t in texts), [x for x in labels if any(ch.isdigit() for ch in x)])
+
+
+def own_problems(data: Dict[str, Any], own: List[Dict[str, Any]], labels: Dict[str, Any]) -> List[str]:
+    """The own entries: a new one is entry "new"; a modify or cancel names one of today's own entries by its label;
+    new and modify name the outcome, the assistant's part and when; every one says why, in words, and lists in
+    relies_on the labels of what prompted it."""
     changes = data.get("own_entries")
     if changes is None:
         return []
     if not isinstance(changes, list):
         return ["own_entries is not a list"]
-    by_id = {e["id"]: e for e in own}
+    by_label = {e["ref"]: e for e in own}
     out, seen = [], []
     for c in changes:
         entry, action = str((c or {}).get("entry") or "").strip(), (c or {}).get("action")
@@ -220,8 +317,8 @@ def own_problems(data: Dict[str, Any], own: List[Dict[str, Any]], refs: Dict[str
         if action == "new" and entry != "new":
             out.append(f'a new own entry is written as entry "new", got {entry!r}')
         if action != "new":
-            if entry not in by_id:
-                out.append(f"{entry!r} is not one of your own entries today")
+            if entry not in by_label:
+                out.append(f"{entry!r} is not one of your own entries today (O1, O2...)")
                 continue
             seen.append(entry)
         if action in ("new", "modify"):
@@ -230,28 +327,33 @@ def own_problems(data: Dict[str, Any], own: List[Dict[str, Any]], refs: Dict[str
                 out.append(f"own entry {entry}: {action} names {', '.join(missing)}")
         if not str(c.get("why") or "").strip():
             out.append(f"own entry {entry}: why is empty")
-        cites = [str(x).strip() for x in c.get("cites") or []]
-        unknown = [x for x in cites if x not in refs]
-        if not cites:
-            out.append(f"own entry {entry}: cites names nothing; name what prompted it")
+        relied = [str(x).strip() for x in c.get("relies_on") or []]
+        unknown = [x for x in relied if x not in labels]
+        if not relied:
+            out.append(f"own entry {entry}: relies_on names nothing; name what prompted it")
         elif unknown:
-            out.append(f"own entry {entry}: cites {unknown}, which are not labels given")
+            out.append(f"own entry {entry}: relies_on {unknown}, which are not labels given")
+        written = _in_prose(labels, c.get("what"), c.get("assistant_part"), c.get("why"))
+        if written:
+            out.append(f"own entry {entry}: {written} written into what, assistant_part or why; write it in words "
+                       f"and put the reference in relies_on")
     twice = sorted({x for x in seen if seen.count(x) > 1})
     if twice:
         out.append(f"own entries changed more than once: {twice}")
     return out
 
 
-def problems(data: Any, items: List[Dict[str, Any]], refs: Dict[str, str]) -> List[str]:
-    """Every item not yet on the list decided, once; needed names the part and when; covers name other items."""
+def problems(data: Any, items: List[Dict[str, Any]], labels: Dict[str, Any]) -> List[str]:
+    """Every item not yet on the list decided, once; needed names the part and when; covers name other items;
+    relies_on names labels given; why and the assistant's part are words, with no label in them."""
     if not isinstance(data, dict) or not isinstance(data.get("decisions"), list):
         return ["no decisions list"]
-    labels = [it["label"] for it in items]
-    listed = {it["label"]: it["current"]["decided_at"] for it in items if it["current"]}
+    item_labels = [it["label"] for it in items]
+    listed = {it["label"] for it in items if it["current"]}
     out, seen = [], []
     for d in data["decisions"]:
         label = str((d or {}).get("item") or "").strip()
-        if label not in labels:
+        if label not in item_labels:
             out.append(f"{label!r} is not one of the items given")
             continue
         seen.append(label)
@@ -263,13 +365,20 @@ def problems(data: Any, items: List[Dict[str, Any]], refs: Dict[str, str]) -> Li
                 out.append(f"{label}: needed names {', '.join(missing)}")
         elif d.get("covers"):
             out.append(f"{label}: only a needed item covers others")
-        bad = [x for x in d.get("covers") or [] if x not in labels or x == label]
+        bad = [x for x in d.get("covers") or [] if x not in item_labels or x == label]
         if bad:
             out.append(f"{label}: covers {bad}, which are not other items given")
+        unknown = [x for x in d.get("relies_on") or [] if str(x).strip() not in labels]
+        if unknown:
+            out.append(f"{label}: relies_on {unknown}, which are not labels given")
+        written = _in_prose(labels, d.get("why"), d.get("assistant_part"))
+        if written:
+            out.append(f"{label}: {written} written into why or assistant_part; write it in words and put the "
+                       f"reference in relies_on")
     twice = sorted({x for x in seen if seen.count(x) > 1})
     if twice:
         out.append(f"decided more than once: {twice}")
-    missing = [x for x in labels if x not in seen and x not in listed]
+    missing = [x for x in item_labels if x not in seen and x not in listed]
     if missing:
         out.append(f"not decided: {missing}")
     return out
@@ -329,24 +438,12 @@ def gather(now_utc: datetime, *, plan_connect=None) -> Optional[Dict[str, Any]]:
     from app.assistant.dayflow_orchestrator.brain_list_intake import work_of
     own = brain_list.entries(day=day, kind="day")
     own_work = work_of([e["id"] for e in own])
-    own = [{**e, "work": own_work.get(e["id"])} for e in own]
-    mark_list_work(s, day, items, own)
-    return {"day": day, "now": now_utc.isoformat(), "items": items, "own": own,
-            "situation": s, "matters": matters, "refs": label_refs(s, matters), "correction": None}
-
-
-def mark_list_work(situation: Dict[str, Any], day: str, items: List[Dict[str, Any]],
-                   own: List[Dict[str, Any]]) -> None:
-    """Each work item of the situation, in place, with `from_list`: the entry it was made from as this decider knows
-    it (an item's entry, by its label; one of its own entries, by id), or the list entry's id. On 2026-10-06 the
-    decider called an item's own work "already covered by W8" and decided the item not needed, which would have ended
-    that work."""
-    from app.assistant.subconscious import brain_list
-    names = {brain_list.calendar_id(day, it["belief_key"]): f"your entry for {it['label']}" for it in items}
-    names.update({e["id"]: f"your own entry {e['id']}" for e in own})
-    for w in [*situation["work"]["in_motion"], *situation["work"]["ended"]]:
-        entry = w.get("list_entry")
-        w["from_list"] = names.get(entry, f"list entry {entry}") if entry else None
+    own = [{**e, "work": own_work.get(e["id"]), "relies_on": [list(r) for r in brain_list.relies_on(e["id"])]}
+           for e in own]
+    # On 2026-10-06 the decider called an item's own work "already covered by W8" and decided the item not needed,
+    # which would have ended that work: work names the entry it was made from (project, `from_list`).
+    return {"day": day, "now": now_utc.isoformat(), "items": items, "own": own, "situation": s, "matters": matters,
+            **project(day, s, matters, items, own), "correction": None}
 
 
 def run_day_tasks(*, now_utc: Optional[datetime] = None, connect=None,
@@ -371,8 +468,8 @@ def run_day_tasks(*, now_utc: Optional[datetime] = None, connect=None,
     own = inputs.get("own") or []
 
     def check(answer):
-        found = problems(answer, inputs["items"], inputs["refs"])
-        return found + (own_problems(answer, own, inputs["refs"]) if isinstance(answer, dict) else [])
+        found = problems(answer, inputs["items"], inputs["labels"])
+        return found + (own_problems(answer, own, inputs["labels"]) if isinstance(answer, dict) else [])
     data = call(inputs)
     found = check(data)
     if found:
@@ -384,10 +481,17 @@ def run_day_tasks(*, now_utc: Optional[datetime] = None, connect=None,
     # The list changes land before the run (its fingerprint) is recorded: a run counts as done only once its entries
     # are on the list. Until 2026-10-05 the run was recorded first, and a failure applying the entries left the
     # next pass "unchanged" with the decisions lost; now it decides again, reading the entries that did land.
+    # The answer's labels back to objects: the model referred only by labels of this call; code stores ids.
     from app.assistant.subconscious import brain_list
-    changed = brain_list.apply_calendar(inputs["day"], inputs["items"], data["decisions"],
+    from app.assistant.subconscious.projection import resolve
+    call_labels = inputs["labels"]
+    decisions = [{**d, "relies_on": [resolve(call_labels, x) for x in d.get("relies_on") or []]}
+                 for d in data["decisions"]]
+    changed = brain_list.apply_calendar(inputs["day"], inputs["items"], decisions,
                                         cause=f"day's tasks {now.isoformat()}", at=now, connect=connect)
-    own_changes = [{k: str(c.get(k) or "").strip() for k in ("entry", "action", "what", "assistant_part", "when", "why")}
+    own_changes = [{**{k: str(c.get(k) or "").strip() for k in ("action", "what", "assistant_part", "when", "why")},
+                    "entry": "new" if c.get("action") == "new" else resolve(call_labels, c["entry"])[1],
+                    "relies_on": [resolve(call_labels, x) for x in c.get("relies_on") or []]}
                    for c in data.get("own_entries") or []]
     if own_changes:
         changed = {**changed, "own": brain_list.apply_day_own(inputs["day"], own_changes,
