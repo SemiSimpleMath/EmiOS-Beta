@@ -501,9 +501,10 @@ def process_matter(events: List[Dict[str, Any]], *, call: Optional[Callable[[Dic
         if problems:
             raise ValueError(f"brain answer still invalid after one correction: {problems}")
 
-    # The answer's labels back to objects (docs/design/objects_and_projections_2026-10-08.md): what a note rests on
-    # is kept by id in the decision; what it attaches becomes the concern's evidence (an event) or attached work.
-    ids = lambda names: [list(call_labels[x]) for x in names or []]
+    # The answer's labels back to objects (docs/design/objects_and_projections_2026-10-08.md): what an update or a new
+    # concern rests on and what it attaches are kept as relations (`links`, written with the matter by _record);
+    # what it attaches also becomes the concern's evidence (an event) or attached work.
+    ids = lambda names: [tuple(call_labels[x]) for x in names or []]
     attached_events = lambda names: [by_label[x] for x in names or [] if x in by_label]
     updates = [{"concern_id": labels[u["concern"]], "action": u["action"], "note": u["note"],
                 "evidence": [_evidence(e) for e in attached_events(u.get("attach"))]}
@@ -529,29 +530,40 @@ def process_matter(events: List[Dict[str, Any]], *, call: Optional[Callable[[Dic
     decisions = {
         "events": {by_label[d["event"]]["source_ref"]: {"decision": d["decision"], "reason": d["reason"]}
                    for d in data["event_decisions"]},
-        "concern_updates": [{"concern_id": u["concern_id"], "action": u["action"], "note": u["note"],
-                             "relies_on": ids(d.get("relies_on")), "attach": ids(d.get("attach"))}
-                            for u, d in zip(updates, data.get("concern_updates") or [])],
+        "concern_updates": [{"concern_id": u["concern_id"], "action": u["action"], "note": u["note"]}
+                            for u in updates],
         # door: what the concern door made of it (create | merge_open | suppress_closed | merge_candidate)
         "new_concerns": [{"label": c["label"], "title": c["title"], "owner_request": c.get("owner_request"),
-                          "door": s["action"], "door_reason": s["reason"],
-                          "relies_on": ids(n.get("relies_on")), "attach": ids(n.get("attach"))}
-                         for c, s, n in zip(candidates, plan, data.get("new_concerns") or [])],
+                          "door": s["action"], "door_reason": s["reason"]}
+                         for c, s in zip(candidates, plan)],
     }
     if attached:
         decisions["attached_work"] = [{"concern_id": c, "work_id": w} for c, w in attached]
-    return {"decisions": decisions, "admitted": admitted,
+    # Each update is the object ("brain_update", "<matter>:<concern id>"), each new concern ("brain_new_concern",
+    # "<matter>:<n>"), n its place in the answer; the matter's id is known once _record writes it.
+    links = [(("brain_update", u["concern_id"]), rel, ids(d.get(rel)))
+             for u, d in zip(updates, data.get("concern_updates") or []) for rel in ("relies_on", "attach")]
+    links += [(("brain_new_concern", str(i)), rel, ids(n.get(rel)))
+              for i, n in enumerate(data.get("new_concerns") or [], 1) for rel in ("relies_on", "attach")]
+    return {"decisions": decisions, "admitted": admitted, "links": links,
             "concern_ids": sorted({cid for e in events for cid in e["concern_ids"]})}
 
 
-def _record(connect, events, status, *, concern_ids=(), decisions=None, admitted=None, error=None) -> None:
+def _record(connect, events, status, *, concern_ids=(), decisions=None, admitted=None, error=None,
+            links=()) -> None:
+    """The matter, and its links (process_matter `links`) as relations from its updates and new concerns, in one
+    transaction."""
+    from app.assistant.subconscious import relations
     now = datetime.now(timezone.utc).isoformat()
+    relations.ensure_schema(connect)
     with connect(True) as c:
-        c.execute("INSERT INTO brain_matters (created_at, event_ids, concern_ids, status, decisions, admitted, error) "
-                  "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                  (now, json.dumps([e["id"] for e in events]), json.dumps(list(concern_ids)), status,
-                   json.dumps(decisions, ensure_ascii=False) if decisions is not None else None,
-                   json.dumps(admitted) if admitted is not None else None, error))
+        cur = c.execute("INSERT INTO brain_matters (created_at, event_ids, concern_ids, status, decisions, admitted, "
+                        "error) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (now, json.dumps([e["id"] for e in events]), json.dumps(list(concern_ids)), status,
+                         json.dumps(decisions, ensure_ascii=False) if decisions is not None else None,
+                         json.dumps(admitted) if admitted is not None else None, error))
+        for (kind, key), rel, to in links:
+            relations.replace(c, (kind, f"{cur.lastrowid}:{key}"), rel, to, at=now, by=f"brain matter {cur.lastrowid}")
         if status == "applied":
             c.executemany("UPDATE brain_events SET consumed_at=? WHERE id=?", [(now, e["id"]) for e in events])
 
@@ -583,7 +595,7 @@ def run_brain_step(*, connect=None, register_connect=None, call=None, judge=None
         step("brain", "matter applied", subject=[e["id"] for e in matter], decisions=result["decisions"],
              admitted=result["admitted"])
         _record(connect, matter, "applied", concern_ids=result["concern_ids"], decisions=result["decisions"],
-                admitted=result["admitted"])
+                admitted=result["admitted"], links=result["links"])
         applied += 1
     logger.info("[brain] matters=%d applied=%d failed=%d", len(matters), applied, failed)
     return {"matters": len(matters), "applied": applied, "failed": failed}

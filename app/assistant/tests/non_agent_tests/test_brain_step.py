@@ -284,11 +284,15 @@ def test_only_attach_attaches_and_references_are_stored_as_objects(inbox, tmp_pa
                               work_record=lambda wid: pytest.fail("nothing named in attach"))
     [c] = reg.read()["active"]
     assert not c.get("attached_work"), "read, not attached"
+    from app.assistant.subconscious import relations
     with inbox(False) as db:
-        decisions = json.loads(db.execute("SELECT decisions FROM brain_matters").fetchone()[0])
+        matter_id, raw = db.execute("SELECT id, decisions FROM brain_matters").fetchone()
         [event_id] = [r[0] for r in db.execute("SELECT id FROM brain_events")]
-    assert decisions["concern_updates"][0]["relies_on"] == [["brain_event", str(event_id)]]
-    assert decisions["concern_updates"][0]["attach"] == []
+    update = ("brain_update", f"{matter_id}:c-vet")
+    assert relations.targets(update, "relies_on", connect=inbox) == [("brain_event", str(event_id))]
+    assert relations.targets(update, "attach", connect=inbox) == []
+    assert "relies_on" not in json.loads(raw)["concern_updates"][0], "one store: the links are relations"
+    assert relations.sources(("brain_event", str(event_id)), connect=inbox) == [(update, "relies_on")]
 
 
 def test_a_label_in_the_brain_s_words_is_malformed():

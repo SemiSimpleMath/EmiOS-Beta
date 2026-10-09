@@ -114,6 +114,16 @@ def _matters(start_iso: str, end_iso: str, connect) -> List[Dict[str, Any]]:
                 f"SELECT * FROM brain_events WHERE id IN ({','.join('?' * len(ids))}) ORDER BY occurred_at, id", ids)]
             m["decisions"] = json.loads(m["decisions"]) if m["decisions"] else None
             m["admitted"] = json.loads(m["admitted"]) if m["admitted"] else {}
+    # Since 2026-10-08 an update's events are its relations (subconscious/relations.py), read back onto it here.
+    from app.assistant.subconscious import relations
+    for m in matters:
+        for u in (m["decisions"] or {}).get("concern_updates") or []:
+            if "events" not in u:
+                key = ("brain_update", f"{m['id']}:{u['concern_id']}")
+                relied = [list(r) for r in relations.targets(key, "relies_on", connect=connect)]
+                attached = [list(r) for r in relations.targets(key, "attach", connect=connect)]
+                if relied or attached:          # a matter recorded before either kept neither
+                    u["relies_on"], u["attach"] = relied, attached
     return matters
 
 

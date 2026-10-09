@@ -124,7 +124,12 @@ things in words and put the objects they rely on in `relies_on`.
 
 ## 5. Decisions for the owner
 
-1. One relation store for every link (recommended: one shape, one query path), or relation fields kept per object?
+1. (Decided and built 2026-10-08: one relation store, `relations` in emi.db, subconscious/relations.py. RELATIONS
+   lists each relation and the kinds it joins; a write outside it raises. Indexed both ways: `targets` (what an
+   object links to) and `sources` (what links to it, for impact analysis). Users: list entries `relies_on`; the
+   brain's updates and new concerns `relies_on` and `attach`, objects `brain_update` <matter>:<concern> and
+   `brain_new_concern` <matter>:<n>. Older structured links (work-store edges, list_entry_id, concern_refs,
+   belief_refs, attached_work) still live where they are; each moves in when its module is built.)
 2. Stored history (today's ~1,000 prose fields with labels or ids): leave as history and render it as-is, or render
    it marked as old text? No backfill rewriting is proposed.
 3. (Decided 2026-10-08: tools keep ids; workers see the ids they pass to tools.)
