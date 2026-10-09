@@ -493,3 +493,34 @@ def test_a_concern_whose_day_has_ended_reaches_the_brain_once_per_day(connect):
     [group] = conversations.build([{**rows[0], "mark": "E1"}], now_utc=NOW)
     assert group["heading"] == "The clock"
     assert brain_step._evidence(rows[0])["kind"] == "time"
+
+
+def test_a_report_on_the_brain_s_own_work_says_where_it_came_from(tmp_path, monkeypatch):
+    """2026-10-09: a report on work the brain's list made reached it as a new matter, and it raised a concern from
+    the 6 AM thermostat routine that had succeeded and from an email still waiting for the owner's approval. The
+    work's heading now says it was made from the brain's own list, and the brain's rule says what that means."""
+    from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+    from app.assistant.subconscious import brain_list, db
+    from belief_engine.intake.store import sqlite_file
+    lst = sqlite_file(tmp_path / "l.db")
+    monkeypatch.setattr(db, "connect", lst)
+    brain_list.apply_calendar("2026-03-10", [{"label": "I1", "belief_key": "B3", "times": ["6:00 AM"],
+                                              "statement": "AC at 75 in the morning."}],
+                              [{"item": "I1", "decision": "needed", "assistant_part": "set the AC to 75",
+                                "when": "6:00 AM", "covers": [], "why": "A standing wish."}],
+                              cause="test", at=NOW, connect=lst)
+    store = get_dayflow_work_store()
+    made = store.apply("create_work_object", {"title": "Set the AC", "goal_content": "Set the AC",
+                                              "satisfied_when_kind": "all_owned_children_done",
+                                              "constraints": {"list_entry_id": "cal:2026-03-10:B3"}})
+    other = store.apply("create_work_object", {"title": "Other", "goal_content": "Other",
+                                               "satisfied_when_kind": "all_owned_children_done"})
+    event = lambda wid: {"source": "work", "source_ref": f"work:{wid}:000-r1", "room_id": None, "speaker": "dayflow",
+                         "occurred_at": NOW.isoformat(), "mark": "E1", "text": 'Work "Set the AC" ended: done.'}
+    text = conversations.render(conversations.build([event(made.id)], now_utc=NOW))
+    assert "This work was made from the brain's own list for Tuesday 2026-03-10: \"set the AC to 75\"." in text
+    assert "own list" not in conversations.render(conversations.build([event(other.id)], now_utc=NOW))
+    from app.assistant.dayflow_orchestrator.work_context import _ENV
+    system = _ENV.get_template("subconscious/brain/prompts/system.j2").render(
+        resource_assistant_data={"name": "the assistant"}, resource_user_data={"first_name": "Sam"})
+    assert "is the outcome of a decision already made" in system

@@ -29,6 +29,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+from app.assistant.utils.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 CONVERSATION_GAP = timedelta(minutes=30)
 
 
@@ -187,6 +191,33 @@ def _email_groups(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return groups
 
 
+def _work_origin(work_id: str) -> Optional[str]:
+    """Where the work came from, when the brain's own list made it for a day (a calendar placement or the day's own
+    entry): the entry's outcome and its day, in words. None for work made for a concern (its report names the
+    concern) or by other means. 2026-10-09: reports on the brain's own work reached it as new matters, and it raised a
+    concern from a routine that had succeeded (the 6 AM thermostat) and from work still waiting for the owner's
+    approval (the Friday Night Meats email)."""
+    import json
+    from datetime import datetime as _dt
+    from app.assistant.subconscious import work_links
+    from app.assistant.subconscious.db import connect
+    store = work_links._store()
+    with store._lock:
+        row = store._conn.execute("SELECT constraints FROM work_objects WHERE id=?", (work_id,)).fetchone()
+    if row is None:
+        logger.warning("[conversations] a work report names work %s, which is not stored", work_id)
+        return None
+    entry_id = json.loads(row[0] or "{}").get("list_entry_id")
+    if not entry_id:
+        return None
+    with connect(False) as c:
+        entry = c.execute("SELECT kind, day, what FROM brain_list_entries WHERE id = ?", (entry_id,)).fetchone()
+    if entry is None or entry["kind"] == "concern":
+        return None
+    day = _dt.strptime(entry["day"], "%Y-%m-%d").strftime("%A %Y-%m-%d")
+    return f"This work was made from the brain's own list for {day}: \"{entry['what']}\"."
+
+
 def _work_groups(events: List[Dict[str, Any]], work_labels: Dict[str, str]) -> List[Dict[str, Any]]:
     by_work: Dict[str, List[Dict[str, Any]]] = {}
     for e in events:
@@ -194,10 +225,11 @@ def _work_groups(events: List[Dict[str, Any]], work_labels: Dict[str, str]) -> L
     groups = []
     for work_id, evs in by_work.items():
         turns = sorted((_event_turn(e) for e in evs), key=lambda t: t["at"])
+        origin = _work_origin(work_id)
         groups.append({"heading": f"Work [{work_labels[work_id]}]" if work_id in work_labels else "Work",
                        "description": "What the assistant did: each entry is a finalizer judgment of one of "
                                       "the work's tasks, or the work's ending, with the objective and the "
-                                      "concerns the work was made for.",
+                                      "concerns the work was made for." + (f" {origin}" if origin else ""),
                        "first_at": turns[0]["at"],
                        "conversations": [{"label": "Progress", "turns": _render_turns(turns)}]})
     return groups
