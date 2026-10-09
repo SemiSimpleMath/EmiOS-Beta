@@ -20,6 +20,7 @@ What wakes it:
   again (concern_planner.next_hold_at);
 - presence (2026-10-07): the owner coming back to the computer (the AFK monitor's afk_state_changed), and the
   moment an absence reaches brain_inbox.PRESENCE_AWAY (brain_inbox.next_presence_due);
+- the calendar (2026-10-09): a calendar sync or write that changed something (the repository's repo_update);
 - boot: one run at start picks up whatever arrived while the app was down;
 - the heartbeat (2026-10-01): a run at least every HEARTBEAT_SECONDS, for what changes without an
   event, such as the inputs of the day pass (subconscious/day_pass.py) and the start of a new day.
@@ -120,6 +121,13 @@ def poke() -> None:
 def handle_envelope(envelope: Any) -> None:
     """The gut's subscriber: every new chat message or email wakes the brain."""
     poke()
+
+
+def handle_repo_update(message: Any) -> None:
+    """The event repository's subscriber: a calendar sync or a calendar write that changed something wakes the brain,
+    which reads what changed (brain_inbox.ingest_calendar, 2026-10-09)."""
+    if str(getattr(message, "content", "") or "").strip().lower() == "calendar":
+        poke()
 
 
 def handle_afk_state_changed(message: Any) -> None:

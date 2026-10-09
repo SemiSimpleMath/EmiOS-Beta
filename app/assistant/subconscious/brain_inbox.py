@@ -12,7 +12,10 @@ MIN_EMAIL_IMPORTANCE, from its pod, full body; the pod id is the ref. Camera: ev
 image_ingest flagged notable (CAMERA_SOURCE_KINDS), as the vision model described it; the pod id is
 the ref, the camera the speaker (2026-10-05; until then they reached only dayflow's pod intake). Presence: the
 owner leaving or coming back to the computer after an absence of PRESENCE_AWAY or more, from the AFK monitor's
-keyboard spells (2026-10-07). The gate
+keyboard spells (2026-10-07). Calendar: an event added to, changed on or removed from the calendar of the coming week
+as the calendar sync keeps it, found by comparing it with what was last seen (2026-10-09, docs/design/
+hub_and_spokes_2026-10-09.md gap 2; until then a calendar change woke dayflow and reached the brain only as context
+beside some other event). The gate
 (subconscious/gate.py) routes each row against the open concerns once it is ready (`ready`): an
 email or camera event at once, a chat room's messages once the room has been quiet for QUIET — `concern` (bears
 on named concerns), `new_matter`, or `none`. Work: dayflow's judgments and endings of work attached
@@ -87,10 +90,24 @@ _FIRST_PRESENCE_LOOKBACK = timedelta(hours=1)
 _PRESENCE_LOOKBACK = timedelta(hours=24)
 
 
+# The calendar as the brain last saw it, one row per stored calendar event (an occurrence of a recurring series is its
+# own event); `seen_at` is the time of the look that saw it.
+CALENDAR_SCHEMA = """CREATE TABLE IF NOT EXISTS brain_calendar_seen (
+    record_id TEXT PRIMARY KEY,
+    series_id TEXT,
+    title TEXT NOT NULL,
+    start TEXT,
+    end_ TEXT,
+    all_day INTEGER NOT NULL,
+    location TEXT NOT NULL,
+    seen_at TEXT NOT NULL)"""
+
+
 def ensure_schema(connect=None) -> None:
     connect = connect or _connect
     with connect(True) as c:
         c.execute(SCHEMA)
+        c.execute(CALENDAR_SCHEMA)
         cols = {r[1] for r in c.execute("PRAGMA table_info(brain_events)")}
         for col in ("noticer_decision", "noticer_reason"):   # added after the first rows were written
             if col not in cols:
@@ -284,6 +301,99 @@ def ingest_presence(*, now_utc: Optional[datetime] = None, connect=None, fetch=N
     return added
 
 
+def _calendar_when(start: Optional[str], end: Optional[str], all_day: bool) -> str:
+    from app.assistant.utils.time_utils import local_time_text, utc_to_local
+    if not start:
+        return "(no time recorded)"
+    if all_day:
+        return utc_to_local(start).strftime("%a %Y-%m-%d") + " (all day)"
+    return local_time_text(start) + (f" to {local_time_text(end)}" if end else "")
+
+
+def _calendar_line(title: str, start: Optional[str], end: Optional[str], all_day: bool, location: str) -> str:
+    return f"{title}, {_calendar_when(start, end, all_day)}" + (f", at {location}" if location else "")
+
+
+def ingest_calendar(*, now_utc: Optional[datetime] = None, connect=None, fetch=None) -> int:
+    """What changed on the calendar of the coming week since the last look (2026-10-09). Returns rows added.
+
+    `fetch()` returns the stored calendar events (the calendar sync's records: id, summary, start, end, location,
+    is_all_day, recurring_event_id, created, updated; production reads the event repository). Compared with what was
+    last seen (brain_calendar_seen):
+    - an event not seen before: "added" when it was created since the last look; "on the calendar this week" when it
+      was made earlier and has come into the week; nothing for another occurrence of a series already seen (a weekly
+      series shows a new occurrence every day);
+    - a seen event whose title, time, all-day or place changed: "changed", with what it was;
+    - a seen event gone from the calendar while its time is still ahead of the sync's window start (local midnight
+      today): "removed". One that ended before today leaves the window, which is not a change.
+    The first look records the calendar and reports nothing. Idempotent: each event's version is its ref."""
+    from app.assistant.utils.time_utils import get_local_timezone
+    connect = connect or _connect
+    ensure_schema(connect)
+    now_utc = now_utc or datetime.now(timezone.utc)
+    records = (fetch or _fetch_calendar)()
+    with connect(False) as c:
+        seen = {r["record_id"]: dict(r) for r in c.execute("SELECT * FROM brain_calendar_seen")}
+        last = c.execute("SELECT MAX(seen_at) FROM brain_calendar_seen").fetchone()[0]
+    now_iso = _iso(now_utc)
+    current = {}
+    for r in records:
+        current[str(r["id"])] = {
+            "record_id": str(r["id"]), "series_id": r.get("recurring_event_id") or None,
+            "title": str(r.get("summary") or "(no title)"), "start": r.get("start") or None, "end_": r.get("end") or None,
+            "all_day": 1 if r.get("is_all_day") else 0, "location": str(r.get("location") or ""),
+            "created": r.get("created") or "", "updated": r.get("updated") or ""}
+    rows = []
+    if last is not None:
+        known_series = {s["series_id"] for s in seen.values() if s["series_id"]}
+        for rid, e in current.items():
+            line = _calendar_line(e["title"], e["start"], e["end_"], bool(e["all_day"]), e["location"])
+            version = "|".join(str(e[k]) for k in ("title", "start", "end_", "all_day", "location"))
+            before = seen.get(rid)
+            if before is None:
+                if e["series_id"] and e["series_id"] in known_series:
+                    continue
+                created = datetime.fromisoformat(e["created"].replace("Z", "+00:00")) if e["created"] else None
+                if created is not None and created >= datetime.fromisoformat(last):
+                    rows.append((f"calendar:{rid}|added|{version}", f"Added to the calendar: {line}."))
+                else:
+                    rows.append((f"calendar:{rid}|in_week|{version}", f"On the calendar this week: {line}."))
+            elif any(before[k] != e[k] for k in ("title", "start", "end_", "all_day", "location")):
+                was = _calendar_line(before["title"], before["start"], before["end_"], bool(before["all_day"]),
+                                     before["location"])
+                rows.append((f"calendar:{rid}|changed|{version}", f"Changed on the calendar: {line}. It was: {was}."))
+        window_start = now_utc.astimezone(get_local_timezone()).replace(hour=0, minute=0, second=0, microsecond=0)
+        for rid, before in seen.items():
+            if rid in current or not before["start"]:
+                continue
+            if datetime.fromisoformat(before["start"].replace("Z", "+00:00")) < window_start:
+                continue
+            line = _calendar_line(before["title"], before["start"], before["end_"], bool(before["all_day"]),
+                                  before["location"])
+            rows.append((f"calendar:{rid}|removed|{before['start']}", f"Removed from the calendar: {line}."))
+    added = 0
+    with connect(True) as c:
+        for ref, text in rows:
+            cur = c.execute(
+                "INSERT OR IGNORE INTO brain_events (source, source_ref, occurred_at, room_id, speaker, text, "
+                "received_at) VALUES ('calendar', ?, ?, NULL, 'calendar', ?, ?)",
+                (ref, now_iso, text, now_iso))
+            added += cur.rowcount
+        c.execute("DELETE FROM brain_calendar_seen")
+        c.executemany("INSERT INTO brain_calendar_seen (record_id, series_id, title, start, end_, all_day, location, "
+                      "seen_at) VALUES (?,?,?,?,?,?,?,?)",
+                      [(e["record_id"], e["series_id"], e["title"], e["start"], e["end_"], e["all_day"], e["location"],
+                        now_iso) for e in current.values()])
+    if added:
+        logger.info("[brain_inbox] ingested %d calendar change(s)", added)
+    return added
+
+
+def _fetch_calendar() -> List[Dict[str, Any]]:
+    from app.assistant.event_repository.event_repository import EventRepositoryManager
+    return [r["data"] for r in json.loads(EventRepositoryManager().search_events(data_type="calendar"))]
+
+
 def next_presence_due(*, now_utc: datetime, fetch=None) -> Optional[datetime]:
     """When the current absence reaches PRESENCE_AWAY, so the brain wakes for it then; None while the owner is at the
     computer or once it has."""
@@ -376,7 +486,7 @@ def pending(connect=None) -> List[Dict[str, Any]]:
 
 
 def ready(events: List[Dict[str, Any]], now_utc: datetime) -> List[Dict[str, Any]]:
-    """The events whose matter is complete: every email, camera, presence and work event, and the chat of every room whose latest
+    """The events whose matter is complete: every email, camera, presence, calendar and work event, and the chat of every room whose latest
     message is at least QUIET old. Messages of a room still talking wait, all of them together."""
     last = _last_message_by_room(events)
     return [e for e in events

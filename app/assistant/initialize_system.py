@@ -286,6 +286,7 @@ def initialize_system():
     from app.assistant.subconscious import brain_wake
     brain_wake.start()
     DI.event_hub.register_event("afk_state_changed", brain_wake.handle_afk_state_changed)
+    DI.event_hub.register_event("repo_update", brain_wake.handle_repo_update)
 
     # Task event lane: a signal-router watch match on a task:: watch resumes its run (the
     # watches themselves are DB-persisted in the router — registered at run start, no boot

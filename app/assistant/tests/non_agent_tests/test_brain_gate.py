@@ -525,3 +525,61 @@ def test_a_report_on_the_brain_s_own_work_says_where_it_came_from(tmp_path, monk
     system = _ENV.get_template("subconscious/brain/prompts/system.j2").render(
         resource_assistant_data={"name": "the assistant"}, resource_user_data={"first_name": "Sam"})
     assert "is the outcome of a decision already made" in system
+
+
+# ── the calendar as a sense (2026-10-09, docs/design/hub_and_spokes_2026-10-09.md gap 2) ──
+
+def cal(i, title, start_min, *, series=None, created=NOW - timedelta(days=30), location="", length=60):
+    start = NOW + timedelta(minutes=start_min)
+    return {"id": i, "summary": title, "start": start.isoformat(), "end": (start + timedelta(minutes=length)).isoformat(),
+            "location": location, "is_all_day": False, "recurring_event_id": series,
+            "created": created.isoformat().replace("+00:00", "Z"), "updated": NOW.isoformat()}
+
+
+def test_the_calendar_reports_what_was_added_changed_or_removed_and_nothing_else(connect):
+    """Until 2026-10-09 a calendar change woke dayflow and reached the brain only as context beside some other event.
+    The first look records the calendar; later looks report an event created since, one that came into the week, a
+    change with what it was, and one removed while still ahead; another occurrence of a known series and an event
+    that ended before today leaving the window are not changes."""
+    week = [cal("walk_1", "Walk the dogs", 120, series="walk"), cal("dentist", "Dentist", 24 * 60, location="Main St"),
+            cal("call", "Call with the contractor", 26 * 60), cal("old", "Yesterday's meeting", -24 * 60)]
+    assert inbox.ingest_calendar(now_utc=NOW, connect=connect, fetch=lambda: week) == 0, "the first look records"
+    later = NOW + timedelta(minutes=30)
+    week2 = [cal("walk_1", "Walk the dogs", 120, series="walk"), cal("walk_2", "Walk the dogs", 24 * 60 + 120, series="walk"),
+             cal("dentist", "Dentist", 48 * 60, location="Main St"),
+             cal("meats", "Friday Night Meats", 3 * 24 * 60, created=NOW + timedelta(minutes=10)),
+             cal("birthday", "Sam's birthday", 5 * 24 * 60, series="bday")]
+    assert inbox.ingest_calendar(now_utc=later, connect=connect, fetch=lambda: week2) == 4
+    texts = {e["source_ref"].split("|")[1]: e["text"] for e in inbox.pending(connect)}
+    assert set(texts) == {"added", "in_week", "changed", "removed"}, "walk_2 and the past meeting are no change"
+    assert texts["added"].startswith("Added to the calendar: Friday Night Meats, ")
+    assert texts["in_week"].startswith("On the calendar this week: Sam's birthday, ")
+    assert texts["changed"].startswith("Changed on the calendar: Dentist, ") and "It was: Dentist, " in texts["changed"]
+    assert ", at Main St" in texts["changed"]
+    assert texts["removed"].startswith("Removed from the calendar: Call with the contractor, ")
+    assert inbox.ingest_calendar(now_utc=later, connect=connect, fetch=lambda: week2) == 0, "once"
+    [removed] = [e for e in inbox.pending(connect) if "|removed|" in e["source_ref"]]
+    assert brain_step._evidence(removed)["kind"] == "calendar_event"
+    assert brain_step._evidence(removed)["ref"] == "calendar:call"
+    assert inbox.ready(inbox.pending(connect), later) == inbox.pending(connect), "ready at once, like email"
+
+
+def test_calendar_changes_render_as_their_own_group_and_wake_the_brain(monkeypatch):
+    from app.assistant.subconscious import brain_wake
+    event = {"source": "calendar", "source_ref": "calendar:dentist|changed|x", "occurred_at": NOW.isoformat(),
+             "room_id": None, "speaker": "calendar", "mark": "E1", "text": "Changed on the calendar: Dentist, Thu."}
+    text = conversations.render(conversations.build([event], now_utc=NOW))
+    assert "### The calendar" in text and "[E1] calendar: Changed on the calendar: Dentist, Thu." in text
+    assert brain_step.group_matters([{**event, "id": 1, "gate_status": "routed", "route": "new_matter",
+                                      "concern_ids": []}])[0][0]["source"] == "calendar"
+    import threading
+
+    def on_hub(content):                 # the event hub calls handlers on its own worker threads
+        t = threading.Thread(target=brain_wake.handle_repo_update, args=(SimpleNamespace(content=content),))
+        t.start()
+        t.join()
+    brain_wake._poked.clear()
+    on_hub("email")
+    assert not brain_wake._poked.is_set()
+    on_hub("calendar")
+    assert brain_wake._poked.is_set()
