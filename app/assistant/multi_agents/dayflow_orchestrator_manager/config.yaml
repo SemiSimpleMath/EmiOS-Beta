@@ -1,6 +1,6 @@
 name: dayflow_orchestrator_manager
 class_name: MultiAgentManager
-description: "Internal dayflow orchestration manager with triage, state mover, action selector, and switchboard."
+description: "The dayflow planning tick: work from the brain's list, the architect, state mover, action selector and switchboard."
 max_cycles: 40
 
 role_bindings:
@@ -9,32 +9,20 @@ role_bindings:
 agents:
   - name: room::delegator
     class: Delegator
-  - name: dayflow_orchestrator::intake_triage
-    class: Agent
   - name: dayflow_orchestrator::state_mover
     class: Agent
   - name: dayflow_orchestrator::action_selector
-    class: Agent
-  - name: dayflow_orchestrator::strategic_planner_wo
     class: Agent
   - name: dayflow_orchestrator::switchboard
     class: Agent
 
 control_nodes:
-  - name: intake_triage_prep_node
-    class: IntakeTriagePrepNode
+  - name: work_prep_node
+    class: WorkPrepNode
   - name: state_mover_prep_node
     class: StateMoverPrepNode
-  - name: triage_spawn_guard_node
-    class: TriageSpawnGuardNode
-  - name: triage_persist_node
-    class: TriagePersistNode
   - name: state_mover_persist_node
     class: StateMoverPersistNode
-  - name: strategic_planner_wo_prep_node
-    class: StrategicPlannerWoPrepNode
-  - name: strategic_planner_wo_persist_node
-    class: StrategicPlannerWoPersistNode
   - name: brain_list_intake_node
     class: BrainListIntakeNode
   - name: work_architect_node
@@ -96,50 +84,43 @@ flow_config:
   strict_routing: true
   flow:
     normal:
-      source_agent: "intake_triage_prep_node"
+      source_agent: "work_prep_node"
   state_map:
     # THE PLANNING TICK, and only that. A work node's time-wake used to enter here too, as a
     # routing hint (tick_router_node jumping to the state_mover) — a hint the router never saw,
     # so every wake ran this whole map. Wakes now open dayflow_wake_manager, which has no
     # planning stage to fall into (2026-09-18).
-    "room::delegator": "intake_triage_prep_node"
-    "intake_triage_prep_node": "dayflow_orchestrator::intake_triage"
-    "dayflow_orchestrator::intake_triage": "triage_spawn_guard_node"
-    "triage_spawn_guard_node": "triage_persist_node"
-    "triage_persist_node": "strategic_planner_wo_prep_node"
-    # --- WORK-OBJECT planning path: steward evaluates → architect (re)plans → state_mover
+    # --- WORK-OBJECT planning path: the brain's list becomes work → architect (re)plans → state_mover
     #     promotes → materializer/switchboard pick ONE node. The dispatch gate claims it and
     #     opens dayflow_dispatch_manager on its own thread for the call and finalizer. ---
-    "strategic_planner_wo_prep_node": "dayflow_orchestrator::strategic_planner_wo"
-    "dayflow_orchestrator::strategic_planner_wo": "strategic_planner_wo_persist_node"
+    # Until 2026-10-10 intake triage ran first (intake_triage_prep_node, the intake_triage agent, its spawn guard
+    # and persist node), then the steward (strategic_planner_wo, its prep and persist nodes), which decided what work
+    # exists from the intake triage admitted. Since 2026-10-06 the brain decides, through its list, and both were
+    # skipped or found nothing; owner, 2026-10-10: "retire the old steward", "triage too". The steward's prep node is
+    # now work_prep_node: pending concern and belief feedback, and the reminder history.
+    "room::delegator": "work_prep_node"
+    "work_prep_node": "brain_list_intake_node"
     # The finalizer runs in dayflow_dispatch_manager on the tool-return path, so a result
     # is judged in the dispatch pass that produced it. The architect therefore plans against nodes the finalizer has already
     # closed, instead of against last pass's unjudged results.
     # Work from the brain's list (control_nodes/brain_list_intake_node.py; 2026-10-05): shells for the entries the
-    # brain decided needed, revisions and end instructions for changed ones, in the lanes switched on in
-    # configs/brain_lanes.json. The architect then lays the new shells' graphs like any new goal.
-    "strategic_planner_wo_persist_node": "brain_list_intake_node"
+    # brain decided needed, revisions and end instructions for changed ones. The architect then lays the new shells'
+    # graphs like any new goal.
     "brain_list_intake_node": "work_architect_node"
-    # work_repair_node was here, and is retired (2026-09-16). Its three dispositions each
-    # belong to an agent that can see more than one failed step:
+    # work_repair_node was here, and is retired (2026-09-16; its files removed 2026-10-10). Its three dispositions
+    # each belong to an agent that can see more than one failed step:
     #   retry    -> the finalizer's `retry`, which must NAME what will be different (an
     #               unchanged retry reproduces its error — 22 identical attempts in two hours)
     #   escalate -> the finalizer's `unrecoverable` + `ask_user`; the architect plans the ask.
     #               Repeated failure escalates to this deterministically (work_finalizer_node).
-    #   abandon  -> `unrecoverable` + `stop` for a branch; the whole goal is the steward's
-    # A failure reached outside a dispatch (sweeper, claim error) is not stranded either: it
-    # sits `failed`, the steward sees it in the projection and flags the work object into
-    # replan_work_ids, and the architect re-plans it. Keeping repair alongside the finalizer
-    # meant two agents judging the same failure, and repair could answer `abandon_goal` on a
-    # node the finalizer had deliberately left to the steward.
-    # Its node + agent files remain on disk, unwired.
+    #   abandon  -> `unrecoverable` + `stop` for a branch; the architect ends the goal.
+    # A failure reached outside a dispatch (sweeper, claim error) sits `failed`; the finalizer judges the
+    # sweeper's failed result, and a goal nothing can advance wakes the architect as stranded.
     "work_architect_node": "state_mover_prep_node"
     "state_mover_prep_node": "dayflow_orchestrator::state_mover"
     "dayflow_orchestrator::state_mover": "state_mover_persist_node"
     "state_mover_persist_node": "work_node_materializer_node"
-    # relevance_cleaner was retired at the work-object cutover. The evaluator now records
-    # explicit transfer, no-action, or timed-deferral decisions for admitted intake. Its agent/node files remain under
-    # agents/dayflow_orchestrator/relevance_cleaner + control_nodes/relevance_cleaner_*.py, unwired.
+    # relevance_cleaner was retired at the work-object cutover (its files removed 2026-10-10).
     "work_node_materializer_node": "dayflow_orchestrator::action_selector"
     "dayflow_orchestrator::action_selector": "action_selector_router_node"
     "action_selector_router_node": "dayflow_orchestrator::switchboard"

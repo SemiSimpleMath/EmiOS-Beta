@@ -287,10 +287,8 @@ def test_a_run_puts_an_own_entry_on_the_list_and_the_lane_makes_work_from_it(tmp
     assert own["id"].startswith(f"day:{DAY}:") and own["assistant_part"] == "ask the owner" and own["kind"] == "day"
     from app.assistant.dayflow_orchestrator import brain_list_intake as B
     from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
-    live = {"calendar": {"mode": "live", "from_day": DAY}, "concern": {"mode": "off", "since": None},
-            "steward": {"mode": "retired"}}
-    out = B.deliver(get_dayflow_work_store(), now_utc=NOW, connect=sqlite_file(tmp_path / "dl.db"), list_connect=conn,
-                    lane_config=live)
+    monkeypatch.setattr(B, "CALENDAR_FROM_DAY", DAY)
+    out = B.deliver(get_dayflow_work_store(), now_utc=NOW, connect=sqlite_file(tmp_path / "dl.db"), list_connect=conn)
     [made] = [get_dayflow_work_store().load(w) for w in out["created"]]
     assert made.constraints["list_entry_id"] == own["id"]
     assert made.constraints["belief_refs"] == [] and made.constraints["concern_refs"] == []
@@ -360,11 +358,10 @@ def test_an_entry_for_a_concern_is_the_concerns(tmp_path, monkeypatch):
     from app.assistant.subconscious import concern_store
     monkeypatch.setattr(concern_store, "load_register", lambda connect=None: {
         "active": [{"concern_id": "c-sleep"}], "addressing": [], "resolved": [], "dormant": []})
-    live = {"calendar": {"mode": "live", "from_day": DAY}, "concern": {"mode": "live", "since": "2026-01-01T00:00:00+00:00"},
-            "steward": {"mode": "retired"}}
+    monkeypatch.setattr(B, "CALENDAR_FROM_DAY", DAY)
+    monkeypatch.setattr(B, "CONCERN_SINCE", "2026-01-01T00:00:00+00:00")
     monkeypatch.setattr(B, "brief", lambda entry: f"BRIEF of {entry['id']}")
-    out = B.deliver(get_dayflow_work_store(), now_utc=NOW, connect=sqlite_file(tmp_path / "dl.db"), list_connect=conn,
-                    lane_config=live)
+    out = B.deliver(get_dayflow_work_store(), now_utc=NOW, connect=sqlite_file(tmp_path / "dl.db"), list_connect=conn)
     [work] = [get_dayflow_work_store().load(w) for w in out["created"]]
     assert work.constraints["concern_refs"] == ["concern:c-sleep"], "its work is attached to the concern"
     closed = L.cancel_for_closed_concerns({"active": [], "addressing": [],
@@ -374,17 +371,6 @@ def test_an_entry_for_a_concern_is_the_concerns(tmp_path, monkeypatch):
     labels = {"C1": ["concern", "c-sleep"], "W1": ["work", "w"], "D": ["resource", "r"]}
     assert "concern 'W1' is not an open concern given" in D.entries_problems(
         {"entries": [_own() | {"concern": "W1"}]}, {}, labels)[0]
-
-
-def test_an_all_day_placement_is_past_once_its_date_is_over():
-    """2026-10-09: an all-day placement never passed, so between midnight and the 05:00 boundary Thursday's all-day
-    placements were still offered, and the day's tasks turned Thursday's entries into Friday's work."""
-    from app.assistant.subconscious.belief_occurrences import passed
-    evening = datetime(2026, 3, 11, 5, 0, tzinfo=timezone.utc)        # 10:00 PM on the 10th, local
-    after_midnight = datetime(2026, 3, 11, 9, 0, tzinfo=timezone.utc)  # 2:00 AM on the 11th, still the 10th's day
-    assert not passed(DAY, "all day", evening)
-    assert passed(DAY, "all day", after_midnight)
-    assert not passed(DAY, "11:30 PM", evening), "clock times keep their own rule"
 
 
 def test_earlier_entries_whose_work_is_in_motion_are_the_deciders_to_rewrite(tmp_path):

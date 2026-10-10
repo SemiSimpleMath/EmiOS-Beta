@@ -101,8 +101,9 @@ def test_active_strategic_renderers_share_statuses_and_hide_terminal_wakes():
         assert "first change still allowed two workers" in text
 
 
-def test_render_actual_architect_and_steward_templates(monkeypatch, tmp_path):
-    """Capture the real replan Message and render both agents with the production Jinja environment."""
+def test_render_actual_architect_templates(monkeypatch, tmp_path):
+    """Capture the real replan Message and render the architect with the production Jinja environment (the steward,
+    rendered beside it until 2026-10-10, was retired)."""
     import os
     from pathlib import Path
     from types import SimpleNamespace
@@ -123,7 +124,7 @@ def test_render_actual_architect_and_steward_templates(monkeypatch, tmp_path):
     monkeypatch.setattr(work_architect_apply, "apply_architect_dag", lambda *a, **kw: {})
     monkeypatch.setattr(DI, "agent_factory", SimpleNamespace(create_agent=lambda *a, **kw:
         SimpleNamespace(action_handler=lambda msg: captured.append(msg) or SimpleNamespace(data={}))))
-    bb = FakeBlackboard({"replan_work_ids": [wo.id], "work_portfolio": render_portfolio([wo]),
+    bb = FakeBlackboard({"work_portfolio": render_portfolio([wo]),
         "recent_responded_tickets": {"acknowledged": [{"title": "Release timing", "user_comment": "Wait for my approval before publishing."}]}})
     node = WorkArchitectNode(name="architect", blackboard=bb, agent_registry={}, tool_registry={})
     monkeypatch.setattr(node, "_scope", lambda msg: None)
@@ -135,13 +136,12 @@ def test_render_actual_architect_and_steward_templates(monkeypatch, tmp_path):
     assert "Wait for my approval before publishing." not in captured[0].information
     assert "WORK PORTFOLIO" in captured[0].information
     root = Path(__file__).resolve().parents[2] / "agents" / "dayflow_orchestrator"
-    artifact = ["# Complex work object: architect and steward prompt example",
+    artifact = ["# Complex work object: architect prompt example",
         "Synthetic data only. Generated from the current agent Jinja templates using the production Jinja environment.",
-        "The architect input is captured from its actual replan control node; store writes and the LLM are mocked. The steward portfolio uses its active renderer. Optional personal resources are empty.",
+        "The architect input is captured from its actual replan control node; store writes and the LLM are mocked. Optional personal resources are empty.",
         "This is a prompt inspection artifact, not evidence that deployment or all orchestration repairs are complete."]
     for name, overrides in [
         ("work_architect", {"task": captured[0].task, "information": captured[0].information}),
-        ("strategic_planner_wo", {"work_portfolio": render_portfolio([wo]), "recent_completed_work": ""}),
     ]:
         config = yaml.safe_load((root / name / "config.yaml").read_text(encoding="utf-8"))
         context = {key: None for key in config["user_context_items"] + config["system_context_items"]}
@@ -149,7 +149,7 @@ def test_render_actual_architect_and_steward_templates(monkeypatch, tmp_path):
         # Bound skills render as the injector renders them: name -> body.
         from app.assistant.ServiceLocator.service_locator import DI
         context["skills"] = {n: DI.skill_registry.get(n).body for n in config.get("skills") or []}
-        artifact.append("## " + ("Architect" if name == "work_architect" else "Steward"))
+        artifact.append("## Architect")
         for kind in ("system", "user"):
             rendered = _jinja_env.get_template(f"dayflow_orchestrator/{name}/prompts/{kind}.j2").render(**context)
             if kind == "user":

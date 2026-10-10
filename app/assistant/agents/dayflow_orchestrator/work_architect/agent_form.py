@@ -1,6 +1,6 @@
 """Output contract for the dayflow WORK ARCHITECT (Part 2 of the split planner).
 
-The steward (strategic_planner_wo) decides WHAT work exists (creates a goal). The architect owns that
+The brain decides WHAT work exists (its list; dayflow's list intake creates the goal). The architect owns that
 goal from then on, to its end (docs/design/dayflow_goal_ownership_2026-09-30.md): it may revise the
 objective when its premise changes, and it completes or abandons the goal. It decides how the goal is
 STRUCTURED: it decomposes the goal into a small DAG of work nodes, with dependencies AND —

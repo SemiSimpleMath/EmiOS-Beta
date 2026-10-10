@@ -2,21 +2,22 @@
 
 Pins: only the beliefs the owner approved for the calendar are placed, each read with the beliefs closest to
 it in meaning (found by code over the stored embeddings, nearest first, up to RELATED_MAX at RELATED_MIN or
-closer); the writer is shown them and places only approved beliefs; the plan line keeps them. Each placement is handed to dayflow as a belief intake item once, not when an hour
-past; the work made from it carries the belief. Beliefs are not made into concerns: the standing concerns
+closer); the writer is shown them and places only approved beliefs; the plan line keeps them. Until 2026-10-10 each
+placement was also handed to dayflow's steward as a belief intake item (belief_occurrences, retired with the steward;
+the day's placements are concerns, test_calendar_concerns.py). The standing concerns of 2026-10-02/03
 retire to dormant and the concern door no longer compares candidates with them. Scratch register and plan
 store; every agent is a fake. Invented data only.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
 
 import app.assistant.tests.test_setup  # noqa: F401
 import app.assistant.subconscious.day_pass as drs
-from app.assistant.subconscious import belief_occurrences, concern_door, day_plan
+from app.assistant.subconscious import concern_door, day_plan
 from app.assistant.utils.time_utils import get_local_timezone
 from belief_engine.intake.store import sqlite_file
 
@@ -104,76 +105,6 @@ def test_every_approved_belief_is_judged_once_and_only_those_that_apply_are_plac
         ['B1: judge each approved belief once']
     assert drs._problems({'judgments': [answer['judgments'][0], {**answer['judgments'][1], 'times': []}]},
                          {'B1', 'B3'}) == ["B3: it applies today, so give the time it applies, or 'all day'"]
-
-
-# ── each placement is handed to dayflow ───────────────────────────────────────────────────────────────
-@pytest.fixture(autouse=True)
-def _lanes_off(monkeypatch):
-    """The steward's path: both lanes off, whatever configs/brain_lanes.json says today."""
-    from app.assistant.dayflow_orchestrator import brain_list_intake
-    monkeypatch.setattr(brain_list_intake, "lanes", lambda: {"calendar": {"mode": "off", "from_day": None},
-                                                             "concern": {"mode": "off", "since": None}})
-
-
-NOON = datetime(2026, 1, 7, 12, 0, tzinfo=TZ).astimezone(timezone.utc)
-
-
-def _clock(dt):
-    return dt.astimezone(TZ).strftime('%I:%M %p').lstrip('0')
-
-
-def _plan_today(tmp_path, times):
-    from app.assistant.pipelines.context import boundary_date_local_str
-    key = boundary_date_local_str(NOON.astimezone(TZ))
-    plans = sqlite_file(tmp_path / 'plan.db')
-    line = lambda t: {'time': t, 'belief_key': 'B1', 'statement': 'Takes the trash out on Wednesday nights.',  # noqa: E731
-                      'related': [{'belief_key': 'B2', 'statement': 'After a holiday, Thursday.'}]}
-    day_plan.save_plan({'day': key, 'generated_at_utc': 'x', 'inputs_fingerprint': 'f', 'selected_belief_keys': ['B1'],
-                        'qualifier_belief_keys': ['B2'], 'selection_reason': '', 'change_summary': '', 'backdrops': [],
-                        'flags': [line(t) for t in times if t == 'all day'],
-                        'slots': [{'slot': 's', 'hour_local_iso': f'{key}T12:00:00', 'items': [],
-                                   'lines': [line(t) for t in times if t != 'all day']}]}, connect=plans)
-    return plans, key
-
-
-def _hand(plans, now, items=()):
-    written = []
-    belief_occurrences.run_occurrence_handoffs(now_utc=now, plan_connect=plans,
-                                               handed_ids=lambda day: {i['item_id'] for i in [*items, *written]},
-                                               write_item=written.append, poke=lambda: None)
-    return written
-
-
-def test_each_placement_is_handed_over_once_with_its_time_and_related_beliefs(tmp_path):
-    later = _clock(NOON + timedelta(hours=2))
-    plans, key = _plan_today(tmp_path, [later, 'all day'])
-    first = _hand(plans, NOON)
-    assert sorted(i['summary'] for i in first) == sorted([
-        f'At {later} today ({key}): Takes the trash out on Wednesday nights.',
-        f'All day today ({key}): Takes the trash out on Wednesday nights.'])
-    assert all(i['source_type'] == 'belief' and i['belief_key'] == 'B1' and i['occurrence_day'] == key
-               and i['read_with'] == '- After a holiday, Thursday.' and i['evaluator_pending']
-               for i in first)
-    assert _hand(plans, NOON, first) == [], "once per placement"
-
-
-def test_a_placement_more_than_an_hour_past_is_not_handed_over(tmp_path):
-    plans, _ = _plan_today(tmp_path, [_clock(NOON - timedelta(hours=3)), _clock(NOON - timedelta(minutes=30))])
-    assert [i['occurrence_time'] for i in _hand(plans, NOON)] == ['11:30 AM']
-
-
-def test_a_placement_after_midnight_belongs_to_the_end_of_the_day():
-    from app.assistant.pipelines.context import day_window_local
-    start, _ = day_window_local('2026-10-02')
-    before = (start + timedelta(hours=19)).astimezone(timezone.utc)          # 12:00 AM the next calendar date
-    assert not belief_occurrences.passed('2026-10-02', '12:30 AM', before)
-    assert belief_occurrences.passed('2026-10-02', '12:30 AM', before + timedelta(hours=2))
-    assert belief_occurrences.passed('2026-10-02', '9:00 PM', before)
-
-
-def test_work_made_from_a_placement_carries_the_belief():
-    from app.assistant.dayflow_orchestrator.work_intake import belief_refs_of
-    assert belief_refs_of([{'item_id': 'a', 'belief_key': 'B1'}, {'item_id': 'b', 'concern_id': 'c'}]) == ['B1']
 
 
 # ── beliefs are not concerns ──────────────────────────────────────────────────────────────────────────

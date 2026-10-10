@@ -2,11 +2,11 @@
 from pathlib import Path
 import pytest
 from jinja2 import Environment, FileSystemLoader, ChainableUndefined
-from app.assistant.tests.dayflow.conftest import FakeBlackboard
+from app.assistant.tests.dayflow.conftest import FakeBlackboard, make_work_object
 from app.assistant.control_nodes.state_mover_prep_node import StateMoverPrepNode
 from app.assistant.control_nodes.state_mover_persist_node import StateMoverPersistNode
 from app.assistant.dayflow_orchestrator.work_context import worker_data, render_view
-from app.assistant.dayflow_orchestrator.work_persist import persist_steward_output
+from app.assistant.dayflow_orchestrator.work_intake import intake_source
 from app.assistant.dayflow_orchestrator.work_portfolio import node_result
 from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
 from app.assistant.utils.time_utils import local_time_text
@@ -22,11 +22,9 @@ def email(item_id, text):
 
 def scenario():
     store = get_dayflow_work_store()
-    result = persist_steward_output(store, {"new_or_changed": [{
-        "objective": "Research appliances and relay the approved choice", "based_on": ["request"]}]},
-        admitted_artifacts=[email("request", "Compare three appliances.")])
-    wid = result["created"][0]["work_id"]
-    wo = store.load(wid)
+    wo = make_work_object(store, "Research appliances and relay the approved choice",
+                          sources=[intake_source(email("request", "Compare three appliances."))])
+    wid = wo.id
     for nid in ("research", "relay"):
         store.apply("add_node", {"work_id": wid, "id": nid, "parent_id": wo.goal_node_id,
             "type": "subtask", "title": nid, "content": "Send the approved choice" if nid == "relay" else "Compare options"})

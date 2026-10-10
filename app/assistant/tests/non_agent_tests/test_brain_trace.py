@@ -57,15 +57,11 @@ def test_an_error_is_stored_and_untraced_agents_are_not(connect):
     assert brain_trace.get_call(call["id"], connect=connect)["result"] is None
 
 
-def test_calls_are_found_by_concern_and_steward_calls_by_item(connect):
+def test_calls_are_found_by_concern(connect):
     with brain_trace.trace(stage="summary", concern_id="c-bake"):
         _record(connect, agent="subconscious::concern_summary", result={"what": "w"})
-    brain_trace.record_call(agent_name="dayflow_orchestrator::strategic_planner_wo",
-                            messages=[{"role": "user", "content": "- [concern_handoff:c-bake:abc] Handed over"}],
-                            engine="gpt-x", started=datetime.now(timezone.utc), result={}, connect=connect)
+    _record(connect, agent="subconscious::concern_summary", result={"what": "w"})        # no concern: not its call
     assert len(brain_trace.calls_for_concern("c-bake", connect=connect)) == 1
-    assert len(brain_trace.steward_calls_mentioning("concern_handoff:c-bake:abc", connect=connect)) == 1
-    assert brain_trace.steward_calls_mentioning("concern_handoff:other", connect=connect) == []
 
 
 def test_a_failed_write_is_logged_not_raised(monkeypatch):
@@ -114,8 +110,8 @@ def test_the_dayflow_diagram_follows_the_managers_configs():
     from app.routes import dayflow_flow
     planning, wake, dispatch = (dayflow_flow._stages(m) for m, _, _ in dayflow_flow.MANAGERS)
     names = [s["name"] for s in planning]
-    assert names[0] == "intake_triage_prep_node" and names[-1] == "post_room_finalize_node"
-    assert names.index("dayflow_orchestrator::strategic_planner_wo") < names.index("work_architect_node") \
+    assert names[0] == "work_prep_node" and names[-1] == "post_room_finalize_node"
+    assert names.index("brain_list_intake_node") < names.index("work_architect_node") \
         < names.index("dayflow_orchestrator::switchboard") < names.index("work_node_dispatch_node")
     architect = next(s for s in planning if s["name"] == "work_architect_node")
     assert [a["name"] for a in architect["agents"]] == ["dayflow_orchestrator::work_architect"]

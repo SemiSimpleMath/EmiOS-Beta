@@ -16,11 +16,11 @@ def intake_source(item):
             "created_at": str(meta.get("created_at") or item.get("timestamp") or ""),
             "message_id": str(meta.get("linked_email_unified_id") or ""),
             "thread_id": str(meta.get("email_thread_id") or ""),
-            # A concern handed over by the brain (subconscious/concern_handoff.py): work made from
-            # this item serves that concern, whatever the steward cites.
+            # A concern handed to the steward (concern_handoff, retired 2026-10-10): work made from
+            # this item serves that concern.
             "concern_id": str(meta.get("concern_id") or ""),
-            # A placement of today's calendar (subconscious/belief_occurrences.py): work made from it
-            # serves that belief, and its outcome returns to the belief.
+            # A placement of the day handed to the steward (belief_occurrences, retired 2026-10-10): work
+            # made from it serves that belief, and its outcome returns to the belief.
             "belief_key": str(meta.get("belief_key") or "")}
 
 
@@ -32,18 +32,6 @@ def concern_refs_of(sources):
 def belief_refs_of(sources):
     """The belief keys work made from these intake sources must carry."""
     return [s["belief_key"] for s in sources if s.get("belief_key")]
-
-
-def source_records(items, references):
-    refs = {str(ref).strip() for ref in references}
-    records = {}
-    for item in items:
-        meta = get_meta(item)
-        source = intake_source(item)
-        item_id = source["item_id"]
-        if item_id and ({item_id, str(meta.get("short_id") or "")} & refs):
-            records[item_id] = source
-    return list(records.values())
 
 
 def goal_update(wo, *, objective=None, sources=(), success_criteria=None):
@@ -69,21 +57,3 @@ def goal_update(wo, *, objective=None, sources=(), success_criteria=None):
     return {"work_id": wo.id, "expected_updated_at": wo.updated_at,
             "objective": constraints["objective"], "content": content, "constraints": constraints}
 
-
-def reconcile_transferred_intake(store, items):
-    """Retry source acknowledgment when a previous tick saved a goal then stopped."""
-    if not items:
-        return []
-    pending = {str(get_meta(item).get("item_id") or item.get("id") or ""): item for item in items}
-    from app.assistant.dayflow_orchestrator.dayflow_item_writer import write_dayflow_item
-    for summary in store.list_work_objects():
-        wo = store.load(summary["id"])
-        for source in wo.constraints.get("source_intake") or []:
-            item_id = str(source.get("item_id") or "")
-            if item_id in pending:
-                write_dayflow_item(item_id, state="closed", reason=f"converted_to_work_object:{wo.id}", caller="steward_handoff_recovery",
-                                   updates={"evaluator_pending": False, "evaluator_review": {"outcome": "transferred", "work_id": wo.id}})
-                pending.pop(item_id)
-        if not pending:
-            break
-    return list(pending.values())

@@ -18,7 +18,7 @@ or rewriting of existing records is required for this classification.
 - The finalizer reads the full main-task directive, its returned result and full owned
   provenance. Its outcome summarizes what was tried, went wrong, succeeded and remains
   unresolved, preserving useful saved-output references.
-- Architect/steward views show main tasks and finalizer summaries, not the worker's
+- Architect views show main tasks and finalizer summaries, not the worker's
   internal record list or raw results. Missing summary is labeled awaiting finalizer
   summary. Architect deltas cannot directly target or depend on provenance records.
 - Internal helper failures do not increment the whole goal's failed-attempt count.
@@ -51,13 +51,12 @@ orchestrator callers must also enforce `is_work_unit`.
 > - **The planning tick ends at the CLAIM.** `arguments → tool call → finalizer` run in the dispatch
 >   room. So `dayflow_switchboard_arguments_node` and `dayflow_tool_caller` are the live dispatch
 >   core, NOT the "legacy item-lane chain" older text called them.
-> - **`work_repair` is retired** (files on disk, unwired). Failed nodes carry the finalizer's verdict
+> - **`work_repair` is retired** (2026-09-16; files removed 2026-10-10). Failed nodes carry the finalizer's verdict
 >   and route; repeated failure escalates to `ask_user` (`work_finalizer_node._REPEAT_FAILURE_LIMIT`,
 >   applied by `WorkStore._op_finalize_task` against the goal's `goal_unmet_since_progress`).
-> - **The steward is retired.** `configs/brain_lanes.json` `steward.mode: retired`:
->   its stages remain in the state_map and are skipped; work comes from the brain's list through
->   `brain_list_intake_node` (05_DAYFLOW, "Brain list intake"). Steward text below describes the
->   path that runs with `steward.mode: on`.
+> - **The steward and intake triage are removed** (2026-10-10; skipped from 2026-10-06): work comes from
+>   the brain's list through `brain_list_intake_node` (05_DAYFLOW, "Brain list intake"). Steward text
+>   below is history.
 > - **The finalizer** answers "was the node's GOAL achieved" with four verdicts
 >   (`achieved`/`achieved_plan_changes`/`retry`/`unrecoverable`) plus an `outcome` prose account, and
 >   persists them on the node (`payload.finalizer`), never on a blackboard.
@@ -74,8 +73,8 @@ orchestrator callers must also enforce `is_work_unit`.
 ## 0. What the dayflow_orchestrator is
 
 The autonomous daily-workflow engine. It ingests new signals (chat and email as wake context; pod
-intake retired 2026-10-05), takes the work the brain decided on from the brain's list (concern and
-calendar lanes; the steward that used to decide this is retired), and either does the work or surfaces a UI ticket to the
+intake retired 2026-10-05), takes the work the brain decided on from the brain's list (the steward that used to decide this, and
+the intake triage that fed it, were removed on 2026-10-10), and either does the work or surfaces a UI ticket to the
 user — all without a human in the loop. It is invoked as a **manager** (`dayflow_orchestrator_manager`,
 class `MultiAgentManager`, `max_cycles: 40`, `strict_routing: true`) whose `state_map` deterministically
 routes a tick through a chain of **LLM agents** (decisions) and **control nodes** (deterministic
@@ -266,7 +265,7 @@ vocabulary small: status = lifecycle position, outcome nuance = the result text.
 
 ### How the lanes relate
 Items = intake + context (item timers retired 2026-09-16). Work objects = the live execution graph,
-created from the brain's list (or, with the steward on, by the evaluator converting actionable
+created from the brain's list (until 2026-10-06 also by the steward converting actionable
 items). The live pipeline runs through the work-object materializer/dispatch loop; the item dispatch
 lane and its `LEGACY ITEM LANE fired` warning (in `view_materializer_node`) were deleted. They share
 `emi.db`, but item and work writes are separate transactions.
@@ -284,155 +283,53 @@ medium). Check the tier here, not model names in the paragraphs, which drift:
 
 | agent (`dayflow_orchestrator::`) | tier | tools | wiring |
 |---|---|---|---|
-| `intake_triage` | mini | none | live |
-| `strategic_planner_wo` | smart | none | wired, skipped while `steward.mode: retired` |
 | `work_architect` | smart | none | live |
 | `state_mover` | mini | none | live |
 | `action_selector` | nano | none | live |
 | `switchboard` | nano | `all` except `ask_user` | live |
 | `work_finalizer` | smart | none | live (dispatch room) |
 | `result_formatter` | mini | none | live (called by master_room) |
-| `strategic_planner` | mini | none | retired, unwired |
-| `relevance_cleaner` | mini | none | retired, unwired |
-| `work_repair` | mini | none | retired, unwired |
+| `strategic_planner_wo` | smart | none | removed from the tick 2026-10-10; archived (`strategic_planner_wo.archive`, local only) |
+| `strategic_planner` | mini | none | retired; archived (`strategic_planner.archive`, local only) |
+
+Removed 2026-10-10 (owner: "retire the old steward", "triage too"): `intake_triage` and its three control nodes,
+the steward's prep/persist nodes (its agent directory is archived as `strategic_planner_wo.archive`, kept as
+reference per the owner's 2026-10-04 directive: `.ignore` keeps the registry off it, `*.archive` keeps it out of git), and the already-unwired `relevance_cleaner` and `work_repair` with their
+nodes. Their files are in git history before that date.
 
 The ticket composer is a separate namespace and a separate manager — see **ticket_builder** below.
 
-### Intake & evaluation
+### The tick's first stages
 
-**intake_triage** (mini) — the intake gate; first agent in the tick. Driven by
-`intake_triage_prep_node`, which loads all items and buckets them: brand-new (not cooldown-blocked) →
-`eligible_items_now`, plan synopses, recently-resolved (< 6 h), everything else → `active_dayflow_items`.
-Four source types never reach triage: `plan_synopsis` (context only), `chat` (context, and kept out of
-the active list too), and the `action_dispatch` / `action_result` / `action_log` rows, which are
-represented in the action log instead.
+**work_prep_node** (control node, no agent) — the tick's first stage: delivers pending concern and belief
+feedback (`recover_pending_concern_feedback`, `recover_pending_belief_feedback`) and loads the fixed scheduler's
+recent reminders (`scheduled_reminder_history`) for the architect and the state mover. Until 2026-10-10 this was
+`strategic_planner_wo_prep_node`, and intake triage (`intake_triage_prep_node` → `intake_triage` →
+`triage_spawn_guard_node` → `triage_persist_node`) ran before it; the steward (`strategic_planner_wo` and its
+persist node) turned admitted intake into work objects and reviewed the rest (no action, or deferred to a time).
+Since 2026-10-06 the brain decides what work exists, through its list, and both had nothing left to do. The
+reviews the steward wrote stay on the items (`evaluator_review`): `intake_review.wake_intake_eligible` keeps an
+item reviewed as no action, or deferred to a time not yet come, out of the state mover's event candidates.
 
-For each eligible artifact the agent emits `ADMIT` vs `REJECT_DUPLICATE / REJECT_NO_ACTION /
-REJECT_POLICY` (defaults to ADMIT unless clearly junk or *wholly* a duplicate; never rejects
-`[UPDATE]` items as dupes). The axis is **coverage, and it is partial by default**: every part already
-covered → `REJECT_DUPLICATE`; ANY part uncovered → `ADMIT` plus a **required `uncovered`** field
-naming what remains. That field exists because the evaluator otherwise sees a whole artifact with no
-hint which part is new, and would either redo the covered part or drop the uncovered one — on
-2026-09-11 a relay request died inside an artifact whose facts were already being tracked.
-
-**Three nodes, three distinct jobs** — the agent produces decisions only:
-
-1. `intake_triage_prep_node` buckets and gates, skipping the LLM entirely when nothing is eligible.
-2. **`triage_spawn_guard_node` builds `admitted_artifacts` / `rejected_artifacts`** — it validates the
-   decisions against their contract, resolves each `artifact_id` (raw → eligible item_id → `short_id`
-   → a DB lookup for items from prior ticks), drops duplicates and unmatched ids with a warning,
-   merges `auto_admitted_artifacts`, and mutates the metadata **in memory only** (`state=artifact` for
-   ADMIT, `suppressed` for REJECT). A decision-count mismatch warns and processes what it has rather
-   than raising.
-3. `triage_persist_node` then writes both to the DB — **immediately**, not at end of tick, so the
-   evaluator reads authoritative state instead of stale state. Admissions go through
-   `write_dayflow_items_batch`, which is the path that performs no transition validation (§2).
-
-**strategic_planner_wo** (the work-object **EVALUATOR** / "steward", smart) — **RETIRED behind
-`configs/brain_lanes.json` `steward.mode: retired`** (read fresh every tick). While retired,
-`strategic_planner_wo_prep_node` still recovers pending concern/belief feedback, reconciles
-transferred intake and builds the portfolio and done-logs (the architect's situational context),
-then skips the model call and the persist node: it sets an empty `steward_persist_result` and empty
-`replan_work_ids` / `user_directed_replan_ids`, logs an ERROR naming any admitted intake items that
-remain (they have no reviewer), and routes to `brain_list_intake_node`. With `steward.mode: on` it
-is the path from intake to action, as described here. Driven by `strategic_planner_wo_prep_node` (builds `work_portfolio` from non-terminal
-work objects, plus two separate 18 h done-logs: `recent_completed_work` = DONE/don't-recreate vs
-`recent_abandoned_work` = dropped/may-recreate, and the situational context — tickets, dispatch results,
-action log). **Id-chain context (25cf2b5b):** every ticket reply is annotated with its resolved work ref
-(`_annotate_work_refs` — ticket → `trigger_context.work_node` → WO → live status, joined deterministically,
-never by wording), and `expected_schedule_view` renders today's expected schedule with per-row provenance
-(`_resolve_ticket_provenance`) so the evaluator can SEE that a reminder already exists / was answered /
-was dropped (drop reasons included) instead of re-minting it. The model judges; it never links. Each tick it judges the portfolio + new intake and decides only **what changes** — create /
-change-objective / flag-for-replan / request an end — never decomposing, executing or ending work.
-Output (`new_or_changed`, `replan_work_ids`, `end_requests`) is applied by
-`strategic_planner_wo_persist_node` via `work_persist.persist_steward_output`: an empty `work_id` →
-`create_work_object` then `set_status → dispatched` (the goal node); a non-empty one → in-place objective
-change; an end request → `instruct_goal`, for the architect, which owns the work object to its end
-(05_DAYFLOW, "Goal ownership"). It then **consumes intake** — artifacts a new WO cites in
-`based_on` are folded into the goal content and their source items closed
-(`converted_to_work_object:<wid>`) — and leaves `replan_work_ids` for the architect.
-
-Only items in **this** tick's `admitted_artifacts` are eligible to be consumed, and only **created**
-work objects consume (a changed one already did). The fold appends under an "— Originating intake —"
-heading via a same-status `set_status`, which is a content-only write and one of the legitimate uses
-of the store's same-target bypass. Crucially it carries the **pod handle, not just the summary**:
-`[full content: <pod_id> — open with pod_fetch]`. That line is the only thing a worker ever sees about
-where its goal came from, and a summary is a paraphrase — on 2026-09-13 a worker was told its answer
-was in "newsletter [7667]", could not open a `short_id` (no tool accepts one, and that one named two
-different items), asked the user three times, then spent 117 nodes reconstructing from the open web
-what was sitting in a 1,978-character pod. Policy: one WO per
-objective (check the portfolio before creating), the ROUTINE section is authoritative for timing, ticket
-responses are authoritative, and an already-DONE recurring automation is never re-minted.
-
-> **The portfolio must never LIE about being empty** — the single most important property of this prep
-> node. It is the only thing standing between the evaluator and recreating work already in flight, and
-> "(no active work objects)" is true of an empty store and false of a broken one while reading
-> identically to the planner, which then does exactly what its prompt says to do with an empty
-> portfolio: create the work. On 2026-08-30 three rows with NULL timestamps failed `WorkObject`
-> validation, the comprehension raised, the `except` left the default in place, and the planner minted
-> **34 duplicate work objects and 28 notifications** before anyone noticed. Four hours.
->
-> The two failures are now told apart. A store that cannot be **listed** at all **raises** — a tick
-> planned blind is worse than a tick not taken. Individual objects that will not **load** are skipped,
-> logged as ERROR, and **named at the top of the rendered portfolio** behind an `!! INCOMPLETE VIEW`
-> banner that tells the planner work exists which is not listed, and to prefer changing or re-planning
-> over creating anything this cycle.
-
-The done-logs carry WHY, not just titles, and that is deliberate. A DONE entry appends the goal's
-epitaph; an ABANDONED entry (`_abandoned_line`) carries when it was dropped, the **recorded epitaph
-rendered in full** — never truncated, since that is where "user declined — DO NOT RECREATE" lives —
-the user's **last recorded reply** on that goal, and the goal's final content. Without those, the
-evaluator re-mints a goal the user just settled: on 2026-07-27 a July-timesheets work object was
-dropped on "those are done first of next month always", the DROPPED section showed the bare title
-alone, and an identical work object appeared 11 minutes later. (The scan relies on summaries being
-newest-updated-first and breaks out of the loop at the window edge.)
-
-Two window sizes, easily conflated: the done-logs look back **18 h** (as does the action log), while
-responded tickets look back **12 h**. Replies reach the evaluator as a **flat, newest-first list** so
-every reply is visible with the user's own words primary, acknowledged ones included; the categorized
-dict is kept alongside it for the architect's context builder.
-
-`_resolve_ticket_provenance` exists because of the 2026-07-29 trash re-mint: the daily context
-tracker's echo of an accepted ticket read as a bare unowned ongoing activity and was minted as new
-work. So a schedule entry whose `source` carries a verbatim ticket id is chased ticket → work node →
-work object → status by deterministic lookup. The evaluator judges what to do; it is never asked
-whether two phrasings are the same task.
-
-**strategic_planner** (LEGACY items-lane planner) — the older evaluator that emitted
-**plans (DAGs of task nodes) + standalone tasks** instead of work objects, with per-task
-wait/dependency/reactivate fields and plan-synopsis bookkeeping it managed itself. **Retired:** its driving
-control nodes (`StrategicPlannerPrepNode`, `PlannerPersistNode`) were deleted and it was removed from the
-manager's agents list + state_map; `triage_persist_node` routes to the live `strategic_planner_wo` (the context enricher between them was retired 2026-09-30).
-The agent dir is KEPT but unwired — the prompts are preserved as reference (see its `KEEP.md`).
-
-**relevance_cleaner** — the items-lane **janitor** that `close`s finished tasks (mark done,
-keep history) and `suppress`es items safe to forget (irreversible). Driven by a 30-minute gate
-(`relevance_cleaner_gate_node`) → prep → agent → persist (which stamps the last-run time, resolves
-`short_id`s, applies `write_dayflow_item`, and **refuses to close/suppress any `pending_directive` item**
-so a user's owed follow-up is never stranded). Operates on items, not work objects. **Wiring flag:** the
-gate node is **not declared in the manager's `control_nodes:` list at all**, and nothing routes into
-it in any live `state_map` — so it is unreachable, not merely unrouted. Consistent with it being the
-legacy lane's cleaner; the files remain on disk.
-
-**brain_list_intake_node** (control node, no agent) — runs after `strategic_planner_wo_persist_node`
+**brain_list_intake_node** (control node, no agent) — runs after `work_prep_node`
 and before `work_architect_node`; logic in `dayflow_orchestrator/brain_list_intake.py::deliver`.
-For each brain-list entry with undelivered changes in a non-off lane (`configs/brain_lanes.json`):
-create a work-object shell (goal only, `constraints.list_entry_id`, `concern_refs` from a concern
-entry, `belief_refs` from a calendar entry), revise active work (one batch: `revise_goal` +
-`instruct_goal kind=replan`), or end active work (`instruct_goal kind=end`); an entry still needed
-after its work ended gets new work (2026-10-08). Each change is recorded once in `brain_list_deliveries`;
-`dry_run` records and does nothing. One entry's failure is logged and retried next tick; failing to
-read the list raises. Full description: 05_DAYFLOW, "Brain list intake".
+For each brain-list entry with undelivered changes (every entry made since its kind's work came from the list:
+`CALENDAR_FROM_DAY`, `CONCERN_SINCE`): create a work-object shell (goal only, `constraints.list_entry_id`,
+`concern_refs` from a concern entry, `belief_refs` from the entry's beliefs), revise active work (one batch:
+`revise_goal` + `instruct_goal kind=replan`), or end active work (`instruct_goal kind=end`); an entry still needed
+after its work ended gets new work (2026-10-08). Each change is recorded once in `brain_list_deliveries`. One
+entry's failure is logged and retried next tick; failing to read the list raises. Until 2026-10-10 lanes were
+switched in `configs/brain_lanes.json` (off / dry_run / live). Full description: 05_DAYFLOW, "Brain list intake".
 
 ### Planning structure
 
 **work_architect** (smart, no tools) — the structure designer ("Part 2" of the split planner).
-Driven by `work_architect_node`, which decomposes goals with no tasks — this tick's creations, the
-brain's shells and durable empty goals from a lost tick (`_undecomposed_goals`) — and re-plans work
+Driven by `work_architect_node`, which decomposes goals with no tasks — the brain's shells and durable
+empty goals from a lost tick (`_undecomposed_goals`) — and re-plans work
 objects woken by: a **work_finalizer verdict carrying a route** (read off the graph by
 `_pending_finalizer_instructions`), an unconsumed goal instruction (`constraints.architect_instructions`:
-an end request from the steward or the brain, or the brain's `replan`), the evaluator's
-`replan_work_ids`, or the goal being stranded (`stranded_fingerprint`). The cap of 3/tick
+the brain's end request or `replan`), or the goal being stranded (`stranded_fingerprint`); until
+2026-10-10 also the steward's end requests and `replan_work_ids`. The cap of 3/tick
 (`_MAX_REPLANS_PER_TICK`) applies to re-plans only. It is handed one
 goal + a shared situational `information` block (ticket replies, active tickets, portfolio, recent
 completions); for a re-plan it also gets the existing graph (and the finalizer's outcome, recommendation
@@ -467,13 +364,11 @@ Never raises — a per-object failure leaves that object as-is and the pipeline 
 
 Four more mechanics worth knowing:
 
-- **The prune licence is computed here.** `licensed = bool(licence) or (work_id in user_directed) or
-  (work_id in stranded) or brain_replan`, where `licence` is the joined finalizer recommendations,
-  `user_directed` comes from `user_directed_replan_ids` (a steward-classed user directive), a stranded
-  goal is licensed by its state, and `brain_replan` is an unconsumed brain `replan` instruction. It is passed to
-  `apply_architect_dag`, and without it the store's churn fence refuses to prune queued or
-  future-wake-held nodes. An unlicensed re-plan — the steward's own read of progress — may add but
-  not kill.
+- **The prune licence is computed here.** `licensed = bool(licence) or (work_id in stranded) or
+  brain_replan`, where `licence` is the joined finalizer recommendations, a stranded goal is licensed by its
+  state, and `brain_replan` is an unconsumed brain `replan` instruction (until 2026-10-10 also a steward-classed
+  user directive, `user_directed_replan_ids`). It is passed to `apply_architect_dag`, and without it the store's
+  churn fence refuses to prune queued or future-wake-held nodes. An unlicensed re-plan may add but not kill.
 - **`duplicate_of`** lets the agent name `{duplicate_node_id: keep_node_id}` pairs, converted from a
   LIST here because OpenAI structured output rejects a free-form object. The apply reports
   `deduplicated` alongside added and abandoned.
@@ -617,8 +512,7 @@ It can finalize a previously recorded result without rerunning its worker. It st
 for gates or a judgment requiring planning; it never fast-forwards time or retries
 on its own. This wrapper is a scenario runner, not Dayflow's scheduler.
 
-**work_repair** — **RETIRED 2026-09-16.** `work_repair_node` and `work_repair_apply` remain on disk but
-are on no path: the node is absent from the `state_map` and nothing imports the applier. Its three
+**work_repair** — **RETIRED 2026-09-16** (`work_repair_node` and `work_repair_apply` removed 2026-10-10). Its three
 dispositions moved to agents that can see more than one failed step — *retry* became the finalizer's
 `replan` (which must NAME what will be different, because an unchanged retry reproduces its error),
 *escalate* became an ordinary node with a communicate goal that the architect plans, and *abandon* is
@@ -676,7 +570,7 @@ judgment (and as an automatic rollup ending), and after its commit the finalizer
 (`propagate_work_outcome(..., "judged")`); belief feedback is delivered when the judgment ended the
 work object. Other delivery sites: `brain_list_intake` and `work_persist` (attached, at creation /
 revision), `work_architect_node` after an `end_goal`, and evaluator prep's recovery of pending
-receipts every tick. (The retired `work_repair_apply` still contains a call; it is unwired.)
+receipts every tick.
 
 ### Surface, comms & finalization
 
@@ -878,24 +772,19 @@ minutes rather than at the ceiling tick.
 is in the future (master-room chat is active), it records a skip and **returns without invoking the
 manager**. No agents run.
 
-**P2 — Empty-intake skip.** `room::delegator → intake_triage_prep_node`; if no items are
-eligible, the prep node sets `next_agent → triage_spawn_guard_node`, **skipping the triage LLM**, and the
-tick proceeds to evaluator prep (and, while the steward is retired, straight on to the list-item
-intake) with no new admissions.
+**P2 — Empty-intake skip: REMOVED 2026-10-10** with intake triage, which it skipped when no item was
+eligible.
 
 **P3 — The planning tick (`dayflow_orchestrator_manager`, the whole of it).**
-`room::delegator → intake_triage_prep_node → intake_triage → triage_spawn_guard_node →
-triage_persist_node → (context enricher retired 2026-09-30) →
-strategic_planner_wo_prep_node → strategic_planner_wo → strategic_planner_wo_persist_node →
+`room::delegator → work_prep_node →
 brain_list_intake_node → work_architect_node → state_mover_prep_node → state_mover →
 state_mover_persist_node → work_node_materializer_node → action_selector → action_selector_router_node →
 switchboard → work_node_dispatch_node → post_room_finalize_node → final_answer_node → manager_exit_node`.
-While `steward.mode` is `retired`, `strategic_planner_wo_prep_node` sets `next_agent →
-brain_list_intake_node`, skipping `strategic_planner_wo` and its persist node.
+Until 2026-10-10 intake triage and the steward (`strategic_planner_wo` with its prep and persist nodes) ran
+before the list intake; the steward was skipped from 2026-10-06.
 
-The cadence: ingest → sweeps + pending-finalization recovery → triage → (evaluate, when the steward
-is on: create / change / re-plan / request an end) → work from the brain's list (shells, revisions,
-end instructions) → decompose new and empty goals, re-plan woken ones, end goals → promote ready nodes
+The cadence: ingest → sweeps + pending-finalization recovery → pending concern/belief feedback → work from the
+brain's list (shells, revisions, end instructions) → decompose new and empty goals, re-plan woken ones, end goals → promote ready nodes
 → materialize → pick ONE → **claim it, and end the pass**. Neither the finalizer nor repair appears here: the finalizer moved into the
 dispatch room, and repair is retired.
 
@@ -968,10 +857,9 @@ any log on disk). `plan_mode_final_router_node` remains — master_room's planni
 **P10 — Graceful-exit path.** `graceful_exit → graceful_exit_control_node → final_answer_node` — a clean
 early termination of the manager loop.
 
-**P11 — Relevance-cleaner cadence: ORPHANED.** `relevance_cleaner_gate_node → relevance_cleaner_prep →
-relevance_cleaner → relevance_cleaner_persist` cleaned the items lane. No inbound edge routes into the
-gate in any live map, and its old exit (`view_materializer_node`) is deleted. Files remain on disk. Stale
-items now age out via the freshness windows and the tick sweeps instead.
+**P11 — Relevance-cleaner cadence: REMOVED 2026-10-10** (orphaned since the work-object cutover).
+`relevance_cleaner_gate_node → relevance_cleaner_prep → relevance_cleaner → relevance_cleaner_persist` cleaned the
+items lane. Stale items age out via the freshness windows and the tick sweeps instead.
 
 **P12 — Legacy item-lane dispatch (PARTLY RETIRED — read carefully).** Of the old chain, only
 `action_result_normalizer_node` was deleted. `dayflow_switchboard_arguments_node` and
@@ -981,8 +869,8 @@ items now age out via the freshness windows and the tick sweeps instead.
 
 **P13 — Legacy plan-task planner (RETIRED).** The old `strategic_planner_prep_node → strategic_planner →
 planner_persist_node` path is gone — the two control nodes were deleted and the agent unwired;
-`triage_persist_node` routes to the work-object evaluator (`strategic_planner_wo`); the context enricher was retired 2026-09-30. The agent dir
-(prompts) is kept as reference.
+the work-object evaluator that replaced it (`strategic_planner_wo`) was removed in turn on 2026-10-10. The
+agent dir (prompts) is kept as reference.
 
 ---
 
@@ -993,21 +881,23 @@ per-node wakes) drives two entry paths, and each claim opens a third manager:
 
 | Manager | Path | Runs |
 |---|---|---|
-| `dayflow_orchestrator_manager` | P3 | the planning tick: intake → (evaluate, steward retired) → brain list intake → decompose → promote → claim ONE node |
+| `dayflow_orchestrator_manager` | P3 | the planning tick: feedback → brain list intake → decompose → promote → claim ONE node |
 | `dayflow_wake_manager` | P7 | one due node: re-judge the moment → dispatch or hold. No planning stage exists in it |
 | `dayflow_dispatch_manager` | P4 | one claimed node: build arguments → make the (blocking) call → finalize |
 
-Plus P1/P2 skips, P6 exit, P10 graceful exit.
+Plus the P1 skip, P6 exit, P10 graceful exit.
 
-**Retired (files on disk, wired into nothing):** `work_repair_node` + the `work_repair` agent (2026-09-16
-— its three dispositions became the finalizer's verdicts); the `relevance_cleaner` sub-chain; the legacy
+**Retired (files on disk, wired into nothing):** the legacy
 `strategic_planner` trio (`StrategicPlannerPrepNode` / `PlannerPersistNode` deleted, agent unwired, dir
-kept for prompt reference per `KEEP.md`); `dayflow_orchestrator::plan_mode` (2026-09-18, agent dir
+archived 2026-10-10 as `strategic_planner.archive`, kept for prompt reference per its `KEEP.md`); `dayflow_orchestrator::plan_mode` (2026-09-18, agent dir
 deleted); `dayflow_orchestrator::room_summary` (the generic `room_summary` is untouched).
 
-**Retired behind a switch (still wired, skipped):** `strategic_planner_wo` + `strategic_planner_wo_persist_node`
-while `configs/brain_lanes.json` `steward.mode` is `retired`; the prep node still runs and routes to
-`brain_list_intake_node`.
+**Removed 2026-10-10:** intake triage (`intake_triage` and `intake_triage_prep_node`, `triage_spawn_guard_node`,
+`triage_persist_node`); the steward's prep and persist nodes and `work_persist` (its agent dir archived as
+`strategic_planner_wo.archive`); the
+lane switches (`configs/brain_lanes.json`); the handoffs to the steward (`subconscious/concern_handoff.py`,
+`subconscious/belief_occurrences.py`); `work_repair_node` + the `work_repair` agent + `work_repair_apply`
+(retired 2026-09-16 — its three dispositions became the finalizer's verdicts); the `relevance_cleaner` sub-chain.
 
 **Deleted outright:** `tick_router_node`, `view_materializer_node`, `fast_tick_promoter_node`,
 `state_transition_guard_node`, `action_result_normalizer_node`, `work_execution_node`,

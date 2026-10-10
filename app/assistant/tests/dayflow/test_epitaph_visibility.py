@@ -2,15 +2,13 @@
 
 A cut-off reason in a prompt is how dead chains get re-laid: "user declined ...
 DO NOT RE" sliced at 100 chars reads as nothing. The why-lines in the architect's
-graph render and the steward's portfolio, and the WO-level ending reason in the
-steward's done/dropped logs, all render FULL; the finalizer stores its resolve
+graph render and the portfolio, and the WO-level ending reason in the recent
+done/dropped logs (dayflow_orchestrator/recent_work.py), all render FULL; the finalizer stores its resolve
 reasoning un-cut and reads a node's result un-cut.
 """
 from __future__ import annotations
 
-from app.assistant.control_nodes.strategic_planner_wo_prep_node import (
-    _abandoned_line, _goal_epitaph,
-)
+from app.assistant.dayflow_orchestrator.recent_work import ended_item, goal_epitaph, render_recent_ended
 from app.assistant.control_nodes.work_architect_node import _render_existing_graph
 from app.assistant.dayflow_orchestrator.work_portfolio import render_work_portfolio
 
@@ -33,11 +31,11 @@ def test_wo_epitaph_reaches_the_dropped_log_whole():
     store = _store()
     wid, gid = _mk_wo(store)
     store.apply("set_work_status", {"work_id": wid, "status": "abandoned",
-                                    "reason": LONG_REASON}, actor="steward")
+                                    "reason": LONG_REASON}, actor="architect")
     wo = store.load(wid)
-    assert "DO NOT RECREATE" in _goal_epitaph(wo)
-    line = _abandoned_line(wo)
-    assert "DO NOT RECREATE" in line
+    assert "DO NOT RECREATE" in goal_epitaph(wo)
+    _, dropped = render_recent_ended([], [ended_item(wo, finalizers=True)])
+    assert "DO NOT RECREATE" in dropped
 
 
 def test_node_epitaph_renders_whole_in_architect_graph_and_portfolio():

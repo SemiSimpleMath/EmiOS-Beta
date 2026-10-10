@@ -297,7 +297,7 @@ def test_a_rolled_up_goal_records_what_satisfied_it(store):
 
 
 def test_a_plan_changing_completion_is_legible_in_its_epitaph(store):
-    from app.assistant.control_nodes.strategic_planner_wo_prep_node import _goal_epitaph
+    from app.assistant.dayflow_orchestrator.recent_work import goal_epitaph as _goal_epitaph
     wo = _goal(store, "Get the picture packet.")
     nid = _child(store, wo.id, wo.goal_node_id, "Find the packet")
     _set(store, wo.id, nid, "done")

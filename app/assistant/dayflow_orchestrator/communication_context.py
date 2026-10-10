@@ -9,6 +9,32 @@ from app.models.db_manager import get_db_manager
 
 logger = get_logger(__name__)
 HISTORY_HOURS = 18
+_DAYFLOW_TYPES = frozenset({"dayflow_orchestrator"})
+
+
+def load_active_tickets():
+    """Active dayflow tickets from the ticket manager (pending/proposed/snoozed): title, message, suggestion type and
+    the items each acted on. Moved here from the steward's prep node, retired 2026-10-10."""
+    from app.assistant.ticket_manager import get_ticket_manager, TicketState
+    active = get_ticket_manager().get_tickets(
+        states=[TicketState.PENDING, TicketState.PROPOSED, TicketState.SNOOZED], limit=50)
+    result = []
+    for t in active:
+        if (getattr(t, "ticket_type", "") or "").lower() not in _DAYFLOW_TYPES:
+            continue
+        trigger_context = getattr(t, "trigger_context", None) or {}
+        if not isinstance(trigger_context, dict):
+            trigger_context = {}
+        acted_on = trigger_context.get("acted_on_item_ids", [])
+        if not isinstance(acted_on, list):
+            acted_on = []
+        result.append({
+            "title": str(getattr(t, "title", "") or "").strip(),
+            "message": str(getattr(t, "message", "") or "").strip(),
+            "suggestion_type": str(getattr(t, "suggestion_type", "") or "").strip(),
+            "acted_on_item_ids": acted_on,
+        })
+    return result
 
 
 def scheduled_reminder_history(now_utc: datetime) -> dict:

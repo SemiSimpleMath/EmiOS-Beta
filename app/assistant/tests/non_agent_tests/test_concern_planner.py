@@ -114,8 +114,8 @@ def test_a_plan_is_stored_against_its_record_with_its_proposals_and_reaches_the_
     assert brain_list.entries(concern_id="c-club", connect=lst) == [], "the planner proposes; the list is untouched"
     assert concern_planner.run_planners(invoke=invoke, register_connect=reg.connect,
                                         list_connect=lst)["plans_written"] == 0
-    from app.assistant.subconscious.concern_handoff import _brief_text
-    text = _brief_text(c, "active")
+    from app.assistant.dayflow_orchestrator.work_context import render_view
+    text = render_view("concern_view", concerns=[concern_view.view(c, "active")])     # as the concern's readers see it
     assert "things that should be done:\n    - The caterer's order moves to the 16th or is cancelled" in text
 
 

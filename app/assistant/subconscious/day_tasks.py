@@ -371,10 +371,8 @@ def gather(now_utc: datetime, *, plan_connect=None) -> Dict[str, Any]:
     from app.assistant.pipelines.context import boundary_date_local_str
     from app.assistant.utils.time_utils import get_local_timezone
     day = boundary_date_local_str(now_utc.astimezone(get_local_timezone()))
-    from app.assistant.dayflow_orchestrator.brain_list_intake import calendar_live
     from app.assistant.subconscious import brain_list, situation
-    # Calendar-made work is the brain's own on a live day; on a steward day it is left out (module docstring).
-    s = situation.gather(now_utc, calendar_work=calendar_live(day))
+    s = situation.gather(now_utc)
     with_concerns(s)
     matters = matters_today(day, now_utc)
     from app.assistant.dayflow_orchestrator.brain_list_intake import work_of

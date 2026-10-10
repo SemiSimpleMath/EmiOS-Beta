@@ -7,10 +7,10 @@ llm_params:
 allowed_tools: []
 except_tools: []
 
-# The architect must see ~the same situational picture the steward saw when it minted the goal — the
+# The architect must see ~the same situational picture the goal was decided from — the
 # calendar, the source intake, the day's state, who the user is, entity cards — or it decomposes blind
 # (e.g. shaping "walk the dogs" as an executable step instead of a notify). These resolve from the same
-# shared blackboard + resources the steward loaded earlier this tick.
+# shared resources the tick reads.
 entity_scan_keys: [task, information]
 entity_card_level: 0
 

@@ -30,6 +30,16 @@ is retired (d02e72e2), all three by `configs/brain_lanes.json`. `subconscious/da
 planning tick's state map: intake triage and the steward's prep node still run, and the prep node routes past the
 steward to the list-item intake node (section "The steward's retirement, behind a switch").
 
+**2026-10-10: removed from the tick** (owner: "retire the old steward", "triage too"). The planning tick is now
+`work_prep_node` (pending concern/belief feedback, the reminder history) → `brain_list_intake_node` → the
+architect. Removed: intake triage (agent and three nodes), the steward's prep and persist nodes and
+`work_persist.py`, `configs/brain_lanes.json` (every entry is delivered except those made before its kind's start,
+`CALENDAR_FROM_DAY` / `CONCERN_SINCE` in `brain_list_intake.py`), the handoffs to the steward
+(`concern_handoff.py`, `belief_occurrences.py`), and the already-unwired relevance_cleaner and work_repair. The
+steward's agent directory is archived as `strategic_planner_wo.archive` (owner: "change its directory names to
+x.archive so we know they are not in use"): `.ignore` keeps the agent registry off it, and the `*.archive` rule keeps it
+local, out of git (section "The steward retires"; its `KEEP.md`).
+
 ## The owner's words
 
 "it makes a lot of sense if brain races all the concerns comes up with the broad tasks related to the concerns

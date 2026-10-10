@@ -14,9 +14,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from app.assistant.ServiceLocator.service_locator import DI
-from app.assistant.control_nodes.strategic_planner_wo_prep_node import StrategicPlannerWoPrepNode
 from app.assistant.control_nodes.work_architect_node import WorkArchitectNode
-from app.assistant.dayflow_orchestrator.work_portfolio import render_active_portfolio
 from app.assistant.tests.dayflow.conftest import FakeBlackboard
 from app.assistant.utils.time_utils import local_time_text
 
@@ -37,7 +35,10 @@ def _goal_with_task(store, objective, task_title):
     return wo
 
 
-def _replan(bb) -> dict:
+def _replan(store, wo) -> dict:
+    """Wake the architect on `wo` the way the brain does (a re-plan instruction on the work object) and keep what
+    it was shown. Until 2026-10-10 the steward's replan_work_ids on the tick's blackboard woke it."""
+    store.apply("instruct_goal", {"work_id": wo.id, "kind": "replan", "reason": "the entry was revised"}, actor="brain")
     sink: dict = {}
 
     class _Agent:
@@ -49,7 +50,7 @@ def _replan(bb) -> dict:
             return _Result()
 
     with patch.object(DI.agent_factory, "create_agent", return_value=_Agent()):
-        WorkArchitectNode(name="work_architect_node", blackboard=bb,
+        WorkArchitectNode(name="work_architect_node", blackboard=FakeBlackboard({}),
                           agent_registry={}, tool_registry={}).action_handler(message=None)
     return sink
 
@@ -62,10 +63,7 @@ def test_a_long_completed_objective_reaches_the_architect_whole_with_its_end_tim
     ended_at = store.load(ended.id).nodes[ended.goal_node_id].payload["terminal"]["at"]
     current = _goal_with_task(store, "Water the garden tonight", "Tell the user to water the garden")
 
-    prep = StrategicPlannerWoPrepNode(name="prep", blackboard=FakeBlackboard({}),
-                                      agent_registry={}, tool_registry={})
-    completed, _ = prep._render_recent_completed(store.list_work_objects(), store)
-    sink = _replan(FakeBlackboard({"replan_work_ids": [current.id], "recent_completed_work": completed}))
+    sink = _replan(store, current)
 
     assert LONG_OBJECTIVE in sink["information"]
     assert f"(completed {local_time_text(ended_at)})" in sink["information"]
@@ -75,9 +73,7 @@ def test_the_goals_own_work_object_appears_once():
     store = _store()
     current = _goal_with_task(store, "Water the garden tonight", "Tell the user to water the garden")
     other = _goal_with_task(store, "Book the dentist appointment", "Ask the user which day suits")
-    tick_portfolio, _, _ = render_active_portfolio(store, store.list_work_objects())
-
-    sink = _replan(FakeBlackboard({"replan_work_ids": [current.id], "work_portfolio": tick_portfolio}))
+    sink = _replan(store, current)
     prompt = sink["task"] + sink["information"]
 
     assert prompt.count("GOAL: Tell the user to water the garden") == 1, "the goal's own graph was printed twice"

@@ -3,9 +3,9 @@
 
 Each wake of the brain is a run (subconscious/brain_trace.py): the model calls made during it carry its
 id, and what code decided (an answer refused, a candidate folded into a concern, a stale reason, a
-handoff) is recorded as its steps. The page picks a run on a time scrubber, lights the stages it ran,
-and opens a stage's calls and steps in time order. The steward is dayflow's, not the brain's: its calls
-for a run are the ones whose prompt holds an item the run handed over.
+list change) is recorded as its steps. The page picks a run on a time scrubber, lights the stages it ran,
+and opens a stage's calls and steps in time order. Until 2026-10-10 the diagram ended in the handoffs to dayflow's
+steward and the steward's calls on them; both were retired (the brain's list is dayflow's input).
 
 The diagram is NODES and EDGES below: the brain's stages are code in subconscious/, not a manager's
 state_map, so unlike /dayflow/flow there is no config to read it from.
@@ -35,14 +35,16 @@ NODES: List[Dict[str, Any]] = [
      "role": "Reads one matter at a time with everything that bears on it, and decides: notes and "
              "resolutions on concerns, new concerns, and a decision on every event."},
     {"id": "day_pass", "title": "Day pass", "col": 1, "row": 2,
-     "agents": ["dayflow_routine_writer"],
-     "role": "Places each belief the owner approved for the calendar at its times today, read with the beliefs "
-             "closest to it in meaning; code builds the day from the placements and hands each one to dayflow."},
-    {"id": "day_tasks", "title": "Day's tasks (shadow)", "col": 1, "row": 3,
+     "agents": ["dayflow_routine_writer", "subconscious::day_placements"],
+     "role": "Judges each belief the owner approved for the calendar against today, read with the beliefs closest "
+             "to it in meaning; code builds the day from those that apply, and the day's placements (one per thing "
+             "the day holds, with every belief about it) become the day's calendar concerns."},
+    {"id": "day_tasks", "title": "Day's tasks", "col": 6, "row": 1,
      "agents": ["subconscious::day_tasks"],
-     "role": "Shadow only: decides what each placement on today's calendar needs (who acts, the assistant's part, "
-             "when, or nothing and why), reading the brain's situation (schedule, presence, health, chat, todos, "
-             "work, reminders), and records it beside what dayflow did. Nothing is handed over yet."},
+     "role": "The brain's list's one decider: for every open concern, the calendar's included, and for the day, "
+             "whether the assistant has a part, what and when, reading the brain's situation (schedule, presence, "
+             "health, chat, todos, work, reminders) and each planner's proposals. Dayflow makes the work from the "
+             "list."},
     {"id": "day_record", "title": "Day's record (shadow)", "col": 2, "row": 3,
      "agents": ["subconscious::day_record"],
      "role": "Shadow only: applies the open concerns and the brain's decisions today to today's calendar and records "
@@ -65,21 +67,13 @@ NODES: List[Dict[str, Any]] = [
      "role": "For a concern whose record changed: a read-only planner looks things up with tools, then "
              "concern_tasks decides act now, hold until a date, or no action, and changes the concern's entries "
              "on the brain's list (new, modified or cancelled by id; the rest kept)."},
-    {"id": "handoff", "title": "Handoffs", "col": 6, "row": 1, "agents": [],
-     "role": "Code hands dayflow a concern whose plan says act now, and each placement on today's "
-             "calendar at its time, as intake the steward must answer."},
-    {"id": "steward", "title": "Steward (dayflow)", "col": 7, "row": 1,
-     "agents": ["dayflow_orchestrator::strategic_planner_wo"],
-     "role": "Turns each handoff into work or answers it as no action, with a reason. Work made from a "
-             "handoff carries its concern or belief by code; every outcome comes back to the brain."},
 ]
 # from, to, label (empty: the main path; a label marks a side path, drawn dashed)
 EDGES = [
     ("gate", "brain", ""), ("brain", "door", ""), ("brain", "concerns", ""),
     ("door", "concerns", ""), ("concerns", "summary", ""), ("summary", "plan", ""),
-    ("plan", "handoff", ""), ("day_pass", "handoff", "today's calendar"), ("handoff", "steward", ""),
-    ("steward", "gate", "work outcomes come back as events"), ("concerns", "stories", ""),
-    ("day_pass", "day_tasks", "shadow: recorded, not handed over"),
+    ("plan", "day_tasks", "proposals"), ("day_pass", "concerns", "the day's calendar concerns"),
+    ("day_tasks", "gate", "work outcomes come back as events"), ("concerns", "stories", ""),
     ("concerns", "day_record", "shadow: the day's record"),
 ]
 AGENT_NODE = {a: n["id"] for n in NODES for a in n["agents"]}
@@ -122,20 +116,13 @@ def _concern_index() -> Dict[str, Dict[str, Any]]:
 
 @brain_flow_bp.route("/api/brain/runs/<run_id>")
 def brain_run_api(run_id: str):
-    """One run: its steps and calls, each with the diagram node it belongs to; the steward's calls for the
-    items it handed over; the concerns it touched, by id."""
+    """One run: its steps and calls, each with the diagram node it belongs to; the concerns it touched, by id."""
     from app.assistant.subconscious import brain_trace
     run = brain_trace.get_run(run_id)
     for s in run["steps"]:
         s["node"] = s["stage"]
     for c in run["calls"]:
         c["node"] = AGENT_NODE.get(c["agent"], c["trace"].get("stage") or "")
-    items = [s["detail"]["item_id"] for s in run["steps"] if s["stage"] == "handoff" and s["what"] == "handed"]
-    steward: Dict[str, Dict[str, Any]] = {}
-    for item in items:
-        for call in brain_trace.steward_calls_mentioning(item):
-            steward.setdefault(call["id"], {**call, "node": "steward", "items": []})["items"].append(item)
-    run["calls"] += sorted(steward.values(), key=lambda c: c["at"])
     index = _concern_index()
     touched = {s["subject"] for s in run["steps"] if s["subject"] in index}
     touched |= {c["trace"].get("concern_id") for c in run["calls"] if c["trace"].get("concern_id") in index}

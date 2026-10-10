@@ -49,16 +49,15 @@ _start_lock = threading.Lock()
 
 
 def run_brain() -> Dict[str, Any]:
-    """One pass: gate, brain step, the entries of closed concerns cancelled, summaries, the concern planner, handoffs,
-    the day pass and its occurrences, the stories, and the day's tasks."""
+    """One pass: expiry, gate, brain step, summaries, the concern planner, the day pass, the stories, the entries of
+    closed concerns cancelled, and the day's tasks. Until 2026-10-10 the pass also handed concerns and the day's
+    placements to dayflow's steward for a lane not live (concern_handoff, belief_occurrences), retired with it."""
     from app.assistant.subconscious.brain_step import run_brain_step
     from app.assistant.subconscious.concern_summary import run_summaries
-    from app.assistant.subconscious.concern_handoff import run_handoffs
     from app.assistant.subconscious import concern_planner
     from app.assistant.subconscious.day_pass import run_day_pass
     from app.assistant.subconscious.gate import run_gate
     from app.assistant.subconscious.concern_store import load_register
-    from app.assistant.subconscious.belief_occurrences import run_occurrence_handoffs
     # A concern whose expiry has passed closes first, whatever its state (rule 4); until 2026-10-09 the clock asked the
     # brain each day whether a day's concern still mattered (brain_inbox.add_day_ended_events).
     from app.assistant.subconscious import persist
@@ -67,17 +66,14 @@ def run_brain() -> Dict[str, Any]:
     brain = run_brain_step()
     summaries = run_summaries()
     plans = concern_planner.run_planners()
-    handoffs = run_handoffs()
     register, now = load_register(), datetime.now(timezone.utc)
     from app.assistant.subconscious.brain_inbox import next_presence_due
     due = [t for t in (gate["next_ready_at"], concern_planner.next_hold_at(register, now),
                        next_presence_due(now_utc=now), persist.next_expiry(register, now)) if t is not None]
-    # Last: a day pass that fails does not hold up the concerns' summaries and plans. Today's calendar is
-    # handed to dayflow one placement at a time (subconscious/belief_occurrences.py).
+    # Last: a day pass that fails does not hold up the concerns' summaries and plans.
     from app.assistant.subconscious.brain_trace import trace
     with trace(stage="day_pass"):
         day = run_day_pass()
-        occurrences = run_occurrence_handoffs()
     # The owner's stories of what changed (subconscious/brain_stories.py), told from the records above.
     from app.assistant.subconscious.brain_stories import run_stories
     with trace(stage="stories"):
@@ -93,14 +89,10 @@ def run_brain() -> Dict[str, Any]:
     closed_entries = brain_list.cancel_for_closed_concerns(load_register(), at=datetime.now(timezone.utc))
     with trace(stage="day_tasks"):
         decided = run_day_tasks()
-    # A live lane takes its work from the list: the planning tick makes it, so the tick is asked to run when the
-    # list changed (dayflow_orchestrator/brain_list_intake.py).
-    from app.assistant.dayflow_orchestrator.brain_list_intake import lanes
-    config = lanes()
-    if (closed_entries or decided.get("day_list_changes")) and "live" in (
-            config["calendar"]["mode"], config["concern"]["mode"]):
-        from app.assistant.subconscious.concern_handoff import _poke_dayflow
-        _poke_dayflow()
+    # The planning tick makes the work from the list, so it is asked to run when the list changed
+    # (dayflow_orchestrator/brain_list_intake.py).
+    if closed_entries or decided.get("day_list_changes"):
+        brain_list.poke_dayflow()
     # Last, in shadow: the day's record (subconscious/day_record.py, docs/design/day_record_2026-10-09.md), compared
     # with the daily context tracker before it replaces it. It feeds nothing, so its failure is logged and does not
     # fail the brain's pass.
@@ -111,7 +103,7 @@ def run_brain() -> Dict[str, Any]:
     except Exception as exc:
         logger.error("[brain_wake] the day's record (shadow) failed: %s", exc, exc_info=True)
         recorded = {"day_record": f"failed: {type(exc).__name__}"}
-    return {**gate, **{f"brain_{k}": v for k, v in brain.items()}, **summaries, **plans, **handoffs, **day, **occurrences,
+    return {**gate, **{f"brain_{k}": v for k, v in brain.items()}, **summaries, **plans, **day,
             **stories, **decided, **recorded, "expired": expired, "closed_concern_entries": closed_entries,
             "next_wake_at": min(due) if due else None}
 

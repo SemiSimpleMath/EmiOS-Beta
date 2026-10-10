@@ -13,7 +13,6 @@ from __future__ import annotations
 import pytest
 
 TEMPLATES = [
-    "dayflow_orchestrator/strategic_planner_wo/prompts/user.j2",
     "dayflow_orchestrator/work_architect/prompts/user.j2",
     "dayflow_orchestrator/state_mover/prompts/user.j2",
     "dayflow_orchestrator/switchboard/prompts/user.j2",

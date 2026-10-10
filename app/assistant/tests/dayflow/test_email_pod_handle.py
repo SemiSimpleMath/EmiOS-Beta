@@ -18,9 +18,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from app.assistant.control_nodes.strategic_planner_wo_persist_node import (
-    StrategicPlannerWoPersistNode,
-)
 from app.assistant.dayflow_orchestrator.input_message_builder import _build_email_message
 from app.assistant.pod_store.email_pods import email_pod_id
 
@@ -53,59 +50,19 @@ def test_an_email_item_carries_its_pod():
 # The handle has to survive into the goal, which is all the worker sees
 # --------------------------------------------------------------------------- #
 
-def _summary_for(meta, monkeypatch):
-    """Run the REAL persist node over one admitted item and capture the goal text it writes.
-
-    Deliberately not a re-implementation of the node's string building: a test that restates
-    the logic passes forever regardless of what production does.
-    """
-    written = {}
-
-    class _Goal:
-        id, status, content = "goal_1", "dispatched", "Do the thing."
-
-    class _WO:
-        id = "work_1"
-        updated_at = NOW
-        constraints = {}
-        goal_node_id = "goal_1"
-        nodes = {"goal_1": _Goal()}
-
-    class _Store:
-        def load(self, wid):
-            return _WO()
-
-        def apply(self, op, data, actor=None):
-            written["content"] = data.get("content", "")
-
-    class _BB:
-        def __init__(self, admitted):
-            self._admitted = admitted
-
-        def get_state_value(self, key, default=None):
-            return self._admitted if key == "admitted_artifacts" else default
-
-        def update_state_value(self, *a, **k):
-            pass
-
-    monkeypatch.setattr(
-        "app.assistant.dayflow_orchestrator.work_store.get_dayflow_work_store",
-        lambda: _Store(), raising=False)
-    monkeypatch.setattr(
-        "app.assistant.dayflow_orchestrator.dayflow_item_writer.write_dayflow_item",
-        lambda *a, **k: None, raising=False)
-
-    node = StrategicPlannerWoPersistNode.__new__(StrategicPlannerWoPersistNode)
-    node.name = "test"
-    node.blackboard = _BB([{"metadata": meta}])
-    node._close_consumed_items([{"work_id": "work_1",
-                                 "based_on": [meta.get("item_id")]}])
-    return written.get("content", "")
+def _summary_for(meta):
+    """The goal text a work object made from this item gets: its source rendered by the goal template, as work
+    made from intake does (work_intake.intake_source, goal_content.j2). Until 2026-10-10 this ran the steward's
+    persist node, retired with it."""
+    from app.assistant.dayflow_orchestrator.work_context import render_view
+    from app.assistant.dayflow_orchestrator.work_intake import intake_source
+    return render_view("goal_content", objective="Do the thing.", sources=[intake_source({"metadata": meta})],
+                       success_criteria="")
 
 
-def test_the_goal_line_carries_the_pod_handle(monkeypatch):
+def test_the_goal_line_carries_the_pod_handle():
     msg = _build_email_message(email_data=EMAIL, now_utc=NOW)
-    line = _summary_for(msg.metadata, monkeypatch)
+    line = _summary_for(msg.metadata)
     assert POD in line
     assert "pod_fetch" in line
     assert msg.metadata["email_summary"] in line, "the informative email summary and full-source handle are kept"

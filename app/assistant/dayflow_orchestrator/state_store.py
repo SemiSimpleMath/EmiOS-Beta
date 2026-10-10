@@ -521,25 +521,6 @@ def reload_active_items_onto_blackboard(blackboard, *, now_utc: datetime, caller
     return len(active_items)
 
 
-def load_admitted_intake(*, now_utc=None) -> List[Dict[str, Any]]:
-    """Load pending admissions that are due, without aging out unfinished handoffs.
-
-    Legacy triage_admit describes historical classification, not a pending
-    evaluator handoff. Only TriagePersistNode's explicit marker opts a row in.
-    Explicit future deferrals wait for their reconsideration time; no source-type filter.
-    """
-    with get_db_manager().read_session() as session:
-        stmt = (select(UnifiedLog2026)
-                .where(UnifiedLog2026.source == DAYFLOW_ITEM_SOURCE)
-                .where(UnifiedLog2026.room_id == DAYFLOW_ROOM_ID)
-                .where(func.json_extract(UnifiedLog2026.metadata_json, "$.state") == "artifact")
-                .where(func.json_extract(UnifiedLog2026.metadata_json, "$.evaluator_pending") == 1)
-                .order_by(UnifiedLog2026.timestamp.asc()))
-        from app.assistant.dayflow_orchestrator.intake_review import review_due
-        items = [_row_to_dict(row) for row in session.execute(stmt).scalars().all()]
-        return [item for item in items if review_due(item["metadata"], now_utc)]
-
-
 def load_ingestion_identity_index() -> Dict[str, Dict[str, Any]]:
     """Read all retained identities and short IDs without materializing source content.
 

@@ -6,15 +6,11 @@ accepted/declined/snoozed replies (the user's acknowledge-with-correction
 never reached it), and the RECENTLY DROPPED section showed a bare title with
 no reason. These tests pin the fixes:
 
-- _abandoned_line: dropped entries carry the full objective + when (local) +
-  the user's last word;
-- the evaluator template renders the annotated drop reason;
-- the evaluator gets no ticket-reply list (2026-10-02): a reply is its work
-  node's result, read in that work object's record. A 12-hour list labelled
-  "user directives" made it re-create finished work every pass (one handled
-  "please send it" became five more Seija email work objects);
+- the recently-dropped log (dayflow_orchestrator/recent_work.py): dropped entries carry the full objective +
+  when (local) + the user's last word;
 - the editorializing rubrics ("supplementary", "can nudge again") are gone
   from every consumer.
+The evaluator (the steward) read that log and its template was pinned here; it was retired on 2026-10-10.
 """
 from __future__ import annotations
 
@@ -27,8 +23,13 @@ from types import SimpleNamespace
 
 import app.assistant.tests.test_setup  # noqa: F401
 
-from app.assistant.control_nodes.strategic_planner_wo_prep_node import _abandoned_line
+from app.assistant.dayflow_orchestrator.recent_work import ended_item, render_recent_ended
 from app.assistant.utils.path_utils import get_repo_root
+
+
+def _abandoned_line(wo) -> str:
+    """One work object's entry in the recently-dropped log, as its readers see it."""
+    return render_recent_ended([], [ended_item(wo, finalizers=True)])[1]
 
 
 # ---------------------------------------------------------------------------
@@ -100,42 +101,6 @@ def test_abandoned_line_refuses_an_ending_without_a_time():
 
 
 # ---------------------------------------------------------------------------
-# Evaluator template — the incident context must render the settling facts
-# ---------------------------------------------------------------------------
-
-
-def _render_evaluator_template(**ctx):
-    from app.assistant.agent_runtime.services.prompt_builder import _jinja_env
-    src = (
-        get_repo_root() / "app" / "assistant" / "agents" / "dayflow_orchestrator"
-        / "strategic_planner_wo" / "prompts" / "user.j2"
-    ).read_text(encoding="utf-8")
-    defaults = {
-        "date_time": "2026-07-27 12:41 PDT",
-        "day_of_week": "Monday",
-        "recent_completed_work": "(none)",
-        "work_portfolio": "",
-    }
-    defaults.update(ctx)
-    return _jinja_env.from_string(src).render(**defaults)
-
-
-def test_evaluator_gets_no_ticket_reply_list():
-    root = get_repo_root() / "app" / "assistant" / "agents" / "dayflow_orchestrator" / "strategic_planner_wo"
-    assert "recent_ticket_replies" not in (root / "config.yaml").read_text(encoding="utf-8")
-    assert "TICKET REPLIES" not in (root / "prompts" / "user.j2").read_text(encoding="utf-8")
-
-
-def test_evaluator_prompt_shows_drop_reason():
-    out = _render_evaluator_template(
-        recent_abandoned_work=_abandoned_line(_fake_wo()),
-    )
-    assert "RECENTLY DROPPED" in out
-    assert "Those are done first of next month always." in out
-    assert "recorded reason" in out
-
-
-# ---------------------------------------------------------------------------
 # The editorializing rubrics are gone everywhere
 # ---------------------------------------------------------------------------
 
@@ -146,7 +111,6 @@ def test_no_consumer_discounts_the_users_words():
         "app/assistant/agents/daily_context_tracker/prompts/user.j2",
         "app/assistant/agents/dayflow_cron_tickets/prompts/user.j2",
         "app/assistant/agents/health_status_inference/prompts/user.j2",
-        "app/assistant/agents/dayflow_orchestrator/strategic_planner_wo/prompts/user.j2",
         "app/assistant/pipelines/dayflow/utils/situation_snapshot.py",
     ]
     for rel in consumers:

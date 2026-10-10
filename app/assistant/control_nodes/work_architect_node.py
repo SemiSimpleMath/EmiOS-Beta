@@ -1,16 +1,14 @@
 """Decompose freshly-created goals into their DAG, and own each goal to its end (Part 2 of the split planner).
 
 The architect owns a work object from creation to end (docs/design/dayflow_goal_ownership_2026-09-30.md):
-the steward decides what work exists; everything that happens to a work object after, including its
-end, is the architect's. Runs right after strategic_planner_wo_persist_node. Per tick, for ONE work
-object at a time:
-- CREATE: for each work object the evaluator created this tick, invoke dayflow_orchestrator::work_architect
+the brain decides what work exists, through its list; everything that happens to a work object after, including
+its end, is the architect's. Runs right after brain_list_intake_node. Per tick, for ONE work object at a time:
+- CREATE: for each active goal with no graph yet (the list's new shells), invoke dayflow_orchestrator::work_architect
   on its objective and lay the resulting DAG (subtask nodes, depends_on edges, wait-gates) into the graph
   via apply_architect_dag.
 - RE-PLAN, woken per work object by: a finalizer verdict that asks for something (on its node as
-  `payload.finalizer`); an instruction to end it (the steward's, or the brain's for a cancelled list entry) or the
-  brain's instruction to re-plan it (its list entry revised) (`constraints.architect_instructions`); the
-  steward's `replan_work_ids` (intake, a user directive); or the work object being STRANDED (nothing in
+  `payload.finalizer`); the brain's instruction to end it (a cancelled list entry) or to re-plan it (its list entry
+  revised) (`constraints.architect_instructions`); or the work object being STRANDED (nothing in
   it can still run and no scheduled time lies ahead, `stranded_fingerprint`). It re-invokes the architect
   with the goal + the existing graph and applies the DELTA: add the missing steps, abandon the moot ones,
   revise the objective, or end the goal. An ended goal's concern and belief feedback is delivered after
@@ -33,11 +31,12 @@ _MAX_REPLANS_PER_TICK = 3
 _TERMINAL_WO_STATES = {"done", "abandoned"}
 
 
-def _undecomposed_goals(store, created):
-    """Recover initial decomposition from durable empty graphs after a lost tick."""
-    result = {entry["work_id"]: entry for entry in created}
+def _undecomposed_goals(store):
+    """Every active goal with no graph yet: a shell the brain's list made (brain_list_intake), or one a lost tick left
+    empty. Until 2026-10-10 the steward's goals created in the same tick came first, from its persist node."""
+    result = {}
     for summary in store.list_work_objects():
-        if summary.get("status") != "active" or summary["id"] in result:
+        if summary.get("status") != "active":
             continue
         wo = store.load(summary["id"])
         if any(wo.is_work_unit(node) for node in wo.nodes.values()):
@@ -188,7 +187,7 @@ def _view(store, wo, *, history, replan: bool):
     (evidence the finalizer judges). The tick's list of every answered ticket once reached every architect call as
     "directives"; on 2026-10-01 a reply to a test goal's question ("this task should be aborted") ended the goal that
     had just emailed a family member."""
-    from app.assistant.control_nodes.strategic_planner_wo_prep_node import recent_ended_items, render_recent_ended
+    from app.assistant.dayflow_orchestrator.recent_work import recent_ended_items, render_recent_ended
     from app.assistant.dayflow_orchestrator.work_portfolio import active_work_objects, render_portfolio
     summaries = store.list_work_objects()
     active, unreadable = active_work_objects(store, summaries)
@@ -365,27 +364,14 @@ class WorkArchitectNode(ControlNode):
             from app.assistant.dayflow_orchestrator.work_architect_apply import apply_architect_dag
             store = get_dayflow_work_store()
 
-            persist = self.blackboard.get_state_value("steward_persist_result", {}) or {}
-            created = [c for c in (persist.get("created") or [])
-                       if isinstance(c, dict) and c.get("work_id") and c.get("objective")]
-            created = _undecomposed_goals(store, created)
-            replan_ids = [str(w).strip() for w in (self.blackboard.get_state_value("replan_work_ids", []) or [])
-                          if str(w or "").strip()]
-            # The finalizer's outstanding verdicts, read off the graph — the authoritative
-            # "why re-plan". A work object carrying one needs re-planning whether or not the
-            # steward also flagged it: the verdict is a deterministic signal and must not depend
-            # on an agent happening to notice the node in the portfolio.
+            created = _undecomposed_goals(store)
+            # Every reason to re-plan is on the work object, read off the store: the finalizer's outstanding
+            # verdicts (on the graph), the brain's instructions (constraints.architect_instructions) and the goal
+            # being stranded. Until 2026-10-10 the steward also flagged work objects on the tick's blackboard
+            # (replan_work_ids, and user_directed_replan_ids, which licensed a prune).
             pending = _pending_finalizer_instructions(store)
             instructions, stranded = _goal_triggers(store)
-            # Judgments and the steward's instructions first, then the steward's flags, then stranded goals.
-            replan_ids = list(dict.fromkeys([*pending, *instructions, *replan_ids, *stranded]))
-            # Steward-classed user directives: replans that carry out something the USER said. Together
-            # with a finalizer verdict these LICENSE the replan to prune queued/held nodes; an unlicensed
-            # replan (the steward's own read of progress) may add but not kill — the store's churn
-            # fence refuses those prunes. The judgment is the model's; only its transport is typed.
-            user_directed = {str(w).strip()
-                             for w in (self.blackboard.get_state_value("user_directed_replan_ids", []) or [])
-                             if str(w or "").strip()}
+            replan_ids = list(dict.fromkeys([*pending, *instructions, *stranded]))
 
             if created or replan_ids:
                 scope = self._scope(message)
@@ -469,7 +455,7 @@ class WorkArchitectNode(ControlNode):
                         # A stranded goal's prunes are licensed by its state: nothing in it can run. The brain's
                         # re-plan instruction (its list entry revised) is a directive, like the user's.
                         brain_replan = any(e.get("kind") == "replan" for e in instructions.get(work_id, []))
-                        licensed = bool(licence) or (work_id in user_directed) or (work_id in stranded) or brain_replan
+                        licensed = bool(licence) or (work_id in stranded) or brain_replan
                         task = render_view("architect_task", mode="replan", objective=objective,
                                            finalizer_block=finalizer_block, graph=_render_existing_graph(wo, ids),
                                            goal_instructions=instructions.get(work_id, []),

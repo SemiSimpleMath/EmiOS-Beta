@@ -13,8 +13,8 @@ class MasterRoomChatTaskRouterNode(ChatTaskRouterNode):
     Adds the "track this" acknowledgement and guard persistence on top of the base chat/handoff
     pattern. A request to track something (wait, monitor, do later) is acknowledged here and nothing
     else: the brain reads the user's message itself and keeps it as a concern in the user's words
-    (subconscious/brain_step.py), then hands it to dayflow when it is time
-    (subconscious/concern_handoff.py). The dayflow delegation request this node used to write was
+    (subconscious/brain_step.py), and its entries on the brain's list become dayflow's work when it is time
+    (subconscious/brain_list.py). The dayflow delegation request this node used to write was
     retired on 2026-09-30.
     """
 

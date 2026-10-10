@@ -11,14 +11,15 @@ failure inside it and still have achieved what the node asked. Judge the goal, n
 The output is three things, not one:
 
     outcome         prose, ALWAYS. What actually happened — what was found, what was not, why. This
-                    is what the architect or steward reads next tick to decide what to do, so it has
+                    is what the architect reads next tick to decide what to do, so it has
                     to be a usable account, not a verdict restated.
     verdict         the routing enum. Decides what the store does with the node.
     recommendation  on every verdict except `achieved`: what should happen now, in plain language.
                     For `unrecoverable`, `next_step` types it so the runtime can route it.
 
-The finalizer judges ONE node. Whether the GOAL is finished or moot is the steward's call — it sees
-every work object each run, where this sees one node. Say so in `outcome` and the steward acts.
+The finalizer judges ONE node. Whether the GOAL is finished or moot is the architect's call — it owns the
+goal and sees its whole graph, where this sees one node. Say so in `outcome` and the architect acts. (Until
+2026-09-30 it was the steward's, retired 2026-10-10.)
 """
 from typing import List
 
@@ -33,7 +34,7 @@ class AgentForm(BaseModel):
         description="ALWAYS. The account of what happened, written for the planner who reads it next: "
         "what the node was for, what actually came back, what was found and what was not, and why. If "
         "the result means the whole GOAL is finished or has become pointless, say so plainly here — the "
-        "steward reads this and decides; you do not end work objects. Failed sub-steps inside an achieved "
+        "architect reads this and decides; you do not end work objects. Failed sub-steps inside an achieved "
         "call belong here too, as provenance.")
     verdict: str = Field(
         description="Exactly one of:\n"
@@ -61,7 +62,7 @@ class AgentForm(BaseModel):
     recommendation: str = Field(
         default="",
         description="REQUIRED for every verdict except 'achieved': what should happen now, in plain "
-        "language, for the architect or steward to act on. For 'retry': what will be different next time. "
+        "language, for the architect to act on. For 'retry': what will be different next time. "
         "For 'achieved_plan_changes': what the plan should now do. For 'unrecoverable': the specifics "
         "behind `next_step`. Never 'try again' with nothing named.")
     question_for_user: str = Field(

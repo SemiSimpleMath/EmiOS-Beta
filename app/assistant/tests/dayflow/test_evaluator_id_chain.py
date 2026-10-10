@@ -1,14 +1,8 @@
-"""The evaluator's id chain (2026-08-01): provenance is resolved deterministically
-before the prompt, never reconstructed from wording by the model.
+"""A ticket's context row carries its ticket id and the work node it belongs to (2026-08-01).
 
-Edges recorded at write time: ticket.trigger_context.work_node (node_dispatch),
-schedule-entry source `ticket:<ticket_id>` (daily_context_tracker, verbatim copy).
-The prep node chases them — ticket -> work node -> work object -> status — and
-renders the resolved facts on the evaluator's TODAY'S SCHEDULE lines (its ticket-reply
-list was removed 2026-10-02: replies are read in their work object's record).
-Unresolvable ids render visibly unresolved (sink, not drop). The 2026-07-29
-trash re-mint is the motivating incident: the tracker's echo of an accepted ticket
-read as a bare unowned ongoing activity and was re-minted as new work.
+Edges recorded at write time: ticket.trigger_context.work_node (node_dispatch). Until 2026-10-10 the steward's prep
+node also chased schedule entries `ticket:<ticket_id>` to the work object's status (the 2026-07-29 trash re-mint);
+it was retired with the steward.
 """
 from __future__ import annotations
 
@@ -16,21 +10,9 @@ from types import SimpleNamespace
 
 import app.assistant.tests.test_setup  # noqa: F401
 
-from app.assistant.control_nodes.strategic_planner_wo_prep_node import _resolve_ticket_provenance
 from app.assistant.pipelines.dayflow.utils.context_sources import (
     _format_ticket_for_context,
 )
-
-_STATUS = {"work_a860eab761d8": "done", "work_af114744b5eb": "active"}
-
-
-class FakeTicketManager:
-    def __init__(self, tickets):
-        self._tickets = {t.ticket_id: t for t in tickets}
-
-    def get_ticket_by_id(self, ticket_id):
-        return self._tickets.get(ticket_id)
-
 
 def _ticket(ticket_id="t1", work_node="work_a860eab761d8::trash_bins_reminder--a860ea",
             user_action="willdo"):
@@ -46,28 +28,6 @@ def _ticket(ticket_id="t1", work_node="work_a860eab761d8::trash_bins_reminder--a
         trigger_context={"work_node": work_node} if work_node else {},
         execution_result="",
     )
-
-
-class TestTicketProvenance:
-
-    def test_full_chain_resolves(self):
-        tm = FakeTicketManager([_ticket()])
-        out = _resolve_ticket_provenance("t1", tm, _STATUS)
-        assert out == "outcome of work_a860eab761d8 — done; user willdo"
-
-    def test_missing_ticket_is_visibly_unresolved(self):
-        tm = FakeTicketManager([])
-        out = _resolve_ticket_provenance("t404", tm, _STATUS)
-        assert "unresolved" in out and "t404" in out
-
-    def test_ticket_without_work_edge_still_names_the_ticket(self):
-        tm = FakeTicketManager([_ticket(ticket_id="t2", work_node=None)])
-        out = _resolve_ticket_provenance("t2", tm, _STATUS)
-        assert out == "from ticket t2; user willdo"
-
-    def test_empty_id_is_visibly_unresolved(self):
-        out = _resolve_ticket_provenance("", FakeTicketManager([]), _STATUS)
-        assert "unresolved" in out
 
 
 class TestTicketContextRow:

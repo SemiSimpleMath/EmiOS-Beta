@@ -140,17 +140,13 @@ def _every_concern(register: Dict[str, Any]) -> Dict[str, Tuple[str, Dict[str, A
 
 
 def _handed_on(start_iso: str, end_iso: str) -> int:
-    """Concern handoffs written to dayflow in [start, end)."""
-    from app.models.db_manager import get_db_manager
-    from app.assistant.dayflow_orchestrator.dayflow_item_writer import DAYFLOW_ITEM_SOURCE, DAYFLOW_ROOM_ID
-    from app.assistant.subconscious.concern_handoff import SOURCE_TYPE
-    with get_db_manager().read_session() as session:
-        raw = session.connection().connection.driver_connection
-        return raw.execute("SELECT count(*) FROM unified_log_2026 WHERE source=? AND room_id=? "
-                           "AND json_extract(metadata_json, '$.source_type') = ? "
-                           "AND json_extract(metadata_json, '$.created_at') >= ? "
-                           "AND json_extract(metadata_json, '$.created_at') < ?",
-                           (DAYFLOW_ITEM_SOURCE, DAYFLOW_ROOM_ID, SOURCE_TYPE, start_iso, end_iso)).fetchone()[0]
+    """Work dayflow made from the brain's list in [start, end) (brain_list_deliveries, action create). Until
+    2026-10-10 the concern handoffs written to the steward's inbox, which stopped on 2026-10-05."""
+    from app.assistant.dayflow_orchestrator.brain_list_intake import _connect, ensure_schema
+    ensure_schema()
+    with _connect(False) as c:
+        return c.execute("SELECT count(DISTINCT work_id) FROM brain_list_deliveries WHERE mode = 'live' "
+                         "AND action = 'create' AND at >= ? AND at < ?", (start_iso, end_iso)).fetchone()[0]
 
 
 # ── a matter ────────────────────────────────────────────────────────────────

@@ -1,8 +1,8 @@
 """The list-item intake node: work made from the brain's list, in the planning tick (2026-10-05).
 
-Runs between the steward's persist node and the architect (multi_agents/dayflow_orchestrator_manager/config.yaml).
+Runs between the tick's prep node and the architect (multi_agents/dayflow_orchestrator_manager/config.yaml).
 The logic is dayflow_orchestrator/brain_list_intake.py: new shells for entries the brain decided needed, revisions
-for changed entries, end instructions for cancelled ones, in the lanes switched on in configs/brain_lanes.json.
+for changed entries, end instructions for cancelled ones.
 The architect then lays the new shells' graphs (they are work objects without tasks) and re-plans the revised ones
 from the re-plan instruction each carries (constraints.architect_instructions), licensed as the brain's directive. A
 failure here is raised: a tick that cannot read the brain's list must not plan as if it were empty.

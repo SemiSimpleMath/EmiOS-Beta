@@ -1,9 +1,10 @@
-"""The architect owns a work object from creation to end; the steward only asks (2026-09-30).
+"""The architect owns a work object from creation to end; the brain only asks (2026-09-30).
 
 2026-09-30: the finalizer judged the 7:00 thermostat work unrecoverable and asked for the owner; the
 architect planned the question for 10:20; the steward abandoned the work at 7:20 because 7:00 had
-passed, and the abandon cancelled the question. Pins: the steward's end request is recorded, not
-applied; the architect ends a goal or revises its objective in its own revision, with the reason; a
+passed, and the abandon cancelled the question. The steward was retired on 2026-10-10; the brain's end
+instruction (a cancelled list entry, brain_list_intake) takes its place here. Pins: an end instruction is
+recorded, not applied; the architect ends a goal or revises its objective in its own revision, with the reason; a
 revision that also acts on instructions keeps both; a stranded goal (nothing in it can run) is found,
 once per state; and the architect's schema refuses contradictory goal changes. Invented data only.
 """
@@ -15,7 +16,6 @@ from pydantic import ValidationError
 from work_objects.store import WorkStore
 from app.assistant.control_nodes.work_architect_node import stranded_fingerprint
 from app.assistant.dayflow_orchestrator.work_architect_apply import apply_architect_dag
-from app.assistant.dayflow_orchestrator.work_persist import persist_steward_output
 
 CONCERN = "c1c1c1c1-0000-4000-8000-000000000001"
 
@@ -38,22 +38,23 @@ def goal(store, *, refs=(), tasks=("set",)):
     return store.load(wo.id)
 
 
-def test_the_steward_asks_and_the_work_stays_open(store):
+def end_instruction(store, wo, reason):
+    store.apply("instruct_goal", {"work_id": wo.id, "kind": "end", "reason": reason}, actor="brain")
+
+
+def test_the_brain_asks_and_the_work_stays_open(store):
     wo = goal(store)
-    out = persist_steward_output(store, {"end_requests": [{"work_id": wo.id, "reason": "duplicate of work_b"}]})
-    assert out["end_requested"] == [wo.id]
+    end_instruction(store, wo, "duplicate of work_b")
     wo = store.load(wo.id)
     assert wo.status == "active"
     [entry] = wo.constraints["architect_instructions"]
-    assert (entry["kind"], entry["reason"], entry["from"]) == ("end", "duplicate of work_b", "steward")
-    with pytest.raises(ValueError, match="work_id and a reason"):
-        persist_steward_output(store, {"end_requests": [{"work_id": wo.id, "reason": ""}]})
+    assert (entry["kind"], entry["reason"], entry["from"]) == ("end", "duplicate of work_b", "brain")
 
 
 def test_the_architect_ends_the_goal_with_its_reason_and_the_concern_hears(store):
     wo = goal(store, refs=[f"concern:{CONCERN}"])
     store.acknowledge_concern_feedback(store.pending_concern_feedback()[0]["id"])   # the attachment
-    persist_steward_output(store, {"end_requests": [{"work_id": wo.id, "reason": "superseded by new intake"}]})
+    end_instruction(store, wo, "superseded by new intake")
     wo = store.load(wo.id)
     res = apply_architect_dag(store, wo.id, [], goal_instructions=wo.constraints["architect_instructions"],
                               end_goal={"status": "abandoned", "reason": "the owner set it by hand"},
@@ -69,7 +70,7 @@ def test_the_architect_ends_the_goal_with_its_reason_and_the_concern_hears(store
 
 def test_a_revised_objective_keeps_the_instructions_and_review_it_acted_on(store):
     wo = goal(store)
-    persist_steward_output(store, {"end_requests": [{"work_id": wo.id, "reason": "7:00 has passed"}]})
+    end_instruction(store, wo, "7:00 has passed")
     wo = store.load(wo.id)
     res = apply_architect_dag(
         store, wo.id, [{"node_id": "ask", "title": "Ask about access",
@@ -121,10 +122,5 @@ def test_an_ended_goal_takes_no_instruction(store):
     apply_architect_dag(store, wo.id, [], end_goal={"status": "done", "reason": "reached"},
                         expected_updated_at=wo.updated_at)
     with pytest.raises(ValueError, match="already done"):
-        store.apply("instruct_goal", {"work_id": wo.id, "kind": "end", "reason": "late"}, actor="steward")
+        store.apply("instruct_goal", {"work_id": wo.id, "kind": "end", "reason": "late"}, actor="brain")
 
-
-def test_the_steward_form_has_no_closing_lists():
-    from app.assistant.agents.dayflow_orchestrator.strategic_planner_wo.agent_form import AgentForm
-    fields = set(AgentForm.model_fields)
-    assert "end_requests" in fields and not {"complete_work_ids", "abandon_work_ids"} & fields

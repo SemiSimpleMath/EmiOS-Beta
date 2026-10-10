@@ -20,8 +20,8 @@ day holds, each with every belief about it, and each placement is one concern; u
 Each approved belief is read with the beliefs nearest to it in meaning (`_related`: up to RELATED_MAX, at least
 RELATED_MIN cosine over the stored statement embeddings), found by code: the holiday rule beside trash night,
 the morning setpoint beside the night one. The writer reads them as context and places only approved beliefs;
-the plan line keeps them, and each placement is handed to dayflow from the calendar
-(subconscious/belief_occurrences.py). Until 2026-10-03 a selector chose each morning from the whole catalog
+the plan line keeps them (until 2026-10-06 each placement was handed to dayflow's steward from the calendar,
+belief_occurrences, removed 2026-10-10). Until 2026-10-03 a selector chose each morning from the whole catalog
 (dayflow_belief_selector) and an agent named each selected belief's modifiers (dayflow_belief_modifiers); the
 selection differed day to day and placed context as items. Beliefs are not
 made into concerns (owner, 2026-10-03); until then each placed belief got an owner concern through the

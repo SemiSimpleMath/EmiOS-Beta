@@ -78,10 +78,7 @@ def test_a_fresh_goal_is_decomposed_not_the_tick():
         "title": "Prepare for picture day", "goal_content": "Prepare the child for makeup Picture Day",
         "satisfied_when_kind": "all_owned_children_done"})
 
-    bb = _tick_blackboard(steward_persist_result={"created": [
-        {"work_id": wo.id, "objective": "Prepare the child for makeup Picture Day"},
-    ]})
-    sink = _run_architect_on(bb)
+    sink = _run_architect_on(_tick_blackboard())         # a goal with no graph yet is the architect's to lay
 
     assert "Prepare the child for makeup Picture Day" in sink["task"]
     assert _TICK_TITLE not in sink["task"], (
@@ -97,8 +94,9 @@ def test_a_replan_is_given_its_own_goal_not_the_tick():
     store.apply("add_node", {"work_id": wo.id, "id": "lights1", "type": "subtask",
                              "parent_id": wo.goal_node_id, "title": "Turn off the lights"})
 
-    bb = _tick_blackboard(replan_work_ids=[wo.id])
-    sink = _run_architect_on(bb)
+    store.apply("instruct_goal", {"work_id": wo.id, "kind": "replan", "reason": "the entry was revised"},
+                actor="brain")
+    sink = _run_architect_on(_tick_blackboard())
 
     assert "Turn off the whole-house lights tonight" in sink["task"]
     assert _TICK_TITLE not in sink["task"]
@@ -112,9 +110,7 @@ def test_the_agent_does_not_share_the_ticks_blackboard():
         "title": "Probe", "goal_content": "Probe",
         "satisfied_when_kind": "all_owned_children_done"})
 
-    bb = _tick_blackboard(steward_persist_result={"created": [
-        {"work_id": wo.id, "objective": "Probe objective"},
-    ]})
+    bb = _tick_blackboard()
 
     seen_blackboards = []
 

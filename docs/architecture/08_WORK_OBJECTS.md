@@ -18,7 +18,7 @@ or rewriting of existing records is required for this classification.
 - The finalizer reads the full main-task directive, its returned result and full owned
   provenance. Its outcome summarizes what was tried, went wrong, succeeded and remains
   unresolved, preserving useful saved-output references.
-- Architect/steward views show main tasks and finalizer summaries, not the worker's
+- Architect views show main tasks and finalizer summaries, not the worker's
   internal record list or raw results. Missing summary is labeled awaiting finalizer
   summary. Architect deltas cannot directly target or depend on provenance records.
 - Internal helper failures do not increment the whole goal's failed-attempt count.
@@ -121,11 +121,10 @@ reads each node's *goal* to route it — one node type, handler varies.)
 
 Every status word has to be taught to the agents that read or write it, so the vocabulary is a cost,
 not a free label space. **One glossary — `work_portfolio.STATUS_LEGEND` — is the single source**, and
-every reader takes it from there: the steward and the dayflow situation snapshot through
+every reader takes it from there: the architect and the dayflow situation snapshot through
 `render_portfolio`, which prepends it; the finalizer by prepending it to the single object's
 projection; the state_mover *and the wake lane* as a `node_status_legend` blackboard item their prep
-nodes set. Do not write a second one in a prompt. (The retired `work_repair_node` renders it too;
-that path is unwired.)
+nodes set. Do not write a second one in a prompt.
 
 | status | meaning |
 |---|---|
@@ -460,13 +459,13 @@ declare a DEV-ONLY `scenario_scope()` under `scenarios/`.
 | Writer | Ops | When |
 |---|---|---|
 | **brain's list-item intake** (`brain_list_intake`, actor `brain`) | `create_work_object` + goal `set_status → dispatched`; `batch` of `revise_goal` + `instruct_goal kind=replan`; `instruct_goal kind=end` | per live lane in `configs/brain_lanes.json`, once per list change (`brain_list_deliveries`); shells carry `list_entry_id`, `concern_refs` (concern entries), `belief_refs` (calendar entries) |
-| **evaluator** (`strategic_planner_wo` via `work_persist`) | `create_work_object`, `revise_goal`, `instruct_goal kind=end` | RETIRED while `steward.mode: retired`; when on, converts intake to WOs and records end requests for the architect; forwards `constraints.concern_refs` / `belief_refs` |
+| **evaluator** (`strategic_planner_wo` via `work_persist`) | `create_work_object`, `revise_goal`, `instruct_goal kind=end` | REMOVED 2026-10-10 (skipped from 2026-10-06): it converted intake into work objects; the brain's list does now |
 | **architect** (`work_architect_apply`) | one `batch`: `add_node` (born `proposed`), `add_edge` (`depends_on`), `defer_node` (wake gates), abandon deltas, `revise_goal`, `consume_*` acknowledgments, `set_work_status` (`end_goal`) | decomposes new and empty goals; re-plans woken goals (≤3 re-plans/tick); owns each goal's ending |
 | **state_mover** | `set_status` (`proposed/waiting → actionable`), wake clears | promotes ready main tasks only; LLM may HOLD; provenance is excluded |
 | **dispatch** (`work_node_dispatch_node` -> `work_session.open_session` / `discharge_node`) | `set_status` (`→ dispatched`, `→ done/failed`), `defer_node` (asks), `attach_pod`, evidence children | one node per tick + the worker's own subtree |
 | **worker** (via `work_*` tools + reconcile hook) | subtasks, evidence, artifacts, questions, defers | inside the job thread |
 | **finalizer** (`work_finalizer_node`) | `set_status` (`done → closed`; `→ failed`; `failed → proposed` on retry), `payload.finalizer` (verdict + outcome + route) | normal Dayflow producer of `closed`; not a store-level exclusivity rule; escalates repeated failure to `ask_user` |
-| **repair** (`work_repair_apply`) | — | RETIRED 2026-09-16; files remain, unwired. Judged failures carry the finalizer's route (retry / stop / new_approach / ask_user); ending a goal is the architect's |
+| **repair** (`work_repair_apply`) | — | RETIRED 2026-09-16, removed 2026-10-10. Judged failures carry the finalizer's route (retry / stop / new_approach / ask_user); the architect ends a goal |
 | **sweeper** (`sweep_stuck_work_nodes`) | atomic `record_result` (`→ failed`) and execution revocation | dispatched main tasks with over 80 minutes of owned-history inactivity; ordinary pending finalization judges the timeout; old execution still blocks takeover |
 | **/work UI** | `edit_node`, `set_status`, `set_work_status`, node add/remove | owner's manual surface |
 
@@ -476,8 +475,7 @@ Concern back-propagation: a WO carrying `constraints.concern_refs` gets
 `concern_feedback.propagate_work_outcome` delivers them post-commit from
 `work_finalizer_node` (each judgment), `work_architect_node` (after `end_goal`),
 `brain_list_intake` and `work_persist` (attached, at creation / revision), with
-`strategic_planner_wo_prep_node` recovering pending receipts every tick. (The retired
-`work_repair_apply` still holds a call; it is unwired.) The `concern:` refs come from a
+`work_prep_node` recovering pending receipts every tick. The `concern:` refs come from a
 concern list entry (`brain_list_intake`) or the evaluator's `based_on` (`work_persist`).
 
 ## The /work UI
@@ -562,10 +560,9 @@ concern** and a **belief**. Both ride the same contract, and the belief lane is 
 mirror of the concern lane rather than a second pattern.
 
 **Provenance in.** A shell made from the brain's list carries the refs directly
-(`brain_list_intake`: `concern:<id>` from a concern entry, the belief_key from a calendar
-entry). With the steward on, its `based_on` carries prefixed source ids. At creation
-`work_persist` lifts `concern:` entries into `constraints.concern_refs` and `belief:` entries
-into `constraints.belief_refs`. Beliefs are stored as the **belief_key with the prefix stripped**,
+(`brain_list_intake`: `concern:<id>` from a concern entry, the belief_keys from the entry's beliefs).
+Until 2026-10-06 the steward's `based_on` carried prefixed source ids, which `work_persist` lifted into
+`constraints.concern_refs` and `constraints.belief_refs` (both removed 2026-10-10). Beliefs are stored as the **belief_key with the prefix stripped**,
 never the row id: a merge deprecates the losing id, but the surviving key still resolves through
 `BeliefStore.get_by_key`.
 
@@ -584,8 +581,8 @@ condition was stricter.
 
 **Delivery sites**: for both lanes, `work_finalizer_node` after an atomic
 finalization (concerns on every judgment; beliefs when the judgment ended the work object),
-`work_architect_node` after the architect ends a goal, and `strategic_planner_wo_prep_node`
-as crash recovery before the next planning pass (it runs even while the steward is retired).
+`work_architect_node` after the architect ends a goal, and `work_prep_node`
+as crash recovery before the next planning pass.
 Concerns also hear `attached` from `brain_list_intake` and `work_persist`.
 
 **Who decides what it means.** `belief_engine::work_outcome` returns `no_change` | `resolve` |

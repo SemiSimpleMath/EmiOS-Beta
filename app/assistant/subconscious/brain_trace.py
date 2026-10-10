@@ -46,9 +46,9 @@ logger = get_logger(__name__)
 
 TRACED_AGENTS = frozenset({
     "subconscious::gate", "subconscious::brain", "subconscious::concern_door", "subconscious::concern_summary",
-    "subconscious::noticer", "dayflow_orchestrator::strategic_planner_wo",
+    "subconscious::noticer",
     "subconscious::concern_planner", "subconscious::concern_tasks",
-    "dayflow_routine_writer",   # the day pass
+    "dayflow_routine_writer", "subconscious::day_placements",   # the day pass
     "subconscious::day_tasks",     # the day's tasks (subconscious/day_tasks.py)
     "subconscious::day_record",    # the day's record, shadow (subconscious/day_record.py)
     "subconscious::story_matter", "subconscious::story_concern", "subconscious::story_day",
@@ -300,18 +300,6 @@ def calls_for_concern(concern_id: str, connect=None) -> List[Dict[str, Any]]:
     """The summary writer's calls for this concern, oldest first."""
     return sorted([c for c in list_calls(agent="subconscious::concern_summary", limit=100000, connect=connect)
                    if c["trace"].get("concern_id") == concern_id], key=lambda c: c["at"])
-
-
-def steward_calls_mentioning(text: str, connect=None) -> List[Dict[str, Any]]:
-    """Steward calls whose user prompt contains `text` (a handoff item id), oldest first."""
-    connect = connect or _connect
-    ensure_schema(connect)
-    with connect(False) as c:
-        ids = [r[0] for r in c.execute("SELECT id FROM brain_calls WHERE agent = ? AND instr(user, ?) > 0 ORDER BY at",
-                                       ("dayflow_orchestrator::strategic_planner_wo", text))]
-    wanted = set(ids)
-    return [c for c in list_calls(agent="dayflow_orchestrator::strategic_planner_wo", limit=100000, connect=connect)
-            if c["id"] in wanted][::-1]
 
 
 def _run_row(r) -> Dict[str, Any]:

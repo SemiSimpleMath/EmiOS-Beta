@@ -30,9 +30,7 @@ from app.assistant.utils.pydantic_classes import Message
 _WAKE_CONFIG = Path(__file__).resolve().parents[2] / "multi_agents" / "dayflow_wake_manager" / "config.yaml"
 _TICK_CONFIG = Path(__file__).resolve().parents[2] / "multi_agents" / "dayflow_orchestrator_manager" / "config.yaml"
 _PLANNING_STAGES = {
-    "intake_triage_prep_node", "dayflow_orchestrator::intake_triage", "triage_persist_node",
-    "strategic_planner_wo_prep_node", "dayflow_orchestrator::strategic_planner_wo",
-    "work_architect_node", "work_node_materializer_node", "dayflow_orchestrator::action_selector",
+    "work_prep_node", "brain_list_intake_node", "work_architect_node", "work_node_materializer_node", "dayflow_orchestrator::action_selector",
 }
 
 
@@ -78,7 +76,7 @@ class TestTheWakeManagerCannotPlan:
         named = set(state_map) | set(state_map.values())
         assert "tick_router_node" not in named
         assert "work_node_wake_router_node" not in named
-        assert state_map["room::delegator"] == "intake_triage_prep_node"
+        assert state_map["room::delegator"] == "work_prep_node"
 
     def test_the_scheduler_opens_the_wake_manager(self, monkeypatch):
         ref = _ready_node(_store())

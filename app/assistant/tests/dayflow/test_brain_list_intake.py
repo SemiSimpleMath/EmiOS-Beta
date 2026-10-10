@@ -1,12 +1,13 @@
 """Work from the brain's list: the list-item intake node (docs/design/brain_delegates_work_2026-10-04.md, section 3).
 
-Pins: with every lane off nothing happens; in a live lane an entry decided needed gets a work object shell built by
+Pins: an entry decided needed gets a work object shell built by
 code (objective = the outcome and when, the brief, the entry id and its belief or concern in the constraints) and
 each change is acted on once; a changed entry with active work is revised and a re-plan instruction left on it in
 the same commit (any change the list records, the assistant's part included); an entry
 decided not needed, or cancelled, sends an end instruction with the brain's reason; an entry still decided needed
-after its work ended gets new work (2026-10-08); an entry before the lane's start is left to the steward; a dry run makes nothing and leaves
-the changes for the live run; a calendar concern's entry carries its concern and its belief (2026-10-09). The calendar
+after its work ended gets new work (2026-10-08); an entry made before its kind's work came from the list (a day's
+before CALENDAR_FROM_DAY, a concern's before CONCERN_SINCE) is left as it was, the retired steward's; a calendar
+concern's entry carries its concern and its belief (2026-10-09). The calendar
 entries here (`cal:<day>:<belief>`) are written as the day's tasks wrote them until 2026-10-09; intake still carries
 the ones made before. Scratch list and deliveries; the dayflow test store; the brief and the register are fakes.
 """
@@ -22,8 +23,6 @@ from belief_engine.intake.store import sqlite_file
 
 NOW = datetime(2026, 3, 10, 15, 0, tzinfo=timezone.utc)
 DAY = "2026-03-10"
-LIVE = {"calendar": {"mode": "live", "from_day": DAY}, "concern": {"mode": "off", "since": None}}
-OFF = {"calendar": {"mode": "off", "from_day": None}, "concern": {"mode": "off", "since": None}}
 
 
 def _store():
@@ -40,6 +39,8 @@ REGISTER = {"active": [{"concern_id": "c-ring", "title": "Doorbell battery"},
 @pytest.fixture
 def scratch(tmp_path, monkeypatch):
     monkeypatch.setattr(B, "brief", lambda entry: f"BRIEF of {entry['id']}")
+    monkeypatch.setattr(B, "CALENDAR_FROM_DAY", DAY)
+    monkeypatch.setattr(B, "CONCERN_SINCE", NOW.isoformat())
     from app.assistant.subconscious import concern_store
     monkeypatch.setattr(concern_store, "load_register", lambda connect=None: REGISTER)
     return sqlite_file(tmp_path / "list.db"), sqlite_file(tmp_path / "deliveries.db")
@@ -67,15 +68,9 @@ def _ring(lst, changes, at=NOW):
                            at=at, connect=lst)
 
 
-def _deliver(scratch, config=LIVE, at=NOW):
+def _deliver(scratch, at=NOW):
     lst, dl = scratch
-    return B.deliver(_store(), now_utc=at, connect=dl, list_connect=lst, lane_config=config)
-
-
-def test_with_every_lane_off_nothing_happens(scratch):
-    _decide(scratch[0])
-    assert _deliver(scratch, OFF) == {"created": [], "revised": [], "ended": [], "dry_run": [], "failed": []}
-    assert _store().list_work_objects() == []
+    return B.deliver(_store(), now_utc=at, connect=dl, list_connect=lst)
 
 
 def test_a_needed_entry_becomes_a_shell_once(scratch):
@@ -143,19 +138,16 @@ def test_an_entry_still_needed_after_its_work_ended_gets_new_work(scratch):
     assert "8:30 PM" in store.load(out["created"][0]).title
 
 
-def test_a_day_before_the_lane_starts_stays_the_stewards(scratch):
-    _decide(scratch[0], day="2026-03-09")
-    assert _deliver(scratch)["created"] == []
-    assert B.calendar_live(DAY, LIVE) and not B.calendar_live("2026-03-09", LIVE) and not B.calendar_live(DAY, OFF)
-
-
-def test_a_dry_run_makes_nothing_and_leaves_the_changes_for_the_live_run(scratch):
-    _decide(scratch[0])
-    dry = {**LIVE, "calendar": {"mode": "dry_run", "from_day": DAY}}
-    out = _deliver(scratch, dry)
-    assert out["dry_run"] == [{"entry": _cal(DAY, "B3"), "action": "create", "work_id": None}]
-    assert _store().list_work_objects() == [] and _deliver(scratch, dry)["dry_run"] == []
-    assert len(_deliver(scratch, LIVE)["created"]) == 1
+def test_an_entry_made_before_its_kinds_start_stays_as_it_was(scratch):
+    """A day before CALENDAR_FROM_DAY, and a concern's entry made before CONCERN_SINCE, were the steward's: never
+    made into work by the list, so old entries cannot suddenly become work."""
+    lst, _ = scratch
+    _decide(lst, day="2026-03-09")
+    _ring(lst, [{"entry": "new", "action": "new", "what": "The doorbell battery is recharged",
+                 "assistant_part": "ask the owner to confirm", "when": "9:00 AM", "why": "Low battery."}],
+          at=NOW - timedelta(minutes=1))
+    assert _deliver(scratch) == {"created": [], "revised": [], "ended": [], "failed": []}
+    assert _store().list_work_objects() == []
 
 
 def test_a_concern_entry_carries_its_concern(scratch, monkeypatch):
@@ -165,8 +157,7 @@ def test_a_concern_entry_carries_its_concern(scratch, monkeypatch):
     _ring(lst, [{"entry": "new", "action": "new", "what": "The doorbell battery is recharged",
                  "assistant_part": "tell the owner and ask him to confirm", "when": "9:00 AM",
                  "why": "Ring sent a low-battery notice."}])
-    config = {"calendar": {"mode": "off", "from_day": None}, "concern": {"mode": "live", "since": NOW.isoformat()}}
-    [work_id] = _deliver(scratch, config)["created"]
+    [work_id] = _deliver(scratch)["created"]
     assert _store().load(work_id).constraints["concern_refs"] == ["concern:c-ring"]
 
 
@@ -179,8 +170,7 @@ def test_a_calendar_concerns_entry_carries_its_concern_and_its_belief(scratch, m
     L.apply_entries(DAY, [{"entry": "new", "action": "new", "what": "The trash is at the curb before bed",
                            "assistant_part": "remind the owner", "when": "9:00 PM", "why": "Trash night.",
                            "concern_id": "c-trash", "relies_on": []}], cause="decided", at=NOW, connect=lst)
-    config = {"calendar": {"mode": "off", "from_day": None}, "concern": {"mode": "live", "since": NOW.isoformat()}}
-    [work_id] = _deliver(scratch, config)["created"]
+    [work_id] = _deliver(scratch)["created"]
     c = _store().load(work_id).constraints
     assert c["concern_refs"] == ["concern:c-trash"] and c["belief_refs"] == ["B7"]
 
@@ -195,13 +185,12 @@ def test_a_concern_entrys_part_changed_alone_revises_its_work(scratch, monkeypat
     entry = {"entry": "new", "action": "new", "what": "The doorbell battery is recharged",
              "assistant_part": "ask the owner to confirm", "when": "9:00 AM", "why": "Ring sent a low-battery notice."}
     _ring(lst, [entry])
-    config = {"calendar": {"mode": "off", "from_day": None}, "concern": {"mode": "live", "since": NOW.isoformat()}}
-    [work_id] = _deliver(scratch, config)["created"]
+    [work_id] = _deliver(scratch)["created"]
     [listed] = L.entries(concern_id="c-ring", connect=lst)
     _ring(lst, [{**entry, "entry": listed["id"], "action": "modify",
                  "assistant_part": "wait for the Ring confirmation without contacting the owner"}],
           at=NOW + timedelta(minutes=5))
-    assert _deliver(scratch, config, at=NOW + timedelta(minutes=6))["revised"] == [work_id]
+    assert _deliver(scratch, at=NOW + timedelta(minutes=6))["revised"] == [work_id]
 
 
 def test_a_closed_concern_cancels_its_open_entries_and_its_work_ends(scratch, monkeypatch):
@@ -212,15 +201,14 @@ def test_a_closed_concern_cancels_its_open_entries_and_its_work_ends(scratch, mo
     monkeypatch.setattr(concern_feedback, "propagate_work_outcome", lambda store, work_id, outcome: None)
     _ring(lst, [{"entry": "new", "action": "new", "what": "The doorbell battery is recharged",
                  "assistant_part": "ask the owner to confirm", "when": "9:00 AM", "why": "Low battery."}])
-    config = {"calendar": {"mode": "off", "from_day": None}, "concern": {"mode": "live", "since": NOW.isoformat()}}
-    [work_id] = _deliver(scratch, config)["created"]
+    [work_id] = _deliver(scratch)["created"]
     register = {"active": [], "addressing": [], "dormant": [],
                 "resolved": [{"concern_id": "c-ring", "resolution_reason": "The owner recharged it this morning."}]}
     later = NOW + timedelta(minutes=5)
     [cancelled] = L.cancel_for_closed_concerns(register, at=later, connect=lst)
     assert L.entries(concern_id="c-ring", connect=lst) == []
     assert L.cancel_for_closed_concerns(register, at=later, connect=lst) == [], "once"
-    assert _deliver(scratch, config, at=later)["ended"] == [work_id]
+    assert _deliver(scratch, at=later)["ended"] == [work_id]
     [instruction] = _store().load(work_id).constraints["architect_instructions"]
     assert instruction["kind"] == "end" and "The owner recharged it this morning." in instruction["reason"]
 

@@ -26,11 +26,11 @@ def test_a_conversation_still_going_waits_and_a_finished_one_is_read_whole():
     assert S.finished_conversations([], NOW) == []
 
 
-def test_calendar_work_is_left_out_in_shadow_and_ended_work_is_the_brains_view(monkeypatch):
+def test_the_brain_sees_all_work_in_motion_and_what_ended_in_the_window(monkeypatch):
+    """Until 2026-10-10 work made from the calendar was left out on a day the steward still held (retired with it)."""
     from app.assistant.subconscious import work_links
     belief = {"source_intake": [{"source_type": "belief"}]}
-    monkeypatch.setattr(work_links, "active_work", lambda: [
-        {"work_id": "w1", "from_calendar": True}, {"work_id": "w2", "from_calendar": False}])
+    monkeypatch.setattr(work_links, "active_work", lambda: [{"work_id": "w1"}, {"work_id": "w2"}])
     recent, old = (NOW - 60 * MIN).isoformat(), (NOW - 20 * 60 * MIN).isoformat()
     monkeypatch.setattr(work_links, "_rows", lambda: [
         {"id": "w3", "title": "AC", "status": "done", "updated_at": recent, "constraints": belief},
@@ -40,13 +40,10 @@ def test_calendar_work_is_left_out_in_shadow_and_ended_work_is_the_brains_view(m
         {"id": "w5", "title": "Old", "status": "done", "updated_at": old, "constraints": {}},
         {"id": "w6", "title": "Running", "status": "active", "updated_at": recent, "constraints": {}}])
     monkeypatch.setattr(work_links, "work_view", lambda work_id, link: {"work_id": work_id, "link": link})
-    shadow = S.work(NOW, calendar_work=False)
-    assert [w["work_id"] for w in shadow["in_motion"]] == ["w2"]
-    assert shadow["ended"] == [{"work_id": "w4", "link": "ended"}], "ended in the window, not from the calendar"
-    assert not work_links.from_calendar({}) and work_links.from_calendar({"belief_refs": ["B455"]})
-    live = S.work(NOW, calendar_work=True)
-    assert [w["work_id"] for w in live["in_motion"]] == ["w1", "w2"]
-    assert sorted(w["work_id"] for w in live["ended"]) == ["w3", "w4", "w7"]
+    work = S.work(NOW)
+    assert [w["work_id"] for w in work["in_motion"]] == ["w1", "w2"]
+    assert sorted(w["work_id"] for w in work["ended"]) == ["w3", "w4", "w7"], "ended in the window, every source"
+    assert all(w["link"] == "ended" for w in work["ended"])
 
 
 def test_the_template_shows_times_local_and_says_what_is_not_known():

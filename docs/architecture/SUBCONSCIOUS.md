@@ -63,16 +63,17 @@ Each pass is recorded as a run (`brain_trace`, trigger boot / event / timer). A 
 
 `brain_wake.run_brain`, in order; each stage is free when it has nothing to do, and a stage that raises ends the pass:
 
-1. **gate** (`gate.run_gate`): ingest new chat, email, camera and presence events; route the ready ones;
-2. **brain step** (`brain_step.run_brain_step`): every pending matter;
-3. **closed concerns' entries** (`brain_list.cancel_for_closed_concerns`): every open list entry whose concern is no longer open is cancelled, with the concern's resolution as the reason;
+1. **expiry** (`persist.expire_concerns`): every open concern whose `expires_at` has passed is closed, whatever its state;
+2. **gate** (`gate.run_gate`): ingest new chat, email, camera and presence events; route the ready ones;
+3. **brain step** (`brain_step.run_brain_step`): every pending matter;
 4. **summaries** (`concern_summary.run_summaries`, agent `subconscious::concern_summary`): an open concern whose notes since its last summary passed `SUMMARY_AFTER_CHARS` (3,000) gets them folded into a new summary (until 2026-10-09 a brief was rewritten for every concern whose record changed);
 5. **concern planner** (`concern_planner.run_planners`);
-6. **handoffs** (`concern_handoff.run_handoffs`): concerns handed to the steward; off while the concern lane is live;
-7. **day pass and occurrences** (`day_pass.run_day_pass`, `belief_occurrences.run_occurrence_handoffs`): the occurrence handoffs are off for a day the live calendar lane holds;
+6. **handoffs**: removed 2026-10-10 with the steward they handed concerns and the day's placements to (`concern_handoff`, `belief_occurrences`; off since the lanes went live on 2026-10-05/06);
+7. **day pass** (`day_pass.run_day_pass`): the day's plan and its calendar concerns;
 8. **stories** (`brain_stories.run_stories`);
-9. **day's tasks** (`day_tasks.run_day_tasks`): last, so they read the concern entries made earlier in the pass;
-10. when entries were cancelled, a plan was written or the day's tasks decided, and either lane is live, dayflow is poked to run a planning tick (`concern_handoff._poke_dayflow`).
+9. **closed concerns' entries** (`brain_list.cancel_for_closed_concerns`): every open list entry whose concern is no longer open is cancelled, with the concern's resolution as the reason; Since 2026-10-10 just before the day's tasks, after the day pass, so a calendar concern the day pass withdrew takes its entry with it before the day's tasks read the list;
+10. **day's tasks** (`day_tasks.run_day_tasks`): last, so they read the concern entries made earlier in the pass;
+11. when entries were cancelled, a plan was written or the day's tasks decided, dayflow is poked to run a planning tick (`brain_list.poke_dayflow`).
 
 ### The inbox
 
@@ -119,7 +120,7 @@ The **day's tasks** (`day_tasks.py`, agent `subconscious::day_tasks`, table `bra
 
 `brain_list.py`, tables `brain_list_entries` (each entry's current state) and `brain_list_changes` (every creation, modification and cancellation, with before, after and cause). Entry kinds: `calendar` (`cal:<day>:<belief_key>`, from the day's tasks), `concern` (`con:<hex>`, from concern_tasks) and `day` (`day:<day>:<hex>`, the day's tasks' own). Each names the outcome, the decision, the assistant's part, when and why.
 
-Dayflow takes its work from the list: in each planning tick `dayflow_orchestrator/brain_list_intake.py` turns every undelivered change in a live lane into a new work object, a revision with a re-plan instruction, or an end instruction. `configs/brain_lanes.json` switches the calendar lane (from a day) and the concern lane (from a time); a live lane stops reaching the steward. Today both lanes are live and the steward is retired. See [05_DAYFLOW.md](05_DAYFLOW.md), "Brain list intake".
+Dayflow takes its work from the list: in each planning tick `dayflow_orchestrator/brain_list_intake.py` turns every undelivered change into a new work object, a revision with a re-plan instruction, or an end instruction (entries made before their kind's work came from the list are left: a day's before 2026-10-06, a concern's before 2026-10-05 16:31 UTC). Until 2026-10-10 `configs/brain_lanes.json` switched the calendar lane (from a day) and the concern lane (from a time), and a lane not live reached the steward. Today both lanes are live and the steward is retired. See [05_DAYFLOW.md](05_DAYFLOW.md), "Brain list intake".
 
 Each pass's model calls and code decisions are recorded per run and told to the owner as stories: see §10, "Seeing the brain work".
 
@@ -162,10 +163,9 @@ The door merged beliefs about different acts and the concern's single rule misde
   today, each read with the beliefs closest to it in meaning (found by code, 2026-10-03; until then an agent,
   `dayflow_belief_modifiers`, named each belief's modifiers). The day's tasks (§2) decide what each placement
   needs onto the brain's list, and dayflow's list-item intake makes the work. Work made from a calendar entry
-  carries the belief (`constraints.belief_refs`), so its outcome returns to the belief. Only for a day before the
-  calendar lane's `from_day` (`configs/brain_lanes.json`) does code still hand each placement to the steward as a
-  belief intake item (`subconscious/belief_occurrences.py`, item `belief_occurrence:<belief_key>:<day>:<time>`,
-  once each, not when an hour past).
+  carries the belief (`constraints.belief_refs`), so its outcome returns to the belief. Until the calendar lane went
+  live (2026-10-06) code handed each placement to the steward as a belief intake item (`belief_occurrences`, item
+  `belief_occurrence:<belief_key>:<day>:<time>`), removed with the steward on 2026-10-10.
 - Every finalizer judgment and ending of every work object enters the brain inbox as a pending `work` event
   (`concern_feedback`), with its objective and the concerns it was made for; the gate routes it to the open
   concerns it bears on, and the brain attaches work it cites on a concern (`brain_step._attach_cited_work`,
@@ -335,9 +335,8 @@ Design: `docs/design/brain_insight_2026-10-02.md`.
   placements and owners. Steps outside a wake are not recorded.
 - **`/brain/flow`** (`app/routes/brain_flow.py`, local-only): the stages as a diagram (`NODES`, `EDGES`),
   a scrubber over the runs, and each stage's calls and steps in time order for the chosen run. It also
-  adds the steward's calls whose prompt holds an item the run handed over (its `handoff` steps); with both
-  lanes live and the steward retired, no items are handed over and none are found. The diagram predates the
-  list: it shows the day's tasks as shadow and handoffs to the steward, and has no list or list-intake stage.
+  ends in the day's tasks, the list's one decider (until 2026-10-10 it ended in the handoffs to dayflow's steward
+  and the steward's calls on the items each run handed over).
   `?concern=` lists the runs that touched one concern.
 - **Stories** (`subconscious/brain_stories.py`, last stage of the wake): `subconscious::story_matter` (per
   matter: headline + a line per event), `story_concern` (per open concern: state, story,
@@ -393,7 +392,7 @@ All pod ids follow `datapod:<kind>:<uuid4-hex-24>`. See [14_PODS.md](14_PODS.md)
 | `subconscious/{concern_store,concern_door,concern_summary,concern_view,concern_planner,concern_feedback}.py` | Concerns table, admission, summaries, the concern as readers see it, planner, work feedback |
 | `subconscious/{day_pass,day_plan,day_tasks,situation,brain_list}.py` | Day plan, the day's tasks, the situation, the brain's list |
 | `subconscious/{brain_trace,brain_stories}.py` | Runs and steps; the owner's stories |
-| `dayflow_orchestrator/brain_list_intake.py`, `configs/brain_lanes.json` | Dayflow's work from the list; the lane switches |
+| `dayflow_orchestrator/brain_list_intake.py` | Dayflow's work from the list |
 | `subconscious/scope.yaml` | Authority-99 permission scope for the subsystem |
 | `subconscious/context_builder.py` | Noticer context + shared `build_weekly_schedule_block` |
 | `subconscious/persist.py` | Register writers: `apply_brain_matter`, work attachment, judgments and endings |

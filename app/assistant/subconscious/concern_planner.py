@@ -6,8 +6,9 @@ persist.history_for_prompt; until 2026-10-09 from a brief rewritten on every cha
 planner looks things up (the email threads and calendar entries the concern names, reminders and to-dos,
 the work done for it, pods, the knowledge graph) and a decider writes the decision (act now, hold until a
 date, no action) and the things that should be done, as bullet points under the concern
-(`concern["plan"]`). It changes nothing in the world. Consumers read the bullets and decide how: dayflow
-gets them in the concern's handoff (subconscious/concern_handoff.py).
+(`concern["plan"]`). It changes nothing in the world. Consumers read the bullets and decide how: the day's tasks
+decide the entries it proposes, and dayflow makes the work (until 2026-10-05 the concern's handoff to dayflow's
+steward carried the bullets).
 
 Owner, 2026-10-02: "it breaks it into bullet points under the concern like: these are things that should
 be done. its up to consumers to interpret those." It replaced the brief's own readiness decision.

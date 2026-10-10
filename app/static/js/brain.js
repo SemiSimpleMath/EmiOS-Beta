@@ -181,7 +181,7 @@ async function loadMatters() {
   });
 }
 
-// ── Concerns: summary, plan, handoffs, work ──────────────────────────────
+// ── Concerns: summary, plan, work ─────────────────────────────────────────
 async function loadConcerns() {
   const list = $("#c-list");
   list.innerHTML = "";
@@ -208,16 +208,6 @@ async function loadConcerns() {
       body.appendChild(el("div", "br-h", "Summary writer's calls"));
       if (!c.summary_calls.length) body.appendChild(el("div", "br-note", "None recorded."));
       c.summary_calls.forEach((k) => body.appendChild(callRow(k)));
-      body.appendChild(el("div", "br-h", "Handoffs to dayflow"));
-      if (!c.handoffs.length) body.appendChild(el("div", "br-note", "Never handed over."));
-      c.handoffs.forEach((h) => {
-        const review = h.evaluator_review || {};
-        const outcome = review.outcome
-          ? ` · steward: ${review.outcome}${review.work_id ? " → " + review.work_id : ""}${review.reason ? " (" + review.reason + ")" : ""}`
-          : " · waiting for the steward";
-        body.appendChild(el("div", "br-decision", `${when(h.created_at)} · ${h.item_id} · ${h.state}${outcome}\ntask: ${h.summary}`));
-        h.steward_calls.forEach((k) => body.appendChild(callRow(k)));
-      });
       body.appendChild(el("div", "br-h", "Work serving it"));
       if (!c.work.length) body.appendChild(el("div", "br-note", "None."));
       c.work.forEach((w) => body.appendChild(el("div", "br-decision", `${w.work_id} [${w.status}] ${w.title}`)));

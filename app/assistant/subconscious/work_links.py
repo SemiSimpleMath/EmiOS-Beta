@@ -82,7 +82,7 @@ def work_view(work_id: str, *, link: str, score: Optional[float] = None) -> Dict
     work object, and read outside it they became household rules (2026-10-03: "do not send a reminder" for one expired
     ticket held a concern until its date had passed). Until 2026-10-09 the deciders saw an entry's work without its
     steps to come, so an email the work was waiting for read as new and could become a second entry for it."""
-    from app.assistant.control_nodes.strategic_planner_wo_prep_node import _goal_epitaph
+    from app.assistant.dayflow_orchestrator.recent_work import goal_epitaph as _goal_epitaph
     from work_objects.progress import work_progress
     wo = _store().load(work_id)
     nodes = getattr(wo, "nodes", {}) or {}
@@ -211,20 +211,12 @@ def progress(work_id: str) -> Dict[str, Any]:
     return work_progress(_store().load(work_id))
 
 
-def from_calendar(constraints: Dict[str, Any]) -> bool:
-    """Whether work was made from the calendar's beliefs: an intake item of source type `belief`, or a belief it
-    cites (`belief_refs`; the steward could cite `belief:<key>` without the item, as the 2026-10-04 timesheets
-    heads-up did). Work the steward made citing nothing cannot be told apart."""
-    return bool(constraints.get("belief_refs")) or any(
-        s.get("source_type") == "belief" for s in constraints.get("source_intake") or [])
-
-
 def active_work() -> List[Dict[str, Any]]:
-    """Every active work object: title, objective, when it started, where it stands, and whether it was made
-    from the calendar (`from_calendar`)."""
+    """Every active work object: title, objective, when it started, where it stands, and the list entry it was made
+    from."""
     return [{"work_id": r["id"], "title": r["title"], "objective": str(r["constraints"].get("objective") or ""),
              "created": _local(r["created_at"]), "progress": progress(r["id"]),
-             "from_calendar": from_calendar(r["constraints"]), "list_entry": r["constraints"].get("list_entry_id")}
+             "list_entry": r["constraints"].get("list_entry_id")}
             for r in sorted(_rows(), key=lambda r: r["created_at"] or "") if r["status"] == "active"]
 
 

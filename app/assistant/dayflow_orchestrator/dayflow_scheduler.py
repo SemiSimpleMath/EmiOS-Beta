@@ -337,7 +337,7 @@ class DayflowScheduler:
                     ("afk_state_changed", self._on_afk_state_changed),
                     ("dayflow_ticket_responded", self._on_ticket_responded),
                     ("dayflow_work_progress", self._on_work_progress),
-                    ("concern_handoff", self._on_concern_handoff)]
+                    ("brain_list_changed", self._on_brain_list_changed)]
         registered = []
         try:
             for topic, handler in handlers:
@@ -544,9 +544,9 @@ class DayflowScheduler:
     def _on_ticket_responded(self, message: Message) -> None:
         self.poke(reason="ticket_responded")
 
-    def _on_concern_handoff(self, message: Message) -> None:
-        """The brain handed a concern to the planner's inbox (subconscious/concern_handoff.py)."""
-        self.poke(reason="concern_handoff")
+    def _on_brain_list_changed(self, message: Message) -> None:
+        """The brain's list changed (subconscious/brain_list.poke_dayflow): the tick makes its work."""
+        self.poke(reason="brain_list_changed")
 
     def _on_work_progress(self, message: Message) -> None:
         """A work node progressed. Follow up so the planner applies finalizer instructions and

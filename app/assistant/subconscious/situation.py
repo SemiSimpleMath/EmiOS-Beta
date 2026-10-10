@@ -94,20 +94,19 @@ def todos() -> List[Dict[str, Any]]:
 ENDED_HOURS = 18   # the window of ended work the steward reads
 
 
-def work(now_utc: datetime, *, calendar_work: bool) -> Dict[str, Any]:
+def work(now_utc: datetime) -> Dict[str, Any]:
     """Work in motion with where each stands, and the work that ended in the last ENDED_HOURS, each as the brain
     reads past work (work_links.work_view: why it ended and each task's outcome in the finalizer's own words, never
-    its verdict or next step, which are dayflow's). `calendar_work=False` leaves out work made from a calendar
-    placement: on a day the steward still holds that work is the steward's, and the brain must not copy it."""
+    its verdict or next step, which are dayflow's). Until 2026-10-10 work made from a calendar placement was left out
+    on a day the steward still held, so the brain would not copy the steward's work."""
     from datetime import timedelta
     from app.assistant.subconscious import work_links
     from app.assistant.utils.time_utils import parse_iso_utc
 
     cutoff = now_utc - timedelta(hours=ENDED_HOURS)
-    active = [w for w in work_links.active_work() if calendar_work or not w["from_calendar"]]
+    active = work_links.active_work()
     ended = [r for r in sorted(work_links._rows(), key=lambda r: r["updated_at"] or "", reverse=True)
-             if r["status"] in ("done", "abandoned") and parse_iso_utc(r["updated_at"]) >= cutoff
-             and (calendar_work or not work_links.from_calendar(r["constraints"]))]
+             if r["status"] in ("done", "abandoned") and parse_iso_utc(r["updated_at"]) >= cutoff]
     return {"in_motion": active, "ended": [work_links.work_view(r["id"], link="ended") for r in ended]}
 
 
@@ -125,9 +124,9 @@ def open_concerns() -> List[Dict[str, Any]]:
 
 # ── the whole ──────────────────────────────────────────────────────────────
 
-def gather(now_utc: datetime, *, calendar_work: bool = True) -> Dict[str, Any]:
+def gather(now_utc: datetime) -> Dict[str, Any]:
     """Everything a brain decider reads about the moment. Raises when a part cannot be read."""
-    from app.assistant.control_nodes.strategic_planner_wo_prep_node import _load_active_tickets
+    from app.assistant.dayflow_orchestrator.communication_context import load_active_tickets
     from app.assistant.dayflow_orchestrator.communication_context import scheduled_reminder_history
     from app.assistant.location_manager.location_manager import get_user_location_summary
     from app.assistant.pipelines.context import boundary_date_local_str, day_window_local
@@ -156,9 +155,9 @@ def gather(now_utc: datetime, *, calendar_work: bool = True) -> Dict[str, Any]:
         "health": str(_resource(scope, "resource_health_inference_output").get("general_health_assessment") or ""),
         "chat": finished_conversations(chat_today(day, now_utc), now_utc),
         "todos": todos(),
-        "work": work(now_utc, calendar_work=calendar_work),
+        "work": work(now_utc),
         "reminders": scheduled_reminder_history(now_utc),
-        "tickets": _load_active_tickets(),
+        "tickets": load_active_tickets(),
         "concerns": open_concerns(),
     }
 

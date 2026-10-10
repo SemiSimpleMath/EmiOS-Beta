@@ -30,8 +30,8 @@ dayflow_flow_bp.before_request(reject_if_not_local)
 _ASSISTANT = Path(__file__).resolve().parents[1] / "assistant"
 MANAGERS = [
     ("dayflow_orchestrator_manager", "Planning pass",
-     "One at a time with the wake pass. Started by the scheduler: new intake, work progress, a brain "
-     "handoff, or the 30-minute ceiling. Ends when it has claimed one node to run."),
+     "One at a time with the wake pass. Started by the scheduler: the brain's list changed, work progress, "
+     "a ticket reply, or the 30-minute ceiling. Ends when it has claimed one node to run."),
     ("dayflow_wake_manager", "Wake pass",
      "One due node's time-wake. No planning stage: it re-judges the moment, then dispatches or holds."),
     ("dayflow_dispatch_manager", "Dispatch room",
@@ -40,10 +40,6 @@ MANAGERS = [
 ]
 # Roles of the agents, as written in CLAUDE.md's dayflow section; the configs carry none.
 AGENT_ROLES = {
-    "dayflow_orchestrator::intake_triage": "Triage: which pending intake is worth the steward's attention.",
-    "dayflow_orchestrator::strategic_planner_wo": "The steward: decides WHAT work exists. Turns intake "
-        "(including the brain's concern handoffs) into work objects, reviews the rest as no-action or "
-        "deferred, completes or abandons work.",
     "dayflow_orchestrator::work_architect": "The architect: lays each new goal's graph of tasks, and "
         "re-plans flagged ones.",
     "dayflow_orchestrator::state_mover": "Promotes ready tasks; may hold one for the current context.",
@@ -57,7 +53,8 @@ AGENT_ROLES = {
 # How the passes meet each other and the rest of the assistant: not in any state_map.
 LINKS = {
     "work_node_dispatch_node": "claims one node and opens the Dispatch room for it; the pass ends here",
-    "strategic_planner_wo_prep_node": "reads pending intake: the brain's concern handoffs and admitted pods",
+    "brain_list_intake_node": "reads the brain's list (subconscious/brain_list.py): the brain decides what work "
+                              "exists, and each change becomes a new goal, a revision or an end instruction",
     "dayflow_tool_caller": "runs the worker (work_emi_team_manager) or a ticket to the user "
                            "(create_dayflow_ticket); calls made inside are shown below",
     "work_finalizer_node": "writes the judgment; the concerns the work is attached to get it, and the "

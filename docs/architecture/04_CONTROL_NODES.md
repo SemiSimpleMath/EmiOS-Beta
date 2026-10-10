@@ -53,8 +53,6 @@ Route based on blackboard state:
 ### Flow Gates & Critics
 
 - **`critic_pre_node.py` / `critic_post_node.py` / `critic_capture_node.py`** (`CriticPreNode` etc.) — Critic loop: pre-check, post-check, and capture of the critic verdict around an agent step
-- **`relevance_cleaner_gate_node.py`** — RETIRED at the work-object cutover; on disk but wired into no manager (paired with `relevance_cleaner_prep_node.py` / `relevance_cleaner_persist_node.py`)
-- **`triage_spawn_guard_node.py`** (`TriageSpawnGuardNode`) — Guards intake-triage spawning
 - **`task_compile_critic_node.py`** (`TaskCompileCriticNode`) — Quality gate on compiled task output
 
 ### Exit/Return Nodes
@@ -72,17 +70,17 @@ they are live, and since the 2026-09-17 dispatch split they are the first two st
 `dayflow_dispatch_manager` (arguments → tool call → `work_finalizer_node`), which runs one
 claimed node on its own thread. Its control nodes:
 
-- **`strategic_planner_wo_prep_node.py` / `_persist_node.py`** — build the
-  evaluator's context (portfolio, ticket replies with resolved work refs,
-  `expected_schedule_view` with id-chain provenance) / persist its verdicts
-  (mint/change/complete/abandon via `work_persist`, consume cited intake items,
-  forward `concern:` refs onto the work object)
+- **`work_prep_node.py`** — the planning tick's first stage: delivers pending concern and belief
+  feedback and loads the reminder history. It replaced the steward's prep node on 2026-10-10, when
+  the steward (`strategic_planner_wo_prep_node` / `_persist_node`) and intake triage
+  (`intake_triage_prep_node`, `triage_spawn_guard_node`, `triage_persist_node`) were removed
+- **`brain_list_intake_node.py`** — work from the brain's list: a shell, a revision with a re-plan
+  instruction, or an end instruction per list change (`dayflow_orchestrator/brain_list_intake.py`)
 - **`work_finalizer_node.py`** — judges whether each completed node's GOAL was achieved;
   sole producer of the `closed` terminal; runs in `dayflow_dispatch_manager`, not the tick
 - **`work_architect_node.py`** — per-goal DAG decomposition + re-plan
-- **`work_repair_node.py`** — RETIRED 2026-09-16; on disk but wired into no manager. Its
-  three dispositions became the finalizer's verdicts (retry / unrecoverable + stop /
-  new_approach / ask_user)
+- `work_repair_node.py` — RETIRED 2026-09-16, removed 2026-10-10. Its three dispositions
+  became the finalizer's verdicts (retry / unrecoverable + stop / new_approach / ask_user)
 - **`work_node_dispatch_node.py`** — the CLAIM GATE, and nothing else: canonicalize the selector's
   pick, publish `work_node_ref`, mark the node `dispatched`, hand off to
   `work_session.open_session`, end the planning pass. It calls no tool and chooses no branch —
@@ -92,15 +90,12 @@ claimed node on its own thread. Its control nodes:
   anything the state_mover has not promoted. Empty list → short-circuits to
   `post_room_finalize_node`. It used to carry a reply pre-step that scanned the ticket store for
   answers to in-flight asks; that was removed on purpose — landing a tool result was never this
-  node's job, and doing it here put it seven stops into the tick, behind the steward. A ticket
+  node's job, and doing it here put it seven stops into the tick, behind the steward (since removed). A ticket
   response is now recorded by the ask's own session, whose tool call returns the user's reply
 - **`workobject_render_node.py`** — renders the work-object view a worker sees. Wired into the
   WORKER managers (`work_emi_team_manager`, `work_web_manager`), not the dayflow orchestrator —
   it serves the `node_input: render` handoff shape
 - **`state_mover_prep_node.py` / `_persist_node.py`** — is_ready promotion + HOLD
-- **`intake_triage_prep_node.py` / `triage_persist_node.py`**,
-  **`context_enricher_prep_node.py` / `_persist_node.py`** (retired 2026-09-30) — intake triage and
-  enrichment prep/persist pairs
 - **`post_room_finalize_node.py`** — the universal EXIT node: every dayflow path lands here,
   including the materializer's empty-list short-circuit and both wake-pass early exits. It closes
   acted_on items, stamps `execution_result` onto plan steps via `result_formatter`, writes action-log
@@ -115,8 +110,8 @@ claimed node on its own thread. Its control nodes:
 
 Many nodes come in per-agent **prep/persist pairs**: a `*_prep_node.py` loads that
 agent's context off the items table before it runs, and a `*_persist_node.py` writes its
-output back. Examples (the context enricher pair was retired 2026-09-30):
-`relevance_cleaner_prep/persist`, `state_mover_prep/persist`, `triage_persist_node`,
+output back. Examples (the context enricher pair was retired 2026-09-30; the relevance cleaner and
+intake triage pairs were removed 2026-10-10): `state_mover_prep/persist`,
 `summary_pre/post_node`, `task_compile_metadata/post/final_output_node`. (`planner_persist_node` was
 listed here until 2026-09-18 — it was deleted with the legacy plan-task planner and no such file
 exists.)

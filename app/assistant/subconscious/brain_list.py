@@ -5,9 +5,9 @@ the list holds the pieces of work the brain decides they, and today's calendar, 
 tasks (subconscious/day_tasks.py), which since 2026-10-09 also decides every concern's entries; the concern planner
 proposes them. Each entry has a stable id,
 what it serves (a calendar placement or a concern), the decision (needed, not needed, done elsewhere), who acts,
-the assistant's part and when, and a status. In a lane switched live (configs/brain_lanes.json) dayflow's list-item
-intake makes work from the entries (dayflow_orchestrator/brain_list_intake.py); elsewhere they are recorded beside
-what dayflow actually does.
+the assistant's part and when, and a status. Dayflow's list-item intake makes work from the entries
+(dayflow_orchestrator/brain_list_intake.py); until 2026-10-10 only in a lane switched live (configs/brain_lanes.json),
+and elsewhere they were recorded beside what dayflow's steward did.
 
 Every change is recorded with its cause, so a changed decision reads as what it would be when live: entry X
 created, modified (before, after, why), or cancelled. Concern entries get an id when first created and are then
@@ -61,6 +61,16 @@ SCHEMA = [
 
 FIELDS = ("what", "decision", "who_acts", "assistant_part", "when_local", "covers", "why")
 _TERMINAL = ("cancelled",)
+
+
+def poke_dayflow() -> None:
+    """Ask dayflow for a planning tick: the list changed, and the tick makes its work. Until 2026-10-10 this was
+    concern_handoff._poke_dayflow, its event named for the handoffs to the steward."""
+    from app.assistant.ServiceLocator.service_locator import DI
+    from app.assistant.utils.pydantic_classes import Message
+    msg = Message(sender="brain_list", receiver=None, data_type="agent_msg", content="brain_list_changed")
+    msg.event_topic = "brain_list_changed"
+    DI.event_hub.publish(msg)
 
 
 def ensure_schema(connect=None) -> None:

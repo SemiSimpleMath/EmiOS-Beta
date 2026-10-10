@@ -75,20 +75,6 @@ class StateMutationContract(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Triage artifact decisions (intake_triage output)
-# ---------------------------------------------------------------------------
-
-
-class ArtifactDecisionContract(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    artifact_id: str
-    decision: str
-    reason: str = ""
-    confidence: float = 0.0
-
-
-# ---------------------------------------------------------------------------
 # Planner task (strategic_planner output → state_mover/view/finalize)
 # ---------------------------------------------------------------------------
 
@@ -188,10 +174,6 @@ def validate_dayflow_items(raw: Any, label: str) -> None:
 
 def validate_mutations(raw: Any, label: str) -> None:
     _validate_list(raw, StateMutationContract, label)
-
-
-def validate_artifact_decisions(raw: Any, label: str) -> None:
-    _validate_list(raw, ArtifactDecisionContract, label)
 
 
 def validate_planned_tasks(raw: Any, label: str) -> None:

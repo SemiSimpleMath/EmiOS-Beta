@@ -77,19 +77,3 @@ class TestPropagateWorkOutcome:
         def _boom(wid):
             raise RuntimeError("store unavailable")
         propagate_work_outcome(SimpleNamespace(load=_boom), "work_x", "done")
-
-
-class TestForwardEdge:
-
-    def test_created_work_object_carries_concern_refs(self, tmp_path):
-        from work_objects.store import WorkStore
-        from app.assistant.dayflow_orchestrator.work_persist import persist_steward_output
-        store = WorkStore(str(tmp_path / "work.db"))
-        result = persist_steward_output(store, {"new_or_changed": [{
-            "work_id": "",
-            "objective": "Schedule home AC service.",
-            "based_on": [f"concern:{_CID[:8]}", "7128"],
-        }]})
-        wid = result["created"][0]["work_id"]
-        wo = store.load(wid)
-        assert wo.constraints["concern_refs"] == [f"concern:{_CID[:8]}"]

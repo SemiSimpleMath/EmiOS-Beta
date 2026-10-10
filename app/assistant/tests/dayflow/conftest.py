@@ -280,3 +280,24 @@ def get_meta(item: Dict[str, Any]) -> Dict[str, Any]:
     """Extract metadata dict from an item."""
     from app.assistant.dayflow_orchestrator.contracts import get_meta as _get_meta
     return _get_meta(item)
+
+
+def make_work_object(store, objective: str, *, sources=(), concern_refs=(), belief_refs=(),
+                     success_criteria: str = "", actor: str = "brain"):
+    """A goal as dayflow's intake makes one (dayflow_orchestrator/brain_list_intake.py): the goal node rendered from
+    the objective and its sources, the refs in its constraints, the goal dispatched, and its concerns told it is
+    attached. Until 2026-10-10 tests made their goals through the steward's persist (work_persist), retired with it."""
+    from app.assistant.dayflow_orchestrator.work_context import render_view
+    from app.assistant.subconscious.concern_feedback import propagate_work_outcome
+    sources = list(sources)
+    wo = store.apply("create_work_object", {
+        "title": objective,
+        "goal_content": render_view("goal_content", objective=objective, sources=sources,
+                                    success_criteria=success_criteria),
+        "satisfied_when_kind": "all_owned_children_done",
+        "constraints": {"concern_refs": list(concern_refs), "belief_refs": list(belief_refs), "objective": objective,
+                        "source_intake": sources, "rationale": "", "success_criteria": success_criteria},
+    }, actor=actor)
+    store.apply("set_status", {"work_id": wo.id, "node_id": wo.goal_node_id, "status": "dispatched"}, actor=actor)
+    propagate_work_outcome(store, wo.id, "attached")
+    return store.load(wo.id)

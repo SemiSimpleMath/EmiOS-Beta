@@ -3,7 +3,7 @@
 The brain decides what work exists and keeps it as entries on its list (subconscious/brain_list.py), decided by one
 decider, the day's tasks: today's calendar, every concern's entries (each concern's planner proposes them), and the
 day's own. This turns the list's changes into work, by code, in each
-planning tick (control_nodes/brain_list_intake_node.py, between the steward's persist node and the architect). It
+planning tick (control_nodes/brain_list_intake_node.py, between the tick's prep node and the architect). It
 judges nothing; the entry already says what is needed:
 
 - an entry decided needed with no work yet: a work object shell is built from it (objective = the outcome and when,
@@ -20,14 +20,15 @@ judges nothing; the entry already says what is needed:
   the reason, and nothing could make the work again (owner: "you have a gate keeper not letting a decision
   through"). The decider reads each entry with its work's ending, so a needed entry over ended work is its decision.
 
-Which entries are the brain's to delegate is set per lane in configs/brain_lanes.json (off, dry_run, live): the
-calendar lane from a day on, the concern lane from a moment on. A lane that is live stops reaching the steward
-(subconscious/belief_occurrences.py, subconscious/concern_handoff.py). Every change acted on is recorded in
-`brain_list_deliveries` (emi.db), so none is acted on twice; a dry run records its own marker and acts on nothing.
+Every entry is the brain's to delegate, except those made before each kind's work came from the list: a day's
+entries (calendar and the day's own) before CALENDAR_FROM_DAY, a concern's before CONCERN_SINCE. Their work was the
+steward's, which was retired on 2026-10-10 (owner: "retire the old steward"); until then lanes were switched in
+configs/brain_lanes.json (off, dry_run, live) and a lane not live reached the steward instead. Every change acted on
+is recorded in `brain_list_deliveries` (emi.db), so none is acted on twice (its `mode` is `live`; rows marked
+`dry_run` are the lanes' trial runs of 2026-10-05).
 """
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -43,7 +44,11 @@ SCHEMA = """CREATE TABLE IF NOT EXISTS brain_list_deliveries (
     action TEXT NOT NULL,
     work_id TEXT,
     PRIMARY KEY (change_id, mode))"""
-# action: create | revise | end | none (work_ended_not_reopened in rows before 2026-10-08). mode: live | dry_run.
+# action: create | revise | end | none (work_ended_not_reopened in rows before 2026-10-08). mode: live (dry_run in the
+# lanes' trial rows of 2026-10-05).
+
+CALENDAR_FROM_DAY = "2026-10-06"               # the first day whose calendar and own entries became work from the list
+CONCERN_SINCE = "2026-10-05T16:31:58+00:00"    # concern entries made from then on are the brain's to delegate
 
 _ACTIVE = ("active", "blocked")
 
@@ -58,43 +63,12 @@ def ensure_schema(connect=None) -> None:
         c.execute(SCHEMA)
 
 
-def lanes() -> Dict[str, Any]:
-    """The lane switches, read fresh on every call (configs/brain_lanes.json)."""
-    from app.assistant.utils.path_utils import get_configs_dir
-    data = json.loads((get_configs_dir() / "brain_lanes.json").read_text(encoding="utf-8"))
-    for lane in ("calendar", "concern"):
-        if data[lane]["mode"] not in ("off", "dry_run", "live"):
-            raise ValueError(f"brain_lanes.json: {lane}.mode {data[lane]['mode']!r} is not off, dry_run or live")
-    if data["steward"]["mode"] not in ("on", "retired"):
-        raise ValueError(f"brain_lanes.json: steward.mode {data['steward']['mode']!r} is not on or retired")
-    return data
-
-
-def steward_retired(lane_config: Optional[Dict[str, Any]] = None) -> bool:
-    """True when the planning tick skips the steward (configs/brain_lanes.json steward.mode: retired)."""
-    return (lane_config or lanes())["steward"]["mode"] == "retired"
-
-
-def calendar_live(day: str, lane_config: Optional[Dict[str, Any]] = None) -> bool:
-    """True when the day's calendar is the brain's to delegate (the calendar lane live from a day on or before it)."""
-    lane = (lane_config or lanes())["calendar"]
-    return lane["mode"] == "live" and bool(lane.get("from_day")) and day >= lane["from_day"]
-
-
-def concern_live(lane_config: Optional[Dict[str, Any]] = None) -> bool:
-    lane = (lane_config or lanes())["concern"]
-    return lane["mode"] == "live" and bool(lane.get("since"))
-
-
-def _lane_mode(entry: Dict[str, Any], config: Dict[str, Any]) -> str:
-    """The mode this entry's lane is in for this entry: off when it falls before the lane's start."""
+def _the_brains(entry: Dict[str, Any]) -> bool:
+    """True when the entry's work is the brain's to make: made after its kind's work came from the list."""
     from app.assistant.utils.time_utils import parse_iso_utc
-    if entry["kind"] in ("calendar", "day"):          # a day's own entries ride the calendar lane by their day
-        lane = config["calendar"]
-        return lane["mode"] if lane.get("from_day") and entry["day"] >= lane["from_day"] else "off"
-    lane = config["concern"]
-    return lane["mode"] if lane.get("since") and parse_iso_utc(entry["created_at"]) >= parse_iso_utc(lane["since"]) \
-        else "off"
+    if entry["kind"] in ("calendar", "day"):
+        return entry["day"] >= CALENDAR_FROM_DAY
+    return parse_iso_utc(entry["created_at"]) >= parse_iso_utc(CONCERN_SINCE)
 
 
 # ── what a shell carries ─────────────────────────────────────────────────────
@@ -189,10 +163,9 @@ def _decide(entry: Dict[str, Any], work: Optional[Dict[str, Any]]) -> str:
     return "revise"
 
 
-def deliver(store, *, now_utc: Optional[datetime] = None, connect=None, list_connect=None,
-            lane_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Act on every change on the brain's list not yet delivered in its lane's mode, one entry at a time (its newest
-    state stands for all its changes). Returns {created, revised, ended, dry_run} work and entry ids, and
+def deliver(store, *, now_utc: Optional[datetime] = None, connect=None, list_connect=None) -> Dict[str, Any]:
+    """Act on every change on the brain's list not yet delivered, one entry at a time (its newest state stands for all
+    its changes). Returns {created, revised, ended} work ids, and
     `failed`: entries whose action raised. Reading the list raises; one entry's failure is logged ERROR and left
     undelivered for the next tick, and the other entries go on (2026-10-05: until then one entry that could not be
     briefed stopped every planning tick)."""
@@ -202,49 +175,41 @@ def deliver(store, *, now_utc: Optional[datetime] = None, connect=None, list_con
     connect = connect or _connect
     ensure_schema(connect)
     brain_list.ensure_schema(list_connect)
-    config = lane_config or lanes()
-    out: Dict[str, List[Any]] = {"created": [], "revised": [], "ended": [], "dry_run": [], "failed": []}
-    if config["calendar"]["mode"] == "off" and config["concern"]["mode"] == "off":
-        return out
+    out: Dict[str, List[Any]] = {"created": [], "revised": [], "ended": [], "failed": []}
     with (list_connect or _connect)(False) as c:
         changes = [dict(r) for r in c.execute("SELECT id, entry_id FROM brain_list_changes ORDER BY id")]
         entries = {r["id"]: dict(r) for r in c.execute("SELECT * FROM brain_list_entries")}
     with connect(False) as c:
-        delivered = {(r["change_id"], r["mode"]) for r in c.execute("SELECT change_id, mode FROM brain_list_deliveries")}
+        delivered = {r["change_id"] for r in c.execute(
+            "SELECT change_id FROM brain_list_deliveries WHERE mode = 'live'")}
     pending: Dict[str, List[int]] = {}
     for ch in changes:
-        entry = entries[ch["entry_id"]]
-        mode = _lane_mode(entry, config)
-        if mode != "off" and (ch["id"], mode) not in delivered:
+        if _the_brains(entries[ch["entry_id"]]) and ch["id"] not in delivered:
             pending.setdefault(ch["entry_id"], []).append(ch["id"])
     if not pending:
         return out
     by_entry = _work_by_entry()
     for entry_id, change_ids in pending.items():
         try:
-            _deliver_entry(store, entries[entry_id], change_ids, by_entry.get(entry_id), config, now, connect, out)
+            _deliver_entry(store, entries[entry_id], change_ids, by_entry.get(entry_id), now, connect, out)
         except Exception as exc:
             logger.error("[brain_list_intake] entry %s could not be delivered; left for the next tick: %s",
                          entry_id, exc, exc_info=True)
             step("list_intake", "failed: left for the next tick", subject=entry_id, error=f"{type(exc).__name__}: {exc}")
             out["failed"].append(entry_id)
-    logger.info("[brain_list_intake] created=%s revised=%s ended=%s dry_run=%s failed=%s", out["created"],
-                out["revised"], out["ended"], out["dry_run"], out["failed"])
+    logger.info("[brain_list_intake] created=%s revised=%s ended=%s failed=%s", out["created"],
+                out["revised"], out["ended"], out["failed"])
     return out
 
 
 def _deliver_entry(store, entry: Dict[str, Any], change_ids: List[int], work: Optional[Dict[str, Any]],
-                   config: Dict[str, Any], now: datetime, connect, out: Dict[str, List[Any]]) -> None:
+                   now: datetime, connect, out: Dict[str, List[Any]]) -> None:
     """Act on one entry's undelivered changes and record them delivered."""
     from app.assistant.subconscious.brain_trace import step
     entry_id = entry["id"]
-    mode = _lane_mode(entry, config)
     action = _decide(entry, work)
     work_id = work["id"] if work else None
-    if mode == "dry_run":
-        out["dry_run"].append({"entry": entry_id, "action": action, "work_id": work_id})
-        step("list_intake", f"dry run: would {action}", subject=entry_id, work_id=work_id, outcome=entry["what"])
-    elif action == "create":
+    if action == "create":
         wo = store.apply("create_work_object", _shell(entry), actor="brain")
         store.apply("set_status", {"work_id": wo.id, "node_id": wo.goal_node_id, "status": "dispatched"},
                     actor="brain")
@@ -267,12 +232,11 @@ def _deliver_entry(store, entry: Dict[str, Any], change_ids: List[int], work: Op
         store.apply("instruct_goal", {"work_id": work_id, "kind": "end", "reason": f"The brain: {reason}"},
                     actor="brain")
         out["ended"].append(work_id)
-    if mode == "live":
-        step("list_intake", action, subject=entry_id, work_id=work_id, outcome=entry["what"])
+    step("list_intake", action, subject=entry_id, work_id=work_id, outcome=entry["what"])
     with connect(True) as c:
         c.executemany("INSERT OR IGNORE INTO brain_list_deliveries (change_id, mode, entry_id, at, action, work_id) "
                       "VALUES (?,?,?,?,?,?)",
-                      [(cid, mode, entry_id, now.isoformat(), action, work_id) for cid in change_ids])
+                      [(cid, "live", entry_id, now.isoformat(), action, work_id) for cid in change_ids])
 
 
 def work_of(entry_ids: List[str]) -> Dict[str, Dict[str, Any]]:
