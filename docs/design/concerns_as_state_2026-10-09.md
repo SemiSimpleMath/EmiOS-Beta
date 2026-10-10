@@ -7,7 +7,14 @@ the brain"; "dog walking concern from yesterday cannot still be a concern today 
 concern that should probably resolve tonight or tomorrow"; "we also need something that looks at these concerns and can
 just summarize them. we cant have something with 100 notes on it. we also don't want to show truncated record."
 
-Part of the hub-and-spokes pipeline (docs/design/hub_and_spokes_2026-10-09.md). No code yet.
+Later the same day: "Concerns have an expiration date. time today that it becomes irrelevant no matter what, only
+relevant for today. some other time in the future."; "This engine that builds the beliefs into the day, maybe they
+should just become concerns. then really everything is a concern."; "Every concern that is created on the calendar
+would have an expiri of at most 2 hours or something reasonable determined by the agent creating them, all day event
+might have expiri at midnight."
+
+Part of the hub-and-spokes pipeline (docs/design/hub_and_spokes_2026-10-09.md). Built so far: the noticer raises
+issues and writes nothing to concerns (22ffbf09).
 
 ## What went wrong (root cause)
 
@@ -54,7 +61,7 @@ concern_door, pipelines/dayflow/utils/subconscious_projection.py, context_builde
 ### 2. One writer of the record: the brain
 
 The record keeps what changed the concern, as history: the brain's notes and the events it attached (evidence with
-ids). It stops receiving: the noticer's daily dispositions, the brief's `addressing:` lines, `WORK ATTACHED` /
+ids). It stops receiving: the noticer's daily dispositions (stopped 22ffbf09), the brief's `addressing:` lines, `WORK ATTACHED` /
 `WORK ENDED` lines (a concern's work is read live from the work store, through the progress view), and raw ticket
 JSON (a reply reaches the brain as a ticket event and is noted in words).
 
@@ -74,15 +81,20 @@ that renders work for outside readers (work_links.work_view with its progress). 
 into the concern, so nothing goes stale: persist.record_judgment and the copying in attach_work and
 apply_work_outcome go; the work feedback receipts only tell the brain (rule 3's one concern) that its work moved.
 
-### 4. A concern says what ends it
+### 4. Every concern expires
 
-- **A moment** ("the movie at a friend's house tonight", "this morning's dog walk") carries an end time; code closes it then,
-  with the reason "its moment has passed". Tomorrow's walk is tomorrow's concern, raised by tomorrow's events.
-- **A matter** ("<daughter> is sick and needs to get back to school", "the library fine", "the property tax by November
-  1") ends when its done-when is met or the owner says it is over; the brain closes it when news says so. No daily
-  re-asking: the clock's day-ended question and the noticer's daily disposition go.
+Every concern carries `expires_at`: the time after which it is irrelevant no matter what. Whoever raises it sets it.
+- **Only relevant today** ("the movie at a friend's house tonight", "this morning's dog walk"): a time today, the end
+  of its moment, or midnight. Tomorrow's walk is tomorrow's concern.
+- **Relevant longer** ("<daughter> is sick and needs to get back to school", "the library fine", "the property tax by
+  November 1"): a time in the future when it stops mattering even if nothing settled it.
 
-The brain chooses moment or matter when it raises a concern, and may change it.
+Before that it ends as now: its done-when is met or the owner says it is over, and the brain closes it. At
+`expires_at` code closes it, whatever its state, with the reason that its time passed; its open list entries are
+cancelled and their work gets its end instruction, as for any closed concern (`brain_list.cancel_for_closed_concerns`).
+The brain may move `expires_at` when news changes when the concern stops mattering (the appointment moved), and says
+why in its note. Nothing re-asks whether a concern still matters: the clock's day-ended event
+(`brain_inbox.add_day_ended_events`) goes. Stored in UTC, shown in local time like every time in a prompt.
 
 ### 5. Facts of the day are not concerns
 
@@ -93,16 +105,37 @@ visit) is a fact of the day: the brain decides it needs nothing for concerns, an
 
 Owner, 2026-10-09: "shouldnt we have unified things like source: user." Every concern carries
 `source: {kind, at, ref, content}`:
-- `kind`: `user` (the owner, in chat or a ticket reply), `email`, `calendar`, `camera`, `presence`, `work`, or
-  `noticer` / `brain` for a pattern the assistant inferred;
+- `kind`: `user` (the owner, in chat or a ticket reply), `email`, `calendar`, `camera`, `presence`, `work`,
+  `belief` (a calendar concern, rule 7), or `noticer` / `brain` for a pattern the assistant inferred;
 - `at`: when it happened;
 - `ref`: the event's id, kept by code, never shown in prose;
 - `content`: the source's own text, copied exactly by code (the owner's message; an email's sender, subject and the
-  lines that raised it; the signals the noticer counted).
+  lines that raised it; the signals the noticer counted; the belief's statement).
 
 Readers show it alike: "raised from: the owner, Fri 1:42 PM: "..."". A concern whose source is `user` closes only
 when its done-when is met or the owner says it is over; this replaces the special `owner_request` field. Each note
 records the event it came from in the same way, and the summary keeps each fact's source.
+
+### 7. The day's beliefs become concerns
+
+Until now the day pass (`subconscious/day_pass.py`) places the owner's calendar beliefs that apply today as
+placements, a second kind of input the day's tasks decide entries from. Instead each placement becomes a concern
+for that day, so the day's tasks read concerns only and every outcome returns to a concern the same way.
+
+- **The day pass creates them.** The agent that places a belief today raises its concern: what the belief asks for
+  today, at what time, with the belief as its source (`kind: belief`, `content` the belief's statement) and its
+  `belief_refs`, so the work's outcome still reaches the belief.
+- **Identity by code.** A calendar concern's identity is its belief, its day and its time. It does not go through the
+  concern door: nothing to judge, so nothing can be merged into it. (On 2026-10-02/03 beliefs did become concerns, one
+  "standing" concern per belief across all days, admitted through the door; the door merged beliefs about different
+  acts and one rule misdescribed them. They were retired, and about 35 still lie dormant.)
+- **Expiry.** At most about two hours after its time, or what is reasonable for it, set by the day pass's agent; an
+  all-day placement expires at midnight.
+- **The day pass changes only its own.** When its placements change during the day it updates or closes the
+  concerns it raised that day; the brain notes them like any concern.
+
+Open: whether a calendar concern needs a planner pass (its placement already says what and when; proposed: the day's
+tasks decide its entry from the concern directly); whether its entries keep the `cal:` kind or become concern entries.
 
 ## Converting what is there
 
@@ -111,7 +144,9 @@ records the event it came from in the same way, and the summary keeps each fact'
 - The old notes stay in the record as history, folded into the summary and unread by anyone else.
 - Work attached by the brain's judgment (not made for the concern) is detached: the dog-walk follow-up from <friend>'s
   birthday, the Edison bill from the property tax, the bedtime and lights reminders from fatigue.
-- Each open concern is marked moment or matter; moments from before today close.
+- Each open concern gets its `expires_at`; those past it close.
+- The dormant standing concerns from 2026-10-02/03 ("beliefs are not concerns") are removed; they hold nothing and
+  every reader of closed concerns still lists them. (Stored data; asked before.)
 - Each concern's `source` is its first evidence (the event it was raised from); `owner_request` becomes a source of
   kind `user`.
 
@@ -119,7 +154,8 @@ records the event it came from in the same way, and the summary keeps each fact'
 
 1. Readers get the brief (rule 1) and writers stop (rule 2): the noise stops reaching any model.
 2. One concern per event (rule 3), attachment by code only.
-3. Moments and matters (rule 4), and the conversion.
+3. Expiry (rule 4) and the conversion.
+4. The day's beliefs as concerns (rule 7), replacing placements as an input to the day's tasks.
 
 The work-stress concern was closed on 2026-10-09 at the owner's request (its record corrupted); fatigue keeps the
 October 13 physical reminder and converts with the rest.
