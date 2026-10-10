@@ -139,6 +139,14 @@ def test_gate_prompts_render_with_every_event_and_concern():
     # one-day notification preference"; the chat gate had promised it would be handled, and nothing ever saw it.
     assert "A task the owner gives the assistant is the brain's to decide" in system
     assert "is a promise to the owner, not a sign that anything picked it" in system
+    # 2026-10-09: every return to the computer went to the sleep concern, and every "OK" to a check-in to the
+    # work-stress concern, each as a note that it established nothing.
+    assert "or evening says nothing about sleep or fatigue" in system
+    assert "check-in acknowledged says nothing about whether the stress it is for has changed" in system
+    brain = work_context._ENV.get_template("subconscious/brain/prompts/system.j2").render(
+        resource_assistant_data={"name": "the assistant"}, resource_user_data={"first_name": "Sam"})
+    assert "write no note that only says the event does not establish something" in brain
+    assert "absence in the day or evening says nothing about sleep" in brain
 
 
 def _event(i, minutes, text, room="master_room", speaker="Owner"):
