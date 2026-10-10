@@ -21,6 +21,7 @@ What wakes it:
 - presence (2026-10-07): the owner coming back to the computer (the AFK monitor's afk_state_changed), and the
   moment an absence reaches brain_inbox.PRESENCE_AWAY (brain_inbox.next_presence_due);
 - the calendar (2026-10-09): a calendar sync or write that changed something (the repository's repo_update);
+- a ticket answered (2026-10-09, the ticket service's dayflow_ticket_responded, published for every ticket);
 - boot: one run at start picks up whatever arrived while the app was down;
 - the heartbeat (2026-10-01): a run at least every HEARTBEAT_SECONDS, for what changes without an
   event, such as the inputs of the day pass (subconscious/day_pass.py) and the start of a new day.
@@ -128,6 +129,11 @@ def handle_repo_update(message: Any) -> None:
     which reads what changed (brain_inbox.ingest_calendar, 2026-10-09)."""
     if str(getattr(message, "content", "") or "").strip().lower() == "calendar":
         poke()
+
+
+def handle_ticket_responded(message: Any) -> None:
+    """A ticket answered wakes the brain, which reads the reply (brain_inbox.ingest_tickets, 2026-10-09)."""
+    poke()
 
 
 def handle_afk_state_changed(message: Any) -> None:

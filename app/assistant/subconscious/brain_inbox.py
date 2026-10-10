@@ -15,7 +15,10 @@ owner leaving or coming back to the computer after an absence of PRESENCE_AWAY o
 keyboard spells (2026-10-07). Calendar: an event added to, changed on or removed from the calendar of the coming week
 as the calendar sync keeps it, found by comparing it with what was last seen (2026-10-09, docs/design/
 hub_and_spokes_2026-10-09.md gap 2; until then a calendar change woke dayflow and reached the brain only as context
-beside some other event). The gate
+beside some other event). Tickets: the owner's reply to every ticket the assistant raised (a scheduled reminder, a
+notice, a question) except dayflow's own (2026-10-09): those return to the task that asked and reach the brain in its
+work report. Until then a reply such as "you do this every night" to a question, or "stop reminding me" to a reminder,
+reached no decider. The gate
 (subconscious/gate.py) routes each row against the open concerns once it is ready (`ready`): an
 email or camera event at once, a chat room's messages once the room has been quiet for QUIET — `concern` (bears
 on named concerns), `new_matter`, or `none`. Work: dayflow's judgments and endings of work attached
@@ -88,6 +91,10 @@ PRESENCE_AWAY = timedelta(minutes=10)
 _FIRST_PRESENCE_LOOKBACK = timedelta(hours=1)
 # Every later run looks back this far; the event ids make it idempotent. The keyboard spells are kept 7 days.
 _PRESENCE_LOOKBACK = timedelta(hours=24)
+# Tickets whose replies return to the work that raised them: their reply reaches the brain in that work's report.
+TICKET_TYPES_VIA_WORK = ("dayflow_orchestrator",)
+# First run only: how far back ticket intake reaches (older replies are history, not news).
+_FIRST_TICKET_LOOKBACK = timedelta(hours=1)
 
 
 # The calendar as the brain last saw it, one row per stored calendar event (an occurrence of a recurring series is its
@@ -389,6 +396,52 @@ def ingest_calendar(*, now_utc: Optional[datetime] = None, connect=None, fetch=N
     return added
 
 
+def ingest_tickets(*, now_utc: Optional[datetime] = None, connect=None, fetch=None) -> int:
+    """Every ticket the owner answered since the last one ingested, except those whose reply returns to the work that
+    raised them (TICKET_TYPES_VIA_WORK). Returns rows added.
+
+    `fetch(since_utc)` returns the answered tickets as dicts (ticket_id, ticket_type, title, message, user_action,
+    user_text, responded_at: aware UTC); production reads the tickets table. The event is the ticket's words and the
+    owner's reply, at the reply's time; ref `ticket:<id>:<responded_at>`, so an answer given again lands again."""
+    connect = connect or _connect
+    ensure_schema(connect)
+    now_utc = now_utc or datetime.now(timezone.utc)
+    with connect(False) as c:
+        last = c.execute("SELECT MAX(occurred_at) FROM brain_events WHERE source='ticket'").fetchone()[0]
+    since = datetime.fromisoformat(last) if last else now_utc - _FIRST_TICKET_LOOKBACK
+    rows = (fetch or _fetch_answered_tickets)(since)
+    received = _iso(now_utc)
+    added = 0
+    with connect(True) as c:
+        for t in rows:
+            if t["ticket_type"] in TICKET_TYPES_VIA_WORK:
+                continue
+            reply = str(t.get("user_text") or "").strip()
+            action = str(t.get("user_action") or "").strip()
+            text = (f"Ticket ({t['ticket_type']}): {str(t.get('title') or '').strip()}\n"
+                    f"{str(t.get('message') or '').strip()}\n"
+                    f"The owner replied: {reply or '(no words)'}" + (f" (action: {action})" if action else ""))
+            cur = c.execute(
+                "INSERT OR IGNORE INTO brain_events (source, source_ref, occurred_at, room_id, speaker, text, "
+                "received_at) VALUES ('ticket', ?, ?, NULL, 'owner', ?, ?)",
+                (f"ticket:{t['ticket_id']}:{_iso(t['responded_at'])}", _iso(t["responded_at"]), text, received))
+            added += cur.rowcount
+    if added:
+        logger.info("[brain_inbox] ingested %d ticket reply(ies) since %s", added, since.isoformat())
+    return added
+
+
+def _fetch_answered_tickets(since_utc: datetime) -> List[Dict[str, Any]]:
+    """Tickets answered after `since_utc`, oldest first. responded_at is stored as naive UTC."""
+    since = since_utc.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+    with _connect(False) as c:
+        rows = c.execute("SELECT ticket_id, ticket_type, title, message, user_action, user_text, responded_at "
+                         "FROM tickets WHERE responded_at IS NOT NULL AND responded_at > ? ORDER BY responded_at",
+                         (since,)).fetchall()
+    return [{**dict(r), "responded_at": datetime.fromisoformat(str(r["responded_at"])).replace(tzinfo=timezone.utc)}
+            for r in rows]
+
+
 def _fetch_calendar() -> List[Dict[str, Any]]:
     from app.assistant.event_repository.event_repository import EventRepositoryManager
     return [r["data"] for r in json.loads(EventRepositoryManager().search_events(data_type="calendar"))]
@@ -486,7 +539,7 @@ def pending(connect=None) -> List[Dict[str, Any]]:
 
 
 def ready(events: List[Dict[str, Any]], now_utc: datetime) -> List[Dict[str, Any]]:
-    """The events whose matter is complete: every email, camera, presence, calendar and work event, and the chat of every room whose latest
+    """The events whose matter is complete: every email, camera, presence, calendar, ticket and work event, and the chat of every room whose latest
     message is at least QUIET old. Messages of a room still talking wait, all of them together."""
     last = _last_message_by_room(events)
     return [e for e in events
