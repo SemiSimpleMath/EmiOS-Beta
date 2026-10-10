@@ -191,7 +191,8 @@ def apply_entries(day: str, changes: List[Dict[str, Any]], *, cause: str, at: da
     day's, an earlier day's, or a concern's. A concern's entry keeps its concern; a day's entry keeps the concern the
     decider last named for it (2026-10-08: intake then attaches its work to the concern, and it ends when the concern
     closes). A change's `relies_on` ((kind, id) pairs, resolved by the caller) becomes the entry's relations when
-    the entry is created or changed.
+    the entry is created, changed or cancelled (a cancellation's since 2026-10-10: the day's tasks are woken when work
+    a decision relied on ends, and a cancellation "covered by the work already scheduled" relies on that work).
 
     The only writer of these entries since 2026-10-09 (owner: one decider, docs/design/hub_and_spokes_2026-10-09.md).
     Until then the concern planner wrote a concern's entries (apply_concern) and the day's tasks wrote its own, and
@@ -205,6 +206,7 @@ def apply_entries(day: str, changes: List[Dict[str, Any]], *, cause: str, at: da
         for a in changes:
             if a["action"] == "cancel":
                 cancel(c, a["entry"], reason=a["why"], cause=cause, at=when)
+                _relies_on(c, a["entry"], a.get("relies_on"), cause=cause, at=when)
                 counts["cancelled"] += 1
                 continue
             concern_id = a.get("concern_id")

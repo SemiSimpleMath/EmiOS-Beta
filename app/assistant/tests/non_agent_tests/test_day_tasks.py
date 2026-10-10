@@ -3,7 +3,8 @@
 Pins: it decides every entry on the list, a concern's included, and since 2026-10-09 the day's calendar arrives as
 concerns (subconscious/calendar_concerns.py), so a calendar concern's entry is a concern's entry; a run is recorded,
 and repeated only when a stage before it changed (a concern's record or plan), never on chat or the rest of the
-situation alone; a concern planner's proposal reaches it by label; the prompts render the rules, the labelled objects
+situation alone, and since 2026-10-10 when work a decision relied on ended (a cancellation keeps what it relied on
+too); a concern planner's proposal reaches it by label; the prompts render the rules, the labelled objects
 and the brain's situation, times local. The prompt is a projection (2026-10-08): every object shows a label of the
 call, never its id; the answer refers only by labels in relies_on, concern and entry, code maps them back and keeps
 what an entry relies on as relations, shown again on the next run. Scratch database; fake agent; invented data only.
@@ -43,9 +44,10 @@ def situation(chat="I'll start the report at 5", **changes):
                                          "changed_at": (NOW - timedelta(days=1)).isoformat()}], **changes}
 
 
-def _gather(conn, chat="I'll start the report at 5", s=None, basis="record-1"):
+def _gather(conn, chat="I'll start the report at 5", s=None, basis="record-1", ended=()):
     """day_tasks.gather's shape, on a scratch list: its own entries, the situation, and the call's labels
-    (day_tasks.project). `basis` stands for the concerns' records (what wakes the decider)."""
+    (day_tasks.project). `basis` stands for the concerns' records and `ended` for the work relied on that has ended
+    (what wakes the decider)."""
     def gather(now):
         own = [{**e, "work": None, "relies_on": [list(r) for r in L.relies_on(e["id"], connect=conn)]}
                for e in L.entries(day=DAY, kind="day", connect=conn)]
@@ -53,7 +55,7 @@ def _gather(conn, chat="I'll start the report at 5", s=None, basis="record-1"):
         for c in sit["concerns"]:
             c.setdefault("basis", basis)
         return {"day": DAY, "now": now.isoformat(), "own": own, "situation": sit, "matters": [], "beliefs": [],
-                **D.project(DAY, sit, [], own, connect=conn), "correction": None}
+                "ended_relied_on": list(ended), **D.project(DAY, sit, [], own, connect=conn), "correction": None}
     return gather
 
 
@@ -87,6 +89,30 @@ def test_a_calendar_concerns_entry_is_decided_and_a_run_repeats_only_when_a_stag
     with conn(False) as c:
         recorded = json.loads(c.execute("SELECT decisions FROM brain_day_decisions ORDER BY id").fetchone()[0])
     assert recorded == GOOD["entries"], "the run records its answer"
+
+
+def test_the_end_of_work_a_decision_relied_on_wakes_it_and_a_cancellation_keeps_what_it_relied_on(tmp_path,
+                                                                                                 monkeypatch):
+    """2026-10-10: at 8:02 the decider cancelled the evening AC's entry as covered by the work already scheduled;
+    that work was ended, and nothing woke the decider to give the concern its entry again."""
+    conn = sqlite_file(tmp_path / "d.db")
+    D.run_day_tasks(now_utc=NOW, connect=conn, gather_inputs=_gather(conn), call=lambda p: GOOD)
+    [ac] = L.entries(concern_id="c-ac", connect=conn)
+    L.apply_entries(DAY, [{"action": "cancel", "entry": ac["id"], "why": "covered by the work already scheduled",
+                           "relies_on": [("work", "work_old")]}], cause="test", at=NOW, connect=conn)
+    assert L.relies_on(ac["id"], connect=conn) == [("work", "work_old")], "a cancellation keeps what it relied on"
+    from app.assistant.subconscious import work_links
+    monkeypatch.setattr(work_links, "_rows", lambda: [{"id": "work_old", "status": "active"}])
+    assert D.ended_relied_on([], [{"concern_id": "c-ac"}], connect=conn) == []
+    monkeypatch.setattr(work_links, "_rows", lambda: [{"id": "work_old", "status": "abandoned"}])
+    assert D.ended_relied_on([], [{"concern_id": "c-ac"}], connect=conn) == ["work_old"]
+    later = NOW + timedelta(minutes=10)
+    calls = []
+    out = D.run_day_tasks(now_utc=later, connect=conn, gather_inputs=_gather(conn, ended=["work_old"]),
+                          call=lambda p: calls.append(p) or {"entries": []})
+    assert out["day_tasks"] == "decided" and calls, "the ending woke it"
+    assert D.run_day_tasks(now_utc=later, connect=conn, gather_inputs=_gather(conn, ended=["work_old"]),
+                           call=lambda p: pytest.fail("woken once per ending")) == {"day_tasks": "unchanged"}
 
 
 def test_an_answer_without_an_entries_list_is_refused(tmp_path):

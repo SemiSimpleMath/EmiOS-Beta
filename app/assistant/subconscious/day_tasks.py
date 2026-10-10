@@ -82,13 +82,17 @@ def ensure_schema(connect=None) -> None:
 def fingerprint(inputs: Dict[str, Any]) -> str:
     """What wakes the decider: the stages before it (docs/design/hub_and_spokes_2026-10-09.md, "each stage is woken
     only by the stage before it"): each open concern's record and plan (the brain step, the day pass's calendar
-    concerns and the concern planner). Everything else it reads (the situation, the chat, what
-    the brain decided today, the list's own entries and their work) is context, never a reason to run. Until
-    2026-10-09 the situation counted: chat the brain had already turned into concerns woke this decider a second time,
-    and the work its own entries made changed the situation and woke it again."""
+    concerns and the concern planner); and, the one exception (owner, 2026-10-10: "yes add the wake rule"), the end of
+    work one of its decisions relied on (`ended_relied_on`). Everything else it reads (the situation, the chat, what
+    the brain decided today, the list's own entries and their work in progress) is context, never a reason to run.
+    Until 2026-10-09 the situation counted: chat the brain had already turned into concerns woke this decider a
+    second time, and the work its own entries made changed the situation and woke it again. Until 2026-10-10 an ending
+    did not count: at 8:02 that day it cancelled three entries as covered by work already scheduled, the work was then
+    ended, and nothing would have woken it to give the concerns their entries again."""
     read = {"day": inputs["day"],
             "concerns": [(c["concern_id"], c["basis"], (c.get("plan") or {}).get("written_at"))
-                         for c in inputs["situation"]["concerns"]]}
+                         for c in inputs["situation"]["concerns"]],
+            "ended_relied_on": inputs["ended_relied_on"]}
     return hashlib.sha256(json.dumps(read, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 
@@ -389,7 +393,22 @@ def gather(now_utc: datetime, *, plan_connect=None) -> Dict[str, Any]:
     # On 2026-10-06 the decider called an item's own work "already covered by W8" and decided the item not needed,
     # which would have ended that work: work names the entry it was made from (project, `from_list`).
     return {"day": day, "now": now_utc.isoformat(), "own": own, "situation": s, "matters": matters,
-            "beliefs": concern_beliefs(s["concerns"]), **project(day, s, matters, own), "correction": None}
+            "beliefs": concern_beliefs(s["concerns"]), "ended_relied_on": ended_relied_on(own, s["concerns"]),
+            **project(day, s, matters, own), "correction": None}
+
+
+def ended_relied_on(own: List[Dict[str, Any]], concerns: List[Dict[str, Any]], *, connect=None) -> List[str]:
+    """The work that a decision on the list relied on and that has since ended (done or abandoned): its own entries'
+    decisions and every open concern's, the cancelled ones included. Its ending is a reason to decide again
+    (fingerprint)."""
+    from app.assistant.subconscious import brain_list, work_links
+    entry_ids = [e["id"] for e in own] + [e["id"] for c in concerns for e in brain_list.entries(
+        concern_id=c["concern_id"], include_cancelled=True, connect=connect)]
+    relied = {i for eid in entry_ids for kind, i in brain_list.relies_on(eid, connect=connect) if kind == "work"}
+    if not relied:
+        return []
+    status = {r["id"]: r["status"] for r in work_links._rows()}
+    return sorted(w for w in relied if status.get(w) in ("done", "abandoned"))
 
 
 def concern_beliefs(concerns: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
