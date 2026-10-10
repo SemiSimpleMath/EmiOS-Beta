@@ -64,6 +64,16 @@ An event bears on one concern, raises one new concern, or needs nothing. The gat
 answer names one concern per event; a second is an exception the brain must state. Work is held by the one concern
 it was made for (attachment by code, from the list entry), never by the brain's judgment that it "bears on" another.
 
+### 3b. Attached work is a reference, rendered live
+
+Owner, 2026-10-09: "attached work should just be a reference to the work object. then its rendered. that way if work
+object is updated then the attached work is automatically updated." A concern holds `attached_work` as references
+only: the work's id and when it was attached. Every reader renders the work from the work store when it reads it
+(its objective, where it stands, each task's outcome in the finalizer's words, how it ended), through the one view
+that renders work for outside readers (work_links.work_view with its progress). Nothing about the work is copied
+into the concern, so nothing goes stale: persist.record_judgment and the copying in attach_work and
+apply_work_outcome go; the work feedback receipts only tell the brain (rule 3's one concern) that its work moved.
+
 ### 4. A concern says what ends it
 
 - **A moment** ("the movie at a friend's house tonight", "this morning's dog walk") carries an end time; code closes it then,
