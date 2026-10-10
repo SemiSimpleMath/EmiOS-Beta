@@ -131,8 +131,15 @@ for that day, so the day's tasks read concerns only and every outcome returns to
   acts and one rule misdescribed them. They were retired, and about 35 still lie dormant.)
 - **Expiry.** At most about two hours after its time, or what is reasonable for it, set by the day pass's agent; an
   all-day placement expires at midnight.
-- **The day pass changes only its own.** When its placements change during the day it updates or closes the
-  concerns it raised that day; the brain notes them like any concern.
+- **Two writers, separate lanes.** Owner, 2026-10-09: "right day pass would only ever edit these concerns. question
+  is then since they are concerns brain can also edit them." The day pass edits only the concerns it raised: when it
+  places again during the day it updates what its placement says (what, when, expiry) or closes the concern when it
+  withdraws the placement. The brain edits them like any concern: notes, resolves ("someone else already walked the
+  dogs" ends that evening's walk and its work), and moves the expiry when news says the moment moved. That is the
+  reason to make them concerns: the brain is what hears what actually happened.
+- **A closed calendar concern stays closed.** The day pass finds its concern by identity on every run; one the brain
+  closed is left closed, never raised again for the same belief, day and time. When both change the same concern, the
+  later change stands, and each says why in its note.
 
 Open: whether a calendar concern needs a planner pass (its placement already says what and when; proposed: the day's
 tasks decide its entry from the concern directly); whether its entries keep the `cal:` kind or become concern entries.
