@@ -31,7 +31,7 @@ context tracker sees day and chat. its a whole mess." The trouble is not who rea
 every part may read anything. It is who reacts to what.
 
 ```
-inputs (chat, email, calendar, camera, presence, the clock, work outcomes)
+inputs (chat, email, calendar, ticket replies, camera, presence, the clock, work outcomes)
    |  each input is decided ONCE, here
    v
 [brain step] --writes--> concerns
@@ -73,6 +73,7 @@ daily insights and so tomorrow's beliefs, a loop that runs once a day by design.
 | Clock (a concern's day ended) | sense | `add_day_ended_events` | exists |
 | Work outcomes | sense (the cascade up) | `add_work_event`, concern and belief feedback | exists |
 | Calendar | sense | `ingest_calendar` | built (gap 2) |
+| Ticket replies | sense: the owner's answers to reminders, notices and questions (dayflow's own return through work reports) | `ingest_tickets` | built 2026-10-09 (20afbf0f) |
 | Day record | sense: what the day held and what happened | `subconscious/day_record.py` | shadow; feeds nothing yet |
 | Concerns | memory | concern register | exists |
 | Beliefs | memory | belief store; placed by the day pass, and by meaning to the brain step and the list decider (`belief_links`) | built (gap 3) |
