@@ -141,8 +141,10 @@ for that day, so the day's tasks read concerns only and every outcome returns to
   closed is left closed, never raised again for the same belief, day and time. When both change the same concern, the
   later change stands, and each says why in its note.
 
-Open: whether a calendar concern needs a planner pass (its placement already says what and when; proposed: the day's
-tasks decide its entry from the concern directly); whether its entries keep the `cal:` kind or become concern entries.
+- **No brief or planner.** Its placement already says what and when, so the day's tasks decide its entry from the
+  concern directly (owner, 2026-10-09: "no planner").
+- **Its entries are concern entries** (`con:`). The `cal:` kind goes: every entry from a placed belief now comes from
+  a concern, and the concern records that its source is a belief (owner, 2026-10-09: "agreed").
 
 ## Converting what is there
 
