@@ -208,16 +208,18 @@ def expire_concerns(now_utc: Optional[datetime] = None, *, connect=None) -> List
     return closed
 
 
-# What the day pass sets on a calendar concern when it places the day again; the brain's notes, its resolution and an
-# expiry it moved are the brain's.
-_PLACEMENT_FIELDS = ("title", "done_when", "notes", "calendar", "source", "belief_refs")
+# What the day pass sets on a calendar concern when it places the day again (a continued placement may move its time,
+# so its expiry moves with it); the brain's notes and its resolution are the brain's. Until 2026-10-10 a concern's
+# identity held its time, and the expiry was the brain's alone.
+_PLACEMENT_FIELDS = ("title", "done_when", "notes", "calendar", "source", "belief_refs", "expires_at")
 
 
 def apply_calendar_concerns(day: str, desired: List[Dict[str, Any]], now_utc: datetime, *,
                             connect=None) -> Dict[str, int]:
     """The day pass's concerns for `day` (subconscious/calendar_concerns.py, rule 7): each desired one raised when it
     is new, its placement updated when it is open, left as it is when the brain closed it; an open one of the day the
-    plan no longer places is closed. Returns the counts."""
+    plan no longer places is closed. A source whose words are unchanged keeps the time it was first given. Returns the
+    counts."""
     now_iso = now_utc.isoformat()
     counts = {"raised": 0, "updated": 0, "withdrawn": 0}
     with _REGISTER_LOCK:
@@ -235,6 +237,8 @@ def apply_calendar_concerns(day: str, desired: List[Dict[str, Any]], now_utc: da
             bucket, c = known[d["concern_id"]]
             if bucket not in ("active", "addressing"):
                 continue                                   # closed by the brain: it stays closed
+            if (c.get("source") or {}).get("content") == d["source"]["content"]:
+                d = {**d, "source": {**d["source"], "at": c["source"]["at"]}}
             if any(c.get(k) != d[k] for k in _PLACEMENT_FIELDS):
                 c.update({k: d[k] for k in _PLACEMENT_FIELDS})
                 counts["updated"] += 1

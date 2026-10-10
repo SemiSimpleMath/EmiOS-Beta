@@ -13,8 +13,9 @@ prose ... build the calendar"). Until then the writer wrote guidance per slot, a
 filed a 9 PM item under 9 AM; placements of the same inputs did not, in 100 replays.
 
 Since 2026-10-09 each placement also carries what the belief asks for today (`outcome`) and, for a clock time, until
-when it matters (`until`), and becomes a concern (subconscious/calendar_concerns.py; docs/design/concerns_as_state_
-2026-10-09.md, rule 7).
+when it matters (`until`), and the day's plan becomes concerns (subconscious/calendar_concerns.py; docs/design/
+concerns_as_state_2026-10-09.md, rule 7): since 2026-10-10 an agent makes the lines into one placement per thing the
+day holds, each with every belief about it, and each placement is one concern; until then each line was one.
 
 Each approved belief is read with the beliefs nearest to it in meaning (`_related`: up to RELATED_MAX, at least
 RELATED_MIN cosine over the stored statement embeddings), found by code: the holiday rule beside trash night,
@@ -180,7 +181,7 @@ def _routine_inputs_fingerprint(boundary_date_local: str, expected_schedule: lis
     """The exact decision inputs, excluding wall-clock/scaffold rendering and generated timestamps. The beliefs
     block is the approved beliefs with their related ones, as the writer reads them."""
     context = daily_context or {}
-    payload = {"projection_version": 7, "day": boundary_date_local,
+    payload = {"projection_version": 8, "day": boundary_date_local,
                "schedule": expected_schedule, "beliefs": beliefs_block,
                "current_status": context.get("current_status"), "milestones": context.get("milestones")}
     return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
@@ -382,9 +383,9 @@ def run_day_pass(now_utc: Optional[datetime] = None, *, connect=None, concern_co
         "backdrops": backdrops, "flags": flags, "slots": plan_slots}
     day_plan.save_plan(plan, connect=connect)
     step("day_pass", "written", day=day)
-    # Each placement is a concern (rule 7): raised, updated or withdrawn to match the plan.
+    # The plan's lines become the day's placements, each a concern (rule 7): raised, updated or withdrawn to match it.
     from app.assistant.subconscious import calendar_concerns
-    concerns = calendar_concerns.apply(plan, now_utc, connect=concern_connect)
+    concerns = calendar_concerns.apply(plan, now_utc, context=base, connect=concern_connect)
     step("day_pass", "concerns", day=day, **concerns)
     logger.info("[day_pass] wrote the plan for %s: %d placements of %d approved beliefs (%d related)",
                 day, sum(len(s["lines"]) for s in plan_slots) + len(flags), len(given), len(conditions))

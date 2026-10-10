@@ -1,0 +1,22 @@
+name: subconscious::day_placements
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  model_tier: "mini"
+
+# Makes today's plan into the day's placements, one per thing the day holds, each with the plan lines (beliefs) it
+# rests on (subconscious/calendar_concerns.py). Each placement is one of the household's concerns for today.
+# Context is fully pre-injected.
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+accept_auto_skills: false
+
+user_context_items:
+  - agent_input
+
+required_context_items:
+  - agent_input
+
+system_context_items: []

@@ -217,9 +217,23 @@ def project(day: str, situation: Dict[str, Any], matters: List[Dict[str, Any]], 
             f"your own entry {label}" if label and label.startswith("O") else
             f"the concern's entry {label}" if label else
             f"an entry on the list of {entry.split(':')[1]}" if entry.startswith(("cal:", "day:")) else
-            "a concern's entry not shown here")
+            _unshown_entry(entry, connect=connect))
     return {"labels": p.labels, "earlier": earlier,
             "source_labels": {i: lab for lab, (k, i) in p.labels.items() if k == "work"}}
+
+
+def _unshown_entry(entry_id: str, *, connect=None) -> str:
+    """Where work made from a concern's entry not in view came from. A cancelled entry's work is being ended
+    (dayflow_orchestrator/brain_list_intake.py): on 2026-10-10 the evening air conditioner's work, its concern closed
+    and its entry cancelled, read here only as "a concern's entry not shown here" while still in motion, and the
+    decider gave the concern that replaced it no entry, as if that work covered it."""
+    from app.assistant.subconscious import brain_list
+    from app.assistant.utils.time_utils import local_time_text
+    last = (brain_list.changes(entry_id, connect=connect) or [{}])[-1]
+    if last.get("change") == "cancelled":
+        return (f"a concern's entry cancelled {local_time_text(last['at'])}: this work is being ended and "
+                "covers nothing now")
+    return "a concern's entry not shown here"
 
 
 def describe(kind: str, obj_id: str, *, connect=None) -> Dict[str, Any]:

@@ -1,0 +1,28 @@
+## Today: {{ agent_input.day_text }}
+Now: {{ agent_input.now_local }}
+
+{{ agent_input.daily_context }}
+
+## Today's plan, the lines still ahead
+{% for l in agent_input.lines -%}
+- [{{ l.label }}] {{ l.time }}{% if l.until %} until {{ l.until }}{% endif %}: {{ l.outcome }}
+  belief: {{ l.statement }}
+{% else -%}
+(no lines ahead)
+{% endfor %}
+## The concerns already made from today's plan
+{% for p in agent_input.concerns -%}
+- [{{ p.label }}] {{ p.time }}{% if p.until %} until {{ p.until }}{% endif %}: {{ p.title }} ({{ p.state }})
+{%- for s in p.statements %}
+  belief: {{ s }}
+{%- endfor %}
+{% else -%}
+(none yet)
+{% endfor %}
+{% if agent_input.get('correction') %}
+## Correct your previous answer
+
+It did not satisfy the contract: {{ agent_input.correction }}
+Answer again, with every placement correct.
+{% endif %}
+Make the day's placements.

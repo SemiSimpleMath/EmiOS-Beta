@@ -63,7 +63,7 @@ def attempts(concern: Dict[str, Any]) -> List[Dict[str, Any]]:
 _SOURCE_WORDS = {"user": "the owner", "email": "an email", "calendar": "the calendar", "camera": "a camera",
                  "presence": "presence at the computer", "work": "a report on the assistant's work",
                  "noticer": "the noticer's reading of the long view", "brain": "the brain's inference",
-                 "belief": "a belief about the household"}
+                 "belief": "the household's beliefs"}
 
 
 def source_text(concern: Dict[str, Any]) -> str:

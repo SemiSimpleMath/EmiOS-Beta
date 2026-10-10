@@ -138,13 +138,17 @@ A concern carries: `concern_id`, `title`, `subject`, `kind`, `domain_tags`, `sev
 
 ### The day's beliefs are concerns (2026-10-10)
 
-Each belief the day pass places becomes a concern of its own (`subconscious/calendar_concerns.py`; rule 7 of
-`docs/design/concerns_as_state_2026-10-09.md`): its identity is its belief, day and time; its source the belief; it
+The day's plan becomes concerns (`subconscious/calendar_concerns.py`; rule 7 of
+`docs/design/concerns_as_state_2026-10-09.md`). The plan keeps one line per belief that applies, at each time;
+`subconscious::day_placements` makes the lines still ahead into one placement per thing the day holds (the beliefs
+about the morning dog walk together), and names the concern from earlier in the day each one continues, so a moved
+time keeps its concern and its work. Each placement is one concern: its source and `belief_refs` its beliefs; it
 expires at most about two hours after its time (the writer's `until`), or at midnight when placed for all day; it has
 no planner pass, and the day's tasks decide its entry (`con:`). The day pass edits only the concerns it raised
 (updates what its placement says, closes one it no longer places); the brain notes and resolves them like any
-concern, and one it closed is never raised again. The work made for its entry carries the belief (`belief_refs`), so
-the outcome returns to the belief. What follows describes 2026-10-03 to 2026-10-09.
+concern, and one it closed is never raised again. The work made for its entry carries the beliefs (`belief_refs`), so
+the outcome returns to each belief. Until later on 2026-10-10 each line was its own concern, its identity belief, day
+and time. What follows describes 2026-10-03 to 2026-10-09.
 
 ### Beliefs are not concerns (2026-10-03)
 

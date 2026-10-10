@@ -65,9 +65,6 @@ def run_brain() -> Dict[str, Any]:
     expired = persist.expire_concerns()
     gate = run_gate()
     brain = run_brain_step()
-    # A concern the brain closed takes its open list entries with it, so dayflow ends their work.
-    from app.assistant.subconscious import brain_list
-    closed_entries = brain_list.cancel_for_closed_concerns(load_register(), at=datetime.now(timezone.utc))
     summaries = run_summaries()
     plans = concern_planner.run_planners()
     handoffs = run_handoffs()
@@ -88,6 +85,12 @@ def run_brain() -> Dict[str, Any]:
     # Last: the day's tasks (subconscious/day_tasks.py), the list's one decider (docs/design/hub_and_spokes_2026-10-09.md),
     # which reads the concerns the brain step changed and the plans the planner proposed earlier in this pass.
     from app.assistant.subconscious.day_tasks import run_day_tasks
+    # A concern the brain closed, or the day pass withdrew, takes its open list entries with it, so dayflow ends their
+    # work; done here, just before the day's tasks read the list. Until 2026-10-10 it ran right after the brain step,
+    # so a calendar concern the day pass withdrew kept its entry through the day's tasks' read: the evening air
+    # conditioner's work looked in motion and the concern that replaced it got no entry.
+    from app.assistant.subconscious import brain_list
+    closed_entries = brain_list.cancel_for_closed_concerns(load_register(), at=datetime.now(timezone.utc))
     with trace(stage="day_tasks"):
         decided = run_day_tasks()
     # A live lane takes its work from the list: the planning tick makes it, so the tick is asked to run when the

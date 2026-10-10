@@ -135,8 +135,13 @@ for that day, so the day's tasks read concerns only and every outcome returns to
 - **The day pass creates them.** The agent that places a belief today raises its concern: what the belief asks for
   today, at what time, with the belief as its source (`kind: belief`, `content` the belief's statement) and its
   `belief_refs`, so the work's outcome still reaches the belief.
-- **Identity by code.** A calendar concern's identity is its belief, its day and its time. It does not go through the
-  concern door: nothing to judge, so nothing can be merged into it. (On 2026-10-02/03 beliefs did become concerns, one
+- **One concern per thing the day holds (2026-10-10).** Owner: "we already had an agent that looks at all the beliefs
+  and picks out the ones that apply today". The day pass judges each belief; `subconscious::day_placements` then makes
+  the plan's lines into placements, one per thing the day holds with every belief about it, and names the concern
+  from earlier in the day each continues, so a moved time keeps its concern. On the first day each line was its own
+  concern (identity belief + day + time): three for the morning dog walk, and a time moved from 9:30 to 9:00 PM
+  closed the evening air conditioner's concern and raised one whose entry the day's tasks never made.
+- **Identity.** A calendar concern does not go through the concern door: nothing to judge, so nothing can be merged into it. (On 2026-10-02/03 beliefs did become concerns, one
   "standing" concern per belief across all days, admitted through the door; the door merged beliefs about different
   acts and one rule misdescribed them. They were retired, and about 35 still lie dormant.)
 - **Expiry.** At most about two hours after its time, or what is reasonable for it, set by the day pass's agent; an
