@@ -35,12 +35,24 @@ _EMAIL_PARSER_SCOPE = ScopeContext(
     resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
 )
 
-def sent_by_assistant(email_message, label_ids) -> dict:
+def held_addresses() -> set:
+    """The address of every Google account the assistant holds or has held, the owner's and its own alike: the
+    accounts it can send from. Read from the OAuth account store on each fetch, so an account added later counts."""
+    from app.assistant.lib.google_auth.oauth_account_store import get_google_oauth_account_store
+    return {str(row["principal_email"]).strip().lower()
+            for row in get_google_oauth_account_store().list_accounts() if row.get("principal_email")}
+
+
+def sent_by_assistant(email_message, held: set) -> dict:
     """The assistant's own mark on an email it sent (send_email puts the headers on), as email fields: empty for any
-    other email. Gmail's SENT label proves this account sent it; a stranger can write the header but not the label."""
+    other email. The mark counts only on mail from an account the assistant holds (`held_addresses`): a stranger can
+    write the header but cannot send from those addresses."""
+    from email.utils import parseaddr
     from app.assistant.lib.core_tools.email_tool.utils.gmail_api_client import (
         SENT_BY_ASSISTANT_HEADER, SENT_FOR_TASK_HEADER, SENT_FOR_WORK_HEADER)
-    if email_message.get(SENT_BY_ASSISTANT_HEADER) is None or "SENT" not in label_ids:
+    if email_message.get(SENT_BY_ASSISTANT_HEADER) is None:
+        return {}
+    if parseaddr(str(email_message.get("From") or ""))[1].strip().lower() not in held:
         return {}
     return {"sent_by_assistant": True,
             "sent_for_work": email_message.get(SENT_FOR_WORK_HEADER),
@@ -219,6 +231,7 @@ class EmailUtils:
         # importance/summary/action_items are populated, then store the kept ones as email pods.
         if repo_update:
             summary_agent = DI.agent_factory.create_agent("email_parser")
+            held = held_addresses()
             processed_emails = []
             email_ids = []
             skipped_low_importance = 0
@@ -244,7 +257,7 @@ class EmailUtils:
                     "account_id": resolved_account_id,
                     "direction": "inbound",
                     "body": email_body,
-                    **sent_by_assistant(email_message, full_email["label_ids"]),
+                    **sent_by_assistant(email_message, held),
                 }
 
                 importance_raw = email_data.get("importance")
@@ -438,6 +451,7 @@ class EmailUtils:
         skipped_missing_importance = 0
         
         summary_agent = DI.agent_factory.create_agent("email_parser")
+        held = held_addresses()
         logger.debug("Starting LLM processing for %d filtered emails.", len(filtered_emails))
 
         for idx, (email_meta, full_email, email_metadata) in enumerate(filtered_emails):
@@ -460,7 +474,7 @@ class EmailUtils:
                 "thread_id": str(email_meta.get("threadId") or ""),
                 "data_type": "email",
                 "account_id": resolved_account_id,
-                **sent_by_assistant(email_message, full_email["label_ids"]),
+                **sent_by_assistant(email_message, held),
             }
 
             # Require a valid importance; if missing or invalid, skip
@@ -607,6 +621,7 @@ class EmailUtils:
 
         # LLM triage — no session open during these calls.
         summary_agent = DI.agent_factory.create_agent("email_parser")
+        held = held_addresses()
         results: list[dict] = []
         skipped_low_importance = 0
         skipped_missing_importance = 0
@@ -626,7 +641,7 @@ class EmailUtils:
                 "thread_id": str(hit.get("threadId") or ""),
                 "data_type": "email",
                 "account_id": resolved_account_id,
-                **sent_by_assistant(email_message, full_email["label_ids"]),
+                **sent_by_assistant(email_message, held),
             }
 
             importance_raw = email_data.get("importance")

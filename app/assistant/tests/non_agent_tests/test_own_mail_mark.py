@@ -3,8 +3,8 @@
 The assistant sends from the owner's Gmail, so an email it sends to the owner lands in the owner's inbox with the owner
 as sender; on 2026-10-10 the brain read its forward as "<owner> forwarded the Yahoo message". Pins: send_email marks
 every email it sends, with the work and task it was sent for on a work session; the fetch reads the mark only on an
-email this account sent (Gmail's SENT label); every reader's sender line and the pod's one-liner then say the assistant
-sent it. Fake Gmail service; invented data only.
+email from one of the accounts the assistant holds, the owner's or its own, however many; every reader's sender line
+and the pod's one-liner then say the assistant sent it. Fake Gmail service; invented data only.
 """
 from __future__ import annotations
 
@@ -36,13 +36,18 @@ class _Send:
         return {"id": "m1"}
 
 
-def _sent(headers):
-    """The email send_email would put on the wire with these headers, parsed back."""
+HELD = {"owner@mail.example", "owner.work@mail.example", "assistant@mail.example"}
+
+
+def _sent(headers, sender="owner@mail.example"):
+    """The email send_email would put on the wire with these headers, parsed back, as Gmail delivers it from `sender`."""
     sink = []
     client = object.__new__(GmailAPIClient)
     client.service = _Send(sink)
     assert client.send_email("owner@mail.example", "Fwd: Hi", "Forwarding.", headers=headers) == {"id": "m1"}
-    return message_from_bytes(base64.urlsafe_b64decode(sink[0]))
+    message = message_from_bytes(base64.urlsafe_b64decode(sink[0]))
+    message["From"] = f"Some Name <{sender}>"
+    return message
 
 
 def _in_work_session(fn):
@@ -55,19 +60,21 @@ def _in_work_session(fn):
 
 def test_an_email_sent_off_a_work_session_carries_only_the_mark():
     message = _sent(_own_mail_headers())
-    assert sent_by_assistant(message, ["SENT", "INBOX"]) == {
+    assert sent_by_assistant(message, HELD) == {
         "sent_by_assistant": True, "sent_for_work": None, "sent_for_task": None}
 
 
 def test_an_email_sent_for_work_names_the_work_and_task():
     message = _sent(_in_work_session(_own_mail_headers))
-    assert sent_by_assistant(message, ["SENT", "INBOX"]) == {
+    assert sent_by_assistant(message, HELD) == {
         "sent_by_assistant": True, "sent_for_work": "work_abc", "sent_for_task": "forward--abc"}
 
 
-def test_the_mark_counts_only_on_mail_this_account_sent():
-    assert sent_by_assistant(_sent(_own_mail_headers()), ["INBOX"]) == {}
-    assert sent_by_assistant(_sent({}), ["SENT", "INBOX"]) == {}
+def test_the_mark_counts_from_every_held_account_and_no_other():
+    for sender in ("owner.work@mail.example", "Assistant@Mail.example"):
+        assert sent_by_assistant(_sent(_own_mail_headers(), sender), HELD)["sent_by_assistant"] is True
+    assert sent_by_assistant(_sent(_own_mail_headers(), "stranger@else.example"), HELD) == {}
+    assert sent_by_assistant(_sent({}), HELD) == {}
 
 
 def _record(**kw):

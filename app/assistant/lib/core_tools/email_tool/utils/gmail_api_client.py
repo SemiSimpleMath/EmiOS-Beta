@@ -146,8 +146,7 @@ class GmailAPIClient:
             
             return {
                 'uid': message_id,
-                'raw_email': raw_email,
-                'label_ids': list(message.get('labelIds') or []),
+                'raw_email': raw_email
             }
             
         except HttpError as e:
