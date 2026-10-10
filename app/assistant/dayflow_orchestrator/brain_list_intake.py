@@ -13,7 +13,12 @@ judges nothing; the entry already says what is needed:
   when, what it covers): the objective and brief are revised and a re-plan instruction is left on the work object in
   the same commit, licensed as the brain's directive (until 2026-10-05 only a changed what or when counted, and the
   re-plan request lived on the tick's blackboard);
-- an entry cancelled, or decided not needed, while its work is active: an end instruction with the brain's reason;
+- an entry cancelled, or decided not needed, while its work is active: the work ends, abandoned with the brain's
+  reason, and the concerns and beliefs it served are told. The brain decides what work exists, so its end is binding
+  (owner, 2026-10-10: "make it binding"). Until then it was an end instruction the architect could refuse: on
+  2026-10-10 it kept five pieces of work whose concerns the day pass had withdrawn ("the cancellation reason does
+  not override this pending work"), the day's tasks then took that work as covering the concerns raised in their
+  place, and the work's outcomes would have reached the closed concerns;
 - an entry still decided needed after its work ended: new work is made from it. Until 2026-10-08 such a change was
   recorded only ("a done entry runs again only by a new decision, never by a rewording"); on 10-08 the architect
   ended the evening's phone-charge reminder as a duplicate of the day before's, the brain re-decided it needed with
@@ -202,6 +207,18 @@ def deliver(store, *, now_utc: Optional[datetime] = None, connect=None, list_con
     return out
 
 
+def _deliver_ending(store, work_id: str) -> None:
+    """After the brain ends work: the concerns and beliefs it served get the ending, as after the architect ends a goal
+    (work_architect_node._deliver_ending). Both are receipt-backed; a failed delivery is retried by the tick's prep."""
+    from app.assistant.subconscious.concern_feedback import propagate_work_outcome
+    from belief_engine.work_feedback import propagate_work_outcome_to_beliefs
+    propagate_work_outcome(store, work_id, "abandoned")
+    try:
+        propagate_work_outcome_to_beliefs(store, work_id, "abandoned")
+    except Exception:
+        logger.error("[brain_list_intake] work %s ended by the brain; belief feedback failed", work_id, exc_info=True)
+
+
 def _deliver_entry(store, entry: Dict[str, Any], change_ids: List[int], work: Optional[Dict[str, Any]],
                    now: datetime, connect, out: Dict[str, List[Any]]) -> None:
     """Act on one entry's undelivered changes and record them delivered."""
@@ -229,8 +246,9 @@ def _deliver_entry(store, entry: Dict[str, Any], change_ids: List[int], work: Op
         out["revised"].append(work_id)
     elif action == "end":
         reason = entry["why"] if entry["status"] != "cancelled" else f"cancelled on the brain's list: {entry['why']}"
-        store.apply("instruct_goal", {"work_id": work_id, "kind": "end", "reason": f"The brain: {reason}"},
+        store.apply("set_work_status", {"work_id": work_id, "status": "abandoned", "reason": f"The brain: {reason}"},
                     actor="brain")
+        _deliver_ending(store, work_id)
         out["ended"].append(work_id)
     step("list_intake", action, subject=entry_id, work_id=work_id, outcome=entry["what"])
     with connect(True) as c:

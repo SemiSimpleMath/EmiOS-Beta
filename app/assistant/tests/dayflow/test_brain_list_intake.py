@@ -4,7 +4,7 @@ Pins: an entry decided needed gets a work object shell built by
 code (objective = the outcome and when, the brief, the entry id and its belief or concern in the constraints) and
 each change is acted on once; a changed entry with active work is revised and a re-plan instruction left on it in
 the same commit (any change the list records, the assistant's part included); an entry
-decided not needed, or cancelled, sends an end instruction with the brain's reason; an entry still decided needed
+decided not needed, or cancelled, ends its work with the brain's reason, binding (2026-10-10); an entry still decided needed
 after its work ended gets new work (2026-10-08); an entry made before its kind's work came from the list (a day's
 before CALENDAR_FROM_DAY, a concern's before CONCERN_SINCE) is left as it was, the retired steward's; a calendar
 concern's entry carries its concern and its belief (2026-10-09). The calendar
@@ -114,13 +114,15 @@ def test_not_needed_or_cancelled_ends_the_work_with_the_brains_reason(scratch):
     [work_id] = _deliver(scratch)["created"]
     _decide(lst, decision="not_needed", at=NOW + timedelta(minutes=5))
     assert _deliver(scratch)["ended"] == [work_id]
-    [instruction] = _store().load(work_id).constraints["architect_instructions"]
-    assert instruction["reason"] == "The brain: A standing wish." and instruction["from"] == "brain"
+    ended = _store().load(work_id)
+    assert ended.status == "abandoned" and ended.constraints["terminal"]["reason"] == "The brain: A standing wish."
+    assert not ended.constraints.get("architect_instructions"), "binding: no instruction for the architect to refuse"
     _decide(lst, belief="B4")
     [other] = _deliver(scratch)["created"]
     with lst(True) as c:
         L.cancel(c, _cal(DAY, "B4"), reason="the owner is away tonight", cause="decided", at=NOW)
     assert _deliver(scratch)["ended"] == [other], "a cancelled entry ends its work"
+    assert _store().load(other).status == "abandoned"
 
 
 def test_an_entry_still_needed_after_its_work_ended_gets_new_work(scratch):
@@ -209,8 +211,8 @@ def test_a_closed_concern_cancels_its_open_entries_and_its_work_ends(scratch, mo
     assert L.entries(concern_id="c-ring", connect=lst) == []
     assert L.cancel_for_closed_concerns(register, at=later, connect=lst) == [], "once"
     assert _deliver(scratch, at=later)["ended"] == [work_id]
-    [instruction] = _store().load(work_id).constraints["architect_instructions"]
-    assert instruction["kind"] == "end" and "The owner recharged it this morning." in instruction["reason"]
+    ended = _store().load(work_id)
+    assert ended.status == "abandoned" and "The owner recharged it this morning." in ended.constraints["terminal"]["reason"]
 
 
 def test_one_entry_that_fails_is_left_for_the_next_tick_and_the_others_go_on(scratch, monkeypatch):

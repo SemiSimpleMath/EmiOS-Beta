@@ -316,7 +316,8 @@ and before `work_architect_node`; logic in `dayflow_orchestrator/brain_list_inta
 For each brain-list entry with undelivered changes (every entry made since its kind's work came from the list:
 `CALENDAR_FROM_DAY`, `CONCERN_SINCE`): create a work-object shell (goal only, `constraints.list_entry_id`,
 `concern_refs` from a concern entry, `belief_refs` from the entry's beliefs), revise active work (one batch:
-`revise_goal` + `instruct_goal kind=replan`), or end active work (`instruct_goal kind=end`); an entry still needed
+`revise_goal` + `instruct_goal kind=replan`), or end active work (abandoned with the brain's reason, binding since 2026-10-10; until then `instruct_goal
+kind=end`, which the architect could refuse); an entry still needed
 after its work ended gets new work (2026-10-08). Each change is recorded once in `brain_list_deliveries`. One
 entry's failure is logged and retried next tick; failing to read the list raises. Until 2026-10-10 lanes were
 switched in `configs/brain_lanes.json` (off / dry_run / live). Full description: 05_DAYFLOW, "Brain list intake".
@@ -784,7 +785,7 @@ Until 2026-10-10 intake triage and the steward (`strategic_planner_wo` with its 
 before the list intake; the steward was skipped from 2026-10-06.
 
 The cadence: ingest → sweeps + pending-finalization recovery → pending concern/belief feedback → work from the
-brain's list (shells, revisions, end instructions) → decompose new and empty goals, re-plan woken ones, end goals → promote ready nodes
+brain's list (shells, revisions, endings) → decompose new and empty goals, re-plan woken ones, end goals → promote ready nodes
 → materialize → pick ONE → **claim it, and end the pass**. Neither the finalizer nor repair appears here: the finalizer moved into the
 dispatch room, and repair is retired.
 

@@ -113,7 +113,9 @@ judges nothing):
   entry; the goal is set `dispatched` and the concern is told it is attached;
 - **revise** — changed while its work is active: one batch of `revise_goal` + `instruct_goal`
   `kind=replan` with the brain's reason;
-- **end** — cancelled or decided not needed while its work is active: `instruct_goal` `kind=end`;
+- **end** — cancelled or decided not needed while its work is active: the work is abandoned with the brain's
+  reason (`set_work_status`) and its concerns and beliefs are told; binding since 2026-10-10 (until then an
+  `instruct_goal` `kind=end` the architect could refuse, and on 2026-10-10 it kept five);
 - **create** also when the entry is still decided needed after its work ended: new work is made from it
   (until 2026-10-08 such a change was recorded only, `work_ended_not_reopened`, and an entry whose work the
   architect had ended by mistake could never get work again).
@@ -361,7 +363,7 @@ ticket manager, not in dayflow items.
 | `dayflow_orchestrator/dayflow_tick.py` | Cadence tick entry point |
 | `dayflow_orchestrator/ingestion.py` + `input_message_builder.py` | Per-source intake -> items |
 | `dayflow_orchestrator/work_store.py` | The dayflow WorkObject store (emi.db) |
-| `dayflow_orchestrator/brain_list_intake.py` | Work from the brain's list: shell / revise + replan / end instruction per entry change; `brain_list_deliveries` |
+| `dayflow_orchestrator/brain_list_intake.py` | Work from the brain's list: shell / revise + replan / end (binding) per entry change; `brain_list_deliveries` |
 | `control_nodes/work_prep_node.py` | The tick's first stage: pending concern/belief feedback, the reminder history |
 | `control_nodes/brain_list_intake_node.py` | Runs the list-item intake between the prep node and the architect |
 | `dayflow_orchestrator/work_intake.py` | Durable source records, goal content and `goal_update` for creations and revisions |
