@@ -81,8 +81,9 @@ visit) is a fact of the day: the brain decides it needs nothing for concerns, an
 
 ## Converting what is there
 
-- Each open concern's brief is rewritten once from its whole record, under the new writer rules.
-- The old notes stay in the record as history, unread by anyone but the brief writer.
+- Each open concern gets its first summary from its whole record now (most are long); later summaries run only when
+  the notes since grow long.
+- The old notes stay in the record as history, folded into the summary and unread by anyone else.
 - Work attached by the brain's judgment (not made for the concern) is detached: the dog-walk follow-up from <friend>'s
   birthday, the Edison bill from the property tax, the bedtime and lights reminders from fatigue.
 - Each open concern is marked moment or matter; moments from before today close.
