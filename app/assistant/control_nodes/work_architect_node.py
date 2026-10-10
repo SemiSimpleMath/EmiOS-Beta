@@ -327,6 +327,36 @@ def _render_existing_graph(wo, ids=None) -> str:
     return render_view("portfolio", work=work_data(wo), labels=ids or {})
 
 
+def _form_refusal(exc: BaseException):
+    """The reasons the architect's form refused its answer (agent_form validation: a node with both a time and a
+    condition, for one), from the chain of the structured-output failure; None when the failure is something else."""
+    from pydantic import ValidationError
+    seen = exc
+    while seen is not None:
+        if isinstance(seen, ValidationError):
+            return "; ".join(f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in seen.errors())
+        seen = seen.__cause__ or seen.__context__
+    return None
+
+
+def _ask(agent, task: str, information: str, scope) -> dict:
+    """The architect's answer. When its form refuses the answer, ask once more with the refusal; a second refusal
+    raises. Until 2026-10-10 a refused answer failed the goal's planning with no correction, and the empty goal was
+    offered again every tick: the lights-off-after-bedtime goal failed twice that morning on a step given both a time
+    and a condition."""
+    try:
+        return getattr(agent.action_handler(Message(task=task, information=information, scope_context=scope)),
+                       "data", {}) or {}
+    except RuntimeError as exc:
+        refusal = _form_refusal(exc)
+        if refusal is None:
+            raise
+        logger.warning("[work_architect_node] answer refused by its form, one correction: %s", refusal)
+        correction = render_view("architect_refused", reason=refusal)
+        return getattr(agent.action_handler(Message(task=task + correction, information=information,
+                                                     scope_context=scope)), "data", {}) or {}
+
+
 def _apply_with_correction(agent, data: dict, task: str, information: str, scope, apply):
     """Apply the architect's answer; when the graph refuses it (ValueError/KeyError from the revision:
     an invalid or cyclic dependency, a refused prune, an invalid duplicate pair), ask once more with the
@@ -337,8 +367,7 @@ def _apply_with_correction(agent, data: dict, task: str, information: str, scope
     except (ValueError, KeyError) as refusal:
         logger.warning("[work_architect_node] revision refused, one correction: %s", refusal)
         correction = render_view("architect_refused", reason=str(refusal))
-        result = agent.action_handler(Message(task=task + correction, information=information, scope_context=scope))
-        data = getattr(result, "data", {}) or {}
+        data = _ask(agent, task + correction, information, scope)
         return data, apply(data)
 
 
@@ -401,17 +430,14 @@ class WorkArchitectNode(ControlNode):
                         goal = wo.nodes.get(wo.goal_node_id)
                         objective = (goal.content or goal.title) if goal else c["objective"]
                         task = render_view("architect_task", mode="create", objective=objective)
-                        result = agent.action_handler(Message(task=task, information=why, scope_context=scope))
-                        data = getattr(result, "data", {}) or {}
+                        data = _ask(agent, task, why, scope)
                         # A new goal is planned or ended, never left empty: an empty one comes back every tick
                         # (2026-10-05: on goals other work already covered, the architect answered "keep the
                         # existing task" with no steps and no ending). One correction, then it is an error.
                         if not (data.get("nodes") or data.get("end_goal")):
                             correction = render_view("architect_empty_create",
                                                      summary=str(data.get("architect_summary") or "").strip())
-                            result = agent.action_handler(Message(task=task + correction, information=why,
-                                                                  scope_context=scope))
-                            data = getattr(result, "data", {}) or {}
+                            data = _ask(agent, task + correction, why, scope)
                             if not (data.get("nodes") or data.get("end_goal")):
                                 raise ValueError(f"architect planned no steps and did not end {work_id}, after one "
                                                  f"correction: {data.get('architect_summary')!r}")
@@ -461,8 +487,7 @@ class WorkArchitectNode(ControlNode):
                                            goal_instructions=instructions.get(work_id, []),
                                            rationale=str((wo.constraints or {}).get("rationale") or "").strip(),
                                            stranded=work_id in stranded)
-                        result = agent.action_handler(Message(task=task, information=goal_info, scope_context=scope))
-                        data = getattr(result, "data", {}) or {}
+                        data = _ask(agent, task, goal_info, scope)
 
                         def apply(d, wo=wo, work_id=work_id, licensed=licensed, labels=labels):
                             d, _ = _resolve(d, labels, wo)
