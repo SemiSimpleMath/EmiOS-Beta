@@ -118,3 +118,35 @@ def test_internal_records_are_not_external_wake_candidates_and_empty_pass_clears
     StateMoverPrepNode(name="prep", blackboard=bb, agent_registry={}, tool_registry={})._build_work_object_waits([])
     assert bb.get_state_value("waiting_work_nodes") == []
     assert bb.get_state_value("work_wait_intake") == []
+
+
+def test_a_wait_shows_when_it_began_and_an_arrival_the_tasks_that_already_acted_on_it():
+    """2026-10-10: a task waiting for "a further email" was woken by the email its sibling task was about to forward,
+    which had arrived before the wait began; the state mover saw neither fact, and it was forwarded twice."""
+    from datetime import datetime, timezone
+    from app.assistant.subconscious import relations
+    from app.assistant.subconscious.db import connect
+    store, wid = scenario()
+    relations.ensure_schema()
+    with connect(True) as c:
+        relations.replace(c, ("task", "research"), "uses", [("source_item", "request")],
+                          at=datetime.now(timezone.utc).isoformat(), by="test")
+    bb = FakeBlackboard()
+    StateMoverPrepNode(name="prep", blackboard=bb, agent_registry={}, tool_registry={})._build_work_object_waits(
+        [email("request", "Compare three appliances."), email("approval", "Option B is approved.")])
+    [wait] = [w for w in bb.get_state_value("waiting_work_nodes") if w["task_id"] == wid + "::relay"]
+    relay = store.load(wid).nodes["relay"]
+    assert wait["waiting_since"] == local_time_text(relay.created_at.isoformat())
+    by_item = {s["item_id"]: s["acted_on_by"] for s in bb.get_state_value("work_wait_intake")}
+    assert by_item["request"] == [{"title": "research", "status": "proposed"}]
+    assert by_item["approval"] == []
+    root = Path(__file__).resolve().parents[2] / "agents"
+    env = Environment(loader=FileSystemLoader(str(root)), undefined=ChainableUndefined)
+    env.filters["local_time"] = local_time_text
+    from app.assistant.control_nodes.state_mover_prep_node import label_state_mover_view
+    label_state_mover_view(bb)
+    text = env.get_template("dayflow_orchestrator/state_mover/prompts/user.j2").render(
+        waiting_work_nodes=bb.get_state_value("waiting_work_nodes"), work_wait_intake=bb.get_state_value("work_wait_intake"),
+        state_mover_ids=bb.get_state_value("state_mover_ids"))
+    assert "waiting since: " + wait["waiting_since"] in text
+    assert 'already acted on by the task "research" (proposed)' in text

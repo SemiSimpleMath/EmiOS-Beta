@@ -231,3 +231,30 @@ def test_one_entry_that_fails_is_left_for_the_next_tick_and_the_others_go_on(scr
     monkeypatch.setattr(B, "brief", real)
     retry = _deliver(scratch)
     assert retry["failed"] == [] and len(retry["created"]) == 1, "the failed entry is delivered on the next tick"
+
+
+def test_a_concerns_work_carries_the_artifacts_it_came_from_by_ref(scratch, monkeypatch):
+    """Owner's standing rule (2026-10-10): every node that refers to an artifact cites its ref. Work made for a
+    concern carries the concern's chat messages and emails as source records with their refs, so the architect sees
+    them by label and a step that acts on one cites it (`uses`). Until then the brief carried them as text alone, and
+    an email pasted into a step's directive was forwarded twice."""
+    lst, _ = scratch
+    from app.assistant.dayflow_orchestrator import state_store
+    from app.assistant.subconscious import brain_step, concern_feedback, concern_store
+    monkeypatch.setattr(concern_feedback, "propagate_work_outcome", lambda store, work_id, outcome: None)
+    ring = {"concern_id": "c-ring", "title": "Doorbell battery", "evidence": [
+        {"kind": "chat_msg", "ref": "message:m-1", "snippet": "watch the doorbell emails"},
+        {"kind": "pod", "ref": "datapod:email:p-ring", "snippet": "Subject: Low battery"},
+        {"kind": "work", "ref": "work:w-old:000", "snippet": "an earlier work event"}]}
+    monkeypatch.setattr(concern_store, "load_register", lambda connect=None: {**REGISTER, "active": [ring]})
+    monkeypatch.setattr(brain_step, "_evidence_text", lambda e: f"TEXT of {e['ref']}")
+    monkeypatch.setattr(state_store, "load_item_by_pod", lambda pod: {"id": "dayflow_email:acct:x1", "metadata": {
+        "item_id": "dayflow_email:acct:x1", "source_type": "email", "pod_id": pod, "email_sender": "Ring <ring@example.com>",
+        "email_subject": "Low battery", "linked_email_unified_id": "email:acct:x1", "summary": "The battery is low."}})
+    _ring(lst, [{"entry": "new", "action": "new", "what": "The doorbell battery is recharged",
+                 "assistant_part": "tell the owner", "when": "9:00 AM", "why": "Low battery."}])
+    [work_id] = _deliver(scratch)["created"]
+    sources = _store().load(work_id).constraints["source_intake"]
+    assert [(s["item_id"], s["pod_id"]) for s in sources] == [
+        ("message:m-1", ""), ("dayflow_email:acct:x1", "datapod:email:p-ring")], "a work event is not an artifact"
+    assert sources[1]["message_id"] == "email:acct:x1" and sources[1]["sender"] == "Ring <ring@example.com>"

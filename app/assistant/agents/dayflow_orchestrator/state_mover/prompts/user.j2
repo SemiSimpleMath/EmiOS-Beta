@@ -48,10 +48,13 @@
 ########## WORK-OBJECT WAITS (parked on an external event) ##########
 *Multi-step work parked on an outside event. Time + dependency gates are already handled by the graph —
 your ONLY job here is to decide whether the awaited EVENT has arrived in the RECENT INCOMING below. For
-each that clearly has, emit a `node_wakes` entry (the task's label + the arrival's label; why it matches is optional). Match conservatively.*
+each that clearly has, emit a `node_wakes` entry (the task's label + the arrival's label; why it matches is optional). Match conservatively.
+A task waiting for a further or new arrival (another email, the next message) waits for one that came after it began
+waiting and that no task has already acted on.*
 {%- for t in waiting_work_nodes %}
 - [{{ t.label }}]
-  waiting for: {{ t.waiting_for }}{% if t.context %}
+  waiting for: {{ t.waiting_for }}
+  waiting since: {{ t.waiting_since }}{% if t.context %}
   FULL TASK: {{ t.context }}{% endif %}
   OBJECTIVE: {{ t.objective }}
 {% with sources = t.sources, labels = state_mover_ids %}{% include 'shared/work/source_context.j2' %}{% endwith %}
@@ -61,6 +64,9 @@ each that clearly has, emit a `node_wakes` entry (the task's label + the arrival
 RECENT INCOMING (match against these):
 {%- for e in work_wait_intake %}
 {% with sources = [e], labels = state_mover_ids %}{% include 'shared/work/source_context.j2' %}{% endwith %}
+{%- for a in e.acted_on_by %}
+  already acted on by the task "{{ a.title }}" ({{ a.status }})
+{%- endfor %}
 {%- endfor %}
 {%- endif %}
 {%- endif %}

@@ -216,17 +216,25 @@ class StateMoverPrepNode(ControlNode):
     def _build_work_object_waits(self, all_items):
         """Find work-object nodes parked on an EXTERNAL event (deps + time already met, ignoring only the external wake while matching) and the recent incoming intake to match them against. Sets waiting_work_nodes +
         work_wait_intake on the blackboard. deps/time are the graph's job; only the event match is the
-        state_mover's (this replaces the standalone event_waker)."""
+        state_mover's (this replaces the standalone event_waker).
+
+        Each wait carries when it began (`waiting_since`), and each arrival the tasks that already acted on it
+        (`acted_on_by`: the tasks citing it in `uses`, in words with their status). On 2026-10-10 a task waiting for
+        "a further email" from an address was woken by the email its sibling task was about to forward, which arrived
+        seven minutes before the wait began, and it was forwarded twice; neither fact was in view."""
         from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
         from work_objects.model import utcnow
 
+        from app.assistant.utils.time_utils import local_time_text
         store = get_dayflow_work_store()
         now = utcnow()
         waiting: List[Dict[str, Any]] = []
+        tasks: Dict[str, Any] = {}
         for s in store.list_work_objects():
             if str(s.get("status") or "").lower() in {"done", "abandoned"}:
                 continue
             wo = store.load(s["id"])
+            tasks.update({n.id: n for n in wo.nodes.values() if wo.is_work_unit(n)})
             for n in wo.nodes.values():
                 # user_reply is an in-flight ask — the dispatch waits until the user
                 # replies, and the reply is then recorded as the node's result. The state_mover only wakes
@@ -236,6 +244,7 @@ class StateMoverPrepNode(ControlNode):
                     waiting.append({
                         "task_id": f"{s['id']}::{n.id}",
                         "waiting_for": getattr(n, "wake_ref", "") or "",
+                        "waiting_since": local_time_text(n.created_at.isoformat()),
                         "context": n.content or n.title or "",
                         "work_version": wo.updated_at.isoformat(),
                         "wake_kind": n.wake_kind,
@@ -249,5 +258,11 @@ class StateMoverPrepNode(ControlNode):
                   if str(get_meta(item).get("source_type") or "").lower()
                   in {"email", "chat", "pod", "user_request"}
                   and wake_intake_eligible(get_meta(item))] if waiting else []
+        from app.assistant.subconscious import relations
+        for source in intake:
+            used = [ref for kind, key in (("source_item", source["item_id"]), ("pod", source["pod_id"])) if key
+                    for (ref, _rel) in relations.sources((kind, key), "uses")]
+            source["acted_on_by"] = [{"title": tasks[task_id].title, "status": tasks[task_id].status}
+                                     for kind, task_id in dict.fromkeys(used) if kind == "task" and task_id in tasks]
         # Preserve source identity; do not silently drop candidates after an arbitrary prefix.
         self.blackboard.update_state_value("work_wait_intake", [s for s in intake if s["item_id"]])

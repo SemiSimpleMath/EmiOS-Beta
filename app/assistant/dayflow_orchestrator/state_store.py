@@ -521,6 +521,17 @@ def reload_active_items_onto_blackboard(blackboard, *, now_utc: datetime, caller
     return len(active_items)
 
 
+def load_item_by_pod(pod_id: str) -> Optional[Dict[str, Any]]:
+    """The dayflow item whose pod is `pod_id` (an ingested email's), or None."""
+    with get_db_manager().read_session() as session:
+        row = session.execute(select(UnifiedLog2026)
+                              .where(UnifiedLog2026.source == DAYFLOW_ITEM_SOURCE)
+                              .where(UnifiedLog2026.room_id == DAYFLOW_ROOM_ID)
+                              .where(func.json_extract(UnifiedLog2026.metadata_json, "$.pod_id") == pod_id)
+                              .limit(1)).scalars().first()
+        return _row_to_dict(row) if row is not None else None
+
+
 def load_ingestion_identity_index() -> Dict[str, Dict[str, Any]]:
     """Read all retained identities and short IDs without materializing source content.
 

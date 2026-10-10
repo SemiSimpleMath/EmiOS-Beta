@@ -117,6 +117,36 @@ def brief(entry: Dict[str, Any]) -> str:
                        concern_text=concern_text, belief=belief, sources=sources).strip()
 
 
+def _sources(entry: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The artifacts the entry's concern came from, as source records the work carries (`source_intake`): each chat
+    message and each email or record pod in the concern's evidence, with its ref, so every planner and worker sees it
+    by label and a step that acts on it cites it (`uses`; owner's standing rule, 2026-10-10: "all nodes that refer to
+    artifacts must site the refs for those artifacts so agents handling them can look up details. also its just a
+    record of the work done."). Until then the brief carried them as text alone: on 2026-10-10 the architect pasted
+    an email into a step's directive, nothing recorded that the step was that email's, the state mover woke the
+    step waiting for a further email with the same one, and it was forwarded twice. A day's own entry has none."""
+    if not entry.get("concern_id"):
+        return []
+    from app.assistant.dayflow_orchestrator.state_store import load_item_by_pod
+    from app.assistant.dayflow_orchestrator.work_intake import intake_source
+    from app.assistant.subconscious.brain_step import _evidence_text
+    from app.assistant.subconscious.concern_store import load_register
+    register = load_register()
+    [concern] = [c for b in ("active", "addressing", "resolved", "dormant") for c in register.get(b) or []
+                 if c["concern_id"] == entry["concern_id"]]
+    out = []
+    for e in concern.get("evidence") or []:
+        ref = str(e.get("ref") or "")
+        if ref.startswith("datapod:"):
+            item = load_item_by_pod(ref)
+            out.append(intake_source(item) if item is not None else
+                       {"item_id": "", "source_type": str(e.get("kind") or "pod"), "summary": _evidence_text(e),
+                        "pod_id": ref})
+        elif ref.startswith("message:"):
+            out.append({"item_id": ref, "source_type": "chat", "summary": _evidence_text(e), "pod_id": ""})
+    return out
+
+
 def _belief_refs(entry: Dict[str, Any]) -> List[str]:
     """The beliefs the work carries back its outcome to: a calendar entry's belief (before 2026-10-10), or the beliefs
     of the concern an entry serves (a calendar concern carries its belief, subconscious/calendar_concerns.py)."""
@@ -136,12 +166,13 @@ def _belief_refs(entry: Dict[str, Any]) -> List[str]:
 def _shell(entry: Dict[str, Any]) -> Dict[str, Any]:
     from app.assistant.dayflow_orchestrator.work_context import render_view
     goal = objective(entry)
+    sources = _sources(entry)
     constraints = {"objective": goal, "success_criteria": entry["what"], "rationale": brief(entry),
-                   "source_intake": [], "list_entry_id": entry["id"],
+                   "source_intake": sources, "list_entry_id": entry["id"],
                    "concern_refs": [f"concern:{entry['concern_id']}"] if entry.get("concern_id") else [],
                    "belief_refs": _belief_refs(entry)}
     return {"title": goal, "satisfied_when_kind": "all_owned_children_done", "constraints": constraints,
-            "goal_content": render_view("goal_content", objective=goal, sources=[], success_criteria=entry["what"])}
+            "goal_content": render_view("goal_content", objective=goal, sources=sources, success_criteria=entry["what"])}
 
 
 # ── acting on the list ───────────────────────────────────────────────────────
@@ -237,7 +268,7 @@ def _deliver_entry(store, entry: Dict[str, Any], change_ids: List[int], work: Op
     elif action == "revise":
         from app.assistant.dayflow_orchestrator.work_intake import goal_update
         wo = store.load(work_id)
-        update = goal_update(wo, objective=objective(entry), success_criteria=entry["what"])
+        update = goal_update(wo, objective=objective(entry), sources=_sources(entry), success_criteria=entry["what"])
         update["constraints"]["rationale"] = brief(entry)
         reason = f"The brain revised the entry this goal was made from: {entry['why']}"
         store.apply("batch", {"work_id": work_id, "operations": [

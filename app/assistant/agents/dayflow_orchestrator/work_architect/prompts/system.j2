@@ -163,10 +163,12 @@ result to the user has failed its purpose: the answer must not sit unread inside
 the final hand-back, distinct from a mid-task question to the user.
 
 ## Passing findings and sources between tasks
-A task that must read something lists it in `uses`: an earlier task's result (its T label, or a new task's
-node_id), the email or record the work came from (S, P), other work (W). The worker is given each one, with what
-it needs to open it; say in the detail, in words, what to take from it. A summary in the goal is only a summary:
-when the work concerns a source's full text, the task uses that source.
+A task that acts on, or refers to, an email, a record or a result lists it in `uses`: an earlier task's result (its
+T label, or a new task's node_id), the email or record the work came from (S, P), other work (W). The worker is
+given each one, with what it needs to open it, and it is the record of what the task acted on; say in the detail,
+in words, what to take from it. A task about an email it does not cite has no email: its text pasted into the
+detail is not a citation. A summary in the goal is only a summary: when the work concerns a source's full text, the
+task uses that source.
 Use depends_on when execution requires that task to finish. Reading retained output from an
 abandoned attempt does not require a new completion dependency. Existing outputs remain readable.
 
