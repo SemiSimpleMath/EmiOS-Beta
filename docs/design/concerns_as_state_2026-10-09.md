@@ -21,8 +21,7 @@ issues and writes nothing to concerns (22ffbf09).
 A concern is an append-only log with many writers, and every reader is given the whole log.
 
 - **Many writers, nothing consolidates.** The brain appends a note per event; the daily noticer appends
-  `disposition=keep_active` with the same paragraph every day; the brief writer appends `addressing:` lines; code
-  appends `WORK ATTACHED` / `WORK ENDED`; ticket replies land as raw JSON. Nothing replaces a stale line.
+  `disposition=keep_active` with the same paragraph every day; code appends `WORK ATTACHED` / `WORK ENDED`; ticket replies land as raw JSON. Nothing replaces a stale line.
 - **Every reader gets all of it:** the gate, the brain step, the concern planner and through it the list decider,
   the concern door, dayflow's subconscious projection, the noticer. On 2026-10-09 the work-stress record was 46
   lines (15,233 characters), fatigue 41 (12,166).
@@ -61,9 +60,12 @@ concern_door, pipelines/dayflow/utils/subconscious_projection.py, context_builde
 ### 2. One writer of the record: the brain
 
 The record keeps what changed the concern, as history: the brain's notes and the events it attached (evidence with
-ids). It stops receiving: the noticer's daily dispositions (stopped 22ffbf09), the brief's `addressing:` lines, `WORK ATTACHED` /
-`WORK ENDED` lines (a concern's work is read live from the work store, through the progress view), and raw ticket
-JSON (a reply reaches the brain as a ticket event and is noted in words).
+ids). It stops receiving: the noticer's daily dispositions (stopped 22ffbf09); `WORK ATTACHED` / `WORK ENDED` lines (a
+concern's work is read from its attached-work record and, rule 3b, live from the work store); the owner's raw ticket
+reply and `USER DECLINED` (a reply reaches the brain as a ticket event and is noted in words); and the door's
+`MERGED` / `SUPPRESSED` lines (a merged duplicate's own note joins the concern as a note of its writer). Stopped
+2026-10-09. (An earlier draft also listed the brief's `addressing:` lines; no code writes those, they were the
+noticer's.)
 
 ### 3. One event changes one concern
 

@@ -270,4 +270,4 @@ class TestDeclineReachesTheConcern:
         assert [c["concern_id"] for c in register["dormant"]] == [concern_id]
         parked = register["dormant"][0]
         assert parked.get("user_declined_at_utc")
-        assert "No thanks" in parked["reinforcement_notes"]
+        assert parked["attached_work"][wid]["ended"]["owner_reply"]["user_text"] == "No thanks"

@@ -253,11 +253,13 @@ def apply_admission(steps: List[Dict[str, Any]], register: Dict[str, Any], *, so
             if c.get("owner_request") and not target.get("owner_request"):
                 target["owner_request"] = c["owner_request"]
             target["last_reinforced_utc"] = now_iso
-            persist._journal_on(target, now_iso, f"MERGED a re-raise from {source}: {title} ({step['reason']})")
+            # What the duplicate said becomes a note on the concern it joins, like any note of its writer's
+            # (until 2026-10-09 a "MERGED a re-raise" line recorded the door's own decision instead).
+            if str(c.get("notes") or "").strip():
+                persist._journal_on(target, now_iso, f"[{source}] {c['notes']}")
             landed[i] = target_id
         elif action == "suppress_closed":
             prior = _find(register, step["target"])
-            persist._journal_on(prior, now_iso, f"SUPPRESSED a re-mint of this ({step['reason']}): {title}")
             prior["suppressed_remint_count"] = int(prior.get("suppressed_remint_count") or 0) + 1
             prior["suppressed_remint_at_utc"] = now_iso
         else:

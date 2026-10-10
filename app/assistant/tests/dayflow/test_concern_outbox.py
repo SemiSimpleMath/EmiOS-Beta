@@ -65,7 +65,7 @@ def test_attaching_work_marks_the_concern_in_progress(setup):
     concern=reg['addressing'][0]
     work=concern['attached_work'][wid]
     assert (work['status'], work['objective'], work['judgments'])==('active','Settle the maintenance question',[])
-    assert f'WORK ATTACHED {wid}' in concern['reinforcement_notes']
+    assert 'WORK ATTACHED' not in (concern.get('reinforcement_notes') or '')   # the notes are the brain's
     assert work_events(inbox)==[]                  # an attachment is a record, not news for the brain
 
 
@@ -127,7 +127,7 @@ def test_failure_survives_reopen_and_retries_without_repeating_register_write(se
         assert concern_feedback.recover_pending_concern_feedback(reopened)==3
         assert reopened.pending_concern_feedback()==[]
         concern=path.read()['active'][0]
-        assert concern['reinforcement_notes'].count(f'WORK ATTACHED {wid}')==1
+        assert list(concern['attached_work'])==[wid]
         assert len(concern['attached_work'][wid]['judgments'])==1
         assert len(work_events(inbox))==2
     finally:

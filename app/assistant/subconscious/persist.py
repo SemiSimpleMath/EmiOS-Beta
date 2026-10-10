@@ -9,7 +9,6 @@ inbox and writes nothing here (docs/design/concerns_as_state_2026-10-09.md).
 """
 from __future__ import annotations
 
-import json
 import threading
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -252,7 +251,6 @@ def attach_work(concern_ref: str, *, work_id: str, work: Dict[str, Any], receipt
             "work_id": work_id, "title": work.get("title"), "objective": work.get("objective"),
             "success_criteria": work.get("success_criteria") or "", "attached_at": work.get("attached_at"),
             "status": "active", "judgments": [], "ended": None})
-        _journal_on(concern, now_iso, f"WORK ATTACHED {work_id}: {work.get('objective')}")
         if receipt_id:
             concern.setdefault("work_receipts", []).append(receipt_id)
         if bucket == "active":
@@ -299,8 +297,6 @@ def attach_seen_work(concern_id: str, *, work_id: str, work: Dict[str, Any], rec
             "work_id": work_id, "title": work.get("title"), "objective": work.get("objective"),
             "success_criteria": work.get("success_criteria") or "", "attached_at": now_iso,
             "status": status, "judgments": [], "ended": work.get("ended")}
-        _journal_on(concern, now_iso, f"WORK ATTACHED {work_id} by the brain (its outcome bears on this concern): "
-                                      f"{work.get('objective')}")
         concern.setdefault("work_receipts", []).append(receipt_id)
         if bucket == "active" and status == "active":
             _move(register, bucket, index, concern, "addressing")
@@ -362,7 +358,9 @@ def apply_work_outcome(
       otherwise, once no attached work is in progress   -> `addressing` back to `active`: whether the
                                                           concern is settled is the brain's decision,
                                                           made from the ending as a brain event
-    The owner's reply is also journalled verbatim. Returns 'user_declined' | 'ended' |
+    The owner's reply is kept on the work's record, not journalled: it reaches the brain as a ticket event, and
+    the concern's notes are the brain's (docs/design/concerns_as_state_2026-10-09.md, rule 2). Returns
+    'user_declined' | 'ended' |
     'already_applied' | 'unresolved'. Lives with the other register writers: one lock, one atomic save.
     """
     with _REGISTER_LOCK:
@@ -396,13 +394,7 @@ def apply_work_outcome(
         # to the brain; do not infer intent from words or lifecycle state.
         explicit_decline = (latest.get("meaning") == "decline"
                             and not str(latest.get("typed_text") or "").strip())
-        if response:
-            _journal_on(concern, now_iso, f"USER RESPONSE via {work_id}: " + json.dumps(response, ensure_ascii=False))
-        elif user_words.strip():
-            _journal_on(concern, now_iso, f"USER WORDS via {work_id}: " + json.dumps(user_words, ensure_ascii=False))
-        _journal_on(concern, now_iso, f"WORK ENDED {work_id} ({outcome})")
         if outcome == "abandoned" and explicit_decline:
-            _journal_on(concern, now_iso, f"USER DECLINED via {work_id} (explicit scoped choice; see response above)")
             concern["user_declined_at_utc"] = now_iso
             concern["last_disposition_at_count"] = int(concern.get("reinforcement_count") or 0)
             if bucket in ("active", "addressing"):

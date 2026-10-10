@@ -56,7 +56,8 @@ class TestApplyWorkOutcome:
         reg = path.read()
         assert reg["active"] == []
         concern = reg["dormant"][0]
-        assert "No thanks" in concern["reinforcement_notes"]
+        assert concern["attached_work"]["work_x"]["ended"]["owner_reply"]["user_text"] == "No thanks"
+        assert "No thanks" not in concern["reinforcement_notes"]    # the reply reaches the brain as a ticket event
         assert concern["user_declined_at_utc"]
         assert concern["last_disposition_at_count"] == 23   # pressure window reset
 
@@ -68,7 +69,7 @@ class TestApplyWorkOutcome:
         reg = path.read()
         concern = reg["active"][0]                      # done work does not settle the concern
         assert concern["attached_work"]["work_x"]["ended"]["outcome"] == "done"
-        assert "WORK ENDED work_x (done)" in concern["reinforcement_notes"]
+        assert "WORK ENDED" not in concern["reinforcement_notes"]
 
     def test_the_last_work_ending_takes_the_concern_out_of_progress(self, tmp_path):
         path = _register(tmp_path)

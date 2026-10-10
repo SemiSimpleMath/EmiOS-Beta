@@ -77,7 +77,7 @@ def test_a_matter_already_tracked_is_folded_into_its_concern(tmp_path):
     [c] = reg.read()["active"]
     assert c["concern_id"] == "c-bake"
     assert [e["ref"] for e in c["evidence"]] == ["calendar:x", "datapod:email:N1"]
-    assert "MERGED a re-raise from brain: Bake sale moved to Monday (because)" in c["reinforcement_notes"]
+    assert c["reinforcement_notes"].splitlines()[-1].endswith("] [brain] n"), "the duplicate's note joins it"
     shown = judge.seen[0]
     assert shown["candidates"][0]["label"] == "N1" and shown["existing"][0]["label"] == "C1"
 
@@ -90,7 +90,7 @@ def test_a_matter_already_settled_is_journalled_not_admitted(tmp_path):
     after = reg.read()
     assert after["active"] == []
     assert after["resolved"][0]["suppressed_remint_count"] == 1
-    assert "SUPPRESSED a re-mint of this (because): Flea medication still due" in after["resolved"][0]["reinforcement_notes"]
+    assert after["resolved"][0]["reinforcement_notes"] == "", "the door's decision is not a note"
 
 
 def test_what_the_judge_compares_with(tmp_path):

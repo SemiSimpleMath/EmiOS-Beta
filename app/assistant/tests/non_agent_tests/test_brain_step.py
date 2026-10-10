@@ -257,7 +257,7 @@ def test_a_work_report_the_brain_cites_attaches_the_work_to_that_concern(inbox, 
     [c] = reg.read()["active"]
     work = c["attached_work"]["work_cal"]
     assert (work["status"], work["ended"]["outcome"]) == ("done", "done")
-    assert "WORK ATTACHED work_cal by the brain" in c["reinforcement_notes"]
+    assert "WORK ATTACHED" not in c["reinforcement_notes"]
 
 
 def test_only_attach_attaches_and_references_are_stored_as_objects(inbox, tmp_path):
