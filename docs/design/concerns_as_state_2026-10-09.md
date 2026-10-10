@@ -79,6 +79,21 @@ The brain chooses moment or matter when it raises a concern, and may change it.
 What happened today with no matter needing attention (the AC was set, a check-in went out, the owner came back from a
 visit) is a fact of the day: the brain decides it needs nothing for concerns, and the day's record keeps it.
 
+### 6. Every concern says where it came from, in one shape
+
+Owner, 2026-10-09: "shouldnt we have unified things like source: user." Every concern carries
+`source: {kind, at, ref, quote}`:
+- `kind`: `user` (the owner, in chat or a ticket reply), `email`, `calendar`, `camera`, `presence`, `work`, or
+  `noticer` / `brain` for a pattern the assistant inferred;
+- `at`: when it happened;
+- `ref`: the event's id, kept by code, never shown in prose;
+- `quote`: the source's own text, copied exactly by code (the owner's message; an email's sender, subject and the
+  lines that raised it; the signals the noticer counted).
+
+Readers show it alike: "raised from: the owner, Fri 1:42 PM: "..."". A concern whose source is `user` closes only
+when its done-when is met or the owner says it is over; this replaces the special `owner_request` field. Each note
+records the event it came from in the same way, and the summary keeps each fact's source.
+
 ## Converting what is there
 
 - Each open concern gets its first summary from its whole record now (most are long); later summaries run only when
@@ -87,6 +102,8 @@ visit) is a fact of the day: the brain decides it needs nothing for concerns, an
 - Work attached by the brain's judgment (not made for the concern) is detached: the dog-walk follow-up from <friend>'s
   birthday, the Edison bill from the property tax, the bedtime and lights reminders from fatigue.
 - Each open concern is marked moment or matter; moments from before today close.
+- Each concern's `source` is its first evidence (the event it was raised from); `owner_request` becomes a source of
+  kind `user`.
 
 ## Order of work
 
