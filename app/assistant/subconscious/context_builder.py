@@ -19,7 +19,7 @@ from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_resources_dir
 from app.assistant.utils.identity_names import get_required_primary_user_name
-from app.assistant.utils.time_utils import get_local_time, get_local_time_str
+from app.assistant.utils.time_utils import get_local_time, get_local_time_str, utc_to_local
 
 logger = get_logger(__name__)
 
@@ -616,7 +616,7 @@ def _build_concerns_recently_closed(register: Optional[Dict[str, Any]] = None) -
 
     lines = []
     for when, c in recent_resolved:
-        stamp = when.date().isoformat() if when else "date unknown"
+        stamp = utc_to_local(when).date().isoformat() if when else "date unknown"
         lines.append(_render_closed_concern(c, status=f"resolved {stamp}", why=c.get("resolution_reason")))
     for c in dormant:
         lines.append(_render_closed_concern(c, status="dormant", why=c.get("dormant_reason")))
