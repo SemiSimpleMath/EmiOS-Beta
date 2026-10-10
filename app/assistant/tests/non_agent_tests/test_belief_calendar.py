@@ -10,7 +10,7 @@ store; every agent is a fake. Invented data only.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -113,3 +113,30 @@ def test_the_door_does_not_compare_candidates_with_retired_standing_concerns():
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
     register = {**EMPTY, 'dormant': [{'concern_id': 'c1', 'kind': 'standing'}, {'concern_id': 'c2', 'chronic': True}]}
     assert [c['concern_id'] for c in concern_door._comparable(register, now)] == ['c2']
+
+
+# ── a placement is decided once (2026-10-10) ─────────────────────────────────────────────────────────────
+
+def test_a_belief_placed_earlier_today_keeps_its_placement_until_the_schedule_or_the_belief_changes(day, monkeypatch):
+    """2026-10-10: every rewrite judged every belief afresh, and the lights-off-after-bedtime belief flipped in and
+    out of the day, its concern withdrawn and its work ended each time."""
+    drs.run_day_pass(day.now, connect=day.plans)
+    shown = []
+    monkeypatch.setattr(drs, '_write', lambda agent_input: (shown.append(agent_input['beliefs_block']), {'judgments': [
+        {'belief_key': k, 'why': 'Not today.', 'applies_today': False, 'outcome': '', 'times': []}
+        for k in ('B1', 'B3') if f'[belief:{k}]' in agent_input['beliefs_block']]})[1])
+    monkeypatch.setattr(drs, '_read_daily_context', lambda: {'expected_schedule': [], 'milestones': [{'time': '12:30 PM', 'description': 'Lunch eaten'}]})
+    monkeypatch.setattr(drs, '_last_attempt_utc', None)
+    later = day.now + timedelta(hours=2)
+    drs.run_day_pass(later, connect=day.plans)
+    assert not shown, "nothing changed for either belief: neither is judged again"
+    assert sorted(line['belief_key'] for line in _lines(day.plans)) == ['B1', 'B3']
+
+    trash_night = {'title': 'Trash night', 'start_local': '08:30 PM', 'end_local': '09:00 PM', 'status': 'upcoming',
+                   'start_utc': (later + timedelta(hours=5)).isoformat(),
+                   'end_utc': (later + timedelta(hours=5, minutes=30)).isoformat()}
+    monkeypatch.setattr(drs, '_read_daily_context', lambda: {'expected_schedule': [trash_night], 'milestones': []})
+    monkeypatch.setattr(drs, '_last_attempt_utc', None)
+    drs.run_day_pass(later + timedelta(hours=1, minutes=1), connect=day.plans)
+    assert shown and '[belief:B1]' in shown[-1], "the schedule ahead changed: the beliefs are judged again"
+    assert _lines(day.plans) == []

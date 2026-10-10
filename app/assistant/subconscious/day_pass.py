@@ -31,6 +31,13 @@ It runs on every brain wake (subconscious/brain_wake.py) and is free unless some
 is written when today has none, or when its inputs changed (calendar, daily context, the approved beliefs
 and their related ones) and the last attempt is at least an hour old.
 
+A placement is decided once (owner, 2026-10-10: "yes do both"): when the plan is written again the same day, a
+belief the earlier plan placed keeps its placements (`_kept`), unless the schedule ahead or the belief itself (its
+statement, its related beliefs) changed; only the others are judged again. What the day brings after that reaches
+its concern through the brain, which notes or resolves it. Until then every rewrite judged every belief afresh, and
+on 2026-10-10 the lights-off-after-bedtime belief was placed at 5:06, not at 6:09 and 7:19, placed at 8:21 and not at
+9:24 ("today's facts do not indicate that he has gone to bed"): each flip withdrew its concern and ended its work.
+
 Inputs: resources/dayflow_pipeline_outputs/resource_daily_context_generator_output.json and
 resource_expected_calendar.json (the dayflow pipeline still produces them),
 resources/kg_derived/resource_user_beliefs.json (which beliefs are approved), and the intake store's statement
@@ -176,12 +183,39 @@ def _related(pool: List[dict], entries: List[dict], vectors: Dict[str, List[floa
     return out
 
 
+def _schedule_ahead(slots: List[dict], now_utc: datetime) -> List[Tuple[str, str, str]]:
+    """The calendar items of the hours from now on, as what they are and when (their status changes as the day goes
+    and is not a change of the schedule)."""
+    hour = now_utc.astimezone(get_local_timezone()).replace(minute=0, second=0, microsecond=0)
+    return [(str(it.get("title") or ""), str(it.get("start_local") or ""), str(it.get("end_local") or ""))
+            for sl in slots if datetime.fromisoformat(sl["hour_local_iso"]) >= hour for it in sl["items"]]
+
+
+def _kept(earlier: Optional[Dict[str, Any]], slots: List[dict], given: Dict[str, str],
+          related: Dict[str, List[Dict[str, str]]], now_utc: datetime) -> Dict[str, List[Dict[str, Any]]]:
+    """The placements of the earlier plan of the same day that stand: belief_key -> its placements still ahead, for
+    every belief that plan placed whose statement and related beliefs are unchanged; none when the schedule ahead
+    changed. A placement is decided once (module docstring)."""
+    from app.assistant.subconscious.calendar_concerns import expires_at
+    if earlier is None or _schedule_ahead(earlier["slots"], now_utc) != _schedule_ahead(slots, now_utc):
+        return {}
+    kept: Dict[str, List[Dict[str, Any]]] = {}
+    for line in [*earlier["flags"], *(line for sl in earlier["slots"] for line in sl["lines"])]:
+        key = line["belief_key"]
+        same = (given.get(key) == line["statement"]
+                and [r["belief_key"] for r in related.get(key, [])] == [r["belief_key"] for r in line["related"]])
+        if same and expires_at(earlier["day"], line) > now_utc:
+            kept.setdefault(key, []).append({"belief_key": key, "time": line["time"], "until": line["until"],
+                                             "outcome": line["outcome"]})
+    return kept
+
+
 def _routine_inputs_fingerprint(boundary_date_local: str, expected_schedule: list, beliefs_block: str,
                                 *, daily_context: Optional[dict] = None) -> str:
     """The exact decision inputs, excluding wall-clock/scaffold rendering and generated timestamps. The beliefs
     block is the approved beliefs with their related ones, as the writer reads them."""
     context = daily_context or {}
-    payload = {"projection_version": 8, "day": boundary_date_local,
+    payload = {"projection_version": 9, "day": boundary_date_local,
                "schedule": expected_schedule, "beliefs": beliefs_block,
                "current_status": context.get("current_status"), "milestones": context.get("milestones")}
     return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
@@ -344,7 +378,7 @@ def run_day_pass(now_utc: Optional[datetime] = None, *, connect=None, concern_co
     beliefs_block = _render_belief_block([{**e, "related": related[e["belief_key"]]} for e in pool])
     fingerprint = _routine_inputs_fingerprint(day, ctx_data.get("expected_schedule") or [], beliefs_block,
                                               daily_context=ctx_data)
-    plan = day_plan.load_plan(day, connect=connect)
+    plan = earlier = day_plan.load_plan(day, connect=connect)
     if plan is not None:
         if plan["inputs_fingerprint"] == fingerprint:
             return {"day_pass": "unchanged"}
@@ -364,17 +398,18 @@ def run_day_pass(now_utc: Optional[datetime] = None, *, connect=None, concern_co
         "day_facts": _day_facts(day), "now_local": f"{now_local:%A, %B} {now_local.day}, {now_local.strftime('%I:%M %p').lstrip('0')}",
         "daily_context": daily_context_block}
     from app.assistant.subconscious.brain_trace import step
-    ordered = sorted(pool, key=lambda e: str(e["belief_key"]))
+    kept = _kept(earlier, slots, given, related, now_utc)
+    ordered = sorted((e for e in pool if e["belief_key"] not in kept), key=lambda e: str(e["belief_key"]))
     judgments: List[Dict[str, Any]] = []
     for i in range(0, len(ordered), BATCH):
         batch = ordered[i:i + BATCH]
         judgments += _judge(batch, related, base, conditions, step)
     data = {"judgments": judgments}
-    placements = _placements(data)
+    placements = [p for key in sorted(kept) for p in kept[key]] + _placements(data)
     plan_slots, flags = _place(placements, slots, given, related)
     step("day_pass", "placed", day=day, approved=sorted(given),
          related={k: [r["belief_key"] for r in v] for k, v in related.items()},
-         placements=placements, judgments=data.get("judgments") or [])
+         placements=placements, judgments=data.get("judgments") or [], kept=sorted(kept))
     plan = {
         "day": day, "generated_at_utc": now_utc.isoformat(), "inputs_fingerprint": fingerprint,
         "selected_belief_keys": sorted(given),                # the beliefs approved for the calendar

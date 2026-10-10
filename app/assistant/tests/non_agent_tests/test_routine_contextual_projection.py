@@ -102,7 +102,9 @@ def test_the_plan_is_written_once_and_regenerated_hourly_on_change(connect, day_
     context['milestones'] = [{'description': 'Glasses packed'}]
     assert drs.run_day_pass(now + timedelta(minutes=20), connect=connect) == {'day_pass': 'changed_too_soon'}
     assert drs.run_day_pass(now + timedelta(hours=1), connect=connect)['day_pass'] == 'written'
-    assert calls == ['write', 'write']
+    # Every belief the first plan placed is unchanged and so is the schedule ahead: its placement stands, and the
+    # writer is not asked again (a placement is decided once, 2026-10-10).
+    assert calls == ['write']
 
 
 def _lesson_day(context):
