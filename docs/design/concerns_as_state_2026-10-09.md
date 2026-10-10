@@ -33,14 +33,20 @@ ticket replies reach the brain directly (20afbf0f).
 
 ## The rules
 
-### 1. Every reader gets the summary, never the log
+### 1. Every reader gets a summary and the recent notes, never a long log
 
-The brief (subconscious/concern_brief.py) is the summary: what it is, why it matters, what is known (each fact with
-its source), what was tried, the owner's wishes in their words, what depends on it, open questions, the
-recommendation. It is rewritten from the whole record whenever the record changes, and it consolidates; it does not
-cut. Every reader gets the concern's identity (title, done-when, the owner's words, moment or matter) and its brief,
-plus the record's entries written after the brief (normally none to two: a second matter in the same brain pass).
-Only the brief writer reads the whole record.
+Owner, 2026-10-09: "It does not have to run on every concern every time. only when the record gets long."
+
+What a reader sees of a concern: its identity (title, done-when, the owner's words, moment or matter), its summary,
+and the notes written since the summary, in full. A summarizer folds the older notes into the summary only when the
+notes since the last summary grow long; it reads the previous summary and those notes whole and writes the new summary
+(what is known now, what was tried, the owner's wishes in their words, what is still open), consolidating, never
+cutting. Until then the notes are shown as written. So no reader ever sees a long log or a truncated one, and the
+summarizer runs only on the concern that needs it.
+
+This replaces the brief written on every change (subconscious/concern_brief.py): the summary is the concern's state
+for every reader, the concern planner included, and the planner is woken by the record changing, not by a new brief.
+The old notes stay in the history the summarizer folded them from.
 
 Readers changed: gate.py, brain_step._concern_view, concern_planner.concern_text (and so the list decider),
 concern_door, pipelines/dayflow/utils/subconscious_projection.py, context_builder (the noticer).
