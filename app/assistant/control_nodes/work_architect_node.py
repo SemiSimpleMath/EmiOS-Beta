@@ -210,18 +210,10 @@ def _view(store, wo, *, history, replan: bool):
 def _resolve(d: dict, labels: dict, wo) -> tuple[dict, dict]:
     """The architect's answer with its labels mapped to ids: (the answer for apply_architect_dag, links to keep as
     relations: uses per new task, covered_by, duplicates). Raises ValueError naming every problem, which the
-    one correction round shows the architect: a label not given, of the wrong kind, or written into words."""
-    from app.assistant.subconscious.projection import labels_in
+    one correction round shows the architect: a label not given, or of the wrong kind."""
     own = {label: ref[1] for label, ref in labels.items() if ref[0] == "task" and ref[1] in wo.nodes}
     new = [str(n.get("node_id") or "").strip() for n in d.get("nodes") or [] if isinstance(n, dict)]
-    numbered = [x for x in labels if any(ch.isdigit() for ch in x)]
     problems: list[str] = []
-
-    def words(where, *texts):
-        found = labels_in(" ".join(str(t or "") for t in texts), numbered)
-        if found:
-            problems.append(f"{where}: {found} written into its words; say it in words and put the reference in "
-                            f"its own field (depends_on, uses, abandon_node_ids, duplicate_of, covered_by)")
 
     nodes, uses = [], {}
     for spec in d.get("nodes") or []:
@@ -248,7 +240,6 @@ def _resolve(d: dict, labels: dict, wo) -> tuple[dict, dict]:
             else:
                 problems.append(f"{slug}: uses {x!r} is not a task, record, source or work given")
         uses[slug] = refs
-        words(slug, spec.get("title"), spec.get("detail"), spec.get("wait_reason"), spec.get("wake_ref"))
         nodes.append({**spec, "depends_on": deps})
     abandon = []
     for x in [str(x).strip() for x in d.get("abandon_node_ids") or []]:
@@ -271,12 +262,6 @@ def _resolve(d: dict, labels: dict, wo) -> tuple[dict, dict]:
                 covered.append(labels[x][1])
             else:
                 problems.append(f"end_goal covered_by: {x!r} is not other work given (its W label)")
-        words("end_goal", end.get("reason"))
-    revision = d.get("revise_objective")
-    if revision:
-        words("revise_objective", revision.get("objective"), revision.get("success_criteria"), revision.get("reason"))
-    words("abandon_reason", d.get("abandon_reason"))
-    words("architect_summary", d.get("architect_summary"))
     if problems:
         raise ValueError("; ".join(problems))
     mapped = {**d, "nodes": nodes, "abandon_node_ids": abandon, "duplicate_of": pairs}

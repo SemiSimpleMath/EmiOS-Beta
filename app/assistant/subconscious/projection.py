@@ -11,7 +11,7 @@ are never stored. `labels` is a plain dict (label -> [kind, id]) so it travels i
 """
 from __future__ import annotations
 
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 Ref = Tuple[str, str]           # (kind, id)
 
@@ -57,28 +57,3 @@ def resolve(labels: Dict[str, List[str]], label: str) -> Optional[Ref]:
     """(kind, id) of a label given in the call, or None."""
     ref = labels.get(str(label).strip())
     return (ref[0], ref[1]) if ref else None
-
-
-def translate(text: str, labels: Dict[str, List[str]]) -> str:
-    """The text with each numbered label of the call written in it (a whole word, as labels_in finds it) replaced by
-    the id of the object it names: a label means nothing once the call is over, an id still names the object.
-    Owner, 2026-10-09: a label in prose is translated, never a reason to throw the answer away."""
-    numbered = {x: ref[1] for x, ref in labels.items() if any(ch.isdigit() for ch in x)}
-    if not text or not numbered:
-        return text
-    out, word = [], []
-    for ch in str(text) + " ":
-        if ch.isalnum():
-            word.append(ch)
-            continue
-        token = "".join(word)
-        out.append(numbered.get(token, token))
-        word = []
-        out.append(ch)
-    return "".join(out)[:-1]
-
-
-def labels_in(text: str, labels: Iterable[str]) -> List[str]:
-    """The call's labels written into prose, as whole words (a label is letters and digits)."""
-    words = set("".join(ch if ch.isalnum() else " " for ch in str(text or "")).split())
-    return sorted(set(labels) & words)

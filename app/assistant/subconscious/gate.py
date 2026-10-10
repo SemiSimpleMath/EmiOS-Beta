@@ -51,12 +51,6 @@ def _problems(data: Any, event_labels: List[str], concern_labels: List[str]) -> 
             out.append(f"{ev}: {bad} are not concern labels given")
         if route == "concern" and not named:
             out.append(f"{ev}: route concern names no concern")
-        # The reasoning is stored and shown on /mind: words only, its labels named nothing outside this call
-        # (docs/design/objects_and_projections_2026-10-08.md).
-        from app.assistant.subconscious.projection import labels_in
-        written = labels_in(d.get("reasoning"), [*event_labels, *concern_labels])
-        if written:
-            out.append(f"{ev}: {written} written into the reasoning; write it in words")
     dup = sorted({e for e in seen if seen.count(e) > 1})
     if dup:
         out.append(f"answered more than once: {dup}")

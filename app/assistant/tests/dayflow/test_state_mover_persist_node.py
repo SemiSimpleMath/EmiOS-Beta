@@ -123,11 +123,6 @@ class TestStateMoverPersistNode:
                                                        "hold_reason": "T1 is noisy", "reactivate_at": wake}])
         _make_node(leaked).action_handler(message=None)
         assert store.load(wid).nodes["meant"].status == "waiting", "the hold applies"
-        label = _label(leaked, f"{wid}::meant")
-        assert leaked.get_state_value("state_mover_summary").startswith(f"{wid}::meant is held"),             "a label in prose is translated to the id it names"
-        from app.assistant.subconscious.projection import translate
-        labels = {"T1": ["task", "w::n"], "S12": ["source_item", "s-1"], "D": ["resource", "r"]}
-        assert translate("T1 woke on S12; T12 and vitamin D stay; (T1).", labels) ==             "w::n woke on s-1; T12 and vitamin D stay; (w::n)."
 
     def test_the_view_shows_labels_not_ids(self):
         store = _store()

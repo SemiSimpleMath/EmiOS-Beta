@@ -332,11 +332,9 @@ def fingerprint(inputs: Dict[str, Any]) -> str:
 
 def problems(data: Any, labels: Dict[str, List[str]]) -> List[str]:
     """Each change names an event by its label (or "new" with a title and a time), a state the model may set, a basis,
-    and in relies_on what shows it; a milestone has its time, words, a basis and what shows it; no label in words."""
-    from app.assistant.subconscious.projection import labels_in
+    and in relies_on what shows it; a milestone has its time, words, a basis and what shows it."""
     if not isinstance(data, dict):
         return ["the answer is not an object"]
-    numbered = [x for x in labels if any(ch.isdigit() for ch in x)]
     out: List[str] = []
 
     def shows(where, refs):
@@ -346,11 +344,6 @@ def problems(data: Any, labels: Dict[str, List[str]]) -> List[str]:
         unknown = [x for x in refs if x not in labels]
         if unknown:
             out.append(f"{where}: relies_on {unknown} are not labels given")
-
-    def words(where, *texts):
-        found = labels_in(" ".join(str(t or "") for t in texts), numbered)
-        if found:
-            out.append(f"{where}: {found} written into its words; say it in words and put the reference in relies_on")
 
     for ch in data.get("changes") or []:
         event = str(ch.get("event") or "").strip()
@@ -366,7 +359,6 @@ def problems(data: Any, labels: Dict[str, List[str]]) -> List[str]:
         if ch.get("basis") not in BASES:
             out.append(f"{where}: basis {ch.get('basis')!r} is not direct or inferred")
         shows(where, ch.get("relies_on"))
-        words(where, ch.get("title"), ch.get("note"))
     for i, m in enumerate(data.get("milestones") or [], 1):
         where = f"milestone {i}"
         if not str(m.get("time") or "").strip() or not str(m.get("description") or "").strip():
@@ -374,9 +366,6 @@ def problems(data: Any, labels: Dict[str, List[str]]) -> List[str]:
         if m.get("basis") not in BASES:
             out.append(f"{where}: basis {m.get('basis')!r} is not direct or inferred")
         shows(where, m.get("relies_on"))
-        words(where, m.get("description"))
-    words("day_theme", data.get("day_theme"))
-    words("current_status", data.get("current_status"))
     return out
 
 

@@ -335,19 +335,12 @@ def _refs(things: Any, call_labels: Dict[str, List[str]], where: str, *, attach:
     return out
 
 
-def _in_prose(call_labels: Dict[str, Any], new_labels: List[str], *texts: Any) -> List[str]:
-    from app.assistant.subconscious.projection import labels_in
-    return labels_in(" ".join(str(t or "") for t in texts), [*call_labels, *new_labels])
-
-
 def _problems(data: Any, events: Dict[str, Dict[str, Any]], concern_labels: List[str],
               call_labels: Dict[str, List[str]]) -> List[str]:
     if not isinstance(data, dict) or not isinstance(data.get("event_decisions"), list):
         return ["no event_decisions list"]
     out: List[str] = []
     decided: Dict[str, str] = {}
-    new_labels = [str(n.get("label") or "").strip() for n in data.get("new_concerns") or []]
-    prose = "write it in words and put the reference in relies_on or attach"
     for d in data["event_decisions"]:
         ev = str((d or {}).get("event") or "").strip()
         if ev not in events:
@@ -356,9 +349,6 @@ def _problems(data: Any, events: Dict[str, Dict[str, Any]], concern_labels: List
             out.append(f"{ev} decided more than once")
         else:
             decided[ev] = d.get("decision")
-        written = _in_prose(call_labels, new_labels, d.get("reason"))
-        if written:
-            out.append(f"{ev}: {written} written into its reason; write it in words")
     missing = [e for e in events if e not in decided]
     if missing:
         out.append(f"not decided: {missing}")
@@ -380,9 +370,6 @@ def _problems(data: Any, events: Dict[str, Dict[str, Any]], concern_labels: List
         out += _refs(attached, call_labels, f"{label} attach", attach=True)
         if not str(u.get("note") or "").strip():
             out.append(f"{label}: note is empty")
-        written = _in_prose(call_labels, new_labels, u.get("note"))
-        if written:
-            out.append(f"{label}: {written} written into its note; {prose}")
         cited_by_update.update(x for x in [*relied, *attached] if x in events)
 
     seen_new = set()
@@ -402,9 +389,6 @@ def _problems(data: Any, events: Dict[str, Dict[str, Any]], concern_labels: List
         words = _squash(n.get("owner_words") or "")
         if words and not any(words in _squash(events[r]["text"]) for r in refs):
             out.append(f"{label}: owner_words must be copied exactly from one of its events")
-        written = _in_prose(call_labels, new_labels, n.get("title"), n.get("done_when"), n.get("notes"))
-        if written:
-            out.append(f"{label}: {written} written into its title, done_when or notes; {prose}")
         cited_by_new.update(refs)
 
     for ev, decision in decided.items():

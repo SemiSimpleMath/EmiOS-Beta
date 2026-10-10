@@ -123,7 +123,6 @@ def test_a_concern_changes_the_day_and_every_change_keeps_what_showed_it(tmp_pat
     (lambda a: a["changes"][0].update(event="C1"), "not an event given"),
     (lambda a: a["changes"][0].update(state="completed"), "state 'completed'"),
     (lambda a: a["changes"][0].update(basis="guess"), "basis 'guess'"),
-    (lambda a: a["changes"][0].update(note="C1 says so"), "['C1'] written into its words"),
     (lambda a: a["changes"][1].update(start=""), "a new event names its title and its start"),
     (lambda a: a["milestones"][0].update(relies_on=[]), "milestone 1: relies_on names nothing"),
 ])

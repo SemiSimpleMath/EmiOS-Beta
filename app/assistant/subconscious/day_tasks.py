@@ -320,12 +320,6 @@ def describe(kind: str, obj_id: str, *, connect=None) -> Dict[str, Any]:
 
 # ── the answer ─────────────────────────────────────────────────────────────
 
-def _in_prose(labels: Dict[str, Any], *texts: Any) -> List[str]:
-    """Labels of this call written into prose. The single letter D is left out: it is also a word ("vitamin D")."""
-    from app.assistant.subconscious.projection import labels_in
-    return labels_in(" ".join(str(t or "") for t in texts), [x for x in labels if any(ch.isdigit() for ch in x)])
-
-
 def changeable(own: List[Dict[str, Any]], concerns: List[Dict[str, Any]]) -> Dict[str, Optional[str]]:
     """The entries an answer may modify or cancel by label: its own (O) and every open concern's (E). Label -> the
     label of the concern a concern's own entry belongs to (it stays with it), or None for a day's entry."""
@@ -372,10 +366,6 @@ def entries_problems(data: Dict[str, Any], entries: Dict[str, Optional[str]], la
             out.append(f"entry {entry}: relies_on names nothing; name what prompted it")
         elif unknown:
             out.append(f"entry {entry}: relies_on {unknown}, which are not labels given")
-        written = _in_prose(labels, c.get("what"), c.get("assistant_part"), c.get("why"))
-        if written:
-            out.append(f"entry {entry}: {written} written into what, assistant_part or why; write it in words "
-                       f"and put the reference in relies_on")
         concern = str(c.get("concern") or "").strip()
         if concern and (labels.get(concern) or [None])[0] != "concern":
             out.append(f"entry {entry}: concern {concern!r} is not an open concern given (its C label)")
@@ -416,10 +406,6 @@ def problems(data: Any, items: List[Dict[str, Any]], labels: Dict[str, Any]) -> 
         unknown = [x for x in d.get("relies_on") or [] if str(x).strip() not in labels]
         if unknown:
             out.append(f"{label}: relies_on {unknown}, which are not labels given")
-        written = _in_prose(labels, d.get("why"), d.get("assistant_part"))
-        if written:
-            out.append(f"{label}: {written} written into why or assistant_part; write it in words and put the "
-                       f"reference in relies_on")
     twice = sorted({x for x in seen if seen.count(x) > 1})
     if twice:
         out.append(f"decided more than once: {twice}")

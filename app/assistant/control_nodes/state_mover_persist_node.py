@@ -24,11 +24,11 @@ class StateMoverPersistNode(ControlNode):
     The answer names tasks and arrivals by the labels of the call (state_mover_prep_node.label_state_mover_view);
     they are mapped back here. An answer whose decisions name a task or an arrival not shown (or of the wrong kind)
     is not applied at all: nothing is woken and nothing promoted that tick, and everything is judged again on the
-    next (owner, 2026-10-08: never send what the answer meant to hold). A label written into prose (the summary, a
-    wake's evidence, a hold's reason) is logged and translated to the id it names
-    (projection.translate), and the decisions apply (owner, 2026-10-09: "We cant throw away
-    something because prose contains something"); until then it refused the whole answer, and at 14:28 a ready step
-    waited a tick because the summary said "T1 is promoted".
+    next (owner, 2026-10-08: never send what the answer meant to hold). Its prose (the summary, a wake's evidence, a
+    hold's reason) is never checked: the prompt asks for words, and the decisions are what count (owner, 2026-10-09:
+    "We cant throw away something because prose contains something"; scanning prose for labels is as good as a
+    regex). Until then a label in the summary refused the whole answer: at 14:28 a ready step waited a tick because
+    the summary said "T1 is promoted".
     """
 
     def action_handler(self, message):
@@ -53,40 +53,25 @@ class StateMoverPersistNode(ControlNode):
 
     def _resolve(self) -> list:
         """Map the answer's labels to tasks and arrivals in place (`task_id`, `source_item_id`), or return every
-        problem with its decisions. Labels written into its prose are logged, not problems."""
-        from app.assistant.subconscious.projection import labels_in, translate
+        problem with its decisions."""
         labels = self.blackboard.get_state_value("state_mover_labels", {}) or {}
         ready = {t["label"] for t in self.blackboard.get_state_value("ready_work_nodes", []) or []}
         waiting = {t["label"] for t in self.blackboard.get_state_value("waiting_work_nodes", []) or []}
-        numbered = [x for x in labels if any(ch.isdigit() for ch in x)]
-        problems, wakes, holds, in_prose = [], [], [], []
+        problems, wakes, holds = [], [], []
         for w in self.blackboard.get_state_value("node_wakes", []) or []:
             task, source = str(w.get("task") or "").strip(), str(w.get("source") or "").strip()
             if task not in waiting:
                 problems.append(f"node_wakes: {task!r} is not a parked task shown (its T label)")
             if (labels.get(source) or [None])[0] != "source_item":
                 problems.append(f"node_wakes: {source!r} is not an arrival shown (its S label)")
-            if labels_in(w.get("evidence"), numbered):
-                in_prose.append(f"node_wakes {task}: evidence")
             if not problems:
-                wakes.append({**w, "evidence": translate(w.get("evidence") or "", labels),
-                              "task_id": labels[task][1], "source_item_id": labels[source][1]})
+                wakes.append({**w, "task_id": labels[task][1], "source_item_id": labels[source][1]})
         for h in self.blackboard.get_state_value("held_work_nodes", []) or []:
             task = str(h.get("task") or "").strip()
             if task not in ready:
                 problems.append(f"held_work_nodes: {task!r} is not a ready task shown (its T label)")
                 continue
-            if labels_in(h.get("hold_reason"), numbered):
-                in_prose.append(f"held_work_nodes {task}: hold_reason")
-            holds.append({**h, "hold_reason": translate(h.get("hold_reason") or "", labels),
-                          "task_id": labels[task][1]})
-        summary = self.blackboard.get_state_value("state_mover_summary", "") or ""
-        if labels_in(summary, numbered):
-            in_prose.append("state_mover_summary")
-            self.blackboard.update_state_value("state_mover_summary", translate(summary, labels))
-        if in_prose:
-            logger.warning("[%s] the state_mover wrote labels into its prose; translated to ids, its decisions "
-                           "apply: %s", self.name, in_prose)
+            holds.append({**h, "task_id": labels[task][1]})
         if not problems:
             self.blackboard.update_state_value("node_wakes", wakes)
             self.blackboard.update_state_value("held_work_nodes", holds)

@@ -62,10 +62,11 @@ def test_every_problem_is_named_and_nothing_is_applied():
     with pytest.raises(ValueError) as refused:
         A._resolve(bad, labels, wo)
     text = str(refused.value)
+    assert "written into" not in text, "prose is never checked for labels (owner, 2026-10-09)"
     for problem in ("a new task's node_id is a short name you choose, not a label",
                     "depends_on 'T9' is neither", "depends_on 'ghost' is neither",
                     "uses 'G' is not a task, record, source or work given",
-                    "['W1'] written into its words", "abandon_node_ids: 'W1' is not a task of this goal"):
+                    "abandon_node_ids: 'W1' is not a task of this goal"):
         assert problem in text
     with pytest.raises(ValueError, match="covered_by: 'T1' is not other work given"):
         A._resolve({"end_goal": {"status": "abandoned", "reason": "done elsewhere", "covered_by": ["T1"]}},

@@ -376,8 +376,8 @@ def test_an_entry_names_what_prompted_it_by_label():
                                                 relies_on=("M1",))]}, given, labels) == []
     assert "not one of the entries given" in D.entries_problems({"entries": [_own(entry=made["id"],
                                                                                   action="modify")]}, given, labels)[0]
-    leaked = D.entries_problems({"entries": [_own(why="M1 says he is back.")]}, {}, labels)
-    assert "['M1'] written into" in leaked[0], "a label in prose is malformed"
+    assert D.entries_problems({"entries": [_own(why="M1 says he is back.")]}, {}, labels) == [], \
+        "prose is never checked for labels (owner, 2026-10-09)"
 
 
 def test_a_run_puts_an_own_entry_on_the_list_and_the_calendar_lane_makes_work_from_it(tmp_path, monkeypatch):
@@ -451,15 +451,6 @@ def test_what_an_entry_relies_on_is_kept_by_id_and_shown_again_by_label(tmp_path
     assert "relies on: [W1], [M2]" in user and "## Earlier things your entries rely on" in user
     assert "### Set the AC yesterday [W1; done;" in user and "[M2] (no longer stored)" in user
     assert "work_yesterday" not in user and f"cal:{DAY}" not in user, "no id is shown"
-
-
-def test_a_label_written_into_prose_is_malformed():
-    labels = {"I1": ["list_entry", "a"], "I2": ["list_entry", "b"], "I3": ["list_entry", "c"], "W3": ["work", "w"],
-              "D": ["resource", "r"]}
-    leaked = {"decisions": [*GOOD["decisions"][:2], _d("I3", "needed", "set the AC", "9:00 PM", why="W3 did it")]}
-    assert any("['W3'] written into why" in p for p in D.problems(leaked, _new_items(), labels))
-    vitamin = {"decisions": [*GOOD["decisions"][:2], _d("I3", "needed", "remind about vitamin D", "9:00 PM")]}
-    assert D.problems(vitamin, _new_items(), labels) == [], "the single letter D is also a word"
 
 
 def test_an_entry_for_a_concern_is_the_concerns(tmp_path, monkeypatch):

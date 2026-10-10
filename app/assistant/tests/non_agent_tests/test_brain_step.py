@@ -300,13 +300,14 @@ def test_only_attach_attaches_and_references_are_stored_as_objects(inbox, tmp_pa
     assert relations.sources(("brain_event", str(event_id)), connect=inbox) == [(update, "relies_on")]
 
 
-def test_a_label_in_the_brain_s_words_is_malformed():
+def test_only_reference_fields_are_checked_never_the_words():
+    """Owner, 2026-10-09: the prompt asks for words; scanning prose for labels is as good as a regex. Only the
+    reference fields are checked."""
     events = {"E1": {"text": "x"}}
     labels = {"E1": ["brain_event", "1"], "C1": ["concern", "c"], "W2": ["work", "w"]}
     problems = brain_step._problems(
         {"event_decisions": [{"event": "E1", "decision": "used", "reason": "W2 ended"}],
          "concern_updates": [{"concern": "C1", "action": "note", "relies_on": ["E1"], "attach": ["W2", "C1"],
                               "note": "C1 remains open"}]}, events, ["C1"], labels)
-    assert any("E1: ['W2'] written into its reason" in p for p in problems)
-    assert any("C1: ['C1'] written into its note" in p for p in problems)
+    assert not any("written into" in p for p in problems)
     assert any("attach names events (E) and work (W) only, got ['C1']" in p for p in problems)
