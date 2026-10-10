@@ -101,7 +101,7 @@ def problems(data: Any, now_utc: datetime, entry_ids: List[str]) -> List[str]:
     """act_now changes at least one entry (new or modified), and only act_now adds or modifies; a modify or a cancel
     names an entry on the list, a new one is written as entry "new"; new and modify name the outcome, the
     assistant's part and when; every change says why; hold has a future time."""
-    from app.assistant.subconscious.concern_view import hold_until_utc
+    from app.assistant.subconscious.concern_view import future_local_utc
     if not isinstance(data, dict):
         return ["no decision"]
     decision = data.get("decision")
@@ -139,7 +139,7 @@ def problems(data: Any, now_utc: datetime, entry_ids: List[str]) -> List[str]:
         out.append(f"changed more than once: {twice}")
     if decision == "hold":
         try:
-            hold_until_utc(data.get("hold_until"), now_utc)
+            future_local_utc(data.get("hold_until"), now_utc)
         except ValueError as exc:
             out.append(f"hold needs hold_until as a future local YYYY-MM-DD HH:MM: {exc}")
     return out
@@ -176,7 +176,7 @@ def write_plan(concern: Dict[str, Any], bucket: str, *, invoke: Optional[Callabl
     decider's answer is invalid. The plan's `todo` is the concern's open entries as the proposals would leave them."""
     from app.assistant.dayflow_orchestrator.work_context import _ENV
     from app.assistant.subconscious import brain_list
-    from app.assistant.subconscious.concern_view import hold_until_utc
+    from app.assistant.subconscious.concern_view import future_local_utc
     now = datetime.now(timezone.utc)
     from app.assistant.dayflow_orchestrator.brain_list_intake import work_of
     current = brain_list.entries(concern_id=concern["concern_id"], connect=list_connect)
@@ -198,7 +198,7 @@ def write_plan(concern: Dict[str, Any], bucket: str, *, invoke: Optional[Callabl
     plan = {"decision": data["decision"], "todo": todo, "why": data["why"], "proposals": changes,
             "hold_until": data.get("hold_until") if data["decision"] == "hold" else None}
     if plan["decision"] == "hold":
-        plan["hold_until_utc"] = hold_until_utc(plan["hold_until"], now).isoformat()
+        plan["hold_until_utc"] = future_local_utc(plan["hold_until"], now).isoformat()
     return plan
 
 

@@ -62,7 +62,7 @@ function render(data) {
   data.concerns.forEach((c) => {
     const s = section("The concern");
     s.appendChild(block(c.title, `${c.status}${c.subject ? " · about " + c.subject : ""}`, kv([
-      ["done when", c.done_when], ["you asked", c.owner_words && `"${c.owner_words}"`], ["notes", c.history],
+      ["done when", c.done_when], ["raised from", c.source], ["no longer matters after", c.expires], ["notes", c.history],
     ])));
     (c.attached_work || []).forEach((w) => {
       const list = el("ul", "rt-list");

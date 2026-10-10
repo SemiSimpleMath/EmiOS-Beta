@@ -16,8 +16,7 @@ import pytest
 
 import app.assistant.tests.test_setup  # noqa: F401
 import app.assistant.subconscious.day_pass as drs
-from app.assistant.subconscious import belief_occurrences, concern_door, day_plan, persist
-from app.assistant.tests.concern_store_helpers import ScratchRegister
+from app.assistant.subconscious import belief_occurrences, concern_door, day_plan
 from app.assistant.utils.time_utils import get_local_timezone
 from belief_engine.intake.store import sqlite_file
 

@@ -496,49 +496,6 @@ def _fetch_keyboard_spells(start_utc: datetime, end_utc: datetime) -> List[Dict[
             for s in get_active_segments_overlapping_range(start_utc, end_utc, include_provisional=True)]
 
 
-def add_day_ended_events(register: Dict[str, Any], *, now_utc: Optional[datetime] = None, connect=None) -> int:
-    """An open concern whose horizon is `today` and whose day has ended reaches the brain, once per concern per day
-    (2026-10-08). The brain reads a concern only when an event bears on it, so a concern about a moment ("the pickup
-    of [the son] from BAS tonight") stayed open into the next day while nothing new arrived; the time-bound rule
-    (shared/brain/time_bound.j2) resolves it once the moment has passed. The event is routed to its concern by code,
-    without the gate. Its day is the one the concern was raised on (first_observed, by the day boundary); a concern
-    the brain keeps open is asked again on each later day. Returns rows added."""
-    from app.assistant.pipelines.context import boundary_date_local_str, day_window_local
-    from app.assistant.utils.time_utils import get_local_timezone, local_time_text, parse_iso_utc
-    connect = connect or _connect
-    ensure_schema(connect)
-    now_utc = now_utc or datetime.now(timezone.utc)
-    tz = get_local_timezone()
-    today = boundary_date_local_str(now_utc.astimezone(tz))
-    rows = []
-    for bucket in ("active", "addressing"):
-        for c in register.get(bucket) or []:
-            if str(c.get("horizon") or "").lower() != "today":
-                continue
-            raised = parse_iso_utc(c["first_observed"])
-            day = boundary_date_local_str(raised.astimezone(tz))
-            if day >= today:
-                continue
-            ended = day_window_local(day)[1]
-            rows.append((f"day_ended:{c['concern_id']}:{today}", c["concern_id"],
-                         f"The day this concern was raised for has ended: raised {local_time_text(raised)} with horizon "
-                         f"today; that day ended {local_time_text(ended)}."))
-    received = _iso(now_utc)
-    added = 0
-    with connect(True) as c:
-        for ref, cid, text in rows:
-            cur = c.execute(
-                "INSERT OR IGNORE INTO brain_events (source, source_ref, occurred_at, room_id, speaker, text, received_at, "
-                "gate_status, route, concern_ids, gate_reasoning, gated_at) "
-                "VALUES ('time', ?, ?, NULL, 'clock', ?, ?, 'routed', 'concern', ?, ?, ?)",
-                (ref, received, text, received, json.dumps([cid]), "routed by code: the concern's day has ended",
-                 received))
-            added += cur.rowcount
-    if added:
-        logger.info("[brain_inbox] %d concern(s) past their day handed to the brain", added)
-    return added
-
-
 def add_work_event(*, work_id: str, receipt_id: str, occurred_at: str, text: str, connect=None) -> bool:
     """What dayflow did reports here: each finalizer judgment and each ending of every work object
     (concern_feedback.py). The event is pending like a chat message or an email: the gate routes it to

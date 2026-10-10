@@ -1,8 +1,10 @@
 """The gate: routes every brain-inbox event against the open concerns.
 
 One `subconscious::gate` call per page of pending events. Each event gets exactly one route —
-`concern` (with the concerns it bears on), `new_matter` or `none` — validated here: every event
-answered once, only the labels given, a concern route names at least one concern. One correction
+`concern` (with the one concern it changes), `new_matter` or `none` — validated here: every event
+answered once, only the labels given, a concern route names one concern (docs/design/concerns_as_state_2026-10-09.md,
+rule 3: one event changes one concern; until 2026-10-09 the gate listed every concern an event bore on, and one event
+was filed on several). One correction
 round; an answer still invalid after it marks the page `failed`, which the brain still reads
 (a routing failure must not drop an event).
 
@@ -43,14 +45,13 @@ def _problems(data: Any, event_labels: List[str], concern_labels: List[str]) -> 
             out.append(f"event {ev!r} is not one of the events given")
             continue
         seen.append(ev)
-        route, named = d.get("route"), d.get("concerns") or []
+        route, named = d.get("route"), str(d.get("concern") or "").strip()
         if route not in ("concern", "new_matter", "none"):
             out.append(f"{ev}: route {route!r} is not concern, new_matter or none")
-        bad = [x for x in named if x not in concern_labels]
-        if bad:
-            out.append(f"{ev}: {bad} are not concern labels given")
-        if route == "concern" and not named:
-            out.append(f"{ev}: route concern names no concern")
+        elif route == "concern" and named not in concern_labels:
+            out.append(f"{ev}: route concern names one open concern given, got {named!r}")
+        elif route != "concern" and named:
+            out.append(f"{ev}: route {route} names no concern, got {named!r}")
     dup = sorted({e for e in seen if seen.count(e) > 1})
     if dup:
         out.append(f"answered more than once: {dup}")
@@ -94,7 +95,7 @@ def route_page(events: List[Dict[str, Any]], concerns: List[Dict[str, Any]],
     out = {}
     for d in data["decisions"]:
         e = by_label[d["event"]]
-        named = list(dict.fromkeys(d.get("concerns") or [])) if d["route"] == "concern" else []
+        named = [d["concern"]] if d["route"] == "concern" else []
         out[e["id"]] = {"route": d["route"], "concern_ids": [c_by_label[x]["concern_id"] for x in named],
                         "reasoning": str(d.get("reasoning") or "")}
     return out

@@ -1,11 +1,11 @@
 """The brain step: what the gate passed on, read one matter at a time, applied to the concerns.
 
-Pins: events group into matters (by the concerns they bear on, else by conversation or thread);
+Pins: events group into matters (by the concern they bear on, else by conversation or thread);
 a note lands on the concern as a [brain] journal line with the events as evidence; a resolution
-closes it; a new concern the owner asked for keeps the owner's words and must quote them exactly;
-every event gets a decision that its citations agree with; an invalid answer gets one correction,
-then the matter is recorded failed, nothing is written and it is not retried; the brain reads earlier chat
-summaries and evidence as text.
+closes it; a new concern's source is the event it comes from, copied by code, and it carries when it expires;
+every event is decided once, and an event changes one concern (docs/design/concerns_as_state_2026-10-09.md, rule 3);
+an invalid answer gets one correction, then the matter is recorded failed, nothing is written and it is not retried;
+the brain reads earlier chat summaries, and each concern's record without its evidence list.
 Scratch stores; the brain and the concern door judge are fakes. Invented data only.
 """
 from __future__ import annotations
@@ -21,6 +21,7 @@ from app.assistant.tests.concern_store_helpers import ScratchRegister
 from belief_engine.intake.store import sqlite_file
 
 NOW = datetime.now(timezone.utc).replace(microsecond=0)
+LATER = (NOW + timedelta(days=2)).astimezone().strftime("%Y-%m-%d %H:%M")   # a future local time
 
 
 @pytest.fixture(autouse=True)
@@ -109,9 +110,10 @@ def test_events_group_into_matters(inbox):
 def test_a_note_lands_on_the_concern_and_the_events_are_consumed(inbox, tmp_path):
     reg = _register(tmp_path, active=[_concern("c-vet", "Vet appointment for the dog")])
     _event(inbox, 1, 10, "The vet moved us to Friday at 9.", route="concern", concerns=["c-vet"])
-    brain = _brain({"event_decisions": [{"event": "E1", "decision": "used", "reason": "new date"}],
+    brain = _brain({"event_decisions": [{"event": "E1", "decision": "changes_concern", "concern": "C1",
+                                         "reason": "new date"}],
                     "concern_updates": [{"concern": "C1", "action": "note", "relies_on": ["E1"], "attach": ["E1"],
-                                         "note": "The appointment moved to Friday 9:00."}],
+                                         "note": "The appointment moved to Friday 9:00.", "expires_at": LATER}],
                     "new_concerns": []})
     out = brain_step.run_brain_step(connect=inbox, register_connect=reg.connect, call=brain, judge=_all_new)
     assert out == {"matters": 1, "applied": 1, "failed": 0}
@@ -122,9 +124,11 @@ def test_a_note_lands_on_the_concern_and_the_events_are_consumed(inbox, tmp_path
     assert brain_step.pending_events(inbox) == []
     with inbox(False) as db:
         status, decisions = db.execute("SELECT status, decisions FROM brain_matters").fetchone()
-    assert status == "applied" and json.loads(decisions)["events"]["message:m1"]["reason"] == "new date"
+    decided = json.loads(decisions)["events"]["message:m1"]
+    assert status == "applied" and (decided["reason"], decided["concern_id"]) == ("new date", "c-vet")
+    assert c["expires_at"] > NOW.isoformat(), "the update moved when it stops mattering"
     payload = brain.seen[0]
-    assert payload["concerns"][0]["label"] == "C1" and payload["concerns"][0]["evidence"][0]["snippet"] == "(message old)"
+    assert payload["concerns"][0]["label"] == "C1" and "evidence" not in payload["concerns"][0]
     assert payload["room_history"][0]["summaries"][0]["title"] == "flea medication plan"
     assert "[E1] Owner: The vet moved us to Friday at 9." in payload["events"]
 
@@ -132,7 +136,8 @@ def test_a_note_lands_on_the_concern_and_the_events_are_consumed(inbox, tmp_path
 def test_a_resolution_closes_the_concern(inbox, tmp_path):
     reg = _register(tmp_path, active=[_concern("c-flea", "Flea medication due")])
     _event(inbox, 1, 10, "OK I have given the dogs their flea medication!", route="concern", concerns=["c-flea"])
-    brain = _brain({"event_decisions": [{"event": "E1", "decision": "used", "reason": "done"}],
+    brain = _brain({"event_decisions": [{"event": "E1", "decision": "changes_concern", "concern": "C1",
+                                         "reason": "done"}],
                     "concern_updates": [{"concern": "C1", "action": "resolve", "relies_on": ["E1"], "attach": ["E1"],
                                          "note": "The owner gave the dose."}]})
     brain_step.run_brain_step(connect=inbox, register_connect=reg.connect, call=brain, judge=_all_new)
@@ -140,50 +145,63 @@ def test_a_resolution_closes_the_concern(inbox, tmp_path):
     assert after["active"] == [] and after["resolved"][0]["resolution_reason"] == "The owner gave the dose."
 
 
-def test_an_owner_request_becomes_a_concern_that_keeps_the_owner_words(inbox, tmp_path):
+def test_a_new_concern_carries_its_source_and_its_expiry(inbox, tmp_path):
+    """Rule 6: where a concern came from, its own words copied by code (until 2026-10-09 the brain copied the
+    owner's words into owner_words); rule 4: when it stops mattering."""
     reg = _register(tmp_path)
     _event(inbox, 1, 10, "Keep an eye on the passport renewal until it arrives.")
-    brain = _brain({"event_decisions": [{"event": "E1", "decision": "tracked_as_new", "reason": "asked"}],
+    brain = _brain({"event_decisions": [{"event": "E1", "decision": "new_concern", "concern": "N1", "reason": "asked"}],
                     "new_concerns": [{"label": "N1", "title": "Passport renewal in progress", "subject": "owner",
                                       "kind": "anticipated_need", "severity": "medium", "horizon": "this_month",
-                                      "done_when": "the renewed passport has arrived", "notes": "n", "relies_on": [], "attach": ["E1"],
-                                      "owner_words": "Keep an eye on the passport renewal until it arrives."}]})
+                                      "done_when": "the renewed passport has arrived", "expires_at": LATER,
+                                      "notes": "n", "relies_on": [], "attach": ["E1"]}]})
     brain_step.run_brain_step(connect=inbox, register_connect=reg.connect, call=brain, judge=_all_new)
     [c] = reg.read()["active"]
     assert c["origin"] == "brain" and c["done_when"] == "the renewed passport has arrived"
-    assert c["owner_request"]["words"] == "Keep an eye on the passport renewal until it arrives."
-    assert c["owner_request"]["ref"] == "message:m1"
+    assert c["source"] == {"kind": "user", "at": (NOW - timedelta(minutes=10)).isoformat(), "ref": "message:m1",
+                           "content": "Keep an eye on the passport renewal until it arrives."}
+    from app.assistant.subconscious.concern_view import future_local_utc
+    assert c["expires_at"] == future_local_utc(LATER, NOW).isoformat() and "owner_request" not in c
 
 
 def test_an_invalid_answer_fails_the_matter_once_and_writes_nothing(inbox, tmp_path):
     reg = _register(tmp_path)
     _event(inbox, 1, 10, "Please remind me about the dentist.")
-    bad = {"event_decisions": [{"event": "E1", "decision": "tracked_as_new", "reason": "asked"}],
+    bad = {"event_decisions": [{"event": "E1", "decision": "new_concern", "concern": "N1", "reason": "asked"}],
            "new_concerns": [{"label": "N1", "title": "Dentist", "kind": "anticipated_need", "severity": "low",
-                             "horizon": "this_week", "done_when": "booked", "notes": "n", "relies_on": [], "attach": ["E1"],
-                             "owner_words": "remind me about the dentist next week"}]}
+                             "horizon": "this_week", "done_when": "booked", "expires_at": "2020-01-01 09:00",
+                             "notes": "n", "relies_on": [], "attach": ["E1"]}]}
     brain = _brain(bad, bad)
     out = brain_step.run_brain_step(connect=inbox, register_connect=reg.connect, call=brain, judge=_all_new)
     assert out["failed"] == 1 and len(brain.seen) == 2
-    assert "owner_words must be copied exactly" in brain.seen[1]["correction"]
+    assert "N1: expires_at must be a future local YYYY-MM-DD HH:MM" in brain.seen[1]["correction"]
     assert reg.read()["active"] == []
     assert brain_step.pending_events(inbox) == [], "a failed matter is not retried automatically"
     with inbox(False) as db:
         assert db.execute("SELECT consumed_at FROM brain_events").fetchone()[0] is None
 
 
-def test_decisions_must_agree_with_what_cites_the_events():
-    events = {"E1": {"text": "x"}, "E2": {"text": "y"}}
+def test_an_event_changes_one_concern_and_an_update_names_only_its_own_events():
+    """Rule 3. Until 2026-10-09 an event could be cited on several concerns, and "used" required a concern update, so
+    a fact of the day was filed on whatever concern was nearest (a dog-walk follow-up on a friend's birthday)."""
+    events = {"E1": {"text": "x"}, "E2": {"text": "y"}, "E3": {"text": "z"}}
+    labels = {"E1": ["brain_event", "1"], "E2": ["brain_event", "2"], "E3": ["brain_event", "3"],
+              "C1": ["concern", "c"], "C2": ["concern", "d"]}
     problems = brain_step._problems(
-        {"event_decisions": [{"event": "E1", "decision": "used", "reason": "r"},
-                             {"event": "E2", "decision": "needs_nothing", "reason": "r"}],
-         "concern_updates": [{"concern": "C1", "action": "note", "relies_on": ["E2"], "attach": [], "note": "n"}]},
-        events, ["C1"], {"E1": ["brain_event", "1"], "E2": ["brain_event", "2"], "C1": ["concern", "c"]})
-    assert any("E1 is decided used but no concern update names it" in p for p in problems)
-    # 2026-10-08: told only that a used event must be cited, the brain cited an unrelated concern (a Nest report on
-    # a school pickup), which attached the Nest work to it. The correction names the honest way out too.
-    assert any("or decide needs_nothing if it changes none" in p for p in problems)
-    assert any("E2 is decided needs_nothing but" in p for p in problems)
+        {"event_decisions": [{"event": "E1", "decision": "changes_concern", "concern": "C1", "reason": "r"},
+                             {"event": "E2", "decision": "no_concern", "reason": "r"},
+                             {"event": "E3", "decision": "no_concern", "concern": "C2", "reason": "r"}],
+         "concern_updates": [{"concern": "C2", "action": "note", "relies_on": ["E2"], "attach": [], "note": "n"}]},
+        events, ["C1", "C2"], labels, NOW)
+    assert any("E1 changes C1, but no update of C1 records it" in p for p in problems)
+    assert any("C2 is updated but no event is decided changes_concern for it" in p for p in problems)
+    assert any("C2: ['E2'] are not decided to change it; an event changes one concern" in p for p in problems)
+    assert any("E3: no_concern names no concern" in p for p in problems)
+    fine = {"event_decisions": [{"event": "E1", "decision": "changes_concern", "concern": "C1", "reason": "r"},
+                                {"event": "E2", "decision": "no_concern", "reason": "r"},
+                                {"event": "E3", "decision": "no_concern", "reason": "r"}],
+            "concern_updates": [{"concern": "C1", "action": "note", "relies_on": ["E1"], "attach": ["E1"], "note": "n"}]}
+    assert brain_step._problems(fine, events, ["C1", "C2"], labels, NOW) == []
 
 
 def test_the_brain_prompt_renders_every_section():
@@ -191,9 +209,10 @@ def test_the_brain_prompt_renders_every_section():
     payload = {"now": "Tue 2026-09-30 09:00", "events": "### Room master_room\nAbout.\n",
                "room_history": [{"description": "About master_room.", "summaries": [
                    {"when": "Mon", "title": "flea plan", "body": "Talked about the dose.", "pod_id": "p"}]}],
-               "concerns": [brain_step._concern_view("C1", {**_concern("c1", "Flea medication due",
-                                                                       owner_request={"words": "track it"}),
-                                                             "_status": "active"})],
+               "concerns": [brain_step._concern_view("C1", {**_concern(
+                   "c1", "Flea medication due", expires_at="2026-09-30T23:00:00+00:00",
+                   source={"kind": "user", "at": "2026-09-29T16:00:00+00:00", "ref": "message:m9",
+                           "content": "track it"}), "_status": "active"})],
                "other_concerns": [{"label": "C2", "title": "Car service", "status": "active", "subject": "owner",
                                    "done_when": None}],
                "linked_work": [{"work_id": "w1", "title": "Bake cookies for the sale", "status": "done",
@@ -216,7 +235,11 @@ def test_the_brain_prompt_renders_every_section():
                "correction": None}
     user = work_context._ENV.get_template("subconscious/brain/prompts/user.j2").render(agent_input=payload)
     assert "## Earlier in the chat room" in user and "About master_room." in user and "Talked about the dose." in user
-    assert "### [C1] Flea medication due (active)" in user and 'the owner asked for this: "track it"' in user
+    from app.assistant.utils.time_utils import local_time_text
+    assert "### [C1] Flea medication due (active)" in user
+    assert f'- raised from: the owner, {local_time_text("2026-09-29T16:00:00+00:00")}: "track it"' in user
+    assert f"- no longer matters after: {local_time_text('2026-09-30T23:00:00+00:00')}" in user
+    assert "evidence (" not in user
     assert "- [C2] Car service (active; about owner; done when: (not stated))" in user
     assert "### Bake cookies for the sale [w1; done; started Mon, last changed Tue; cites a concern of this matter]" in user
     assert '- task "Bake the cookies": Two dozen baked.' in user and "(none close enough)" in user
@@ -231,7 +254,8 @@ def test_the_brain_prompt_renders_every_section():
     assert "- Someone else sometimes walks the dogs." in user and "B7" not in user
     system = work_context._ENV.get_template("subconscious/brain/prompts/system.j2").render(
         resource_assistant_data={"name": "the assistant"}, resource_user_data={"first_name": "Sam"})
-    assert "closes only when its done-when is met or Sam says" in system
+    assert "A concern whose source is Sam closes only when\nits done-when is met or Sam says it is over" in system
+    assert "Every concern expires" in system and "owner_words" not in system
     assert "name in your note every item that depends on the old fact" in system
 
 
@@ -247,7 +271,8 @@ def test_a_work_report_the_brain_attaches_is_evidence_and_the_work_stays_where_i
                   "'concern', ?)", (NOW.isoformat(), 'Work "Fix the calendar" (work_cal) ended: done.\n'
                                     'Objective: Clean up next week\'s calendar\nReason: the vet visit was moved to '
                                     'Friday 9:00 while cleaning up.', NOW.isoformat(), json.dumps(["c-vet"])))
-    brain = _brain({"event_decisions": [{"event": "E1", "decision": "used", "reason": "the visit moved"}],
+    brain = _brain({"event_decisions": [{"event": "E1", "decision": "changes_concern", "concern": "C1",
+                                         "reason": "the visit moved"}],
                     "concern_updates": [{"concern": "C1", "action": "note", "relies_on": ["E1"], "attach": ["E1"],
                                          "note": "The appointment is now Friday 9:00."}],
                     "new_concerns": []})
@@ -268,7 +293,8 @@ def test_only_attach_attaches_and_references_are_stored_as_objects(inbox, tmp_pa
                   "route, concern_ids) VALUES ('work', 'work:work_nest:000-r1', ?, 'dayflow', ?, ?, 'routed', "
                   "'concern', ?)", (NOW.isoformat(), 'Work "Set the AC" ended: done.', NOW.isoformat(),
                                     json.dumps(["c-vet"])))
-    brain = _brain({"event_decisions": [{"event": "E1", "decision": "used", "reason": "the AC is set"}],
+    brain = _brain({"event_decisions": [{"event": "E1", "decision": "changes_concern", "concern": "C1",
+                                         "reason": "the AC is set"}],
                     "concern_updates": [{"concern": "C1", "action": "note", "relies_on": ["E1"], "attach": [],
                                          "note": "The thermostat work ended; the visit is unchanged."}]})
     brain_step.run_brain_step(connect=inbox, register_connect=reg.connect, call=brain, judge=_all_new)
@@ -291,8 +317,8 @@ def test_only_reference_fields_are_checked_never_the_words():
     events = {"E1": {"text": "x"}}
     labels = {"E1": ["brain_event", "1"], "C1": ["concern", "c"], "W2": ["work", "w"]}
     problems = brain_step._problems(
-        {"event_decisions": [{"event": "E1", "decision": "used", "reason": "W2 ended"}],
+        {"event_decisions": [{"event": "E1", "decision": "changes_concern", "concern": "C1", "reason": "W2 ended"}],
          "concern_updates": [{"concern": "C1", "action": "note", "relies_on": ["E1"], "attach": ["W2", "C1"],
-                              "note": "C1 remains open"}]}, events, ["C1"], labels)
+                              "note": "C1 remains open"}]}, events, ["C1"], labels, NOW)
     assert not any("written into" in p for p in problems)
     assert any("attach names events (E) only, got ['W2', 'C1']" in p for p in problems)

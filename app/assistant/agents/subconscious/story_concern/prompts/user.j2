@@ -4,7 +4,7 @@ Now: {{ agent_input.now }}
 {% set c = agent_input.concern -%}
 {{ c.title }} ({{ c.status }})
 Settled when: {{ c.done_when or "(not stated)" }}
-{% if c.owner_words %}What the owner asked, in their words: "{{ c.owner_words }}"
+{% if c.source %}Raised from: {{ c.source }}
 {% endif %}
 ## Its notes, oldest first
 {{ c.history or "None yet." }}

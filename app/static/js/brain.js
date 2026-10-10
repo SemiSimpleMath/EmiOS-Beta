@@ -176,7 +176,7 @@ async function loadMatters() {
       (d.concern_updates || []).forEach((u) => body.appendChild(el("div", "br-decision", `${u.action} concern ${u.concern_id.slice(0, 8)}: ${u.note}`)));
       (d.new_concerns || []).forEach((n) => body.appendChild(el("div", "br-decision",
         `new concern ${n.label}: ${n.title}` + (m.admitted && m.admitted[n.label] ? ` → ${m.admitted[n.label].slice(0, 8)}` : " (not admitted)") +
-        (n.owner_request ? ` · the owner asked: "${n.owner_request.words}"` : ""))));
+        (n.source && n.source.kind === "user" ? ` · from the owner: "${n.source.content}"` : ""))));
     }));
   });
 }
@@ -194,7 +194,7 @@ async function loadConcerns() {
       ready.decision && [ready.decision, ready.decision + (ready.hold_until ? " until " + ready.hold_until : "")]];
     list.appendChild(card(c.title, badges, (body) => {
       body.appendChild(kv([["about", c.subject], ["done when", c.done_when], ["origin", c.origin],
-        ["the owner asked", c.owner_request && c.owner_request.words], ["notes", c.notes]]));
+        ["raised from", c.source], ["no longer matters after", c.expires], ["notes", c.notes]]));
       body.appendChild(el("div", "br-h", "Summary"));
       if (c.summary_error) body.appendChild(el("div", "br-err", "summary failed: " + c.summary_error.error));
       if (c.summary) body.appendChild(kv([["summary", c.summary.text], ["covers notes up to", when(c.summary.through)],

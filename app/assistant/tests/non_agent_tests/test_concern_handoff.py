@@ -118,9 +118,9 @@ def test_hold_and_no_action_stay_with_the_brain_and_a_passed_hold_is_planned_aga
 
 def test_a_hold_needs_a_future_time():
     later = (NOW + timedelta(days=3)).astimezone().strftime("%Y-%m-%d %H:%M")
-    assert concern_view.hold_until_utc(later, NOW) > NOW
+    assert concern_view.future_local_utc(later, NOW) > NOW
     with pytest.raises(ValueError, match="not in the future"):
-        concern_view.hold_until_utc("2020-01-01 09:00", NOW)
+        concern_view.future_local_utc("2020-01-01 09:00", NOW)
 
 
 def test_work_made_from_the_item_carries_the_concern_whatever_the_steward_cites():

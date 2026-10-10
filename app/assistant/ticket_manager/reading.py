@@ -82,7 +82,7 @@ def _reply_line(reply: Dict[str, Any]) -> str:
 def _concern(ref: str) -> Optional[Dict[str, Any]]:
     """A concern by full id or `concern:<8+ chars>`, with the parts a reader needs."""
     from app.assistant.subconscious.concern_store import load_register
-    from app.assistant.subconscious.concern_view import attempts
+    from app.assistant.subconscious.concern_view import attempts, expires_text, source_text
     from app.assistant.subconscious.persist import history_for_prompt
     key = ref[len("concern:"):] if ref.startswith("concern:") else ref
     register = load_register()
@@ -91,7 +91,7 @@ def _concern(ref: str) -> Optional[Dict[str, Any]]:
             cid = str(c.get("concern_id"))
             if cid == key or (len(key) >= 8 and cid.startswith(key)):
                 return {"concern_id": cid, "status": bucket, "title": c.get("title"), "subject": c.get("subject"),
-                        "done_when": c.get("done_when"), "owner_words": (c.get("owner_request") or {}).get("words"),
+                        "done_when": c.get("done_when"), "source": source_text(c), "expires": expires_text(c),
                         "history": history_for_prompt(c),
                         "attached_work": attempts(c),
                         "evidence": [str(e.get("ref") or "") for e in c.get("evidence") or []],

@@ -42,7 +42,7 @@ def test_architect_instructions_and_concern_history_are_local():
     text = render_view("architect_task", mode="replan", objective="o", finalizer_block="", graph="",
                        goal_instructions=[{"kind": "end", "at": "2026-09-30T17:20:00+00:00", "reason": "moot"}], stranded=False)
     assert "- Wed 09-30 10:20 AM: moot" in text
-    concerns = [{"concern_id": "c1234567", "title": "t", "status": "addressing", "done_when": "d", "owner_words": "", "history": "",
+    concerns = [{"concern_id": "c1234567", "title": "t", "status": "addressing", "done_when": "d", "source": "", "expires": "", "history": "",
                  "attempts": [{"work_id": "w", "objective": "o", "status": "abandoned",
                                "attached_at": "2026-09-30T07:39:00+00:00",
                                "progress": {"work_id": "w", "state": "abandoned", "ended_at": "2026-09-30T14:20:00+00:00",

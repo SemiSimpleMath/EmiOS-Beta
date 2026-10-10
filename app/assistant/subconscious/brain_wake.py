@@ -18,6 +18,7 @@ What wakes it:
 - a room still talking: the wake sleeps until that room goes quiet, then runs;
 - a plan holding until a time: the wake sleeps until the earliest hold, when the concern is planned
   again (concern_planner.next_hold_at);
+- a concern's expiry: the wake sleeps until the earliest one, when the concern closes (persist.next_expiry);
 - presence (2026-10-07): the owner coming back to the computer (the AFK monitor's afk_state_changed), and the
   moment an absence reaches brain_inbox.PRESENCE_AWAY (brain_inbox.next_presence_due);
 - the calendar (2026-10-09): a calendar sync or write that changed something (the repository's repo_update);
@@ -58,11 +59,11 @@ def run_brain() -> Dict[str, Any]:
     from app.assistant.subconscious.gate import run_gate
     from app.assistant.subconscious.concern_store import load_register
     from app.assistant.subconscious.belief_occurrences import run_occurrence_handoffs
+    # A concern whose expiry has passed closes first, whatever its state (rule 4); until 2026-10-09 the clock asked the
+    # brain each day whether a day's concern still mattered (brain_inbox.add_day_ended_events).
+    from app.assistant.subconscious import persist
+    expired = persist.expire_concerns()
     gate = run_gate()
-    # A concern about a day whose day has ended is handed to the brain (brain_inbox.add_day_ended_events): the brain
-    # reads a concern only when an event bears on it.
-    from app.assistant.subconscious.brain_inbox import add_day_ended_events
-    add_day_ended_events(load_register())
     brain = run_brain_step()
     # A concern the brain closed takes its open list entries with it, so dayflow ends their work.
     from app.assistant.subconscious import brain_list
@@ -73,7 +74,7 @@ def run_brain() -> Dict[str, Any]:
     register, now = load_register(), datetime.now(timezone.utc)
     from app.assistant.subconscious.brain_inbox import next_presence_due
     due = [t for t in (gate["next_ready_at"], concern_planner.next_hold_at(register, now),
-                       next_presence_due(now_utc=now)) if t is not None]
+                       next_presence_due(now_utc=now), persist.next_expiry(register, now)) if t is not None]
     # Last: a day pass that fails does not hold up the concerns' summaries and plans. Today's calendar is
     # handed to dayflow one placement at a time (subconscious/belief_occurrences.py).
     from app.assistant.subconscious.brain_trace import trace
@@ -108,7 +109,7 @@ def run_brain() -> Dict[str, Any]:
         logger.error("[brain_wake] the day's record (shadow) failed: %s", exc, exc_info=True)
         recorded = {"day_record": f"failed: {type(exc).__name__}"}
     return {**gate, **{f"brain_{k}": v for k, v in brain.items()}, **summaries, **plans, **handoffs, **day, **occurrences,
-            **stories, **decided, **recorded, "closed_concern_entries": closed_entries,
+            **stories, **decided, **recorded, "expired": expired, "closed_concern_entries": closed_entries,
             "next_wake_at": min(due) if due else None}
 
 

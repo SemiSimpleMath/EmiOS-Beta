@@ -107,6 +107,8 @@ def apply_brain_matter(updates: List[Dict[str, Any]], plan: List[Dict[str, Any]]
                 raise KeyError(f"concern {u['concern_id']} is no longer open")
             bucket, concern = open_by_id[u["concern_id"]]
             concern.setdefault("evidence", []).extend(u["evidence"])
+            if u.get("expires_at"):
+                concern["expires_at"] = u["expires_at"]
             if u["action"] == "note":
                 concern["last_reinforced_utc"] = now_iso
                 _journal_on(concern, now_iso, f"[{source}] {u['note']}")
@@ -176,6 +178,43 @@ def set_concern_plan(concern_id: str, from_record: str, *, plan: Optional[Dict[s
                 _save_register(connect, register)
                 return True
     raise KeyError(f"concern {concern_id} is not in the register")
+
+
+def expire_concerns(now_utc: Optional[datetime] = None, *, connect=None) -> List[str]:
+    """Close every open concern whose expiry has passed, whatever its state (docs/design/concerns_as_state_2026-10-09.md,
+    rule 4; owner, 2026-10-09: "Concerns have an expiration date. time today that it becomes irrelevant no matter
+    what"). Its resolution says so; its open list entries follow it (brain_list.cancel_for_closed_concerns). Until
+    then a concern about one evening was asked again every day whether it still mattered. Returns the concern ids
+    closed."""
+    from app.assistant.utils.time_utils import local_time_text, parse_iso_utc
+    now = now_utc or datetime.now(timezone.utc)
+    with _REGISTER_LOCK:
+        register = _load_register(connect)
+        closed = []
+        for bucket in ("active", "addressing"):
+            for c in list(register.get(bucket) or []):
+                expires = parse_iso_utc(c.get("expires_at")) if c.get("expires_at") else None
+                if expires is None or expires > now:
+                    continue
+                register[bucket].remove(c)
+                c["resolved_at_utc"] = now.isoformat()
+                c["resolution_reason"] = f"its time passed: it mattered until {local_time_text(expires)}"
+                register.setdefault("resolved", []).append(c)
+                closed.append(c["concern_id"])
+        if closed:
+            register["last_updated_utc"] = now.isoformat()
+            _save_register(connect, register)
+            logger.info("[persist] %d concern(s) expired: %s", len(closed), closed)
+    return closed
+
+
+def next_expiry(register: Dict[str, Any], now_utc: datetime) -> Optional[datetime]:
+    """The earliest future expiry of an open concern, or None: the brain wakes then to close it."""
+    from app.assistant.utils.time_utils import parse_iso_utc
+    times = [parse_iso_utc(c["expires_at"]) for b in ("active", "addressing") for c in register.get(b) or []
+             if c.get("expires_at")]
+    future = [t for t in times if t > now_utc]
+    return min(future) if future else None
 
 
 def _load_register(connect=None) -> Dict[str, Any]:

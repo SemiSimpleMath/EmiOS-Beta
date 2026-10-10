@@ -17,7 +17,7 @@ Now each reader (gate, noticer) gets the events in groups, each under a line say
   work's ending), in time order (subconscious/concern_feedback.py).
 - camera, by camera: the vision model's description of each frame the camera flagged, in time order.
 - presence: the owner leaving or coming back to the computer after 10 minutes or more away, in time order.
-- time: the clock reporting that the day a concern was raised for has ended.
+- time: the clock reporting that the day a concern was raised for has ended (until 2026-10-09; concerns expire now).
 - calendar: an event added to, changed on or removed from the calendar of the coming week, in time order.
 - tickets: the owner's reply to a ticket the assistant raised (a reminder, a notice, a question), in time order.
 - noticer: the issues the daily noticer raised about the long term, in the order raised.

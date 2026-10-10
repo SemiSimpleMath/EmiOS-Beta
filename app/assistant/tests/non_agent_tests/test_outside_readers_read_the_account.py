@@ -30,7 +30,7 @@ def test_the_brains_past_work_shows_what_each_task_found_and_nothing_addressed_t
 
 def test_the_concern_record_shows_the_account_without_the_verdict():
     view = {"concern_id": "c1234567", "title": "School fair", "status": "active", "severity": "low",
-            "done_when": None, "owner_words": None, "history": "",
+            "done_when": None, "source": "", "expires": "", "history": "",
             "attempts": [{"work_id": "w1", "objective": "Ask about the fair", "attached_at": FIN["at"],
                           "progress": {"work_id": "w1", "state": "abandoned", "ended_at": FIN["at"], "reason": "r",
                                        "replanning": False, "done": [], "dropped": [], "unfinished": [], "to_come": []},

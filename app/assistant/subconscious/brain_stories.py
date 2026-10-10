@@ -241,7 +241,7 @@ def concern_input(concern: Dict[str, Any], bucket: str, now_utc: datetime) -> Di
     from app.assistant.subconscious.persist import history_for_prompt
     return {"concern": {
         "title": concern.get("title"), "status": bucket,
-        "done_when": concern.get("done_when"), "owner_words": (concern.get("owner_request") or {}).get("words"),
+        "done_when": concern.get("done_when"), "source": concern_view.source_text(concern),
         "history": history_for_prompt(concern),
         "attempts": concern_view.attempts(concern),
         "plan": {k: (concern.get("plan") or {}).get(k) for k in ("decision", "todo", "why", "hold_until")}
@@ -399,14 +399,19 @@ def run_stories(*, call: Optional[Callable[[str], Callable]] = None, connect=Non
 
 # ── reading, for the page ───────────────────────────────────────────────────
 
-_TAGS = {"used": ("noted", "noted"), "tracked_as_new": ("new concern", "new"),
-         "needs_nothing": ("set aside", "aside")}
+_TAGS = {"changes_concern": ("noted", "noted"), "new_concern": ("new concern", "new"),
+         "no_concern": ("set aside", "aside"),
+         # matters recorded before 2026-10-09 carry the brain's earlier names for the same decisions
+         "used": ("noted", "noted"), "tracked_as_new": ("new concern", "new"), "needs_nothing": ("set aside", "aside")}
 
 
-def _settled(e: Dict[str, Any], matter: Dict[str, Any]) -> bool:
-    """The event settled a concern: a resolve cites it. Matters recorded before updates kept their events
+def _settled(e: Dict[str, Any], matter: Dict[str, Any], decided: Dict[str, Any]) -> bool:
+    """The event settled a concern: the concern it changed was resolved (since 2026-10-09 each event's decision names
+    its concern), or, in earlier matters, a resolve cites it. Matters recorded before updates kept their events
     (2026-10-02) count when every update in them is a resolve."""
     updates = (matter["decisions"] or {}).get("concern_updates") or []
+    if decided.get("concern_id"):
+        return any(u["concern_id"] == decided["concern_id"] and u["action"] == "resolve" for u in updates)
     if any("relies_on" in u for u in updates):       # since 2026-10-08: events named as objects (relies_on, attach)
         ref = ["brain_event", str(e["id"])]
         return any(u["action"] == "resolve" and (ref in u["relies_on"] or ref in u["attach"]) for u in updates)
@@ -417,9 +422,9 @@ def _settled(e: Dict[str, Any], matter: Dict[str, Any]) -> bool:
 
 def _tag(e: Dict[str, Any], matter: Dict[str, Any]) -> Tuple[str, str]:
     decided = ((matter["decisions"] or {}).get("events") or {}).get(e["source_ref"]) or {}
-    if decided.get("decision") == "used" and _settled(e, matter):
+    if decided.get("decision") in ("changes_concern", "used") and _settled(e, matter, decided):
         return "settled", "settled"
-    if decided.get("decision") == "tracked_as_new":
+    if decided.get("decision") in ("new_concern", "tracked_as_new"):
         doors = {n.get("door") for n in (matter["decisions"] or {}).get("new_concerns") or []}
         if doors and doors <= {"merge_open", "merge_candidate"}:
             return "joined a concern", "noted"

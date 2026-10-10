@@ -4,7 +4,7 @@
 ### [{{ c.label }}] {{ c.title }}
 - about: {{ c.subject }}; kind: {{ c.kind }}; horizon: {{ c.horizon }}
 - done when: {{ c.done_when }}
-{% if c.owner_words %}- the owner asked for this: "{{ c.owner_words }}"
+{% if c.source %}- raised from: {{ c.source }}
 {% endif -%}
 - notes: {{ c.notes }}
 {% for e in c.evidence -%}
@@ -18,7 +18,7 @@
 - about: {{ c.subject }}; kind: {{ c.kind }}; first observed: {{ c.first_observed }}
 {% if c.done_when %}- done when: {{ c.done_when }}
 {% endif -%}
-{% if c.owner_words %}- the owner asked for this: "{{ c.owner_words }}"
+{% if c.source %}- raised from: {{ c.source }}
 {% endif -%}
 {% if c.closed_because %}- closed because: {{ c.closed_because }}
 {% endif -%}

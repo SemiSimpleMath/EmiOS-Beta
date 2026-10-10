@@ -14,13 +14,15 @@ class EventDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     event: str = Field(description="The event's label exactly as given, e.g. E2.")
-    decision: Literal["used", "tracked_as_new", "needs_nothing"] = Field(
-        description="used: it changes or confirms a concern you update (that update names it in relies_on or "
-                    "attach). tracked_as_new: a new concern comes from it (that new concern names it). "
-                    "needs_nothing: it changes no open concern and raises nothing new; the reason records what "
-                    "it established.")
-    reason: str = Field(description="Why it matters, or why it does not: specific to this event, in words; no "
-                                    "labels.")
+    decision: Literal["changes_concern", "new_concern", "no_concern"] = Field(
+        description="changes_concern: it changes one open concern (a new fact, a new date, progress, or settles it); "
+                    "your update of that concern records it. new_concern: a concern you raise comes from it. "
+                    "no_concern: it changes no concern and raises none; the reason records what it established.")
+    concern: Optional[str] = Field(
+        default=None,
+        description="changes_concern: the one concern it changes (e.g. C1). new_concern: the concern you raise from it "
+                    "(e.g. N1). Empty for no_concern.")
+    reason: str = Field(description="Why, specific to this event, in words; no labels.")
 
 
 class ConcernUpdate(BaseModel):
@@ -33,11 +35,14 @@ class ConcernUpdate(BaseModel):
                     "longer needed, or the owner says it is over.")
     note: str = Field(description="For note: the new facts, stated plainly. For resolve: why it is settled. "
                                   "Words and dates; no labels.")
-    relies_on: List[str] = Field(description="The labels of what the note rests on: events (E), and anything else "
-                                             "shown (W, M, P, K, S, R).")
-    attach: List[str] = Field(description="The labels of what becomes part of this concern: events (E) whose message, "
-                                          "email, sighting or work report is kept as its evidence, and work (W) whose "
-                                          "later reports reach it. Empty when nothing is attached.")
+    relies_on: List[str] = Field(description="The labels of what the note rests on: the events, and anything else "
+                                             "shown (W, R, K).")
+    attach: List[str] = Field(description="The events (E) whose message, email, sighting or report is kept as this "
+                                          "concern's evidence. Empty when none is.")
+    expires_at: Optional[str] = Field(
+        default=None,
+        description="Only when the events change when this concern stops mattering (the appointment moved): the new "
+                    "local time, YYYY-MM-DD HH:MM. Empty otherwise.")
 
 
 class NewConcern(BaseModel):
@@ -52,16 +57,15 @@ class NewConcern(BaseModel):
     done_when: str = Field(
         description="The outcome that closes the concern, in one line. A delivery (a reminder sent) is "
                     "not an outcome. When the owner stated the condition, use the owner's words.")
+    expires_at: str = Field(
+        description="The local time after which this concern no longer matters, whatever happened, YYYY-MM-DD HH:MM: "
+                    "for something only relevant today, a time today (the end of its moment, or midnight); otherwise "
+                    "the time in the future when it stops mattering.")
     notes: str = Field(description="Why this matters to the household, and what is known so far, in words; no "
                                    "labels.")
-    relies_on: List[str] = Field(description="The labels of anything else it rests on (W, M, P, K, S, R, other "
-                                             "events). Empty when it rests on its own events alone.")
-    attach: List[str] = Field(description="The labels of the events it comes from (E), kept as its evidence, and of "
-                                          "work (W) that belongs to it.")
-    owner_words: Optional[str] = Field(
-        default=None,
-        description="When the owner asked for this to be tracked or done later: the owner's words, copied "
-                    "exactly from the event. Empty otherwise.")
+    relies_on: List[str] = Field(description="The labels of anything else it rests on (W, R, K, other events). Empty "
+                                             "when it rests on its own events alone.")
+    attach: List[str] = Field(description="The events (E) it comes from, kept as its evidence.")
 
 
 class AgentForm(BaseModel):

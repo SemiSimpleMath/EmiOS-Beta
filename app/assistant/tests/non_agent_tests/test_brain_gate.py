@@ -88,7 +88,7 @@ def test_the_cursor_asks_only_for_what_is_new(connect):
 
 
 def _decisions(*rows):
-    return {"decisions": [{"event": e, "route": r, "concerns": c, "reasoning": "r"} for e, r, c in rows]}
+    return {"decisions": [{"event": e, "route": r, "concern": c, "reasoning": "r"} for e, r, c in rows]}
 
 
 def test_routes_are_validated_and_mapped_back_by_code(connect):
@@ -96,8 +96,9 @@ def test_routes_are_validated_and_mapped_back_by_code(connect):
         msg(1, 30, "Gave the cat the worm tablet."), msg(2, 20, "School trip form is due Friday."),
         msg(3, 10, "haha nice")])
     answers = iter([
-        _decisions(("E1", "concern", ["C9"])),                      # bad label, missing events
-        _decisions(("E1", "concern", ["C1"]), ("E2", "new_matter", []), ("E3", "none", [])),
+        _decisions(("E1", "concern", "C9"), ("E2", "new_matter", "C1")),      # bad label, a concern on new_matter,
+                                                                              # a missing event
+        _decisions(("E1", "concern", "C1"), ("E2", "new_matter", None), ("E3", "none", None)),
     ])
     out = gate.run_gate(ingest=False, call=lambda payload: next(answers), register=REGISTER, connect=connect)
     assert out == {"ingested": 0, "routed": 3, "passed_on": 2, "failed": 0, "waiting": 0, "next_ready_at": None}
@@ -134,18 +135,17 @@ def test_gate_prompts_render_with_every_event_and_concern():
     assert "not answered: ['E1']" in user and "Route every labelled event." in user
     system = work_context._ENV.get_template("subconscious/gate/prompts/system.j2").render(
         resource_assistant_data={"name": "the assistant"})
-    assert "You route; the noticer judges." in system
+    assert "You route; the brain judges." in system and "Name that one concern" in system
     # 2026-10-09: "Today only i want to get a notification every time i get a new email." was routed none as "a
     # one-day notification preference"; the chat gate had promised it would be handled, and nothing ever saw it.
     assert "A task the owner gives the assistant is the brain's to decide" in system
     assert "is a promise to the owner, not a sign that anything picked it" in system
-    # 2026-10-09: every return to the computer went to the sleep concern, and every "OK" to a check-in to the
-    # work-stress concern, each as a note that it established nothing.
+    # 2026-10-09: every return to the computer went to the sleep concern, each as a note that it established nothing.
+    # The rule against such notes went with the one-concern decisions: an event that changes nothing is no_concern.
     assert "or evening says nothing about sleep or fatigue" in system
-    assert "check-in acknowledged says nothing about whether the stress it is for has changed" in system
     brain = work_context._ENV.get_template("subconscious/brain/prompts/system.j2").render(
         resource_assistant_data={"name": "the assistant"}, resource_user_data={"first_name": "Sam"})
-    assert "write no note that only says the event does not establish something" in brain
+    assert "no_concern: it changes no concern and raises none" in brain
     assert "absence in the day or evening says nothing about sleep" in brain
 
 
@@ -263,7 +263,7 @@ def test_a_room_still_talking_waits_whole_and_email_goes_at_once(connect):
         text = str(payload["conversations"])
         seen.append(text)
         labels = [f"E{i}" for i in range(1, text.count("'mark': 'E") + 1)]
-        return _decisions(*[(e, "new_matter", []) for e in labels])
+        return _decisions(*[(e, "new_matter", None) for e in labels])
 
     out = gate.run_gate(ingest=False, call=call, register=REGISTER, connect=connect, now_utc=NOW)
     assert (out["routed"], out["waiting"]) == (2, 2)
@@ -381,6 +381,9 @@ def test_the_wake_sleeps_until_a_room_goes_quiet_or_a_hold_passes_whichever_is_f
     monkeypatch.setattr(concern_summary, "run_summaries", lambda: {})
     monkeypatch.setattr(concern_handoff, "run_handoffs", lambda: {})
     monkeypatch.setattr(concern_store, "load_register", lambda: {})
+    from app.assistant.subconscious import persist
+    monkeypatch.setattr(persist, "expire_concerns", lambda: [])
+    monkeypatch.setattr(persist, "next_expiry", lambda register, now: None)
     monkeypatch.setattr(concern_planner, "next_hold_at", lambda register, now: hold)
     summary = brain_wake.run_brain()
     assert summary["next_wake_at"] == hold and summary["day_pass"] == "unchanged"
@@ -485,28 +488,23 @@ def test_coming_back_wakes_the_brain_and_leaving_waits_for_the_timer(monkeypatch
 
 # ── a concern whose day has ended (2026-10-08) ────────────────────────────────
 
-def _day_concern(cid, raised, horizon="today"):
-    return {"concern_id": cid, "title": cid, "horizon": horizon, "first_observed": raised}
-
-
-def test_a_concern_whose_day_has_ended_reaches_the_brain_once_per_day(connect):
-    # NOW is 2026-03-10 18:00 UTC; local day boundary is 05:00.
-    reg = {"active": [_day_concern("c-pickup", "2026-03-09T03:00:00+00:00"),       # the evening before
-                      _day_concern("c-today", "2026-03-10T17:00:00+00:00"),        # raised today: not ended
-                      _day_concern("c-week", "2026-03-01T17:00:00+00:00", "this_week")],
-           "addressing": []}
-    assert inbox.add_day_ended_events(reg, now_utc=NOW, connect=connect) == 1
-    assert inbox.add_day_ended_events(reg, now_utc=NOW + timedelta(minutes=10), connect=connect) == 0   # once a day
-    with connect(False) as c:
-        rows = [dict(r) for r in c.execute("SELECT * FROM brain_events")]
-    assert [(r["source"], r["gate_status"], r["route"], r["concern_ids"]) for r in rows] == [
-        ("time", "routed", "concern", '["c-pickup"]')]
-    assert "has ended" in rows[0]["text"]
-    # the next day: the pickup is asked again, and the concern raised on the 10th has ended too
-    assert inbox.add_day_ended_events(reg, now_utc=NOW + timedelta(days=1), connect=connect) == 2
-    [group] = conversations.build([{**rows[0], "mark": "E1"}], now_utc=NOW)
-    assert group["heading"] == "The clock"
-    assert brain_step._evidence(rows[0])["kind"] == "time"
+def test_a_concern_closes_at_its_expiry_whatever_its_state(tmp_path):
+    """Rule 4 (owner, 2026-10-09: "Concerns have an expiration date. time today that it becomes irrelevant no matter
+    what"). Until then the clock asked the brain every day whether a day's concern still mattered."""
+    from app.assistant.subconscious import persist
+    from app.assistant.tests.concern_store_helpers import ScratchRegister
+    reg = ScratchRegister(tmp_path).write({
+        "active": [{"concern_id": "c-pickup", "title": "Pickup tonight", "expires_at": (NOW - timedelta(minutes=1)).isoformat()},
+                   {"concern_id": "c-fine", "title": "Library fine", "expires_at": (NOW + timedelta(days=3)).isoformat()},
+                   {"concern_id": "c-old", "title": "Raised before expiry was kept"}],
+        "addressing": [], "resolved": [], "dormant": []})
+    assert persist.expire_concerns(NOW, connect=reg.connect) == ["c-pickup"]
+    after = reg.read()
+    assert [c["concern_id"] for c in after["active"]] == ["c-fine", "c-old"]
+    [closed] = after["resolved"]
+    assert closed["resolution_reason"].startswith("its time passed: it mattered until ")
+    assert persist.expire_concerns(NOW, connect=reg.connect) == []
+    assert persist.next_expiry(after, NOW) == NOW + timedelta(days=3)
 
 
 def test_a_report_on_the_brain_s_own_work_says_where_it_came_from(tmp_path, monkeypatch):

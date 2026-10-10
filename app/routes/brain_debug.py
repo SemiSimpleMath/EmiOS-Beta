@@ -187,7 +187,7 @@ def brain_concerns_api():
     the summary writer's calls, each handoff to dayflow with the steward's answer and the steward call
     that gave it, and the work that serves it."""
     import json
-    from app.assistant.subconscious import brain_trace, work_links
+    from app.assistant.subconscious import brain_trace, concern_view, work_links
     from app.assistant.subconscious.concern_handoff import _existing_items
     from app.assistant.subconscious.concern_store import load_register
     register = load_register()
@@ -200,7 +200,8 @@ def brain_concerns_api():
                         for i in sorted(_existing_items(cid), key=lambda i: i.get("created_at") or "")]
             out.append({
                 "concern_id": cid, "status": bucket, "title": c.get("title"), "subject": c.get("subject"),
-                "origin": c.get("origin"), "done_when": c.get("done_when"), "owner_request": c.get("owner_request"),
+                "origin": c.get("origin"), "done_when": c.get("done_when"), "source": concern_view.source_text(c),
+                "expires": concern_view.expires_text(c),
                 "notes": c.get("notes"), "journal": c.get("reinforcement_notes") or "",
                 "summary": c.get("summary"), "summary_error": c.get("summary_error"),
                 "summary_calls": brain_trace.calls_for_concern(cid),

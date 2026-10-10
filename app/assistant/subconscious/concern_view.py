@@ -59,23 +59,48 @@ def attempts(concern: Dict[str, Any]) -> List[Dict[str, Any]]:
     return out
 
 
+# A concern's source as a reader names it (rule 6).
+_SOURCE_WORDS = {"user": "the owner", "email": "an email", "calendar": "the calendar", "camera": "a camera",
+                 "presence": "presence at the computer", "work": "a report on the assistant's work",
+                 "noticer": "the noticer's reading of the long view", "brain": "the brain's inference",
+                 "belief": "a belief about the household"}
+
+
+def source_text(concern: Dict[str, Any]) -> str:
+    """Where the concern came from, as every reader shows it: who or what, when (local), and its own words, copied
+    exactly. Empty for a concern raised before sources were kept (2026-10-09)."""
+    from app.assistant.utils.time_utils import local_time_text
+    src = concern.get("source")
+    if not src:
+        return ""
+    return f'{_SOURCE_WORDS[src["kind"]]}, {local_time_text(src["at"])}: "{src["content"]}"'
+
+
+def expires_text(concern: Dict[str, Any]) -> str:
+    """When the concern stops mattering, local; empty when it has no expiry yet."""
+    from app.assistant.utils.time_utils import local_time_text
+    return local_time_text(concern["expires_at"]) if concern.get("expires_at") else ""
+
+
 def view(concern: Dict[str, Any], bucket: str) -> Dict[str, Any]:
     """One concern for the shared template every agent working on it reads (shared/work/concern_view.j2): what it
-    is, what settles it, its record (the summary and the notes since, whole), its plan and the work done for it."""
+    is, where it came from, what settles it, when it expires, its record (the summary and the notes since, whole), its
+    plan and the work done for it."""
     from app.assistant.subconscious.persist import history_for_prompt
     return {"concern_id": concern["concern_id"], "title": concern.get("title"), "status": bucket,
             "severity": concern.get("severity"), "done_when": concern.get("done_when"),
-            "owner_words": (concern.get("owner_request") or {}).get("words"),
+            "source": source_text(concern), "expires": expires_text(concern),
             "history": history_for_prompt(concern), "plan": concern.get("plan"), "attempts": attempts(concern)}
 
 
-def hold_until_utc(value: str, now_utc: datetime) -> datetime:
-    """A local 'YYYY-MM-DD HH:MM' as UTC; raises when unreadable or not in the future."""
+def future_local_utc(value: str, now_utc: datetime) -> datetime:
+    """A local 'YYYY-MM-DD HH:MM' as UTC, for a plan's hold or a concern's expiry; raises when unreadable or not in the
+    future."""
     from app.assistant.utils.time_utils import get_local_timezone
     local = datetime.strptime(str(value or "").strip(), "%Y-%m-%d %H:%M").replace(tzinfo=get_local_timezone())
     when = local.astimezone(timezone.utc)
     if when <= now_utc:
-        raise ValueError(f"hold_until {value!r} is not in the future")
+        raise ValueError(f"{value!r} is not in the future")
     return when
 
 

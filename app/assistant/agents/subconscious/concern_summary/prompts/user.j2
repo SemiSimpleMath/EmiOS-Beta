@@ -3,7 +3,7 @@
 {% set c = agent_input.concern -%}
 {{ c.title }} ({{ c.status }}; about {{ c.subject }})
 Settled when: {{ c.done_when or "(not stated)" }}
-{% if c.owner_words %}What the owner asked, in their words: "{{ c.owner_words }}"
+{% if c.source %}Raised from: {{ c.source }}
 {% endif %}
 ## Its previous summary
 

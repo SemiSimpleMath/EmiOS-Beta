@@ -45,12 +45,13 @@ def due(register: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
 
 
 def build_payload(concern: Dict[str, Any], bucket: str) -> Dict[str, Any]:
+    from app.assistant.subconscious import concern_view
     from app.assistant.subconscious.persist import unsummarized
     from app.assistant.utils.time_utils import local_time_text
     summary = concern.get("summary")
     return {"concern": {"title": concern.get("title"), "status": bucket, "subject": concern.get("subject") or "household",
                         "done_when": concern.get("done_when"),
-                        "owner_words": (concern.get("owner_request") or {}).get("words")},
+                        "source": concern_view.source_text(concern)},
             "summary": summary["text"] if summary else None,
             "summary_through": local_time_text(summary["through"]) if summary else None,
             "notes": unsummarized(concern)}

@@ -16,16 +16,18 @@ Two phases, so the model call never runs under the register lock:
    by code. One correction round; still invalid raises, so nothing is written and the source's
    inputs stay available for its next run.
 2. `apply_admission` (under the lock). Code assigns every new concern's id and records its origin
-   and time. A duplicate is folded into the concern it matches: its evidence appended and the merge
-   journalled there, never a second concern. A candidate matching a closed concern is journalled on
-   that concern and not admitted.
+   and time. A duplicate is folded into the concern it matches: its evidence appended and its note added
+   there as a note of its writer, never a second concern. A candidate matching a closed concern is not
+   admitted, and the closed concern is left as it is (the run trace keeps the decision).
 
 Every candidate states `done_when`: the outcome that closes it. It is required here, not only in a
 model's schema, because every closing path measures against it.
 
-A candidate the owner asked for carries `owner_request` ({words, at, ref}: the owner's words verbatim
-and the event they came from). The owner asking for something makes it live, so such a candidate is
-never judged the same as a closed matter; folded into an open concern, it carries the request there.
+Every candidate carries its `source` ({kind, at, ref, content}: the event it came from, its own words copied by
+code; docs/design/concerns_as_state_2026-10-09.md, rule 6). A candidate whose source is the owner (kind `user`) is
+live, so it is never judged the same as a closed matter; folded into an open concern, the owner's words become that
+concern's source. Folded in, the later of the two expiry times stands. Until 2026-10-09 the owner's words were an
+`owner_request` the brain copied out of the event.
 
 Until 2026-10-03 the day pass made a candidate of kind `standing` from each placed belief. Beliefs are no
 longer made into concerns (docs/design/what_was_done_reaches_the_brain_2026-10-03.md); the standing
@@ -79,13 +81,14 @@ def build_payload(candidates: List[Dict[str, Any]], existing: List[Dict[str, Any
             return f"accepted as chronic: {c.get('dormant_reason') or ''}".strip()
         return str(c.get("resolution_reason") or c.get("dormant_reason") or "")
 
+    from app.assistant.subconscious.concern_view import source_text
     from app.assistant.subconscious.persist import history_for_prompt
     return {
         "candidates": [{
             "label": f"N{i}", "title": c.get("title"), "subject": c.get("subject") or "household",
             "kind": c.get("kind"), "horizon": c.get("horizon"),
             "done_when": c.get("done_when"), "notes": c.get("notes") or "",
-            "owner_words": (c.get("owner_request") or {}).get("words"),
+            "source": source_text(c),
             "evidence": [{"kind": e.get("kind"), "ref": e.get("ref"), "snippet": e.get("snippet")}
                          for e in c.get("evidence") or []],
         } for i, c in enumerate(candidates, 1)],
@@ -93,7 +96,7 @@ def build_payload(candidates: List[Dict[str, Any]], existing: List[Dict[str, Any
             "label": f"C{i}", "status": c["_status"], "title": c.get("title"),
             "subject": c.get("subject") or "household", "kind": c.get("kind"),
             "done_when": c.get("done_when"),
-            "owner_words": (c.get("owner_request") or {}).get("words"),
+            "source": source_text(c),
             "first_observed": c.get("first_observed"),
             "closed_on": _local_date(c.get("resolved_at_utc") or c.get("dormant_at_utc")),
             "closed_because": closed_because(c) if c["_status"] in ("resolved", "dormant") else "",
@@ -125,7 +128,7 @@ def _problems(data: Any, cand_labels: List[str], open_labels: List[str], closed_
         elif decision == "same_closed" and target not in closed_labels:
             out.append(f"{label}: same_closed must name a closed concern label, got {target!r}")
         elif decision == "same_closed" and label in owner_labels:
-            out.append(f"{label}: the owner asked for it, so it is live: it cannot be same_closed")
+            out.append(f"{label}: it comes from the owner's own words, so it is live: it cannot be same_closed")
         elif decision == "same_candidate":
             if target == label or target not in cand_labels:
                 out.append(f"{label}: same_candidate must name another candidate, got {target!r}")
@@ -173,7 +176,7 @@ def plan_admission(candidates: List[Dict[str, Any]], register: Dict[str, Any], *
         ex_labels = [f"C{k}" for k in range(1, len(existing) + 1)]
         open_labels = [lab for lab, c in zip(ex_labels, existing) if c["_status"] in ("active", "addressing")]
         closed_labels = [lab for lab in ex_labels if lab not in open_labels]
-        owner_labels = [lab for lab, c in zip(cand_labels, batch) if c.get("owner_request")]
+        owner_labels = [lab for lab, c in zip(cand_labels, batch) if (c.get("source") or {}).get("kind") == "user"]
         payload = build_payload(batch, existing)
         call = judge or _agent_call
         data = call(payload)
@@ -250,8 +253,10 @@ def apply_admission(steps: List[Dict[str, Any]], register: Dict[str, Any], *, so
             target_id = step["target"] if action == "merge_open" else landed[step["target"]]
             target = _find(register, target_id)
             target.setdefault("evidence", []).extend(c.get("evidence") or [])
-            if c.get("owner_request") and not target.get("owner_request"):
-                target["owner_request"] = c["owner_request"]
+            if (c.get("source") or {}).get("kind") == "user" and (target.get("source") or {}).get("kind") != "user":
+                target["source"] = c["source"]
+            if c.get("expires_at") and str(c["expires_at"]) > str(target.get("expires_at") or ""):
+                target["expires_at"] = c["expires_at"]
             target["last_reinforced_utc"] = now_iso
             # What the duplicate said becomes a note on the concern it joins, like any note of its writer's
             # (until 2026-10-09 a "MERGED a re-raise" line recorded the door's own decision instead).

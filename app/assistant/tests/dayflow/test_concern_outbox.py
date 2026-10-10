@@ -8,8 +8,6 @@ work live (concern_view.attempts). Attaching or ending work moves the concern no
 only the brain, or the concern's expiry, closes it. Each judgment and the ending reach the brain inbox, pending for
 the gate, naming what the work was made for.
 """
-import json
-from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock
 import pytest
