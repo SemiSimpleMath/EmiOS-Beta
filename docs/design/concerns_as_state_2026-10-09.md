@@ -82,12 +82,12 @@ visit) is a fact of the day: the brain decides it needs nothing for concerns, an
 ### 6. Every concern says where it came from, in one shape
 
 Owner, 2026-10-09: "shouldnt we have unified things like source: user." Every concern carries
-`source: {kind, at, ref, quote}`:
+`source: {kind, at, ref, content}`:
 - `kind`: `user` (the owner, in chat or a ticket reply), `email`, `calendar`, `camera`, `presence`, `work`, or
   `noticer` / `brain` for a pattern the assistant inferred;
 - `at`: when it happened;
 - `ref`: the event's id, kept by code, never shown in prose;
-- `quote`: the source's own text, copied exactly by code (the owner's message; an email's sender, subject and the
+- `content`: the source's own text, copied exactly by code (the owner's message; an email's sender, subject and the
   lines that raised it; the signals the noticer counted).
 
 Readers show it alike: "raised from: the owner, Fri 1:42 PM: "..."". A concern whose source is `user` closes only
