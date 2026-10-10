@@ -64,7 +64,7 @@ def run_brain() -> Dict[str, Any]:
     from app.assistant.subconscious.brain_inbox import add_day_ended_events
     add_day_ended_events(load_register())
     brain = run_brain_step()
-    # A concern the brain (or the noticer) closed takes its open list entries with it, so dayflow ends their work.
+    # A concern the brain closed takes its open list entries with it, so dayflow ends their work.
     from app.assistant.subconscious import brain_list
     closed_entries = brain_list.cancel_for_closed_concerns(load_register(), at=datetime.now(timezone.utc))
     briefs = run_briefs()
