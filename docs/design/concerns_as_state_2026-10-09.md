@@ -13,9 +13,16 @@ should just become concerns. then really everything is a concern."; "Every conce
 would have an expiri of at most 2 hours or something reasonable determined by the agent creating them, all day event
 might have expiri at midnight."
 
-Part of the hub-and-spokes pipeline (docs/design/hub_and_spokes_2026-10-09.md). Built so far: the noticer raises
-issues and writes nothing to concerns (22ffbf09); only the brain writes notes (89e01ac7); readers get the
-summary and the notes since, and the summarizer replaces the brief (step 1, 2026-10-09).
+Part of the hub-and-spokes pipeline (docs/design/hub_and_spokes_2026-10-09.md). Built 2026-10-09/10, every rule:
+the noticer raises issues and writes nothing to concerns (22ffbf09); only the brain writes notes (89e01ac7); readers
+get the summary and the notes since, and the summarizer replaces the brief (4653f273); attached work is a reference
+read live, code moves no concern, no attaching by judgment (860d75b3); every concern expires, `source` replaces
+`owner_request`, one event changes one concern (9be26db9); the day's beliefs become concerns (rule 7, from
+2026-10-10). The existing records were converted on 2026-10-10 (scratch/convert_concerns_2026_10_10.py, with a backup
+of the whole register): addressing moved to active, each open concern got its source and an expiry counted from the
+conversion by its horizon (today: end of tomorrow; this week: 7 days; this month: 31; long horizon: 90), work attached
+by judgment detached, the retired fields removed, the 29 dormant belief concerns of 2026-10-02/03 deleted, and every
+open concern got its first summary.
 
 ## What went wrong (root cause)
 

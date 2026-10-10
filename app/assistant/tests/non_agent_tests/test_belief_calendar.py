@@ -41,8 +41,10 @@ def day(monkeypatch, tmp_path):
     monkeypatch.setattr(loader, 'load_scope_for_source', lambda **k: None)
     shown = []
     monkeypatch.setattr(drs, '_write', lambda agent_input: (shown.append(agent_input), {'judgments': [
-        {'belief_key': 'B1', 'why': 'Wednesday.', 'applies_today': True, 'times': ['9:00 PM']},
-        {'belief_key': 'B3', 'why': 'Every day.', 'applies_today': True, 'times': ['2:00 PM']}]})[1])
+        {'belief_key': 'B1', 'why': 'Wednesday.', 'applies_today': True, 'outcome': 'B1 done',
+         'times': [{'time': '9:00 PM', 'until': '11:00 PM'}]},
+        {'belief_key': 'B3', 'why': 'Every day.', 'applies_today': True, 'outcome': 'B3 done',
+         'times': [{'time': '2:00 PM', 'until': '4:00 PM'}]}]})[1])
     monkeypatch.setattr(drs, '_last_attempt_utc', None)
     return SimpleNamespace(plans=sqlite_file(tmp_path / 'plan.db'), shown=shown,
                            now=datetime(2026, 1, 7, 13, 0, tzinfo=TZ).astimezone(timezone.utc))
@@ -79,18 +81,23 @@ def test_related_beliefs_are_the_nearest_close_enough(monkeypatch):
 
 def test_a_related_belief_is_never_placed_as_an_entry():
     problems = drs._problems({'judgments': [
-        {'belief_key': 'B1', 'why': 'Not Wednesday.', 'applies_today': False, 'times': []},
-        {'belief_key': 'B2', 'why': 'A holiday.', 'applies_today': True, 'times': ['9:00 PM']}]}, {'B1'}, {'B2'})
+        {'belief_key': 'B1', 'why': 'Not Wednesday.', 'applies_today': False, 'outcome': '', 'times': []},
+        {'belief_key': 'B2', 'why': 'A holiday.', 'applies_today': True, 'outcome': 'B2 done',
+         'times': [{'time': '9:00 PM', 'until': '11:00 PM'}]}]}, {'B1'}, {'B2'})
     assert problems == ["'B2' is read beside the approved beliefs, not an entry: leave it out"]
 
 
 def test_every_approved_belief_is_judged_once_and_only_those_that_apply_are_placed():
     """2026-10-05: the writer listed beliefs its own reason said did not apply; now each is judged, reason first."""
     answer = {'judgments': [
-        {'belief_key': 'B1', 'why': 'Business day 3, not the first.', 'applies_today': False, 'times': ['all day']},
-        {'belief_key': 'B3', 'why': 'Every day.', 'applies_today': True, 'times': ['10:00 AM', '3:00 PM']}]}
+        {'belief_key': 'B1', 'why': 'Business day 3, not the first.', 'applies_today': False, 'outcome': '',
+         'times': [{'time': 'all day', 'until': ''}]},
+        {'belief_key': 'B3', 'why': 'Every day.', 'applies_today': True, 'outcome': 'B3 done',
+         'times': [{'time': '10:00 AM', 'until': '11:00 AM'}, {'time': '3:00 PM', 'until': '5:00 PM'}]}]}
     assert drs._problems(answer, {'B1', 'B3'}) == []
-    assert drs._placements(answer) == [{'belief_key': 'B3', 'time': '10:00 AM'}, {'belief_key': 'B3', 'time': '3:00 PM'}]
+    assert drs._placements(answer) == [
+        {'belief_key': 'B3', 'time': '10:00 AM', 'until': '11:00 AM', 'outcome': 'B3 done'},
+        {'belief_key': 'B3', 'time': '3:00 PM', 'until': '5:00 PM', 'outcome': 'B3 done'}]
     assert drs._problems({'judgments': answer['judgments'][1:]}, {'B1', 'B3'}) == \
         ['B1: no judgment; judge every approved belief']
     assert drs._problems({'judgments': [*answer['judgments'], answer['judgments'][0]]}, {'B1', 'B3'}) == \

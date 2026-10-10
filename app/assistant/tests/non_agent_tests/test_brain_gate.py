@@ -516,11 +516,13 @@ def test_a_report_on_the_brain_s_own_work_says_where_it_came_from(tmp_path, monk
     from belief_engine.intake.store import sqlite_file
     lst = sqlite_file(tmp_path / "l.db")
     monkeypatch.setattr(db, "connect", lst)
-    brain_list.apply_calendar("2026-03-10", [{"label": "I1", "belief_key": "B3", "times": ["6:00 AM"],
-                                              "statement": "AC at 75 in the morning."}],
-                              [{"item": "I1", "decision": "needed", "assistant_part": "set the AC to 75",
-                                "when": "6:00 AM", "covers": [], "why": "A standing wish."}],
-                              cause="test", at=NOW, connect=lst)
+    brain_list.ensure_schema(lst)
+    with lst(True) as c:                       # a calendar entry, as the day's tasks wrote them until 2026-10-09
+        brain_list.upsert(c, {"id": "cal:2026-03-10:B3", "kind": "calendar", "day": "2026-03-10", "belief_key": "B3",
+                              "placement_time": "6:00 AM", "concern_id": None, "what": "set the AC to 75",
+                              "decision": "needed", "who_acts": "", "assistant_part": "set the AC to 75",
+                              "when_local": "6:00 AM", "covers": [], "why": "A standing wish."},
+                          cause="test", at=NOW.isoformat())
     store = get_dayflow_work_store()
     made = store.apply("create_work_object", {"title": "Set the AC", "goal_content": "Set the AC",
                                               "satisfied_when_kind": "all_owned_children_done",

@@ -53,15 +53,20 @@ def test_empty_authoritative_calendar_clears_stale_daily_schedule(tmp_path, monk
 
 # ── the day pass: placements, caching, validation ─────────────────────────────────────────────────────
 
+UNTIL = '11:30 PM'
+
+
 def _judged(placements):
-    """The writer's answer for these placements: every approved belief judged, applying at its placed times; a
-    placement of any other key is judged as applying."""
+    """The writer's answer for these placements: every approved belief judged, applying at its placed times, each
+    clock time mattering until UNTIL; a placement of any other key is judged as applying."""
     keys = ['lesson.glasses', 'coffee.morning'] + [p['belief_key'] for p in placements
                                                    if p['belief_key'] not in ('lesson.glasses', 'coffee.morning')]
     judgments = []
     for key in dict.fromkeys(keys):
-        times = [p['time'] for p in placements if p['belief_key'] == key]
-        judgments.append({'belief_key': key, 'why': 'test', 'applies_today': bool(times), 'times': times})
+        times = [{'time': p['time'], 'until': '' if p['time'] == 'all day' else UNTIL}
+                 for p in placements if p['belief_key'] == key]
+        judgments.append({'belief_key': key, 'why': 'test', 'applies_today': bool(times),
+                          'outcome': f'{key} is done' if times else '', 'times': times})
     return {'judgments': judgments}
 
 
@@ -119,10 +124,11 @@ def test_the_writer_places_beliefs_and_code_builds_the_day(connect, day_inputs):
     by_slot = {s['slot']: s for s in plan['slots']}
     assert by_slot['2026-01-01T16:00']['lines'] == [
         {'time': '4:30 PM', 'belief_key': 'lesson.glasses', 'statement': 'Often forgets reading glasses for lessons.',
-         'related': []}]
+         'related': [], 'outcome': 'lesson.glasses is done', 'until': UNTIL}]
     assert by_slot['2026-01-01T17:00']['items'][0]['title'] == 'Lesson'
     assert plan['flags'] == [{'time': 'all day', 'belief_key': 'coffee.morning',
-                              'statement': 'Likes creamer in morning coffee.', 'related': []}]
+                              'statement': 'Likes creamer in morning coffee.', 'related': [],
+                              'outcome': 'coffee.morning is done', 'until': ''}]
 
     text = day_plan.render_day(now, connect=connect)
     assert '### Now (1:30 PM)' in text
@@ -184,6 +190,17 @@ def test_a_still_invalid_answer_is_refused(connect, day_inputs, monkeypatch, pla
     assert day_plan.load_plan('2026-01-01', connect=connect) is None
 
 
+def test_an_applying_belief_needs_its_outcome_and_a_clock_time_its_until(connect, day_inputs, monkeypatch):
+    """Rule 7: each placement becomes a concern, which needs what it asks for today and until when it matters."""
+    bad = {'judgments': [{'belief_key': 'lesson.glasses', 'why': 'w', 'applies_today': True, 'outcome': '',
+                          'times': [{'time': '6:00 PM', 'until': 'later'}]},
+                         {'belief_key': 'coffee.morning', 'why': 'w', 'applies_today': False, 'outcome': '', 'times': []}]}
+    monkeypatch.setattr(drs, '_write', lambda agent_input: bad)
+    with pytest.raises(ValueError) as raised:
+        drs.run_day_pass(datetime(2026, 1, 1, 18, tzinfo=timezone.utc), connect=connect)
+    assert "say what it asks for today" in str(raised.value) and "until 'later' is not a clock time" in str(raised.value)
+
+
 def test_no_plan_for_today_says_so(connect):
     assert 'No plan of the day has been written' in day_plan.render_day(
         datetime(2026, 1, 2, 18, tzinfo=timezone.utc), connect=connect)
@@ -230,8 +247,8 @@ def test_the_writer_judges_the_approved_beliefs_in_batches(connect, day_inputs, 
         keys = [line.split(']')[0].removeprefix('- [belief:') for line in agent_input['beliefs_block'].splitlines()
                 if line.startswith('- [belief:')]
         asked.append(keys)
-        return {'judgments': [{'belief_key': k, 'why': 'test', 'applies_today': k == 'b07', 'times': ['all day']}
-                              for k in keys]}
+        return {'judgments': [{'belief_key': k, 'why': 'test', 'applies_today': k == 'b07', 'outcome': 'done',
+                               'times': [{'time': 'all day', 'until': ''}]} for k in keys]}
     monkeypatch.setattr(drs, '_write', write)
     drs.run_day_pass(datetime(2026, 1, 1, 18, tzinfo=timezone.utc), connect=connect)
     assert [len(a) for a in asked] == [10, 10, 3] and sorted(sum(asked, [])) == [e['belief_key'] for e in many]

@@ -1,9 +1,13 @@
 """The day's tasks: the brain decides what today's calendar needs, and since 2026-10-09 the whole list.
 
 One decider (owner, 2026-10-09; docs/design/hub_and_spokes_2026-10-09.md): this decides every entry on the brain's
-list, the calendar's, the day's own and every concern's (each concern's planner, subconscious/concern_planner.py,
-looks things up and proposes them). It is woken only by the stages before it, the day pass's placements and the
-concerns with their plans (fingerprint), and what was said reaches it through the concerns the brain made of it.
+list, the day's own and every concern's (each concern's planner, subconscious/concern_planner.py, looks things up and
+proposes them). It is woken only by the stages before it, the concerns with their plans (fingerprint), and what was
+said reaches it through the concerns the brain made of it. Since 2026-10-09 the day's calendar arrives as concerns
+too (subconscious/calendar_concerns.py, rule 7 of docs/design/concerns_as_state_2026-10-09.md): each placed belief is
+an open concern with what it asks for today, and its entry is a concern's entry. Until then each placement was an
+item decided here separately (needed, not needed, done elsewhere) onto a calendar entry (`cal:<day>:<belief_key>`);
+the paragraphs below describe that time.
 Until then the concern planner wrote a concern's entries and this the rest, neither could change the other's, and
 chat the brain had already turned into concerns woke this a second time.
 
@@ -41,8 +45,8 @@ attached to it, concern_planner.concern_text) with the concern's own entries on 
 (brain_matters: each event with the brain's decision and reason, the notes it wrote, the concerns it raised). A
 concern's entry is a fact a change can cite: the concern side runs first in the brain's pass, so an entry it makes
 ("we're eating out tonight") reaches the day's tasks in the same pass. Code checks the answer (one correction round) and records the run in `brain_day_decisions` (the
-table keeps the name it was created with). `compare(day)` sets the brain's decisions beside what dayflow did with the
-same beliefs, for the owner to judge.
+table keeps the name it was created with). Until 2026-10-09 `compare(day)` set the brain's shadow decisions beside
+what the steward did with the same beliefs.
 """
 from __future__ import annotations
 
@@ -75,68 +79,17 @@ def ensure_schema(connect=None) -> None:
 
 # ── what the decision reads ────────────────────────────────────────────────
 
-def placements(plan: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """The day's placements, one per belief with every time the plan places it ("all day" or clock times, in the
-    plan's order), labelled I1, I2... in the plan's order. One entry per belief per day (2026-10-05): a placement the
-    day pass moves changes the entry's times instead of cancelling one entry and making another."""
-    by_belief: Dict[str, Dict[str, Any]] = {}
-    for line in [*plan["flags"], *(line for s in plan["slots"] for line in s["lines"])]:
-        it = by_belief.setdefault(line["belief_key"], {
-            "belief_key": line["belief_key"], "times": [], "statement": line["statement"],
-            "related": [r["statement"] for r in line.get("related") or []]})
-        if line["time"] not in it["times"]:
-            it["times"].append(line["time"])
-    return [{"label": f"I{i}", **it} for i, it in enumerate(by_belief.values(), 1)]
-
-
 def fingerprint(inputs: Dict[str, Any]) -> str:
     """What wakes the decider: the stages before it (docs/design/hub_and_spokes_2026-10-09.md, "each stage is woken
-    only by the stage before it"). The day's placements without their entries (the day pass), and each open concern's
-    record and plan (the brain step and the concern planner). Everything else it reads (the situation, the chat, what
+    only by the stage before it"): each open concern's record and plan (the brain step, the day pass's calendar
+    concerns and the concern planner). Everything else it reads (the situation, the chat, what
     the brain decided today, the list's own entries and their work) is context, never a reason to run. Until
     2026-10-09 the situation counted: chat the brain had already turned into concerns woke this decider a second time,
     and the work its own entries made changed the situation and woke it again."""
     read = {"day": inputs["day"],
-            "items": [{k: v for k, v in it.items() if k != "current"} for it in inputs["items"]],
             "concerns": [(c["concern_id"], c["basis"], (c.get("plan") or {}).get("written_at"))
                          for c in inputs["situation"]["concerns"]]}
     return hashlib.sha256(json.dumps(read, sort_keys=True, default=str).encode("utf-8")).hexdigest()
-
-
-def with_current(day: str, items: List[Dict[str, Any]], *, connect=None) -> List[Dict[str, Any]]:
-    """Each placement with its entry on the brain's list (its id, decision, the assistant's part, when, why, when it
-    was decided, the entries it covers, and what its decision relies on as (kind, id)), or None."""
-    from app.assistant.subconscious import brain_list
-    now_on = {e["id"]: e for e in brain_list.entries(day=day, connect=connect)}
-    out = []
-    for it in items:
-        e = now_on.get(brain_list.calendar_id(day, it["belief_key"]))
-        out.append({**it, "current": None if e is None else {
-            "entry_id": e["id"], "decision": e["decision"], "assistant_part": e["assistant_part"],
-            "when": e["when_local"], "why": e["why"], "decided_at": e["updated_at"], "covers": e["covers"],
-            "relies_on": [list(r) for r in brain_list.relies_on(e["id"], connect=connect)]}})
-    return out
-
-
-def with_work(day: str, items: List[Dict[str, Any]]) -> None:
-    """Each listed item's entry, in place, with the work made from it, read live from the work store by the entry id
-    (`current.work`, or None): what dayflow did with it, in the finalizer's own words."""
-    from app.assistant.dayflow_orchestrator.brain_list_intake import work_of
-    from app.assistant.subconscious import brain_list
-    ids = {it["label"]: brain_list.calendar_id(day, it["belief_key"]) for it in items if it["current"]}
-    work = work_of(list(ids.values()))
-    for it in items:
-        if it["current"]:
-            it["current"]["work"] = work.get(ids[it["label"]])
-
-
-def offered(day: str, items: List[Dict[str, Any]], now_utc: datetime) -> List[Dict[str, Any]]:
-    """The placements still open to a decision, labelled I1, I2... again: not one done elsewhere, not one whose every
-    time is a clock time more than an hour past (subconscious/belief_occurrences.passed, the handoff's own rule)."""
-    from app.assistant.subconscious.belief_occurrences import passed
-    still = [it for it in items if not ((it["current"] or {}).get("decision") == "done_elsewhere"
-                                        or all(passed(day, t, now_utc) for t in it["times"]))]
-    return [{**it, "label": f"I{i}"} for i, it in enumerate(still, 1)]
 
 
 def with_concerns(situation: Dict[str, Any], *, connect=None) -> None:
@@ -207,21 +160,17 @@ def _schedule_ref(day: str, e: Dict[str, Any]):
     return "schedule_line", f"{day}|{e['start_local']}|{e['title']}"
 
 
-def project(day: str, situation: Dict[str, Any], matters: List[Dict[str, Any]], items: List[Dict[str, Any]],
-            own: List[Dict[str, Any]], *, connect=None) -> Dict[str, Any]:
-    """The labels of this call, in place: each object the decider reads gets `ref` (placements keep their I labels;
-    own entries O; work W; chat M; reminders sent R; concerns C; concerns' entries E; the brain's decisions B; the
-    schedule's lines K; the standing directives D). An entry's work gets its label (`ref` on the work view); an entry
-    that covers another shows it as `covered_by`; what an entry's decision relies on is shown by label
-    (`relies_on_labels`), and each such object not otherwise in view is labelled too and listed in `earlier`, with
-    its data. Work made from a list entry names that entry by its label (`from_list`). Returns `labels` (label ->
-    [kind, id], for mapping the answer back), `earlier`, and `source_labels` (work id -> label, read by
-    shared/brain/past_work.j2)."""
-    from app.assistant.subconscious import brain_list
+def project(day: str, situation: Dict[str, Any], matters: List[Dict[str, Any]], own: List[Dict[str, Any]], *,
+            connect=None) -> Dict[str, Any]:
+    """The labels of this call, in place: each object the decider reads gets `ref` (own entries O; work W; chat M;
+    reminders sent R; concerns C; concerns' entries E; the brain's decisions B; the schedule's lines K; the standing
+    directives D). An entry's work gets its label (`ref` on the work view); what an entry's decision relies on is
+    shown by label (`relies_on_labels`), and each such object not otherwise in view is labelled too and listed in
+    `earlier`, with its data. Work made from a list entry names that entry by its label (`from_list`). Returns
+    `labels` (label -> [kind, id], for mapping the answer back), `earlier`, and `source_labels` (work id -> label,
+    read by shared/brain/past_work.j2)."""
     from app.assistant.subconscious.projection import Projection
     p = Projection()
-    for it in items:
-        p.fixed(it["label"], "list_entry", brain_list.calendar_id(day, it["belief_key"]))
     p.fixed("D", *_DIRECTIVES)
     for e in own:
         e["ref"] = p.label("O", "list_entry", e["id"])
@@ -245,8 +194,7 @@ def project(day: str, situation: Dict[str, Any], matters: List[Dict[str, Any]], 
     for line in situation["calendar_ahead"]:
         if line["anchor"]:
             line["ref"] = p.label("K", "calendar_event", line["anchor"][len("calendar:"):])
-    entry_work = [it["current"].get("work") for it in items if it["current"]] + [e.get("work") for e in own] + \
-        [e.get("work") for c in situation["concerns"] for e in c.get("entries") or []]
+    entry_work = [e.get("work") for e in own] + [e.get("work") for c in situation["concerns"] for e in c.get("entries") or []]
     for w in entry_work:
         if w:
             w["ref"] = p.label("W", "work", w["work_id"])
@@ -259,13 +207,6 @@ def project(day: str, situation: Dict[str, Any], matters: List[Dict[str, Any]], 
             earlier.append({"ref": label, "kind": kind, **describe(kind, obj_id, connect=connect)})
         return label
 
-    by_entry = {it["current"]["entry_id"]: it["label"] for it in items if it["current"]}
-    for it in items:
-        cur = it["current"]
-        if cur:
-            cur["relies_on_labels"] = [label_of(k, i) for k, i in cur.get("relies_on") or []]
-            cur["covered_by"] = next((by_entry[o["current"]["entry_id"]] for o in items if o["current"]
-                                      and cur["entry_id"] in (o["current"].get("covers") or [])), None)
     for e in own:
         e["relies_on_labels"] = [label_of(k, i) for k, i in e.get("relies_on") or []]
         e["concern_ref"] = label_of("concern", e["concern_id"]) if e.get("concern_id") else None
@@ -273,7 +214,6 @@ def project(day: str, situation: Dict[str, Any], matters: List[Dict[str, Any]], 
         entry = w.get("list_entry")
         label = p.label_of("list_entry", entry) if entry else None
         w["from_list"] = None if not entry else (
-            f"your entry for {label}" if label and label.startswith("I") else
             f"your own entry {label}" if label and label.startswith("O") else
             f"the concern's entry {label}" if label else
             f"an entry on the list of {entry.split(':')[1]}" if entry.startswith(("cal:", "day:")) else
@@ -378,43 +318,6 @@ def entries_problems(data: Dict[str, Any], entries: Dict[str, Optional[str]], la
     return out
 
 
-def problems(data: Any, items: List[Dict[str, Any]], labels: Dict[str, Any]) -> List[str]:
-    """Every item not yet on the list decided, once; needed names the part and when; covers name other items;
-    relies_on names labels given; why and the assistant's part are words, with no label in them."""
-    if not isinstance(data, dict) or not isinstance(data.get("decisions"), list):
-        return ["no decisions list"]
-    item_labels = [it["label"] for it in items]
-    listed = {it["label"] for it in items if it["current"]}
-    out, seen = [], []
-    for d in data["decisions"]:
-        label = str((d or {}).get("item") or "").strip()
-        if label not in item_labels:
-            out.append(f"{label!r} is not one of the items given")
-            continue
-        seen.append(label)
-        if d.get("decision") not in _DECISIONS:
-            out.append(f"{label}: decision {d.get('decision')!r} is not one of {list(_DECISIONS)}")
-        if d.get("decision") == "needed":
-            missing = [f for f in ("assistant_part", "when") if not str(d.get(f) or "").strip()]
-            if missing:
-                out.append(f"{label}: needed names {', '.join(missing)}")
-        elif d.get("covers"):
-            out.append(f"{label}: only a needed item covers others")
-        bad = [x for x in d.get("covers") or [] if x not in item_labels or x == label]
-        if bad:
-            out.append(f"{label}: covers {bad}, which are not other items given")
-        unknown = [x for x in d.get("relies_on") or [] if str(x).strip() not in labels]
-        if unknown:
-            out.append(f"{label}: relies_on {unknown}, which are not labels given")
-    twice = sorted({x for x in seen if seen.count(x) > 1})
-    if twice:
-        out.append(f"decided more than once: {twice}")
-    missing = [x for x in item_labels if x not in seen and x not in listed]
-    if missing:
-        out.append(f"not decided: {missing}")
-    return out
-
-
 def _agent_call(payload: Dict[str, Any]) -> Any:
     from app.assistant.routine_handlers.subconscious import _run_subconscious_agent
     return _run_subconscious_agent(handler_label="day_tasks", agent_name=_AGENT, context=payload,
@@ -423,8 +326,8 @@ def _agent_call(payload: Dict[str, Any]) -> Any:
 
 def decided_placement(day: str, belief_key: str, *, connect=None) -> Dict[str, Any]:
     """The placement of `belief_key` as the newest run that decided it saw it (brain_day_decisions): its times,
-    statement and related beliefs. What a calendar entry was decided from, read by the work made from it
-    (dayflow_orchestrator/brain_list_intake.brief). Not the current plan: the day pass re-places the day as its
+    statement and related beliefs. What a calendar entry (before 2026-10-10) was decided from, read by the work made
+    from it (dayflow_orchestrator/brain_list_intake.brief). Not the current plan: the day pass re-places the day as its
     inputs change and a belief can drop out of a run and return, and a brief read from the plan then raised and
     stopped every planning tick until it returned (found 2026-10-05, before the calendar lane went live). Raises
     when no run decided it."""
@@ -449,22 +352,17 @@ def _last_fingerprint(day: str, connect) -> Optional[str]:
 
 
 def gather(now_utc: datetime, *, plan_connect=None) -> Dict[str, Any]:
-    """Everything the decision reads for the current day. A day the day pass has not placed yet has no items: the
-    concerns are decided all the same (since 2026-10-09 their entries are this decider's)."""
+    """Everything the decision reads for the current day: the situation with every open concern (the day's calendar
+    concerns among them), its own entries, and what the brain decided today."""
     from app.assistant.pipelines.context import boundary_date_local_str
-    from app.assistant.subconscious import day_plan
     from app.assistant.utils.time_utils import get_local_timezone
     day = boundary_date_local_str(now_utc.astimezone(get_local_timezone()))
-    plan = day_plan.load_plan(day, connect=plan_connect)
     from app.assistant.dayflow_orchestrator.brain_list_intake import calendar_live
     from app.assistant.subconscious import brain_list, situation
-    every = placements(plan) if plan is not None else []
     # Calendar-made work is the brain's own on a live day; on a steward day it is left out (module docstring).
     s = situation.gather(now_utc, calendar_work=calendar_live(day))
     with_concerns(s)
     matters = matters_today(day, now_utc)
-    items = offered(day, with_current(day, every), now_utc)
-    with_work(day, items)
     from app.assistant.dayflow_orchestrator.brain_list_intake import work_of
     # Its own entries today, and every earlier day's entry whose work is still in motion (2026-10-09): to change live
     # work the decider rewrites the entry that owns it, and intake carries the change to the work. Until then it could
@@ -478,14 +376,14 @@ def gather(now_utc: datetime, *, plan_connect=None) -> Dict[str, Any]:
            for e in own]
     # On 2026-10-06 the decider called an item's own work "already covered by W8" and decided the item not needed,
     # which would have ended that work: work names the entry it was made from (project, `from_list`).
-    return {"day": day, "now": now_utc.isoformat(), "items": items, "own": own, "situation": s, "matters": matters,
-            "beliefs": concern_beliefs(s["concerns"]), **project(day, s, matters, items, own), "correction": None}
+    return {"day": day, "now": now_utc.isoformat(), "own": own, "situation": s, "matters": matters,
+            "beliefs": concern_beliefs(s["concerns"]), **project(day, s, matters, own), "correction": None}
 
 
 def concern_beliefs(concerns: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """The household's beliefs closest in meaning to the open concerns (their titles and the notes they were raised
     with; subconscious/belief_links.py, 2026-10-09): who usually does what, what the owner prefers, as context. The
-    calendar's own beliefs come as its items."""
+    calendar's own beliefs come as its concerns."""
     from app.assistant.subconscious import belief_links
     from app.assistant.subconscious.concern_store import load_register
     register = load_register()
@@ -496,26 +394,26 @@ def concern_beliefs(concerns: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 def run_day_tasks(*, now_utc: Optional[datetime] = None, connect=None,
                   gather_inputs: Callable[[datetime], Dict[str, Any]] = None,
                   call: Callable[[Dict[str, Any]], Any] = None) -> Dict[str, Any]:
-    """Decide the list (today's placements, the entries beyond them, every open concern's entries) when a stage before
-    it changed since the last run (fingerprint); record the run. The keyword arguments are test seams. Raises when the
-    answer is still invalid after one correction."""
+    """Decide the list (every open concern's entries, the day's own) when a stage before it changed since the last run
+    (fingerprint); record the run. The keyword arguments are test seams. Raises when the answer is still invalid after
+    one correction."""
     from app.assistant.subconscious.brain_trace import step
     now = now_utc or datetime.now(timezone.utc)
     connect = connect or _connect
     ensure_schema(connect)
     inputs = (gather_inputs or gather)(now)
-    if not (inputs["items"] or inputs["situation"]["concerns"] or inputs.get("own")):
+    if not (inputs["situation"]["concerns"] or inputs.get("own")):
         return {"day_tasks": "nothing to decide"}
     fp = fingerprint(inputs)
     if fp == _last_fingerprint(inputs["day"], connect):
         return {"day_tasks": "unchanged"}
     call = call or _agent_call
-    labels = [it["label"] for it in inputs["items"]]
     entries = changeable(inputs.get("own") or [], inputs["situation"]["concerns"])
 
     def check(answer):
-        found = problems(answer, inputs["items"], inputs["labels"])
-        return found + (entries_problems(answer, entries, inputs["labels"]) if isinstance(answer, dict) else [])
+        if not isinstance(answer, dict) or not isinstance(answer.get("entries"), list):
+            return ["no entries list"]
+        return entries_problems(answer, entries, inputs["labels"])
     data = call(inputs)
     found = check(data)
     if found:
@@ -531,69 +429,20 @@ def run_day_tasks(*, now_utc: Optional[datetime] = None, connect=None,
     from app.assistant.subconscious import brain_list
     from app.assistant.subconscious.projection import resolve
     call_labels = inputs["labels"]
-    decisions = [{**d, "relies_on": [resolve(call_labels, x) for x in d.get("relies_on") or []]}
-                 for d in data["decisions"]]
-    changed = brain_list.apply_calendar(inputs["day"], inputs["items"], decisions,
-                                        cause=f"day's tasks {now.isoformat()}", at=now, connect=connect)
     entry_changes = [{**{k: str(c.get(k) or "").strip() for k in ("action", "what", "assistant_part", "when", "why")},
                       "entry": "new" if c.get("action") == "new" else resolve(call_labels, c["entry"])[1],
                       "concern_id": resolve(call_labels, c["concern"])[1] if str(c.get("concern") or "").strip()
                       else None,
                       "relies_on": [resolve(call_labels, x) for x in c.get("relies_on") or []]}
                      for c in data.get("entries") or []]
-    if entry_changes:
-        changed = {**changed, "entries": brain_list.apply_entries(inputs["day"], entry_changes,
-                                                                  cause=f"day's tasks {now.isoformat()}", at=now,
-                                                                  connect=connect)}
+    changed = brain_list.apply_entries(inputs["day"], entry_changes, cause=f"day's tasks {now.isoformat()}", at=now,
+                                       connect=connect) if entry_changes else {}
+    # The run, recorded once its entries are on the list (the table's `items` held the day's placements until
+    # 2026-10-09; `decisions` holds the answer's entries).
     with connect(True) as c:
         c.execute("INSERT INTO brain_day_decisions (day, decided_at_utc, fingerprint, items, decisions) "
                   "VALUES (?,?,?,?,?)",
-                  (inputs["day"], now.isoformat(), fp, json.dumps(inputs["items"], ensure_ascii=False),
-                   json.dumps(data["decisions"], ensure_ascii=False)))
-    from app.assistant.dayflow_orchestrator.brain_list_intake import calendar_live
-    mode = "live" if calendar_live(inputs["day"]) else "shadow"
-    step("day_tasks", f"decided ({mode})", subject=inputs["day"], items=len(labels), decided=len(data["decisions"]),
-         list_changes=changed, decisions=data["decisions"])
-    logger.info("[day_tasks] %s: %d placement(s) offered, %d decided; list %s (%s)",
-                inputs["day"], len(labels), len(data["decisions"]), changed, mode)
-    return {"day_tasks": "decided", "day_items": len(labels), "day_decided": len(data["decisions"]),
-            "day_list_changes": changed}
-
-
-# ── the comparison ─────────────────────────────────────────────────────────
-
-def dayflow_handling(day: str) -> Dict[str, List[str]]:
-    """What dayflow did with each belief's placements that day: belief key -> each occurrence's outcome
-    (converted to work, or the steward's no-action reason)."""
-    from app.assistant.pipelines.context import day_window_local
-    start_local, _ = day_window_local(day)
-    since = start_local.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    out: Dict[str, List[str]] = {}
-    with _connect(False) as c:
-        rows = c.execute("SELECT metadata_json FROM unified_log_2026 WHERE source = 'dayflow_item' AND timestamp >= ?",
-                         (since,)).fetchall()
-    for (raw,) in rows:
-        meta = json.loads(raw)
-        if meta.get("source_type") == "belief" and meta.get("occurrence_day") == day:
-            out.setdefault(meta["belief_key"], []).append(
-                f"{meta.get('occurrence_time')}: {meta.get('state_reason') or meta.get('state')}")
-    return out
-
-
-def compare(day: str, *, connect=None) -> List[Dict[str, Any]]:
-    """The day's entries on the brain's list beside what dayflow did with the same beliefs. (A run records only
-    what it decided, so the list, not the newest run, holds the day.)"""
-    from app.assistant.subconscious import brain_list
-    handled = dayflow_handling(day)
-    return [{**e, "dayflow": handled.get(e["belief_key"], [])}
-            for e in brain_list.entries(day=day, connect=connect)]
-
-
-if __name__ == "__main__":
-    import sys
-    for row in compare(sys.argv[1]):
-        print(f"{row['placement_time']} {row['belief_key']}")
-        print(f"    brain: {row['decision']}"
-              + (f" | {row['assistant_part']} at {row['when_local']}" if row["decision"] == "needed" else "")
-              + f" | {row['why']}")
-        print(f"    dayflow: {row['dayflow'] or '(nothing)'}")
+                  (inputs["day"], now.isoformat(), fp, "[]", json.dumps(data["entries"], ensure_ascii=False)))
+    step("day_tasks", "decided", subject=inputs["day"], list_changes=changed, entries=data["entries"])
+    logger.info("[day_tasks] %s: list %s", inputs["day"], changed)
+    return {"day_tasks": "decided", "day_list_changes": changed}

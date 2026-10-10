@@ -10,9 +10,10 @@ intake makes work from the entries (dayflow_orchestrator/brain_list_intake.py); 
 what dayflow actually does.
 
 Every change is recorded with its cause, so a changed decision reads as what it would be when live: entry X
-created, modified (before, after, why), or cancelled. Calendar entries are keyed by code to their belief and day
-(`cal:<day>:<belief_key>`; until 2026-10-05 also the time, so a placement the day pass moved was cancelled and made
-again), the times being a field; concern entries get an id when first created and are then changed by it.
+created, modified (before, after, why), or cancelled. Concern entries get an id when first created and are then
+changed by it. Until 2026-10-09 the day's placements had entries of their own, keyed by code to their belief and day
+(`cal:<day>:<belief_key>`); since then each placement is a concern (subconscious/calendar_concerns.py) and its entry a
+concern's.
 
 Tables in emi.db (subconscious/db.py):
     brain_list_entries  one row per entry, its current state.
@@ -79,10 +80,6 @@ def relies_on(entry_id: str, *, connect=None) -> List[Tuple[str, str]]:
 def _relies_on(c, entry_id: str, refs, *, cause: str, at: str) -> None:
     from app.assistant.subconscious import relations
     relations.replace(c, ("list_entry", entry_id), "relies_on", [tuple(r) for r in refs or []], at=at, by=cause)
-
-
-def calendar_id(day: str, belief_key: str) -> str:
-    return f"cal:{day}:{belief_key}"
 
 
 def _row(r) -> Dict[str, Any]:
@@ -176,40 +173,6 @@ def cancel(c, entry_id: str, *, reason: str, cause: str, at: str) -> None:
     _write(c, entry_id, "cancelled", _state(_row(row)), None, cause, at)
 
 
-def apply_calendar(day: str, items: List[Dict[str, Any]], decisions: List[Dict[str, Any]], *, cause: str,
-                   at: datetime, connect=None) -> Dict[str, int]:
-    """A day's-tasks answer onto the list: each decided placement's entry created or changed, keyed by code; a
-    placement it did not decide keeps its entry as it is (silence is keep); covers become entry ids; a decision's
-    `relies_on` ((kind, id) pairs, resolved by the caller) becomes the entry's relations when the entry is created or
-    changed. An entry whose
-    placement is no longer in the day's plan is kept: the day pass re-places the day as its inputs change and a
-    belief can drop out of one run and return in the next (2026-10-05: the clock-in reminder was in 2 of 9 runs), so
-    a drop is not the brain's decision to stop the work; an entry ends only by a decision. (Until 2026-10-05 a dropped
-    placement's entry was cancelled, and with the calendar lane live its work with it.) Returns the counts of each
-    change; `kept` counts the offered placements left undecided. The day's tasks name no one who acts: a list entry is the assistant's own task
-    (who_acts stays empty)."""
-    connect = connect or _connect
-    ensure_schema(connect)
-    when = at.isoformat()
-    by_label = {it["label"]: it for it in items}
-    ids = {label: calendar_id(day, it["belief_key"]) for label, it in by_label.items()}
-    counts = {"created": 0, "modified": 0, "unchanged": 0, "kept": len(items) - len(decisions)}
-    with connect(True) as c:
-        for d in decisions:
-            it = by_label[d["item"]]
-            needed = d["decision"] == "needed"
-            result = upsert(c, {
-                "id": ids[d["item"]], "kind": "calendar", "day": day, "belief_key": it["belief_key"],
-                "placement_time": ", ".join(it["times"]), "concern_id": None,
-                "what": d["assistant_part"] if needed else it["statement"], "decision": d["decision"],
-                "who_acts": "", "assistant_part": d["assistant_part"], "when_local": d["when"],
-                "covers": [ids[x] for x in d.get("covers") or []], "why": d["why"]}, cause=cause, at=when)
-            if result != "unchanged":
-                _relies_on(c, ids[d["item"]], d.get("relies_on"), cause=cause, at=when)
-            counts[result] += 1
-    return counts
-
-
 def apply_entries(day: str, changes: List[Dict[str, Any]], *, cause: str, at: datetime,
                   connect=None) -> Dict[str, int]:
     """The list decider's entries onto the list (subconscious/day_tasks.py): every entry not keyed to a calendar
@@ -217,7 +180,8 @@ def apply_entries(day: str, changes: List[Dict[str, Any]], *, cause: str, at: da
     the day's (`day:<day>:<hex>`, kind day). Modify and cancel name any entry (resolved to its id by the caller): the
     day's, an earlier day's, or a concern's. A concern's entry keeps its concern; a day's entry keeps the concern the
     decider last named for it (2026-10-08: intake then attaches its work to the concern, and it ends when the concern
-    closes). `relies_on` as in apply_calendar.
+    closes). A change's `relies_on` ((kind, id) pairs, resolved by the caller) becomes the entry's relations when
+    the entry is created or changed.
 
     The only writer of these entries since 2026-10-09 (owner: one decider, docs/design/hub_and_spokes_2026-10-09.md).
     Until then the concern planner wrote a concern's entries (apply_concern) and the day's tasks wrote its own, and

@@ -138,13 +138,29 @@ def brief(entry: Dict[str, Any]) -> str:
                        concern_text=concern_text, belief=belief, sources=sources).strip()
 
 
+def _belief_refs(entry: Dict[str, Any]) -> List[str]:
+    """The beliefs the work carries back its outcome to: a calendar entry's belief (before 2026-10-10), or the beliefs
+    of the concern an entry serves (a calendar concern carries its belief, subconscious/calendar_concerns.py)."""
+    if entry["kind"] == "calendar":
+        return [entry["belief_key"]]
+    if not entry.get("concern_id"):
+        return []
+    from app.assistant.subconscious.concern_store import load_register
+    register = load_register()
+    found = [c for b in ("active", "addressing", "resolved", "dormant") for c in register.get(b) or []
+             if c["concern_id"] == entry["concern_id"]]
+    if not found:
+        raise KeyError(f"brain list entry {entry['id']}: concern {entry['concern_id']} is not in the register")
+    return list(found[0].get("belief_refs") or [])
+
+
 def _shell(entry: Dict[str, Any]) -> Dict[str, Any]:
     from app.assistant.dayflow_orchestrator.work_context import render_view
     goal = objective(entry)
     constraints = {"objective": goal, "success_criteria": entry["what"], "rationale": brief(entry),
                    "source_intake": [], "list_entry_id": entry["id"],
                    "concern_refs": [f"concern:{entry['concern_id']}"] if entry.get("concern_id") else [],
-                   "belief_refs": [entry["belief_key"]] if entry["kind"] == "calendar" else []}
+                   "belief_refs": _belief_refs(entry)}
     return {"title": goal, "satisfied_when_kind": "all_owned_children_done", "constraints": constraints,
             "goal_content": render_view("goal_content", objective=goal, sources=[], success_criteria=entry["what"])}
 

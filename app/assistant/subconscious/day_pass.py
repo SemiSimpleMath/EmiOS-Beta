@@ -12,6 +12,10 @@ reader. The model never writes the day; it places beliefs (owner, 2026-10-02: "w
 prose ... build the calendar"). Until then the writer wrote guidance per slot, and in about one call in ten
 filed a 9 PM item under 9 AM; placements of the same inputs did not, in 100 replays.
 
+Since 2026-10-09 each placement also carries what the belief asks for today (`outcome`) and, for a clock time, until
+when it matters (`until`), and becomes a concern (subconscious/calendar_concerns.py; docs/design/concerns_as_state_
+2026-10-09.md, rule 7).
+
 Each approved belief is read with the beliefs nearest to it in meaning (`_related`: up to RELATED_MAX, at least
 RELATED_MIN cosine over the stored statement embeddings), found by code: the holiday rule beside trash night,
 the morning setpoint beside the night one. The writer reads them as context and places only approved beliefs;
@@ -176,7 +180,7 @@ def _routine_inputs_fingerprint(boundary_date_local: str, expected_schedule: lis
     """The exact decision inputs, excluding wall-clock/scaffold rendering and generated timestamps. The beliefs
     block is the approved beliefs with their related ones, as the writer reads them."""
     context = daily_context or {}
-    payload = {"projection_version": 6, "day": boundary_date_local,
+    payload = {"projection_version": 7, "day": boundary_date_local,
                "schedule": expected_schedule, "beliefs": beliefs_block,
                "current_status": context.get("current_status"), "milestones": context.get("milestones")}
     return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
@@ -230,7 +234,8 @@ def _problems(data: Dict[str, Any], belief_keys: set, conditions: set = frozense
     """What is wrong with the writer's judgments: a key that is not an approved belief (a related belief is read
     beside the one it relates to and is never an entry of its own: on 2026-10-03 the condition "keeps the
     bedroom fan running continuously" was placed for all day and handed over as work), an approved belief judged
-    twice or not at all, a belief that applies with no time, or a time that is neither a clock time nor 'all day'."""
+    twice or not at all, a belief that applies with no outcome or no time, a time that is neither a clock time nor
+    'all day', or a clock time without a clock time it matters until."""
     out = []
     judged = [str(j.get("belief_key") or "") for j in data.get("judgments") or []]
     for j in data.get("judgments") or []:
@@ -242,11 +247,18 @@ def _problems(data: Dict[str, Any], belief_keys: set, conditions: set = frozense
                        if key in conditions else f"{key!r} is not one of the beliefs given")
         if not j.get("applies_today"):
             continue
+        if not str(j.get("outcome") or "").strip():
+            out.append(f"{key}: it applies today, so say what it asks for today, as an outcome")
         if not j.get("times"):
             out.append(f"{key}: it applies today, so give the time it applies, or 'all day'")
-        for when in j.get("times") or []:
-            if str(when).strip().lower() != "all day" and _clock_hour_minute(when) is None:
+        for p in j.get("times") or []:
+            when, until = str((p or {}).get("time") or "").strip(), str((p or {}).get("until") or "").strip()
+            if when.lower() == "all day":
+                continue
+            if _clock_hour_minute(when) is None:
                 out.append(f"{key}: time {when!r} is not a clock time like '9:00 PM', or 'all day'")
+            elif _clock_hour_minute(until) is None:
+                out.append(f"{key}: at {when}, until {until!r} is not a clock time like '11:00 PM'")
     for key in sorted(belief_keys):
         if judged.count(key) != 1:
             out.append(f"{key}: judge each approved belief once" if judged.count(key) else
@@ -259,8 +271,9 @@ def _placements(data: Dict[str, Any]) -> List[Dict[str, str]]:
     alone and listed beliefs its own reason said did not apply (the monthly timesheets on the 3rd business day,
     "business day 3, so this does not apply", placed all day): 13 of 30 replays; judged reason first, 6 of 30, and
     1 of 30 without the day theme."""
-    return [{"belief_key": j["belief_key"], "time": t}
-            for j in data.get("judgments") or [] if j.get("applies_today") for t in j.get("times") or []]
+    return [{"belief_key": j["belief_key"], "time": p["time"], "until": p.get("until") or "",
+             "outcome": str(j.get("outcome") or "").strip()}
+            for j in data.get("judgments") or [] if j.get("applies_today") for p in j.get("times") or []]
 
 
 def _place(placements: List[Dict[str, Any]], slots: List[dict], statements: Dict[str, str],
@@ -280,7 +293,8 @@ def _place(placements: List[Dict[str, Any]], slots: List[dict], statements: Dict
             continue
         seen.add((key, when.lower()))
         line = {"time": "all day" if when.lower() == "all day" else when, "belief_key": key,
-                "statement": statements[key], "related": related.get(key, [])}
+                "statement": statements[key], "related": related.get(key, []), "outcome": p["outcome"],
+                "until": "" if when.lower() == "all day" else " ".join(str(p["until"]).split())}
         if when.lower() == "all day":
             flags.append(line)
             continue
@@ -310,9 +324,9 @@ def _judge(batch: List[dict], related: Dict[str, List[Dict[str, str]]], base: Di
     return data.get("judgments") or []
 
 
-def run_day_pass(now_utc: Optional[datetime] = None, *, connect=None) -> Dict[str, Any]:
-    """Write today's plan when it is missing or its inputs changed (at most hourly). `connect` is the
-    plan store: a test seam."""
+def run_day_pass(now_utc: Optional[datetime] = None, *, connect=None, concern_connect=None) -> Dict[str, Any]:
+    """Write today's plan when it is missing or its inputs changed (at most hourly), and match the day's calendar
+    concerns to it. `connect` is the plan store and `concern_connect` the concern register: test seams."""
     global _last_attempt_utc
     from app.assistant.pipelines.context import boundary_date_local_str
     from app.assistant.pipelines.dayflow.utils.expected_calendar_utils import build_hour_grid, end_of_local_day_utc
@@ -360,13 +374,18 @@ def run_day_pass(now_utc: Optional[datetime] = None, *, connect=None) -> Dict[st
     step("day_pass", "placed", day=day, approved=sorted(given),
          related={k: [r["belief_key"] for r in v] for k, v in related.items()},
          placements=placements, judgments=data.get("judgments") or [])
-    day_plan.save_plan({
+    plan = {
         "day": day, "generated_at_utc": now_utc.isoformat(), "inputs_fingerprint": fingerprint,
         "selected_belief_keys": sorted(given),                # the beliefs approved for the calendar
         "qualifier_belief_keys": sorted(conditions),         # the related beliefs read beside them
         "selection_reason": "the beliefs the owner approved for the calendar", "change_summary": "",
-        "backdrops": backdrops, "flags": flags, "slots": plan_slots}, connect=connect)
+        "backdrops": backdrops, "flags": flags, "slots": plan_slots}
+    day_plan.save_plan(plan, connect=connect)
     step("day_pass", "written", day=day)
+    # Each placement is a concern (rule 7): raised, updated or withdrawn to match the plan.
+    from app.assistant.subconscious import calendar_concerns
+    concerns = calendar_concerns.apply(plan, now_utc, connect=concern_connect)
+    step("day_pass", "concerns", day=day, **concerns)
     logger.info("[day_pass] wrote the plan for %s: %d placements of %d approved beliefs (%d related)",
                 day, sum(len(s["lines"]) for s in plan_slots) + len(flags), len(given), len(conditions))
-    return {"day_pass": "written", "day": day, "slots": len(plan_slots)}
+    return {"day_pass": "written", "day": day, "slots": len(plan_slots), "calendar_concerns": concerns}

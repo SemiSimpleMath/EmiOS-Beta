@@ -208,6 +208,50 @@ def expire_concerns(now_utc: Optional[datetime] = None, *, connect=None) -> List
     return closed
 
 
+# What the day pass sets on a calendar concern when it places the day again; the brain's notes, its resolution and an
+# expiry it moved are the brain's.
+_PLACEMENT_FIELDS = ("title", "done_when", "notes", "calendar", "source", "belief_refs")
+
+
+def apply_calendar_concerns(day: str, desired: List[Dict[str, Any]], now_utc: datetime, *,
+                            connect=None) -> Dict[str, int]:
+    """The day pass's concerns for `day` (subconscious/calendar_concerns.py, rule 7): each desired one raised when it
+    is new, its placement updated when it is open, left as it is when the brain closed it; an open one of the day the
+    plan no longer places is closed. Returns the counts."""
+    now_iso = now_utc.isoformat()
+    counts = {"raised": 0, "updated": 0, "withdrawn": 0}
+    with _REGISTER_LOCK:
+        register = _load_register(connect)
+        known = {c["concern_id"]: (b, c) for b in ("active", "addressing", "resolved", "dormant")
+                 for c in register.get(b) or []}
+        wanted = {c["concern_id"] for c in desired}
+        for d in desired:
+            if d["concern_id"] not in known:
+                register.setdefault("active", []).append({
+                    **d, "origin": "day_pass", "first_observed": now_iso, "created_at_utc": now_iso, "evidence": [],
+                    "domain_tags": [], "addressable_by": [], "attached_work": {}, "work_receipts": []})
+                counts["raised"] += 1
+                continue
+            bucket, c = known[d["concern_id"]]
+            if bucket not in ("active", "addressing"):
+                continue                                   # closed by the brain: it stays closed
+            if any(c.get(k) != d[k] for k in _PLACEMENT_FIELDS):
+                c.update({k: d[k] for k in _PLACEMENT_FIELDS})
+                counts["updated"] += 1
+        for bucket in ("active", "addressing"):
+            for c in list(register.get(bucket) or []):
+                if (c.get("calendar") or {}).get("day") == day and c["concern_id"] not in wanted:
+                    register[bucket].remove(c)
+                    c["resolved_at_utc"] = now_iso
+                    c["resolution_reason"] = "the day pass no longer places it today"
+                    register.setdefault("resolved", []).append(c)
+                    counts["withdrawn"] += 1
+        if any(counts.values()):
+            register["last_updated_utc"] = now_iso
+            _save_register(connect, register)
+    return counts
+
+
 def next_expiry(register: Dict[str, Any], now_utc: datetime) -> Optional[datetime]:
     """The earliest future expiry of an open concern, or None: the brain wakes then to close it."""
     from app.assistant.utils.time_utils import parse_iso_utc

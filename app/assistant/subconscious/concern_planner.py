@@ -47,12 +47,15 @@ def _hold_passed(plan: Dict[str, Any], now: datetime) -> bool:
 
 def stale(register: Dict[str, Any], now_utc: Optional[datetime] = None) -> List[Tuple[str, Dict[str, Any]]]:
     """Open concerns with no plan written from their current record, or whose plan's hold has passed; minus those
-    whose plan already failed on this record. (bucket, concern)."""
+    whose plan already failed on this record, and the day's calendar concerns, which have no planner pass (rule 7).
+    (bucket, concern)."""
     from app.assistant.subconscious.concern_view import basis
     now = now_utc or datetime.now(timezone.utc)
     out = []
     for bucket in ("active", "addressing"):
         for c in register.get(bucket) or []:
+            if c.get("calendar"):
+                continue                                   # a calendar concern: its placement says what and when
             b = basis(c, bucket)
             if (c.get("plan_error") or {}).get("basis") == b:
                 continue

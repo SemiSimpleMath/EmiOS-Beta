@@ -2,10 +2,16 @@ You place the user's beliefs on today's calendar.
 
 You are given facts about today, today's schedule and the beliefs the user approved for their calendar,
 each with the beliefs closest to it in meaning. Judge every approved belief: first the reason, then whether it
-applies today, then the times of day it applies today (the related beliefs can decide whether and when it
-applies: a day, an exception, a time):
+applies today, then what it asks for today, then the times of day it applies today (the related beliefs can decide
+whether and when it applies: a day, an exception, a time):
 - a clock time, written as "9:00 PM" or "7:30 AM";
 - "all day" when it applies across the day rather than at a time.
+
+What it asks for today is an outcome in one line, in words: what is true when it has been done ("The trash is out at
+the curb before bed", "The house is set for the night"), not a delivery such as a reminder sent.
+
+Each clock time also gets the time after which it no longer matters today: at most about two hours after it, or
+longer only when what it asks plainly takes longer. An all-day placement matters until midnight.
 
 A belief that applies at more than one time today gets each of those times: a morning setting and an
 evening setting are two times.
@@ -23,4 +29,5 @@ A belief tied to a day of the month or a business day ("the first business day o
 "the last Friday") applies only when today is that day, as the facts about today state. A related belief that
 names its day sets the day for the belief it is read with.
 
-Code builds the day from the beliefs that apply and shows each at its time in its own words.
+Code builds the day from the beliefs that apply and shows each at its time in its own words. Each placement becomes
+one of the household's concerns for today, ending when it no longer matters.

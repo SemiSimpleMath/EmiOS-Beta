@@ -136,6 +136,16 @@ The `concerns` table in emi.db (`subconscious/concern_store.py`; it replaced `re
 
 A concern carries: `concern_id`, `title`, `subject`, `kind`, `domain_tags`, `severity` (low/medium/high), `horizon` (today/this_week/this_month/long_horizon), `evidence[]`, `addressable_by[]` (e.g. `["dayflow_orchestrator", "wellness_proposer"]`), `notes`, `first_observed`, plus lifecycle bookkeeping (`reinforcement_count`, `reinforcement_notes` journal, `last_reinforced_utc`, `addressing_since_utc`, `last_disposition_at_count`, `escalation`). `ConcernKind` ∈ `{pattern_drift, anticipated_need, opportunity_external, opportunity_internal, schedule_collision, gift_opportunity}`.
 
+### The day's beliefs are concerns (2026-10-10)
+
+Each belief the day pass places becomes a concern of its own (`subconscious/calendar_concerns.py`; rule 7 of
+`docs/design/concerns_as_state_2026-10-09.md`): its identity is its belief, day and time; its source the belief; it
+expires at most about two hours after its time (the writer's `until`), or at midnight when placed for all day; it has
+no planner pass, and the day's tasks decide its entry (`con:`). The day pass edits only the concerns it raised
+(updates what its placement says, closes one it no longer places); the brain notes and resolves them like any
+concern, and one it closed is never raised again. The work made for its entry carries the belief (`belief_refs`), so
+the outcome returns to the belief. What follows describes 2026-10-03 to 2026-10-09.
+
 ### Beliefs are not concerns (2026-10-03)
 
 From 2026-10-02 to 2026-10-03 every belief placed on the day's calendar got an owner concern of

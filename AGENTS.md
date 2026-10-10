@@ -115,7 +115,7 @@ Global service registry: `DI` from `app/assistant/ServiceLocator/service_locator
 
 **Goal ownership:** the brain decides what work exists, as entries on its list; the architect owns each work object from creation to end (docs/design/dayflow_goal_ownership_2026-09-30.md, docs/design/brain_delegates_work_2026-10-04.md). The architect revises the objective (`revise_objective`) and completes or abandons the goal (`end_goal`, with its reason) in its own revision batch. It is woken by a finalizer instruction, the brain's instructions on the work object (`instruct_goal` kind `replan` when the entry changed, kind `end` when it was cancelled or decided not needed), a new goal with no graph yet, or the goal being stranded (nothing in it can run and no scheduled time lies ahead, `stranded_fingerprint`). Concern and belief feedback are delivered after the architect's commit.
 
-**Brain → dayflow:** the brain's list (`subconscious/brain_list.py`; `brain_list_entries`, `brain_list_changes` in emi.db) holds calendar entries (`cal:<day>:<belief_key>`), the day's own entries for what no belief or concern asks (`day:<day>:<hex>`, each citing what prompted it), and concern entries (`con:<hex>`). One decider writes every entry: the day's tasks (`subconscious/day_tasks.py`), woken only by the day pass's placements and the concerns' records and plans, never by chat; each concern's planner (`subconscious/concern_planner.py`) looks things up and proposes its entries (`plan.proposals`), and the day's tasks decides them (2026-10-09, `docs/design/hub_and_spokes_2026-10-09.md`). Each planning tick, `brain_list_intake_node` (`dayflow_orchestrator/brain_list_intake.py`) turns the list's changes into work by code, per live lane: a needed entry with no work becomes a work-object shell (with `list_entry_id`, and `concern_refs` or `belief_refs` from the entry); a changed entry revises the goal and leaves a `replan` instruction in the same commit; a cancelled or not-needed entry leaves an `end` instruction. Each change is acted on once (`brain_list_deliveries`). Lanes are switched in `configs/brain_lanes.json`, read fresh on every tick and brain pass: calendar live from 2026-10-06, concern live since 2026-10-05, and `steward.mode: retired` (2026-10-06). The brain pass pokes dayflow when the list changed (`brain_wake.run_brain`).
+**Brain → dayflow:** the brain's list (`subconscious/brain_list.py`; `brain_list_entries`, `brain_list_changes` in emi.db) holds concern entries (`con:<hex>`) and the day's own entries for what no concern asks (`day:<day>:<hex>`, each citing what prompted it); calendar entries (`cal:<day>:<belief_key>`) exist only for days before 2026-10-10, when each belief the day pass places became a concern of its own (`subconscious/calendar_concerns.py`: identity belief + day + time, expiring at most about two hours after its time or at midnight, no planner pass). One decider writes every entry: the day's tasks (`subconscious/day_tasks.py`), woken only by the concerns' records and plans, never by chat; each concern's planner (`subconscious/concern_planner.py`) looks things up and proposes its entries (`plan.proposals`), and the day's tasks decides them (2026-10-09, `docs/design/hub_and_spokes_2026-10-09.md`). Each planning tick, `brain_list_intake_node` (`dayflow_orchestrator/brain_list_intake.py`) turns the list's changes into work by code, per live lane: a needed entry with no work becomes a work-object shell (with `list_entry_id`, and `concern_refs` or `belief_refs` from the entry); a changed entry revises the goal and leaves a `replan` instruction in the same commit; a cancelled or not-needed entry leaves an `end` instruction. Each change is acted on once (`brain_list_deliveries`). Lanes are switched in `configs/brain_lanes.json`, read fresh on every tick and brain pass: calendar live from 2026-10-06, concern live since 2026-10-05, and `steward.mode: retired` (2026-10-06). The brain pass pokes dayflow when the list changed (`brain_wake.run_brain`).
 
 **Execution ownership:** use standard ManagerInvoker, agent activation, tool dispatch,
 and monitored thread/executor helpers. WorkContext preserves the main task's captured
@@ -254,20 +254,21 @@ Claims, result recording, finalizer judgments and architect revision batches are
 ### Concern outcome delivery
 
 A concern never becomes a work object: work citing it (`constraints.concern_refs`) is
-ATTACHED to it, recorded on the concern as `attached_work` (objective, status, every
-finalizer judgment with the user's replies, the ending). The store enqueues
+ATTACHED to it as a reference (`attached_work`: the work id and when it was attached); every
+reader renders the work live from the store (`concern_view.attempts`). The store enqueues
 `work_concern_feedback` receipts in the same transaction as each change: `attached`
 (refs added at creation or revision), `judged` (each finalizer judgment of a main task,
 achieved or not), `done`/`abandoned` (including automatic rollup). Keep register/model
 calls outside the generic store. Dayflow delivers after creation, each judgment and
-closure; evaluator prep recovers pending receipts. Register writes are receipt-idempotent;
-acknowledge only after every linked concern and the brain inbox have it. `addressing`
-means attached work is in progress: set on attach, left when the last attached work ends.
-Judgments and endings of every work object become pending brain inbox events
-(`brain_inbox.add_work_event`), routed by the gate like chat and email; the concerns the work
-was made for are named in the event as a hint, and the brain attaches cited work to the concerns
-it updates. Concerns are resolved by the brain, never by dayflow; the daily noticer only
-raises issues for the brain's inbox. A completed notification does not prove the need resolved.
+closure; evaluator prep recovers pending receipts. Register writes are receipt-idempotent.
+Judgments and endings of work that cites a concern become pending brain inbox events
+(`brain_inbox.add_work_event`), routed by the gate like chat and email, naming the concerns the
+work was made for. Code never moves a concern between buckets (no `addressing` moves, no
+dormant on a decline) and the brain never attaches work by judgment. Only the brain writes a
+concern's notes; readers get its summary and the notes since (`concern_summary.py`). Concerns are
+resolved by the brain or closed at their expiry (`expires_at`, `persist.expire_concerns`), never by
+dayflow; the daily noticer only raises issues for the brain's inbox. Design:
+`docs/design/concerns_as_state_2026-10-09.md`. A completed notification does not prove the need resolved.
 
 
 ### Belief outcome delivery

@@ -6,7 +6,9 @@ each change is acted on once; a changed entry with active work is revised and a 
 the same commit (any change the list records, the assistant's part included); an entry
 decided not needed, or cancelled, sends an end instruction with the brain's reason; an entry still decided needed
 after its work ended gets new work (2026-10-08); an entry before the lane's start is left to the steward; a dry run makes nothing and leaves
-the changes for the live run. Scratch list and deliveries; the dayflow test store; the brief is a fake.
+the changes for the live run; a calendar concern's entry carries its concern and its belief (2026-10-09). The calendar
+entries here (`cal:<day>:<belief>`) are written as the day's tasks wrote them until 2026-10-09; intake still carries
+the ones made before. Scratch list and deliveries; the dayflow test store; the brief and the register are fakes.
 """
 from __future__ import annotations
 
@@ -29,17 +31,34 @@ def _store():
     return get_dayflow_work_store()
 
 
+REGISTER = {"active": [{"concern_id": "c-ring", "title": "Doorbell battery"},
+                       {"concern_id": "c-trash", "title": "The trash is at the curb before bed", "belief_refs": ["B7"],
+                        "calendar": {"day": DAY, "belief_key": "B7", "time": "9:00 PM"}}],
+            "addressing": [], "resolved": [], "dormant": []}
+
+
 @pytest.fixture
 def scratch(tmp_path, monkeypatch):
     monkeypatch.setattr(B, "brief", lambda entry: f"BRIEF of {entry['id']}")
+    from app.assistant.subconscious import concern_store
+    monkeypatch.setattr(concern_store, "load_register", lambda connect=None: REGISTER)
     return sqlite_file(tmp_path / "list.db"), sqlite_file(tmp_path / "deliveries.db")
 
 
+def _cal(day, belief):
+    return f"cal:{day}:{belief}"
+
+
 def _decide(lst, decision="needed", when="9:00 PM", day=DAY, at=NOW, belief="B3", part="set the AC to 70"):
-    item = {"label": "I1", "belief_key": belief, "times": ["9:00 PM"], "statement": "The owner wants the AC at 70."}
-    d = {"item": "I1", "decision": decision, "assistant_part": part if decision == "needed" else "",
-         "when": when if decision == "needed" else "", "covers": [], "why": "A standing wish."}
-    return L.apply_calendar(day, [item], [d], cause="test", at=at, connect=lst)
+    """A calendar entry, as the day's tasks wrote them until 2026-10-09."""
+    L.ensure_schema(lst)
+    needed = decision == "needed"
+    with lst(True) as c:
+        return L.upsert(c, {"id": _cal(day, belief), "kind": "calendar", "day": day, "belief_key": belief,
+                            "placement_time": "9:00 PM", "concern_id": None,
+                            "what": part if needed else "The owner wants the AC at 70.", "decision": decision,
+                            "who_acts": "", "assistant_part": part if needed else "", "when_local": when if needed else "",
+                            "covers": [], "why": "A standing wish."}, cause="test", at=at.isoformat())
 
 
 def _ring(lst, changes, at=NOW):
@@ -65,7 +84,7 @@ def test_a_needed_entry_becomes_a_shell_once(scratch):
     [work_id] = out["created"]
     wo = _store().load(work_id)
     c = wo.constraints
-    assert c["list_entry_id"] == L.calendar_id(DAY, "B3") and c["belief_refs"] == ["B3"] and c["concern_refs"] == []
+    assert c["list_entry_id"] == _cal(DAY, "B3") and c["belief_refs"] == ["B3"] and c["concern_refs"] == []
     # dated (2026-10-08): the calendar day, and when the entry was decided
     assert c["objective"] == "set the AC to 70 (for Tue 03-10; when: 9:00 PM; decided Tue 03-10 08:00 AM)"
     assert c["rationale"] == f"BRIEF of {c['list_entry_id']}"
@@ -105,7 +124,7 @@ def test_not_needed_or_cancelled_ends_the_work_with_the_brains_reason(scratch):
     _decide(lst, belief="B4")
     [other] = _deliver(scratch)["created"]
     with lst(True) as c:
-        L.cancel(c, L.calendar_id(DAY, "B4"), reason="the owner is away tonight", cause="decided", at=NOW)
+        L.cancel(c, _cal(DAY, "B4"), reason="the owner is away tonight", cause="decided", at=NOW)
     assert _deliver(scratch)["ended"] == [other], "a cancelled entry ends its work"
 
 
@@ -134,7 +153,7 @@ def test_a_dry_run_makes_nothing_and_leaves_the_changes_for_the_live_run(scratch
     _decide(scratch[0])
     dry = {**LIVE, "calendar": {"mode": "dry_run", "from_day": DAY}}
     out = _deliver(scratch, dry)
-    assert out["dry_run"] == [{"entry": L.calendar_id(DAY, "B3"), "action": "create", "work_id": None}]
+    assert out["dry_run"] == [{"entry": _cal(DAY, "B3"), "action": "create", "work_id": None}]
     assert _store().list_work_objects() == [] and _deliver(scratch, dry)["dry_run"] == []
     assert len(_deliver(scratch, LIVE)["created"]) == 1
 
@@ -149,6 +168,21 @@ def test_a_concern_entry_carries_its_concern(scratch, monkeypatch):
     config = {"calendar": {"mode": "off", "from_day": None}, "concern": {"mode": "live", "since": NOW.isoformat()}}
     [work_id] = _deliver(scratch, config)["created"]
     assert _store().load(work_id).constraints["concern_refs"] == ["concern:c-ring"]
+
+
+def test_a_calendar_concerns_entry_carries_its_concern_and_its_belief(scratch, monkeypatch):
+    """Rule 7: a placement is a concern; the work made for its entry returns its outcome to the concern and to the
+    belief it came from."""
+    lst, _ = scratch
+    from app.assistant.subconscious import concern_feedback
+    monkeypatch.setattr(concern_feedback, "propagate_work_outcome", lambda store, work_id, outcome: None)
+    L.apply_entries(DAY, [{"entry": "new", "action": "new", "what": "The trash is at the curb before bed",
+                           "assistant_part": "remind the owner", "when": "9:00 PM", "why": "Trash night.",
+                           "concern_id": "c-trash", "relies_on": []}], cause="decided", at=NOW, connect=lst)
+    config = {"calendar": {"mode": "off", "from_day": None}, "concern": {"mode": "live", "since": NOW.isoformat()}}
+    [work_id] = _deliver(scratch, config)["created"]
+    c = _store().load(work_id).constraints
+    assert c["concern_refs"] == ["concern:c-trash"] and c["belief_refs"] == ["B7"]
 
 
 def test_a_concern_entrys_part_changed_alone_revises_its_work(scratch, monkeypatch):
@@ -203,7 +237,7 @@ def test_one_entry_that_fails_is_left_for_the_next_tick_and_the_others_go_on(scr
         return real(entry)
     monkeypatch.setattr(B, "brief", brief)
     out = _deliver(scratch)
-    assert out["failed"] == [L.calendar_id(DAY, "B3")] and len(out["created"]) == 1
+    assert out["failed"] == [_cal(DAY, "B3")] and len(out["created"]) == 1
     monkeypatch.setattr(B, "brief", real)
     retry = _deliver(scratch)
     assert retry["failed"] == [] and len(retry["created"]) == 1, "the failed entry is delivered on the next tick"
