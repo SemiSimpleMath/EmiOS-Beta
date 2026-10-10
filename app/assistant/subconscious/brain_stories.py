@@ -10,13 +10,13 @@ you will need auxilary agents to write all the summaries."
 Three agents write them, each from records that are already kept:
 - `subconscious::story_matter`, per matter the brain read (`brain_matters`): a headline and one line
   per event, from the events, the gate's routes, the brain's decisions and the concern door's outcome;
-- `subconscious::story_concern`, per open concern with a brief: a state label, the story so far, the
-  things proposed now and its likely fate, from the brief, the work done for it and the latest plan;
+- `subconscious::story_concern`, per open concern: a state label, the story so far, the things proposed now and
+  its likely fate, from its notes, the work done for it and the latest plan;
 - `subconscious::story_day`, per local day: a headline and an overview, from the day's matter stories,
   counts by source, concerns opened and settled, and how much was handed on.
 
 Each story is stored in `brain_stories` with the fingerprint of the input it was written from and
-written again only when that changes; one that failed waits for a change, as briefs do. The brain's wake
+written again only when that changes; one that failed waits for a change. The brain's wake
 runs this last (subconscious/brain_wake.py): matter stories first, since the day is told from them. Only
 the last STORY_DAYS local days are told; older matters keep the stories they had.
 """
@@ -237,14 +237,13 @@ def matter_problems(data: Any, labels: List[str]) -> List[str]:
 
 def concern_input(concern: Dict[str, Any], bucket: str, now_utc: datetime) -> Dict[str, Any]:
     """The concern as its story is told from it."""
-    from app.assistant.subconscious import concern_brief
-    brief = concern["brief"]
+    from app.assistant.subconscious import concern_view
+    from app.assistant.subconscious.persist import history_for_prompt
     return {"concern": {
         "title": concern.get("title"), "status": bucket,
         "done_when": concern.get("done_when"), "owner_words": (concern.get("owner_request") or {}).get("words"),
-        "brief": {k: brief.get(k) for k in ("what", "why_it_matters", "known", "tried", "owner_wishes",
-                                            "open_questions")},
-        "attempts": concern_brief.attempts(concern),
+        "history": history_for_prompt(concern),
+        "attempts": concern_view.attempts(concern),
         "plan": {k: (concern.get("plan") or {}).get(k) for k in ("decision", "todo", "why", "hold_until")}
         if concern.get("plan") else None,
     }}
@@ -380,8 +379,6 @@ def run_stories(*, call: Optional[Callable[[str], Callable]] = None, connect=Non
     concerns = load("concern", connect)
     for bucket in ("active", "addressing"):
         for c in register.get(bucket) or []:
-            if not c.get("brief"):
-                continue
             inp = concern_input(c, bucket, now)
             decision = _decision(inp)
             count(_write("concern", c["concern_id"], inp, lambda d, decision=decision: concern_problems(d, decision),

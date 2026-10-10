@@ -183,12 +183,11 @@ def brain_matters_api():
 
 @brain_debug_bp.route("/api/brain/concerns")
 def brain_concerns_api():
-    """Every open concern with what the brain knows and decided: its brief and readiness, its journal,
-    the brief writer's calls, each handoff to dayflow with the steward's answer and the steward call
+    """Every open concern with what the brain knows and decided: its summary and plan, its journal,
+    the summary writer's calls, each handoff to dayflow with the steward's answer and the steward call
     that gave it, and the work that serves it."""
     import json
     from app.assistant.subconscious import brain_trace, work_links
-    from app.assistant.subconscious.concern_brief import basis
     from app.assistant.subconscious.concern_handoff import _existing_items
     from app.assistant.subconscious.concern_store import load_register
     register = load_register()
@@ -203,8 +202,8 @@ def brain_concerns_api():
                 "concern_id": cid, "status": bucket, "title": c.get("title"), "subject": c.get("subject"),
                 "origin": c.get("origin"), "done_when": c.get("done_when"), "owner_request": c.get("owner_request"),
                 "notes": c.get("notes"), "journal": c.get("reinforcement_notes") or "",
-                "brief": c.get("brief"), "brief_current": (c.get("brief") or {}).get("basis") == basis(c, bucket),
-                "brief_error": c.get("brief_error"), "brief_calls": brain_trace.calls_for_concern(cid),
+                "summary": c.get("summary"), "summary_error": c.get("summary_error"),
+                "summary_calls": brain_trace.calls_for_concern(cid),
                 "plan": c.get("plan"), "plan_error": c.get("plan_error"), "kind": c.get("kind"),
                 "handoffs": handoffs,
                 "work": [{"work_id": r["id"], "status": r["status"], "title": r["title"]} for r in rows

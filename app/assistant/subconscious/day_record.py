@@ -259,7 +259,8 @@ def _today_notes(concern: Dict[str, Any], start_utc: datetime) -> List[Dict[str,
 
 
 def open_concerns(start_utc: datetime) -> List[Dict[str, Any]]:
-    """Every open concern as it stands now: its title, what it is about (its brief), and the notes made today."""
+    """Every open concern as it stands now: its title, what it is about (the note it was raised with), and the notes
+    made today."""
     from app.assistant.subconscious.concern_store import load_register
     register = load_register()
     out = []
@@ -267,7 +268,7 @@ def open_concerns(start_utc: datetime) -> List[Dict[str, Any]]:
         for c in register.get(bucket) or []:
             out.append({"concern_id": c["concern_id"], "title": c.get("title") or "",
                         "subject": c.get("subject") or "household",
-                        "what": ((c.get("brief") or {}).get("what") or c.get("notes") or "").strip(),
+                        "what": (c.get("notes") or "").strip(),
                         "today": _today_notes(c, start_utc)})
     return out
 

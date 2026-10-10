@@ -55,9 +55,10 @@ def test_ticket_to_graph_to_concern_preserves_text_and_choice(graph,tmp_path,mon
     assert store.pending_concern_feedback()==[]
     reg=path.read()
     concern=next(c for bucket in ('active','addressing','dormant','resolved') for c in reg[bucket])
-    assert 'Already handled. Stop asking.' in concern['reinforcement_notes']
-    assert 'Arrange service' in concern['reinforcement_notes']
-    assert 'decline' in concern['reinforcement_notes']
+    kept=concern['attached_work'][wid]['ended']['owner_reply']   # kept on the work's record, not in the notes
+    assert kept['user_text']=='Already handled. Stop asking.'
+    assert kept['response_details']['scope']=='Arrange service'
+    assert kept['response_details']['meaning']=='decline'
     assert not concern.get('user_declined_at_utc')  # Written qualifiers require interpretation.
 
 
@@ -103,14 +104,14 @@ def test_ambiguous_or_qualified_response_does_not_silence_concern(tmp_path,meani
         user_response=response,connect=path.connect)=='ended'
     reg=path.read()
     assert len(reg['active'])==1 and reg['dormant']==[]
-    assert meaning in reg['active'][0]['reinforcement_notes']
+    assert reg['active'][0]['attached_work']['work']['ended']['owner_reply']['response_details']['meaning']==meaning
 
 
 def test_historical_words_are_preserved_without_inventing_decline(tmp_path):
     path=_register(tmp_path)
     assert apply_work_outcome(_CID,work_id='work',outcome='abandoned',
         user_words='OK',connect=path.connect)=='ended'
-    assert 'OK' in path.read()['active'][0]['reinforcement_notes']
+    assert path.read()['active'][0]['attached_work']['work']['ended']['legacy_user_words']=='OK'
 
 
 def test_response_history_survives_round_trip(graph):

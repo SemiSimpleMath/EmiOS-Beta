@@ -35,7 +35,7 @@ The Subconscious is EmiOS's autonomous background "mind." It runs while the user
            decides, and attaches the work to a concern it cites it on (brain_wake)
 ```
 
-The register is the **spine**: every other component either feeds it (the brain step, work-outcome propagation) or reads it (briefs, the concern planner, proposers, digest, dashboard, the noticer). The brain step (§2) is its writer of notes, resolutions and new concerns, from every event the gate passes on. The noticer (§4) raises issues as events for the brain; it writes no concern (2026-10-09, `docs/design/concerns_as_state_2026-10-09.md`). New concerns enter only through the concern door (`concern_door.py`). The propagation writers are deterministic id-joins: work made from a concern's entry on the brain's list gets `constraints.concern_refs` from that entry (`brain_list_intake._shell`), every judgment and ending of every work object reports back (`concern_feedback`), and the brain attaches work it cites to the concern it cites it on. (2026-08-01: before outcomes were joined by id, 19 duplicate AC-service work objects were minted because outcomes never reached the register.)
+The register is the **spine**: every other component either feeds it (the brain step, work-outcome propagation) or reads it (the summaries, the concern planner, proposers, digest, dashboard, the noticer). The brain step (§2) is its writer of notes, resolutions and new concerns, from every event the gate passes on. The noticer (§4) raises issues as events for the brain; it writes no concern (2026-10-09, `docs/design/concerns_as_state_2026-10-09.md`). New concerns enter only through the concern door (`concern_door.py`). The propagation writers are deterministic id-joins: work made from a concern's entry on the brain's list gets `constraints.concern_refs` from that entry (`brain_list_intake._shell`), every judgment and ending of every work object reports back (`concern_feedback`), and the brain attaches work it cites to the concern it cites it on. (2026-08-01: before outcomes were joined by id, 19 duplicate AC-service work objects were minted because outcomes never reached the register.)
 
 ### Dispatch & scope
 
@@ -66,7 +66,7 @@ Each pass is recorded as a run (`brain_trace`, trigger boot / event / timer). A 
 1. **gate** (`gate.run_gate`): ingest new chat, email, camera and presence events; route the ready ones;
 2. **brain step** (`brain_step.run_brain_step`): every pending matter;
 3. **closed concerns' entries** (`brain_list.cancel_for_closed_concerns`): every open list entry whose concern is no longer open is cancelled, with the concern's resolution as the reason;
-4. **briefs** (`concern_brief.run_briefs`, agent `subconscious::brief`): written again for every open concern whose record changed;
+4. **summaries** (`concern_summary.run_summaries`, agent `subconscious::concern_summary`): an open concern whose notes since its last summary passed `SUMMARY_AFTER_CHARS` (3,000) gets them folded into a new summary (until 2026-10-09 a brief was rewritten for every concern whose record changed);
 5. **concern planner** (`concern_planner.run_planners`);
 6. **handoffs** (`concern_handoff.run_handoffs`): concerns handed to the steward; off while the concern lane is live;
 7. **day pass and occurrences** (`day_pass.run_day_pass`, `belief_occurrences.run_occurrence_handoffs`): the occurrence handoffs are off for a day the live calendar lane holds;
@@ -99,7 +99,11 @@ Code validates the answer (one correction round), admits new concerns through th
 
 ### The concern planner
 
-`concern_planner.py` runs `concern_planner_manager` for each open concern whose current brief has no plan written from it, or whose plan's hold has passed. A read-only planner (`subconscious::concern_planner`: email, calendar, scheduler, to-do, work-object and pod tools, `ask_kg`) looks things up; the decider `subconscious::concern_tasks` decides `act_now`, `hold` (until a future local time) or `no_action`, and changes the concern's entries on the brain's list: new ones, and ones modified or cancelled by id; an entry it leaves out stays. The entries land first and the plan (`concern["plan"]`, its `todo` the concern's open entries) is stored after them (`persist.set_concern_plan(before_store=...)`), so a plan is current only once its entries are on the list. An invalid answer stores `plan_error` and is not retried until the brief changes.
+`concern_planner.py` runs `concern_planner_manager` for each open concern with no plan written from its current record (`concern_view.basis`: the record without its summary and plan), or whose plan's hold has passed. A read-only planner (`subconscious::concern_planner`: email, calendar, scheduler, to-do, work-object and pod tools, `ask_kg`) looks things up; the decider `subconscious::concern_tasks` decides `act_now`, `hold` (until a future local time) or `no_action`, and proposes changes to the concern's entries on the brain's list (new ones, and ones modified or cancelled by id), stored with the plan (`plan.proposals`); the day's tasks decide them. An invalid answer stores `plan_error` and is not retried until the record changes.
+
+### A concern's record as its readers see it
+
+Every reader of a concern (the gate, the brain step, the concern door, the planner and through it the day's tasks, dayflow's agents through `shared/work/concern_view.j2`, the stories, the ticket page) gets its summary, when it has one, and every note written since, whole, oldest first, each with when it was written, in local time (`persist.history_for_prompt`). Only the brain writes notes (2026-10-09). The summary (`concern["summary"]`: `text`, the number of journal `lines` it folds, `through` the last folded note's time) is written by `concern_summary.py` only when the notes since grow long; the folded notes stay in the journal as history. A summary that failed is recorded (`summary_error`) and not tried again until a note is written. Design: `docs/design/concerns_as_state_2026-10-09.md`.
 
 ### The day pass and the day's tasks
 
@@ -322,7 +326,7 @@ Design: `docs/design/brain_insight_2026-10-02.md`.
   list: it shows the day's tasks as shadow and handoffs to the steward, and has no list or list-intake stage.
   `?concern=` lists the runs that touched one concern.
 - **Stories** (`subconscious/brain_stories.py`, last stage of the wake): `subconscious::story_matter` (per
-  matter: headline + a line per event), `story_concern` (per open concern with a brief: state, story,
+  matter: headline + a line per event), `story_concern` (per open concern: state, story,
   proposed now, fate) and `story_day` (per local day: headline + overview), stored in `brain_stories`
   against the fingerprint of their input and rewritten only when it changes; the last `STORY_DAYS` days.
 - **`/mind`** (`app/routes/mind.py`, local-only): the owner's page. The day's ribbon (came in → read →
@@ -372,7 +376,7 @@ All pod ids follow `datapod:<kind>:<uuid4-hex-24>`. See [14_PODS.md](14_PODS.md)
 | `routine_handlers/subconscious.py` | All lane dispatchers + `_run_subconscious_agent` shared helper |
 | `subconscious/brain_wake.py` | The brain's event-driven wake and one pass (`run_brain`) |
 | `subconscious/{brain_inbox,gate,brain_step}.py` | Inbox (`brain_events`), gate, brain step (`brain_matters`) |
-| `subconscious/{concern_store,concern_door,concern_brief,concern_planner,concern_feedback}.py` | Concerns table, admission, briefs, planner, work feedback |
+| `subconscious/{concern_store,concern_door,concern_summary,concern_view,concern_planner,concern_feedback}.py` | Concerns table, admission, summaries, the concern as readers see it, planner, work feedback |
 | `subconscious/{day_pass,day_plan,day_tasks,situation,brain_list}.py` | Day plan, the day's tasks, the situation, the brain's list |
 | `subconscious/{brain_trace,brain_stories}.py` | Runs and steps; the owner's stories |
 | `dayflow_orchestrator/brain_list_intake.py`, `configs/brain_lanes.json` | Dayflow's work from the list; the lane switches |
@@ -388,7 +392,7 @@ All pod ids follow `datapod:<kind>:<uuid4-hex-24>`. See [14_PODS.md](14_PODS.md)
 | `subconscious/dashboard_service.py` | `/subconscious` mind-overview read layer |
 | `pending_questions/{store,injector,ticket_delivery}.py` | Question queue CRUD, chat-nudge picker, ticket delivery |
 | `database/pending_question.py` | `PendingQuestion` model + lifecycle |
-| `agents/subconscious/{gate,brain,concern_door,brief,concern_planner,concern_tasks,day_tasks,story_matter,story_concern,story_day,noticer,answer_matcher}/` | The twelve namespaced agents (all `model_tier: mini` except `day_tasks`, `smart`) |
+| `agents/subconscious/{gate,brain,concern_door,concern_summary,concern_planner,concern_tasks,day_tasks,story_matter,story_concern,story_day,noticer,answer_matcher}/` | The twelve namespaced agents (all `model_tier: mini` except `day_tasks`, `smart`) |
 | `agents/{wellness,romantic,daily_meal,...}_proposer/`, `agents/scheduler_arbiter/`, `agents/skill_distiller/`, `agents/feedback_extractor/`, `agents/conversation_starter/` | Bare-name lane agents |
 | `pipelines/dayflow/steps/conversation_starter_stage.py` | Proactive outreach (Dayflow stage, not a routine) |
 | `routes/subconscious.py` | Page + universal comment endpoint |

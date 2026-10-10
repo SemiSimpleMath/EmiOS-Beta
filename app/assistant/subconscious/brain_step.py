@@ -201,7 +201,7 @@ def _calendar(now_utc: datetime) -> str:
 
 
 def _concern_view(label: str, c: Dict[str, Any]) -> Dict[str, Any]:
-    from app.assistant.subconscious import concern_brief, persist
+    from app.assistant.subconscious import concern_view, persist
     return {
         "label": label, "title": c.get("title"), "status": c["_status"], "subject": c.get("subject") or "household",
         "kind": c.get("kind"), "severity": c.get("severity"), "horizon": c.get("horizon"),
@@ -209,7 +209,7 @@ def _concern_view(label: str, c: Dict[str, Any]) -> Dict[str, Any]:
         "first_observed": c.get("first_observed"), "notes": c.get("notes") or "",
         "evidence": [{"kind": e.get("kind"), "ref": e.get("ref"), "snippet": _evidence_text(e)}
                      for e in c.get("evidence") or []],
-        "attached_work": concern_brief.attempts(c),
+        "attached_work": concern_view.attempts(c),
         "history": persist.history_for_prompt(c),
     }
 

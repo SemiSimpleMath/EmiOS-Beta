@@ -14,7 +14,8 @@ would have an expiri of at most 2 hours or something reasonable determined by th
 might have expiri at midnight."
 
 Part of the hub-and-spokes pipeline (docs/design/hub_and_spokes_2026-10-09.md). Built so far: the noticer raises
-issues and writes nothing to concerns (22ffbf09).
+issues and writes nothing to concerns (22ffbf09); only the brain writes notes (89e01ac7); readers get the
+summary and the notes since, and the summarizer replaces the brief (step 1, 2026-10-09).
 
 ## What went wrong (root cause)
 

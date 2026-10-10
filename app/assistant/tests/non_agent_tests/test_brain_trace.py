@@ -58,8 +58,8 @@ def test_an_error_is_stored_and_untraced_agents_are_not(connect):
 
 
 def test_calls_are_found_by_concern_and_steward_calls_by_item(connect):
-    with brain_trace.trace(stage="brief", concern_id="c-bake"):
-        _record(connect, agent="subconscious::brief", result={"what": "w"})
+    with brain_trace.trace(stage="summary", concern_id="c-bake"):
+        _record(connect, agent="subconscious::concern_summary", result={"what": "w"})
     brain_trace.record_call(agent_name="dayflow_orchestrator::strategic_planner_wo",
                             messages=[{"role": "user", "content": "- [concern_handoff:c-bake:abc] Handed over"}],
                             engine="gpt-x", started=datetime.now(timezone.utc), result={}, connect=connect)
@@ -129,14 +129,14 @@ def test_a_run_holds_its_calls_and_steps(connect):
     brain_trace.step("brief", "stale", subject="c-1", connect=connect)          # outside a run: not recorded
     with brain_trace.run("event", connect=connect) as recorded:
         with brain_trace.trace(stage="brief", concern_id="c-1"):
-            _record(connect, agent="subconscious::brief", result={"what": "w"})
+            _record(connect, agent="subconscious::concern_summary", result={"what": "w"})
             brain_trace.step("brief", "stale", subject="c-1", reason="no brief yet", connect=connect)
         brain_trace.step("handoff", "handed", subject="c-2", item_id="concern_handoff:c-2:abc", connect=connect)
-        recorded["summary"] = {"briefs_written": 1}
+        recorded["summary"] = {"summaries_written": 1}
     with brain_trace.run("timer", connect=connect) as recorded:                  # idle
         recorded["summary"] = {}
     [run] = brain_trace.list_runs(connect=connect)
-    assert run["trigger"] == "event" and run["summary"] == {"briefs_written": 1} and run["ended_at"]
+    assert run["trigger"] == "event" and run["summary"] == {"summaries_written": 1} and run["ended_at"]
     assert (run["steps"], run["calls"]) == (2, 1)
     assert len(brain_trace.list_runs(active_only=False, connect=connect)) == 2
     assert [r["id"] for r in brain_trace.list_runs(concern_id="c-2", connect=connect)] == [run["id"]]

@@ -1,0 +1,23 @@
+## The concern
+
+{% set c = agent_input.concern -%}
+{{ c.title }} ({{ c.status }}; about {{ c.subject }})
+Settled when: {{ c.done_when or "(not stated)" }}
+{% if c.owner_words %}What the owner asked, in their words: "{{ c.owner_words }}"
+{% endif %}
+## Its previous summary
+
+{% if agent_input.summary %}Covering the notes up to {{ agent_input.summary_through }}:
+{{ agent_input.summary }}
+{% else %}None yet: the notes below are the whole record.
+{% endif %}
+## The notes since, oldest first
+
+{% for n in agent_input.notes %}{{ n }}
+{% endfor %}
+{% if agent_input.get('correction') %}
+## Correct your previous answer
+
+It did not satisfy the contract: {{ agent_input.correction }}
+{% endif %}
+Write the new summary of this concern.

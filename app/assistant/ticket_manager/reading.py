@@ -11,9 +11,9 @@ Everything here is assembled by code from links that already exist, no model cal
   work's goal, the steward's reason, success criteria and the node's directive; its source intake
   (emails, pods); the concerns it serves (`constraints.concern_refs`);
 - a noticer question names its question (`trigger_context.question_id`) and through it a concern;
-- each concern: its brief, "done when", the owner's words, and the work attached to it with every
-  judgment of that work and the owner's replies;
-- the sources the work, the brief and the concern cite, resolved to their text: an email in full
+- each concern: its notes (a summary of the older ones, then every note since), "done when", the owner's words,
+  and the work attached to it with every judgment of that work and the owner's replies;
+- the sources the work and the concern cite, resolved to their text: an email in full
   with the rest of its Gmail thread, a chat message, a pod;
 - the people, places and things named (knowledge graph, subconscious/kg_links.py) and past work
   about the concern (subconscious/work_links.py).
@@ -21,14 +21,12 @@ Everything here is assembled by code from links that already exist, no model cal
 from __future__ import annotations
 
 import json
-import re
 from typing import Any, Dict, List, Optional
 
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-_REF = re.compile(r"(datapod:[A-Za-z0-9_]+:[A-Za-z0-9_\-]+|message:[A-Za-z0-9_\-:.]+)")
 
 
 def _ticket(ticket_id: str):
@@ -84,6 +82,7 @@ def _reply_line(reply: Dict[str, Any]) -> str:
 def _concern(ref: str) -> Optional[Dict[str, Any]]:
     """A concern by full id or `concern:<8+ chars>`, with the parts a reader needs."""
     from app.assistant.subconscious.concern_store import load_register
+    from app.assistant.subconscious.persist import history_for_prompt
     key = ref[len("concern:"):] if ref.startswith("concern:") else ref
     register = load_register()
     for bucket in ("active", "addressing", "resolved", "dormant"):
@@ -92,7 +91,7 @@ def _concern(ref: str) -> Optional[Dict[str, Any]]:
             if cid == key or (len(key) >= 8 and cid.startswith(key)):
                 return {"concern_id": cid, "status": bucket, "title": c.get("title"), "subject": c.get("subject"),
                         "done_when": c.get("done_when"), "owner_words": (c.get("owner_request") or {}).get("words"),
-                        "brief": c.get("brief"),
+                        "history": history_for_prompt(c),
                         "attached_work": [{"work_id": w["work_id"], "objective": w.get("objective"),
                                            "status": w.get("status"), "attached_at": w.get("attached_at"),
                                            "judgments": [{"title": j.get("title"), "verdict": j.get("verdict"),
@@ -160,9 +159,6 @@ def ticket_reading(ticket_id: str) -> Dict[str, Any]:
         if s.get("pod_id"):
             cited.setdefault(s["pod_id"], None)
     for c in concerns:
-        for fact in (c.get("brief") or {}).get("known") or []:
-            for ref in _REF.findall(str(fact.get("source") or "")):
-                cited.setdefault(ref, None)
         for ref in c["evidence"]:
             if not ref.startswith("work:"):          # the attached work is shown with the concern
                 cited.setdefault(ref, c["evidence_kinds"].get(ref))
@@ -178,7 +174,7 @@ def ticket_reading(ticket_id: str) -> Dict[str, Any]:
             logger.warning("[reading] %s: cited source %s is not stored", ticket_id, ref)
 
     texts = [ticket.title or "", ticket.message or ""] + [c.get("title") or "" for c in concerns] + \
-        [(c.get("brief") or {}).get("what") or "" for c in concerns]
+        [c.get("history") or "" for c in concerns]
     current = (work or {}).get("work_id")
     related: Dict[str, Dict[str, Any]] = {}
     for c in concerns:

@@ -1,0 +1,24 @@
+name: subconscious::concern_summary
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  model_tier: "mini"
+
+# Folds a concern's older notes into one summary, only when the notes since its last summary grow long
+# (subconscious/concern_summary.py). Every reader of the concern gets the summary and the notes written since.
+# Context is fully pre-injected.
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+accept_auto_skills: false
+
+user_context_items:
+  - agent_input
+
+required_context_items:
+  - agent_input
+
+system_context_items:
+  - resource_assistant_data
+  - resource_user_data

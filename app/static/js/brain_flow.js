@@ -84,8 +84,8 @@ function countsFor(nodeId) {
       add("matched closed", by("suppress_closed")); break;
     case "concerns":
       add("touched", run ? Object.keys(run.concerns || {}).length : 0); break;
-    case "brief":
-      add("written", sum.briefs_written); add("failed", sum.briefs_failed, "bad"); break;
+    case "summary":
+      add("written", sum.summaries_written); add("failed", sum.summaries_failed, "bad"); break;
     case "plan":
       add("written", sum.plans_written); add("failed", sum.plans_failed, "bad"); add("tool results", by("tool result"));
       break;

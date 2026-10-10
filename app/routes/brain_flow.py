@@ -56,13 +56,13 @@ NODES: List[Dict[str, Any]] = [
      "role": "Last in every wake: what changed is told to the owner in plain words, per matter read, per "
              "concern and per day, for the /mind page."},
     {"id": "concerns", "title": "Concerns", "col": 3, "row": 1, "rows": 2, "agents": [],
-     "role": "The register: every open, resolved and dormant concern with its record, brief and plan."},
-    {"id": "brief", "title": "Briefs", "col": 4, "row": 1, "agents": ["subconscious::brief"],
-     "role": "A concern whose record changed gets its brief written again: what it is, what is known, what "
-             "was tried, what the owner wants."},
+     "role": "The register: every open, resolved and dormant concern with its record, summary and plan."},
+    {"id": "summary", "title": "Summaries", "col": 4, "row": 1, "agents": ["subconscious::concern_summary"],
+     "role": "A concern whose notes grew long gets them folded into one summary; every reader gets the summary "
+             "and the notes written since."},
     {"id": "plan", "title": "Concern planner", "col": 5, "row": 1,
      "agents": ["subconscious::concern_planner", "subconscious::concern_tasks"],
-     "role": "For a matter concern with a new brief: a read-only planner looks things up with tools, then "
+     "role": "For a concern whose record changed: a read-only planner looks things up with tools, then "
              "concern_tasks decides act now, hold until a date, or no action, and changes the concern's entries "
              "on the brain's list (new, modified or cancelled by id; the rest kept)."},
     {"id": "handoff", "title": "Handoffs", "col": 6, "row": 1, "agents": [],
@@ -76,7 +76,7 @@ NODES: List[Dict[str, Any]] = [
 # from, to, label (empty: the main path; a label marks a side path, drawn dashed)
 EDGES = [
     ("gate", "brain", ""), ("brain", "door", ""), ("brain", "concerns", ""),
-    ("door", "concerns", ""), ("concerns", "brief", ""), ("brief", "plan", ""),
+    ("door", "concerns", ""), ("concerns", "summary", ""), ("summary", "plan", ""),
     ("plan", "handoff", ""), ("day_pass", "handoff", "today's calendar"), ("handoff", "steward", ""),
     ("steward", "gate", "work outcomes come back as events"), ("concerns", "stories", ""),
     ("day_pass", "day_tasks", "shadow: recorded, not handed over"),

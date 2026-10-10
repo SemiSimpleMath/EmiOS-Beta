@@ -1,12 +1,11 @@
-"""The concern planner: what a matter concern needs now, as things that should be done under the concern.
+"""The concern planner: what a concern needs now, as things that should be done under the concern.
 
-Pins: it runs for an open matter concern whose brief is current and has no plan made from that brief, or
-whose plan's hold has passed; never for a standing concern or before the brief; a plan that failed on this
-brief waits for a change. concern_tasks reads the concern and its entries on the brain's list and answers only
-the changes it proposes; the answer is checked (act_now changes an entry, only act_now adds or modifies, changes name
-entries on the list, hold has a future time) and stored against the brief it was made from, its proposals with it;
-the list is not touched (2026-10-09: the list decider decides them, subconscious/day_tasks.py); a brief that changed
-meanwhile refuses it. The plan's todo is the open entries as the proposals would leave them, and reaches every reader
+Pins: it runs for an open concern with no plan made from its current record, or whose plan's hold has passed; a plan
+that failed on this record waits for a change. concern_tasks reads the concern and its entries on the brain's list and
+answers only the changes it proposes; the answer is checked (act_now changes an entry, only act_now adds or modifies,
+changes name entries on the list, hold has a future time) and stored against the record it was made from, its
+proposals with it; the list is not touched (2026-10-09: the list decider decides them, subconscious/day_tasks.py); a
+record that changed meanwhile refuses it. Until 2026-10-09 it planned from a brief rewritten on every change. The plan's todo is the open entries as the proposals would leave them, and reaches every reader
 of the concern. Scratch register and list; the manager call is a fake. Invented data only.
 """
 from __future__ import annotations
@@ -16,25 +15,18 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 import app.assistant.tests.test_setup  # noqa: F401
-from app.assistant.subconscious import brain_list, concern_brief, concern_planner, persist
+from app.assistant.subconscious import brain_list, concern_planner, concern_view, persist
 from app.assistant.tests.concern_store_helpers import ScratchRegister
 from belief_engine.intake.store import sqlite_file
 
 NOW = datetime.now(timezone.utc)
 EMPTY = {"active": [], "addressing": [], "resolved": [], "dormant": []}
-BRIEF = {"what": "The book club moved from the 9th to the 16th.", "why_it_matters": "Food and guests are booked.",
-         "known": [], "tried": "Food ordered for the 9th.", "owner_wishes": "Nothing said.", "depends_on_it": [],
-         "open_questions": [], "recommendation": "Move what was arranged for the 9th."}
 
 
 def _matter(cid="c-club", **kw):
     return {"concern_id": cid, "title": "Book club meeting", "kind": "anticipated_need", "done_when": "the meeting happens",
-            "notes": "n", "first_observed": (NOW - timedelta(hours=3)).isoformat(), "evidence": [], **kw}
-
-
-def _briefed(concern, bucket="active"):
-    concern["brief"] = {**BRIEF, "basis": concern_brief.basis(concern, bucket)}
-    return concern
+            "notes": "The book club moved from the 9th to the 16th. Food ordered for the 9th.",
+            "first_observed": (NOW - timedelta(hours=3)).isoformat(), "evidence": [], **kw}
 
 
 def _later(hours):
@@ -51,27 +43,27 @@ def _decided(lst, changes, cid="c-club"):
                                     cause="decided", at=NOW, connect=lst)
 
 
-def test_it_plans_a_briefed_matter_concern_once_per_brief():
-    c = _briefed(_matter())
+def test_it_plans_a_concern_once_per_version_of_its_record():
+    c = _matter()
     register = {**EMPTY, "active": [c]}
     assert [x["concern_id"] for _, x in concern_planner.stale(register, NOW)] == ["c-club"]
-    c["plan"] = {"decision": "no_action", "todo": [], "why": "w", "basis": c["brief"]["basis"]}
+    c["plan"] = {"decision": "no_action", "todo": [], "why": "w", "basis": concern_view.basis(c, "active")}
     assert concern_planner.stale(register, NOW) == []
-    c["plan"]["basis"] = "an older brief"
+    c["summary"] = {"text": "s", "lines": 0, "through": c["first_observed"]}
+    assert concern_planner.stale(register, NOW) == [], "a summary is not a change to the record"
+    c["reinforcement_notes"] = "\n[2026-03-10T09:00:00+00:00] [brain] The caterer confirmed."
     assert len(concern_planner.stale(register, NOW)) == 1
 
 
-def test_it_waits_for_the_brief_and_a_failed_plan_waits_for_a_change():
-    unbriefed = _matter("c-new")
-    stale_brief = _matter("c-old", brief={**BRIEF, "basis": "an older record"})
-    failed = _briefed(_matter("c-fail"))
-    failed["plan_error"] = {"basis": failed["brief"]["basis"], "error": "x"}
-    assert concern_planner.stale({**EMPTY, "active": [unbriefed, stale_brief, failed]}, NOW) == []
+def test_a_failed_plan_waits_for_a_change():
+    failed = _matter("c-fail")
+    failed["plan_error"] = {"basis": concern_view.basis(failed, "active"), "error": "x"}
+    assert concern_planner.stale({**EMPTY, "active": [failed]}, NOW) == []
 
 
 def test_a_passed_hold_is_planned_again_and_wakes_the_brain():
-    c = _briefed(_matter())
-    c["plan"] = {"decision": "hold", "todo": [], "why": "w", "hold_until": "x", "basis": c["brief"]["basis"],
+    c = _matter()
+    c["plan"] = {"decision": "hold", "todo": [], "why": "w", "hold_until": "x", "basis": concern_view.basis(c, "active"),
                  "hold_until_utc": (NOW + timedelta(hours=1)).isoformat()}
     register = {**EMPTY, "active": [c]}
     assert concern_planner.stale(register, NOW) == []
@@ -100,8 +92,8 @@ def test_the_answer_is_checked(answer, problem):
     assert concern_planner.problems(cancel, NOW, ["con:a"]) == [], "a cancel comes with any decision"
 
 
-def test_a_plan_is_stored_against_its_brief_with_its_proposals_and_reaches_the_readers(tmp_path):
-    reg = ScratchRegister(tmp_path).write({**EMPTY, "active": [_briefed(_matter())]})
+def test_a_plan_is_stored_against_its_record_with_its_proposals_and_reaches_the_readers(tmp_path):
+    reg = ScratchRegister(tmp_path).write({**EMPTY, "active": [_matter()]})
     lst = sqlite_file(tmp_path / "list.db")
     seen = []
 
@@ -116,11 +108,10 @@ def test_a_plan_is_stored_against_its_brief_with_its_proposals_and_reaches_the_r
     assert seen[0][1] == "(nothing yet)", "the decider reads the concern's entries now"
     [c] = reg.read()["active"]
     assert c["plan"]["todo"][1] == "The eight guests know the new date by September 9"
-    assert c["plan"]["basis"] == c["brief"]["basis"]
+    assert c["plan"]["basis"] == concern_view.basis(c, "active")
     assert [x["what"] for x in c["plan"]["proposals"]] == c["plan"]["todo"]
     assert [x["action"] for x in c["plan"]["proposals"]] == ["new", "new"]
     assert brain_list.entries(concern_id="c-club", connect=lst) == [], "the planner proposes; the list is untouched"
-    assert concern_brief.stale(reg.read(), NOW) == [], "storing the plan does not make the brief stale"
     assert concern_planner.run_planners(invoke=invoke, register_connect=reg.connect,
                                         list_connect=lst)["plans_written"] == 0
     from app.assistant.subconscious.concern_handoff import _brief_text
@@ -129,7 +120,7 @@ def test_a_plan_is_stored_against_its_brief_with_its_proposals_and_reaches_the_r
 
 
 def test_a_hold_is_stored_with_its_time_and_an_invalid_answer_is_recorded(tmp_path):
-    reg = ScratchRegister(tmp_path).write({**EMPTY, "active": [_briefed(_matter("c-a")), _briefed(_matter("c-b"))]})
+    reg = ScratchRegister(tmp_path).write({**EMPTY, "active": [_matter("c-a"), _matter("c-b")]})
 
     def invoke(task, information):
         if "c-a" in task:
@@ -151,7 +142,7 @@ def test_a_changed_plan_proposes_modifies_and_cancels_by_id(tmp_path):
     answer = {"decision": "act_now", "why": "It moved to the 16th.", "entries": [
         {"entry": guests["id"], "action": "modify", "what": "The guests know the date is the 16th",
          "assistant_part": "email the guests with the owner's go", "when": "now", "why": "The date moved."}]}
-    plan = concern_planner.write_plan(_briefed(_matter()), "active", list_connect=lst,
+    plan = concern_planner.write_plan(_matter(), "active", list_connect=lst,
                                       invoke=lambda t, i: seen.append(i) or answer)
     assert f"[{guests['id']}] The guests know the date is the 9th" in seen[0]
     assert plan["todo"] == ["The guests know the date is the 16th", "The food is ordered"], "the food entry is kept"
@@ -159,21 +150,16 @@ def test_a_changed_plan_proposes_modifies_and_cancels_by_id(tmp_path):
     assert [c["change"] for c in brain_list.changes(guests["id"], connect=lst)] == ["created"], "proposed, not applied"
 
 
-def test_a_plan_for_a_brief_that_changed_meanwhile_is_refused(tmp_path):
-    reg = ScratchRegister(tmp_path).write({**EMPTY, "active": [_briefed(_matter())]})
-    assert persist.set_concern_plan("c-club", "an older brief", plan={"decision": "no_action", "todo": [], "why": "w"},
+def test_a_plan_for_a_record_that_changed_meanwhile_is_refused(tmp_path):
+    reg = ScratchRegister(tmp_path).write({**EMPTY, "active": [_matter()]})
+    assert persist.set_concern_plan("c-club", "an older record", plan={"decision": "no_action", "todo": [], "why": "w"},
                                     connect=reg.connect) is False
     assert "plan" not in reg.read()["active"][0]
 
 
-def test_the_brief_decides_nothing():
-    brief = {k: v for k, v in BRIEF.items()}
-    assert concern_brief._problems(brief, {}) == []
-
-
 def test_the_decider_sees_what_it_cancelled_and_why(tmp_path):
     """2026-10-06: the decider re-created a question it had cancelled the night before; it saw only open entries."""
-    reg = ScratchRegister(tmp_path).write({**EMPTY, "active": [_briefed(_matter())]})
+    reg = ScratchRegister(tmp_path).write({**EMPTY, "active": [_matter()]})
     lst = sqlite_file(tmp_path / "list.db")
     _decided(lst, [_new("Guests told", part="ask the owner whether the guests were told")])
     [e] = brain_list.entries(concern_id="c-club", connect=lst)

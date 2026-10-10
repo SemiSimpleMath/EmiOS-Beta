@@ -17,7 +17,7 @@ replayed on their real prompts before it ships (scratch/replay/).
 
 Callers tag what a call was about with `trace(...)`, a context manager over a contextvar: the gate
 per page (`stage=gate`, `event_ids`), the brain per matter (`stage=brain`, `event_ids`; the concern
-door's calls inside it inherit this), the brief writer per concern (`stage=brief`, `concern_id`),
+door's calls inside it inherit this), the summary writer per concern (`stage=summary`, `concern_id`),
 the noticer per tick. The steward's calls carry no tag; the page finds the one that handled a
 handoff item by the item id in its user prompt.
 
@@ -45,7 +45,7 @@ from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 TRACED_AGENTS = frozenset({
-    "subconscious::gate", "subconscious::brain", "subconscious::concern_door", "subconscious::brief",
+    "subconscious::gate", "subconscious::brain", "subconscious::concern_door", "subconscious::concern_summary",
     "subconscious::noticer", "dayflow_orchestrator::strategic_planner_wo",
     "subconscious::concern_planner", "subconscious::concern_tasks",
     "dayflow_routine_writer",   # the day pass
@@ -97,7 +97,7 @@ STEPS_SCHEMA = """CREATE TABLE IF NOT EXISTS brain_steps (
     what TEXT NOT NULL,
     subject TEXT,
     detail TEXT)"""
-# stage: gate | brain | door | brief | plan | handoff | day_pass | stories. subject: a concern id, an item id, or
+# stage: gate | brain | door | summary | plan | handoff | day_pass | stories. subject: a concern id, an item id, or
 # event ids as JSON. detail: JSON.
 
 _trace: contextvars.ContextVar[Dict[str, Any]] = contextvars.ContextVar("brain_trace", default={})
@@ -297,8 +297,8 @@ def calls_for_events(event_ids: List[int], connect=None) -> List[Dict[str, Any]]
 
 
 def calls_for_concern(concern_id: str, connect=None) -> List[Dict[str, Any]]:
-    """The brief writer's calls for this concern, oldest first."""
-    return sorted([c for c in list_calls(agent="subconscious::brief", limit=100000, connect=connect)
+    """The summary writer's calls for this concern, oldest first."""
+    return sorted([c for c in list_calls(agent="subconscious::concern_summary", limit=100000, connect=connect)
                    if c["trace"].get("concern_id") == concern_id], key=lambda c: c["at"])
 
 

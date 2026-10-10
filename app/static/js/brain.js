@@ -181,7 +181,7 @@ async function loadMatters() {
   });
 }
 
-// ── Concerns: brief, plan, handoffs, work ────────────────────────────────
+// ── Concerns: summary, plan, handoffs, work ──────────────────────────────
 async function loadConcerns() {
   const list = $("#c-list");
   list.innerHTML = "";
@@ -189,30 +189,25 @@ async function loadConcerns() {
   const data = await r.json();
   if (!data.concerns.length) { list.appendChild(el("div", "br-empty", "No open concerns.")); return; }
   data.concerns.forEach((c) => {
-    const b = c.brief || {};
     const ready = c.plan || {};
     const badges = [[c.status, c.status],
-      ready.decision && [ready.decision, ready.decision + (ready.hold_until ? " until " + ready.hold_until : "")],
-      c.brief && !c.brief_current && ["pending", "brief out of date"]];
+      ready.decision && [ready.decision, ready.decision + (ready.hold_until ? " until " + ready.hold_until : "")]];
     list.appendChild(card(c.title, badges, (body) => {
       body.appendChild(kv([["about", c.subject], ["done when", c.done_when], ["origin", c.origin],
         ["the owner asked", c.owner_request && c.owner_request.words], ["notes", c.notes]]));
-      body.appendChild(el("div", "br-h", "Brief"));
-      if (c.brief_error) body.appendChild(el("div", "br-err", "brief failed: " + c.brief_error.error));
-      if (c.brief) body.appendChild(kv([["what", b.what], ["why it matters", b.why_it_matters],
-        ["known", (b.known || []).map((f) => `${f.fact} (${f.source})`)], ["tried", b.tried],
-        ["the owner's wishes", b.owner_wishes], ["depends on it", b.depends_on_it], ["open questions", b.open_questions],
-        ["recommendation", b.recommendation],
-        ["written", when(b.written_at)]]));
-      else body.appendChild(el("div", "br-note", "No brief yet."));
+      body.appendChild(el("div", "br-h", "Summary"));
+      if (c.summary_error) body.appendChild(el("div", "br-err", "summary failed: " + c.summary_error.error));
+      if (c.summary) body.appendChild(kv([["summary", c.summary.text], ["covers notes up to", when(c.summary.through)],
+        ["written", when(c.summary.written_at)]]));
+      else body.appendChild(el("div", "br-note", "No summary: the notes are short enough to read whole."));
       body.appendChild(el("div", "br-h", "Plan"));
       if (c.plan_error) body.appendChild(el("div", "br-err", "plan failed: " + c.plan_error.error));
       if (c.plan) body.appendChild(kv([["decision", c.plan.decision + (c.plan.hold_until ? " until " + c.plan.hold_until : "")],
         ["things that should be done", c.plan.todo], ["why", c.plan.why], ["written", when(c.plan.written_at)]]));
       else body.appendChild(el("div", "br-note", "No plan yet."));
-      body.appendChild(el("div", "br-h", "Brief writer's calls"));
-      if (!c.brief_calls.length) body.appendChild(el("div", "br-note", "None recorded."));
-      c.brief_calls.forEach((k) => body.appendChild(callRow(k)));
+      body.appendChild(el("div", "br-h", "Summary writer's calls"));
+      if (!c.summary_calls.length) body.appendChild(el("div", "br-note", "None recorded."));
+      c.summary_calls.forEach((k) => body.appendChild(callRow(k)));
       body.appendChild(el("div", "br-h", "Handoffs to dayflow"));
       if (!c.handoffs.length) body.appendChild(el("div", "br-note", "Never handed over."));
       c.handoffs.forEach((h) => {

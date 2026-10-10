@@ -36,8 +36,8 @@ reads each entry with the reason it was decided and what became of its work, and
 placement done elsewhere, or a clock-time one more than an hour past, is not offered again.
 
 It reads what the brain knows, not a part of it (owner, 2026-10-04: it "sees less than brain"): besides the
-situation, every open concern in full as the brain's agents read it (its record, brief, attempts and journal,
-concern_planner.concern_text) with the concern's own entries on the list, and what the brain read and decided today
+situation, every open concern in full as the brain's agents read it (its summary and the notes since, its plan and the work
+attached to it, concern_planner.concern_text) with the concern's own entries on the list, and what the brain read and decided today
 (brain_matters: each event with the brain's decision and reason, the notes it wrote, the concerns it raised). A
 concern's entry is a fact a change can cite: the concern side runs first in the brain's pass, so an entry it makes
 ("we're eating out tonight") reaches the day's tasks in the same pass. Code checks the answer (one correction round) and records the run in `brain_day_decisions` (the
@@ -141,12 +141,12 @@ def offered(day: str, items: List[Dict[str, Any]], now_utc: datetime) -> List[Di
 
 def with_concerns(situation: Dict[str, Any], *, connect=None) -> None:
     """Each open concern of the situation, in place, with its whole record as the brain's agents read it (`text`,
-    concern_planner.concern_text), the record's basis (`basis`, concern_brief.basis: what the fingerprint counts), its
+    concern_planner.concern_text), the record's basis (`basis`, concern_view.basis: what the fingerprint counts), its
     planner's plan (`plan`: the decision, why, until when, when it was written, and the changes it proposes, or None),
     its entries on the brain's list (`entries`) and the ones cancelled, with why (`cancelled`; 2026-10-06: a decider
     re-created a question it had cancelled the night before, not seeing it)."""
     from app.assistant.subconscious import brain_list
-    from app.assistant.subconscious.concern_brief import basis
+    from app.assistant.subconscious.concern_view import basis
     from app.assistant.subconscious.concern_planner import concern_text
     from app.assistant.subconscious.concern_store import load_register
     register = load_register()
@@ -483,15 +483,14 @@ def gather(now_utc: datetime, *, plan_connect=None) -> Dict[str, Any]:
 
 
 def concern_beliefs(concerns: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """The household's beliefs closest in meaning to the open concerns (their titles and what their briefs say they
-    are; subconscious/belief_links.py, 2026-10-09): who usually does what, what the owner prefers, as context. The
+    """The household's beliefs closest in meaning to the open concerns (their titles and the notes they were raised
+    with; subconscious/belief_links.py, 2026-10-09): who usually does what, what the owner prefers, as context. The
     calendar's own beliefs come as its items."""
     from app.assistant.subconscious import belief_links
     from app.assistant.subconscious.concern_store import load_register
     register = load_register()
-    briefs = {c["concern_id"]: (c.get("brief") or {}).get("what") for b in ("active", "addressing")
-              for c in register.get(b) or []}
-    return belief_links.beliefs_by_meaning([t for c in concerns for t in (c.get("title"), briefs.get(c["concern_id"]))])
+    raised = {c["concern_id"]: c.get("notes") for b in ("active", "addressing") for c in register.get(b) or []}
+    return belief_links.beliefs_by_meaning([t for c in concerns for t in (c.get("title"), raised.get(c["concern_id"]))])
 
 
 def run_day_tasks(*, now_utc: Optional[datetime] = None, connect=None,

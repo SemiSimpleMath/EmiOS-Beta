@@ -85,15 +85,11 @@ def _poke_dayflow() -> None:
 
 
 def _brief_text(concern: Dict[str, Any], bucket: str) -> str:
-    """The brief, the things that should be done, and the work on the concern so far, as the planner reads
+    """The concern's record, the things that should be done, and the work on it so far, as the planner reads
     them: the same template the agents doing the work read."""
     from app.assistant.dayflow_orchestrator.work_context import render_view
-    from app.assistant.subconscious import concern_brief
-    view = {"concern_id": concern["concern_id"], "title": concern.get("title"), "status": bucket, "severity": concern.get("severity"),
-            "done_when": concern.get("done_when"), "owner_words": (concern.get("owner_request") or {}).get("words"),
-            "brief": concern["brief"], "plan": concern.get("plan"), "attempts": concern_brief.attempts(concern),
-            "brief_current": True}
-    return render_view("concern_brief", concerns=[view]).strip()
+    from app.assistant.subconscious.concern_view import view
+    return render_view("concern_view", concerns=[view(concern, bucket)]).strip()
 
 
 def handoff_meta(concern: Dict[str, Any], bucket: str, now_utc: datetime) -> Dict[str, Any]:
@@ -127,7 +123,7 @@ def run_handoffs(*, register_connect=None, now_utc: Optional[datetime] = None,
     from app.assistant.dayflow_orchestrator.brain_list_intake import concern_live
     if concern_live():
         return {"handed_over": 0, "handoff_skipped": 0, "handoffs": "the brain's list"}
-    from app.assistant.subconscious import concern_brief
+    from app.assistant.subconscious.concern_view import basis
     from app.assistant.subconscious.brain_trace import step
     from app.assistant.subconscious.concern_store import load_register
     now = now_utc or datetime.now(timezone.utc)
@@ -143,13 +139,10 @@ def run_handoffs(*, register_connect=None, now_utc: Optional[datetime] = None,
     handed, skipped = [], []
     for bucket in ("active", "addressing"):
         for concern in register.get(bucket) or []:
-            brief = concern.get("brief") or {}
-            if brief.get("basis") != concern_brief.basis(concern, bucket):
-                continue                                   # a newer brief is on its way
             cid = concern["concern_id"]
             plan = concern.get("plan") or {}
-            if plan.get("decision") != "act_now" or plan.get("basis") != brief["basis"]:
-                continue                                   # no plan from this brief yet, or nothing to do
+            if plan.get("decision") != "act_now" or plan.get("basis") != basis(concern, bucket):
+                continue                                   # no plan from this record yet, or nothing to do
             items = existing_items(cid)
             if any(i.get("item_id") == item_id(cid, plan["basis"]) for i in items):
                 continue                                   # this plan was handed over already

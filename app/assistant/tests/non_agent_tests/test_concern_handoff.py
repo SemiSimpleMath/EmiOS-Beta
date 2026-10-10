@@ -1,7 +1,7 @@
 """Handing a ready concern to dayflow, and the link that follows it.
 
-Pins: a matter concern whose current plan (subconscious/concern_planner.py, made from its current brief)
-says act_now becomes one intake item in the planner's inbox (past triage), carrying the concern, the brief
+Pins: a concern whose current plan (subconscious/concern_planner.py, made from its current record)
+says act_now becomes one intake item in the planner's inbox (past triage), carrying the concern, its record
 and the things that should be done; once per plan version; not while an earlier handoff is still in the
 inbox, but work in progress does not hold it back (the plan decided it should be added to or corrected);
 hold and no_action are not handed over, and a passed hold is planned again; work made from the item
@@ -15,13 +15,10 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 import app.assistant.tests.test_setup  # noqa: F401
-from app.assistant.subconscious import concern_brief, concern_handoff, concern_planner
+from app.assistant.subconscious import concern_handoff, concern_planner, concern_view
 from app.assistant.tests.concern_store_helpers import ScratchRegister
 
 NOW = datetime.now(timezone.utc)
-BRIEF = {"what": "The bake sale moved to Monday.", "why_it_matters": "Cookies are promised.",
-         "known": [], "tried": "Nothing yet.", "owner_wishes": "Nothing said.", "depends_on_it": ["Thu reminder"],
-         "open_questions": [], "recommendation": "Update the plans for Monday."}
 
 
 # Where each attached work stands, as the work store would report it (work_objects/progress.py).
@@ -48,14 +45,14 @@ def _lanes_off(monkeypatch):
                                                              "concern": {"mode": "off", "since": None}})
 
 
-def _with_brief(reg, readiness_by_id):
-    """Each concern gets a current brief and a plan made from it: decision, things to do, why, hold."""
+def _with_plan(reg, readiness_by_id):
+    """Each concern gets a plan made from its current record: decision, things to do, why, hold."""
     register = reg.read()
     for c in register["active"]:
         r = readiness_by_id[c["concern_id"]]
-        c["brief"] = {**BRIEF, "basis": concern_brief.basis(c, "active")}
+        c.setdefault("first_observed", "2026-03-10T08:00:00+00:00")
         c["plan"] = {"decision": r["decision"], "todo": [r["task"]] if r.get("task") else [], "why": r["why"],
-                     "hold_until": r.get("hold_until"), "basis": c["brief"]["basis"],
+                     "hold_until": r.get("hold_until"), "basis": concern_view.basis(c, "active"),
                      **({"hold_until_utc": r["hold_until_utc"]} if r.get("hold_until_utc") else {})}
     reg.write(register)
 
@@ -70,7 +67,7 @@ def _run(reg, *, items=None):
 
 
 def _ready(reg, **readiness):
-    _with_brief(reg, {c["concern_id"]: readiness for c in reg.read()["active"]})
+    _with_plan(reg, {c["concern_id"]: readiness for c in reg.read()["active"]})
 
 
 def test_a_concern_ready_to_act_on_becomes_one_inbox_item(tmp_path):
@@ -84,8 +81,8 @@ def test_a_concern_ready_to_act_on_becomes_one_inbox_item(tmp_path):
     assert item["item_id"].startswith("concern_handoff:c-bake:") and item["source_type"] == "concern"
     assert (item["state"], item["evaluator_pending"]) == ("artifact", True), "past triage, into the inbox"
     assert item["summary"] == "Move the bake-sale plans to Monday" and item["why_now"] == "The sale moved."
-    assert "PTSA bake sale" in item["brief_text"] and "Thu reminder" in item["brief_text"]
-    # The same brief version is not handed over twice.
+    assert "PTSA bake sale" in item["brief_text"] and "- Move the bake-sale plans to Monday" in item["brief_text"]
+    # The same plan version is not handed over twice.
     out, written2, _ = _run(reg, items=written)
     assert out["handed_over"] == 0 and written2 == []
 
@@ -110,14 +107,13 @@ def test_hold_and_no_action_stay_with_the_brain_and_a_passed_hold_is_planned_aga
     assert _run(reg)[0]["handed_over"] == 0
     assert concern_planner.stale(reg.read(), now_utc=NOW) == []
     assert [c["concern_id"] for _, c in concern_planner.stale(reg.read(), now_utc=NOW + timedelta(hours=2))] == ["c-bake"]
-    assert concern_brief.stale(reg.read(), now_utc=NOW + timedelta(hours=2)) == [], "the brief itself is still current"
 
 
 def test_a_hold_needs_a_future_time():
     later = (NOW + timedelta(days=3)).astimezone().strftime("%Y-%m-%d %H:%M")
-    assert concern_brief.hold_until_utc(later, NOW) > NOW
+    assert concern_view.hold_until_utc(later, NOW) > NOW
     with pytest.raises(ValueError, match="not in the future"):
-        concern_brief.hold_until_utc("2020-01-01 09:00", NOW)
+        concern_view.hold_until_utc("2020-01-01 09:00", NOW)
 
 
 def test_work_made_from_the_item_carries_the_concern_whatever_the_steward_cites():
@@ -152,12 +148,12 @@ def test_the_brain_wakes_at_the_earliest_hold_of_a_current_plan(tmp_path):
         "addressing": [], "resolved": [], "dormant": []})
     hold = lambda h: {"decision": "hold", "task": "", "why": "w", "hold_until": "x",
                       "hold_until_utc": (NOW + timedelta(hours=h)).isoformat()}
-    _with_brief(reg, {"c-soon": hold(1), "c-late": hold(5),
+    _with_plan(reg, {"c-soon": hold(1), "c-late": hold(5),
                       "c-none": {"decision": "no_action", "task": "", "why": "w", "hold_until": None}})
     assert concern_planner.next_hold_at(reg.read(), NOW) == NOW + timedelta(hours=1)
     assert concern_planner.next_hold_at(reg.read(), NOW + timedelta(hours=2)) == NOW + timedelta(hours=5)
     register = reg.read()
-    register["active"][1]["brief"]["basis"] = "a newer brief"   # its plan is out of date: planned again
+    register["active"][1]["notes"] = "changed since"   # its plan is out of date: planned again
     reg.write(register)
     assert concern_planner.next_hold_at(reg.read(), NOW + timedelta(hours=2)) is None
 

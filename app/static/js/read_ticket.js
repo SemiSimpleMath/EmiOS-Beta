@@ -61,12 +61,8 @@ function render(data) {
 
   data.concerns.forEach((c) => {
     const s = section("The concern");
-    const b = c.brief || {};
     s.appendChild(block(c.title, `${c.status}${c.subject ? " · about " + c.subject : ""}`, kv([
-      ["done when", c.done_when], ["you asked", c.owner_words && `"${c.owner_words}"`],
-      ["what", b.what], ["why it matters", b.why_it_matters],
-      ["known", (b.known || []).map((f) => f.fact)], ["tried", b.tried], ["your wishes", b.owner_wishes],
-      ["depends on it", b.depends_on_it], ["open questions", b.open_questions], ["recommendation", b.recommendation],
+      ["done when", c.done_when], ["you asked", c.owner_words && `"${c.owner_words}"`], ["notes", c.history],
     ])));
     (c.attached_work || []).forEach((w) => {
       const list = el("ul", "rt-list");

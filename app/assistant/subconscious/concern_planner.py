@@ -1,8 +1,8 @@
 """The concern planner: what a matter concern needs now, as its entries on the brain's list (2026-10-02; entries
 2026-10-05).
 
-The brief (subconscious/concern_brief.py) makes a concern's record readable. For a matter concern (one
-that is settled when its matter is done) the planner then works out what it needs now: a read-only
+For each open concern the planner works out what it needs now, from its record (its summary and the notes since,
+persist.history_for_prompt; until 2026-10-09 from a brief rewritten on every change): a read-only
 planner looks things up (the email threads and calendar entries the concern names, reminders and to-dos,
 the work done for it, pods, the knowledge graph) and a decider writes the decision (act now, hold until a
 date, no action) and the things that should be done, as bullet points under the concern
@@ -10,8 +10,7 @@ date, no action) and the things that should be done, as bullet points under the 
 gets them in the concern's handoff (subconscious/concern_handoff.py).
 
 Owner, 2026-10-02: "it breaks it into bullet points under the concern like: these are things that should
-be done. its up to consumers to interpret those." It replaced the brief's own readiness decision for
-matter concerns; a standing concern (a recurring part of the day) keeps its brief's per-occurrence rule.
+be done. its up to consumers to interpret those." It replaced the brief's own readiness decision.
 
 The decider is `subconscious::concern_tasks`: it reads the concern's entries on the brain's list (subconscious/
 brain_list.py), each one outcome with its deadline and constraints, the assistant's part and when, and answers only
@@ -22,9 +21,10 @@ concern's entries, decided the rest of the list beside it. The proposed changes 
 (`proposals`); `todo` keeps its shape for the plan's readers (the concern view every dayflow agent reads, the
 stories): the concern's open entries as the proposals would leave them.
 
-It runs for a matter concern whose brief is current and that has no plan written from that brief, or
-whose plan holds until a time that has passed. A plan that could not be written carries `plan_error` with
-the same basis and is not retried until the concern changes. Run by the brain's wake after the briefs.
+It runs for an open concern that has no plan written from its current record (concern_view.basis: the record
+without its summary and plan), or whose plan holds until a time that has passed. A plan that could not be written
+carries `plan_error` with the same basis and is not retried until the concern changes. Run by the brain's wake after
+the summaries.
 """
 from __future__ import annotations
 
@@ -40,26 +40,20 @@ _DECIDER = "subconscious::concern_tasks"
 _DECISIONS = ("act_now", "hold", "no_action")
 
 
-def _brief_basis(concern: Dict[str, Any]) -> Optional[str]:
-    return (concern.get("brief") or {}).get("basis")
-
-
 def _hold_passed(plan: Dict[str, Any], now: datetime) -> bool:
     when = plan.get("hold_until_utc")
     return plan.get("decision") == "hold" and bool(when) and datetime.fromisoformat(when) <= now
 
 
 def stale(register: Dict[str, Any], now_utc: Optional[datetime] = None) -> List[Tuple[str, Dict[str, Any]]]:
-    """Open matter concerns whose current brief has no plan written from it, or whose plan's hold has
-    passed; minus those whose plan already failed on this brief. (bucket, concern)."""
-    from app.assistant.subconscious.concern_brief import basis
+    """Open concerns with no plan written from their current record, or whose plan's hold has passed; minus those
+    whose plan already failed on this record. (bucket, concern)."""
+    from app.assistant.subconscious.concern_view import basis
     now = now_utc or datetime.now(timezone.utc)
     out = []
     for bucket in ("active", "addressing"):
         for c in register.get(bucket) or []:
-            b = _brief_basis(c)
-            if b is None or b != basis(c, bucket):
-                continue                                   # no current brief yet: the brief comes first
+            b = basis(c, bucket)
             if (c.get("plan_error") or {}).get("basis") == b:
                 continue
             plan = c.get("plan") or {}
@@ -69,24 +63,26 @@ def stale(register: Dict[str, Any], now_utc: Optional[datetime] = None) -> List[
     return out
 
 
-def stale_reason(concern: Dict[str, Any]) -> str:
+def stale_reason(concern: Dict[str, Any], bucket: str) -> str:
     """Why a plan is written again, for the run record."""
+    from app.assistant.subconscious.concern_view import basis
     plan = concern.get("plan") or {}
     if not plan:
         return "no plan yet"
-    if plan.get("basis") == _brief_basis(concern):
+    if plan.get("basis") == basis(concern, bucket):
         return "its hold passed"
-    return "its brief changed"
+    return "its record changed"
 
 
 def next_hold_at(register: Dict[str, Any], now_utc: datetime) -> Optional[datetime]:
-    """The earliest future time a matter concern's current plan holds until, or None."""
+    """The earliest future time a concern's current plan holds until, or None."""
+    from app.assistant.subconscious.concern_view import basis
     times = []
     for bucket in ("active", "addressing"):
         for c in register.get(bucket) or []:
             plan = c.get("plan") or {}
             when = plan.get("hold_until_utc")
-            if plan.get("decision") == "hold" and when and plan.get("basis") == _brief_basis(c):
+            if plan.get("decision") == "hold" and when and plan.get("basis") == basis(c, bucket):
                 at = datetime.fromisoformat(when)
                 if at > now_utc:
                     times.append(at)
@@ -94,24 +90,18 @@ def next_hold_at(register: Dict[str, Any], now_utc: datetime) -> Optional[dateti
 
 
 def concern_text(concern: Dict[str, Any], bucket: str) -> str:
-    """The concern as the planner and the decider read it: the same view every agent working on it reads,
-    with its journal (handoff answers, the owner's replies)."""
+    """The concern as the planner and the decider read it: the same view every agent working on it reads (its
+    record, its plan, the work done for it)."""
     from app.assistant.dayflow_orchestrator.work_context import render_view
-    from app.assistant.subconscious import concern_brief
-    view = {"concern_id": concern["concern_id"], "title": concern.get("title"), "status": bucket, "severity": concern.get("severity"),
-            "done_when": concern.get("done_when"), "owner_words": (concern.get("owner_request") or {}).get("words"),
-            "brief": concern.get("brief"), "attempts": concern_brief.attempts(concern), "brief_current": True}
-    from app.assistant.subconscious.persist import history_for_prompt
-    history = history_for_prompt(concern)
-    return render_view("concern_brief", concerns=[view]).strip() + (
-        f"\n  notes and journal, oldest first, each with when it was written:\n{history}" if history else "")
+    from app.assistant.subconscious.concern_view import view
+    return render_view("concern_view", concerns=[view(concern, bucket)]).strip()
 
 
 def problems(data: Any, now_utc: datetime, entry_ids: List[str]) -> List[str]:
     """act_now changes at least one entry (new or modified), and only act_now adds or modifies; a modify or a cancel
     names an entry on the list, a new one is written as entry "new"; new and modify name the outcome, the
     assistant's part and when; every change says why; hold has a future time."""
-    from app.assistant.subconscious.concern_brief import hold_until_utc
+    from app.assistant.subconscious.concern_view import hold_until_utc
     if not isinstance(data, dict):
         return ["no decision"]
     decision = data.get("decision")
@@ -186,7 +176,7 @@ def write_plan(concern: Dict[str, Any], bucket: str, *, invoke: Optional[Callabl
     decider's answer is invalid. The plan's `todo` is the concern's open entries as the proposals would leave them."""
     from app.assistant.dayflow_orchestrator.work_context import _ENV
     from app.assistant.subconscious import brain_list
-    from app.assistant.subconscious.concern_brief import hold_until_utc
+    from app.assistant.subconscious.concern_view import hold_until_utc
     now = datetime.now(timezone.utc)
     from app.assistant.dayflow_orchestrator.brain_list_intake import work_of
     current = brain_list.entries(concern_id=concern["concern_id"], connect=list_connect)
@@ -213,33 +203,33 @@ def write_plan(concern: Dict[str, Any], bucket: str, *, invoke: Optional[Callabl
 
 
 def run_planners(*, invoke=None, register_connect=None, list_connect=None) -> Dict[str, Any]:
-    """Plan every matter concern that needs it and store the plan, its proposals for the list decider. Free when
-    none does."""
+    """Plan every concern that needs it and store the plan, its proposals for the list decider. Free when none does."""
     from app.assistant.subconscious import persist
     from app.assistant.subconscious.concern_store import load_register
+    from app.assistant.subconscious.concern_view import basis
     todo = stale(load_register(connect=register_connect))
     if not todo:
         return {"plans_written": 0, "plans_failed": 0}
     written = failed = 0
     for bucket, concern in todo:
-        from_brief = _brief_basis(concern)
+        from_record = basis(concern, bucket)
         cid = concern["concern_id"]
         from app.assistant.subconscious.brain_trace import step, trace
-        step("plan", "stale", subject=cid, title=concern.get("title"), reason=stale_reason(concern))
+        step("plan", "stale", subject=cid, title=concern.get("title"), reason=stale_reason(concern, bucket))
         try:
             with trace(stage="plan", concern_id=cid):
                 plan = write_plan(concern, bucket, invoke=invoke, list_connect=list_connect)
         except Exception as exc:
             logger.error("[plan] could not plan %s; not retried until it changes: %s", cid, exc, exc_info=True)
-            step("plan", "failed: not retried until the brief changes", subject=cid,
+            step("plan", "failed: not retried until the record changes", subject=cid,
                  error=f"{type(exc).__name__}: {exc}")
-            persist.set_concern_plan(cid, from_brief, error=f"{type(exc).__name__}: {exc}", connect=register_connect)
+            persist.set_concern_plan(cid, from_record, error=f"{type(exc).__name__}: {exc}", connect=register_connect)
             failed += 1
             continue
-        if persist.set_concern_plan(cid, from_brief, plan=plan, connect=register_connect):
+        if persist.set_concern_plan(cid, from_record, plan=plan, connect=register_connect):
             step("plan", "written", subject=cid, plan=plan, proposals=plan["proposals"])
             written += 1
         else:
-            step("plan", "not stored: the brief changed while it was planned", subject=cid)
+            step("plan", "not stored: the record changed while it was planned", subject=cid)
     logger.info("[plan] written=%d failed=%d", written, failed)
     return {"plans_written": written, "plans_failed": failed}

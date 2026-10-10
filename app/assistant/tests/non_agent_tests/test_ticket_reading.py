@@ -14,9 +14,9 @@ def _ticket(ctx):
                            trigger_context=ctx)
 
 
-def _concern(cid, evidence=(), known=()):
+def _concern(cid, evidence=()):
     return {"concern_id": cid, "status": "addressing", "title": f"concern {cid}", "subject": None,
-            "done_when": "done", "owner_words": None, "brief": {"what": "w", "known": list(known)},
+            "done_when": "done", "owner_words": None, "history": "[Tue 03-10 09:00 AM] [brain] w",
             "earlier": [], "evidence": [e[0] for e in evidence], "evidence_kinds": dict(evidence)}
 
 
@@ -45,9 +45,8 @@ def test_dayflow_ticket_gathers_work_concerns_and_their_sources(monkeypatch, lin
     monkeypatch.setattr(reading, "_work", lambda wn: {
         "work_id": "work_now", "concern_refs": ["concern:aaaaaaaa", "concern:bbbbbbbb"],
         "sources": [{"pod_id": "datapod:email:e1"}, {"note": "no pod"}]})
-    concerns = {"concern:aaaaaaaa": _concern("aaaaaaaa-1", evidence=[("m1", "chat_msg")],
-                                             known=[{"fact": "f", "source": "datapod:email:e1; message:m2"}]),
-                "concern:bbbbbbbb": _concern("bbbbbbbb-1", known=[{"fact": "f", "source": "datapod:email:gone"}])}
+    concerns = {"concern:aaaaaaaa": _concern("aaaaaaaa-1", evidence=[("m1", "chat_msg"), ("datapod:email:e1", "pod")]),
+                "concern:bbbbbbbb": _concern("bbbbbbbb-1", evidence=[("datapod:email:gone", None)])}
     monkeypatch.setattr(reading, "_concern", concerns.get)
 
     out = reading.ticket_reading("t1")
@@ -55,9 +54,8 @@ def test_dayflow_ticket_gathers_work_concerns_and_their_sources(monkeypatch, lin
     assert [c["concern_id"] for c in out["concerns"]] == ["aaaaaaaa-1", "bbbbbbbb-1"]
     assert all("evidence" not in c and "evidence_kinds" not in c for c in out["concerns"])
     # each cited source is fetched once, evidence keeps its kind; a missing one is left out
-    assert links["sources"] == [("datapod:email:e1", None), ("message:m2", None), ("m1", "chat_msg"),
-                                ("datapod:email:gone", None)]
-    assert [s["ref"] for s in out["sources"]] == ["datapod:email:e1", "message:m2", "m1"]
+    assert links["sources"] == [("datapod:email:e1", None), ("m1", "chat_msg"), ("datapod:email:gone", None)]
+    assert [s["ref"] for s in out["sources"]] == ["datapod:email:e1", "m1"]
     # past work excludes the ticket's own work and appears once across concerns
     assert out["related_work"] == [{"work_id": "work_old"}]
     assert out["ticket"]["choices"] == ["OK"] and out["ticket"]["state"] == "pending"

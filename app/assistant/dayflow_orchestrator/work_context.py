@@ -56,12 +56,12 @@ def task_data(wo, node, now=None):
                              for nid in wo.deps_of(node.id)]}
 
 def concern_context(wo):
-    """The concerns this work object serves, each with its brief (subconscious/concern_brief.py)."""
+    """The concerns this work object serves, each with its record (subconscious/concern_view.py)."""
     refs = wo.constraints.get("concern_refs") or []
     if not refs:
         return []
-    from app.assistant.subconscious.concern_brief import briefs_for_refs
-    return briefs_for_refs(refs)
+    from app.assistant.subconscious.concern_view import concerns_for_refs
+    return concerns_for_refs(refs)
 
 
 def work_data(wo, now=None):

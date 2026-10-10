@@ -31,35 +31,53 @@ def _journal_entries(notes: str) -> List[str]:
     return [ln.strip() for ln in (notes or "").splitlines() if ln.strip()]
 
 
+def _entry_stamp(line: str):
+    """The UTC time a journal entry was written ("[<UTC ISO>] text"), or None for a line without one."""
+    from app.assistant.utils.time_utils import parse_iso_utc
+    end = line.find("]")
+    return parse_iso_utc(line[1:end]) if line.startswith("[") and end > 0 else None
+
+
+def _entry_for_prompt(line: str) -> str:
+    """One journal entry as agents read it: its stored UTC stamp shown in local time, as every time in a prompt is;
+    a line without a stamp (the archive marker, older entries) as stored. On 2026-10-04 the concern planner read UTC
+    stamps beside a local "Current Time" and called a 9 AM notice "now-past" at 3:31 AM."""
+    from app.assistant.utils.time_utils import local_time_text
+    stamp = _entry_stamp(line)
+    return f"[{local_time_text(stamp)}]{line[line.find(']') + 1:]}" if stamp else line
+
+
 def journal_for_prompt(notes: str) -> str:
-    """A concern's journal as agents read it: each entry's stored UTC stamp shown in local time, as every
-    time in a prompt is. The journal is stored "[<UTC ISO>] text" per line; a line without a stamp (the
-    archive marker, older entries) is shown as stored. On 2026-10-04 the concern planner read UTC stamps
-    beside a local "Current Time" and called a 9 AM notice "now-past" at 3:31 AM."""
+    """A whole journal as agents read it, each entry in local time (_entry_for_prompt)."""
+    return "\n".join(_entry_for_prompt(line) for line in _journal_entries(notes))
+
+
+def unsummarized(concern: Dict[str, Any]) -> List[str]:
+    """The notes no summary covers yet, oldest first, as agents read them: the note the concern was raised with
+    (until the first summary folds it in), stamped with when it was first observed, then each journal entry after the
+    summary's last."""
     from app.assistant.utils.time_utils import local_time_text, parse_iso_utc
+    summary = concern.get("summary")
+    entries = _journal_entries(concern.get("reinforcement_notes") or "")
     lines = []
-    for line in _journal_entries(notes):
-        end = line.find("]")
-        stamp = parse_iso_utc(line[1:end]) if line.startswith("[") and end > 0 else None
-        lines.append(f"[{local_time_text(stamp)}]{line[end + 1:]}" if stamp else line)
-    return "\n".join(lines)
+    notes = str(concern.get("notes") or "").strip()
+    if notes and not summary:
+        lines.append(f"[{local_time_text(parse_iso_utc(concern['first_observed']))}] {notes}")
+    return lines + [_entry_for_prompt(line) for line in entries[(summary or {}).get("lines", 0):]]
 
 
 def history_for_prompt(concern: Dict[str, Any]) -> str:
-    """A concern's notes in the order they were written, each with when, in local time: the note it was raised with,
-    stamped with when it was first observed, then its journal. Owner, 2026-10-08: "all messages that are carried need
-    to carry timestamps"; "we could just have the notes recorded in order of timestamp ... then it has clear history".
-    A concern raised on 2026-10-07 said "She has a doctor appointment at 10:30 today." with no date; read on the 8th,
-    the daily-context tracker put the appointment on the 8th's calendar."""
-    from app.assistant.utils.time_utils import local_time_text, parse_iso_utc
-    lines = []
-    notes = str(concern.get("notes") or "").strip()
-    if notes:
-        lines.append(f"[{local_time_text(parse_iso_utc(concern['first_observed']))}] {notes}")
-    journal = journal_for_prompt(concern.get("reinforcement_notes") or "").strip("\n")
-    if journal:
-        lines.append(journal)
-    return "\n".join(lines)
+    """A concern's record as every reader gets it: the summary of its older notes, when it has one, then every note
+    written since, whole, in the order written, each with when, in local time (docs/design/concerns_as_state_2026-10-09.md,
+    rule 1). Owner, 2026-10-08: "all messages that are carried need to carry timestamps"; 2026-10-09: "we cant have
+    something with 100 notes on it. we also don't want to show truncated record." A concern raised on 2026-10-07 said
+    "She has a doctor appointment at 10:30 today." with no date; read on the 8th, the daily-context tracker put the
+    appointment on the 8th's calendar."""
+    from app.assistant.utils.time_utils import local_time_text
+    summary = concern.get("summary")
+    head = ([f"Summary of the notes up to {local_time_text(summary['through'])}: {summary['text']}"]
+            if summary else [])
+    return "\n".join(head + unsummarized(concern))
 
 
 def _journal_on(concern: Dict[str, Any], now_iso: str, line: str) -> None:
@@ -142,50 +160,53 @@ def journal_concern(concern_id: str, line: str, *, connect=None) -> None:
     raise KeyError(f"concern {concern_id} is not in the register")
 
 
-def set_concern_brief(concern_id: str, written_from: str, *, brief: Optional[Dict[str, Any]] = None,
-                      error: Optional[str] = None, connect=None) -> bool:
-    """Store a concern's brief (or the error that stopped it) against the record it was written from.
-    Returns False, writing nothing, when the record changed meanwhile: the next run writes it again."""
-    from app.assistant.subconscious import concern_brief
+def set_concern_summary(concern_id: str, lines: int, *, text: Optional[str] = None, error: Optional[str] = None,
+                        connect=None) -> None:
+    """Store a concern's summary of the note it was raised with and its first `lines` journal entries (subconscious/
+    concern_summary.py), or the error that stopped it. The journal only grows, so entries written meanwhile stay
+    after the summary, unread by it and shown whole. Raises when the concern is gone or has fewer entries."""
     with _REGISTER_LOCK:
         register = _load_register(connect)
         for bucket in ("active", "addressing", "resolved", "dormant"):
             for concern in register.get(bucket) or []:
                 if concern.get("concern_id") != concern_id:
                     continue
-                if concern_brief.basis(concern, bucket) != written_from:
-                    return False
+                entries = _journal_entries(concern.get("reinforcement_notes") or "")
+                if len(entries) < lines:
+                    raise ValueError(f"concern {concern_id} has {len(entries)} journal entries, not {lines}")
                 now_iso = datetime.now(timezone.utc).isoformat()
                 if error is None:
-                    concern["brief"] = {**brief, "basis": written_from, "written_at": now_iso}
-                    concern.pop("brief_error", None)
+                    stamps = [t for t in (_entry_stamp(line) for line in entries[:lines]) if t]
+                    through = stamps[-1].isoformat() if stamps else concern["first_observed"]
+                    concern["summary"] = {"text": text, "lines": lines, "through": through, "written_at": now_iso}
+                    concern.pop("summary_error", None)
                 else:
-                    concern["brief_error"] = {"basis": written_from, "error": error, "at": now_iso,
-                                              "writer": concern_brief.WRITER_REVISION}
+                    concern["summary_error"] = {"lines": lines, "error": error, "at": now_iso}
                 _save_register(connect, register)
-                return True
+                return
     raise KeyError(f"concern {concern_id} is not in the register")
 
 
-def set_concern_plan(concern_id: str, from_brief: str, *, plan: Optional[Dict[str, Any]] = None,
+def set_concern_plan(concern_id: str, from_record: str, *, plan: Optional[Dict[str, Any]] = None,
                      error: Optional[str] = None, connect=None) -> bool:
-    """Store a matter concern's plan (subconscious/concern_planner.py), or the error that stopped it, against
-    the brief it was made from. Returns False, writing nothing, when the brief changed meanwhile: the next
+    """Store a concern's plan (subconscious/concern_planner.py), or the error that stopped it, against the record it
+    was made from (concern_view.basis). Returns False, writing nothing, when the record changed meanwhile: the next
     run plans again."""
+    from app.assistant.subconscious.concern_view import basis
     with _REGISTER_LOCK:
         register = _load_register(connect)
         for bucket in ("active", "addressing", "resolved", "dormant"):
             for concern in register.get(bucket) or []:
                 if concern.get("concern_id") != concern_id:
                     continue
-                if (concern.get("brief") or {}).get("basis") != from_brief:
+                if basis(concern, bucket) != from_record:
                     return False
                 now_iso = datetime.now(timezone.utc).isoformat()
                 if error is None:
-                    concern["plan"] = {**plan, "basis": from_brief, "written_at": now_iso}
+                    concern["plan"] = {**plan, "basis": from_record, "written_at": now_iso}
                     concern.pop("plan_error", None)
                 else:
-                    concern["plan_error"] = {"basis": from_brief, "error": error, "at": now_iso}
+                    concern["plan_error"] = {"basis": from_record, "error": error, "at": now_iso}
                 _save_register(connect, register)
                 return True
     raise KeyError(f"concern {concern_id} is not in the register")

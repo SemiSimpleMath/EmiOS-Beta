@@ -7,14 +7,14 @@ every five minutes and read chat in five-minute slices while the conversation wa
 
 A wake runs `run_brain` once: new chat and email into the inbox, the gate routes what is ready (an
 email at once, a room's messages once the room has been quiet for brain_inbox.QUIET), the brain
-decides each matter, the briefs of changed concerns are rewritten, the concern planner works out what
-each changed matter concern needs (subconscious/concern_planner.py), and concerns ready to act on are
-handed to dayflow. Each stage is free when it has nothing to do.
+decides each matter, a concern whose notes grew long is summarized (subconscious/concern_summary.py), the concern
+planner works out what each changed concern needs (subconscious/concern_planner.py), and the day's tasks decide the
+list dayflow makes work from. Each stage is free when it has nothing to do.
 
 What wakes it:
 - the ingest service (the gut) hands it every new chat message and email (`handle_envelope`);
 - a write to the concern register from outside the brain (a work outcome, the noticer, an edit)
-  calls `poke`, so the concern's brief and handoff follow it;
+  calls `poke`, so the concern's plan and entries follow it;
 - a room still talking: the wake sleeps until that room goes quiet, then runs;
 - a plan holding until a time: the wake sleeps until the earliest hold, when the concern is planned
   again (concern_planner.next_hold_at);
@@ -48,10 +48,10 @@ _start_lock = threading.Lock()
 
 
 def run_brain() -> Dict[str, Any]:
-    """One pass: gate, brain step, the entries of closed concerns cancelled, briefs, the concern planner, handoffs,
+    """One pass: gate, brain step, the entries of closed concerns cancelled, summaries, the concern planner, handoffs,
     the day pass and its occurrences, the stories, and the day's tasks."""
     from app.assistant.subconscious.brain_step import run_brain_step
-    from app.assistant.subconscious.concern_brief import run_briefs
+    from app.assistant.subconscious.concern_summary import run_summaries
     from app.assistant.subconscious.concern_handoff import run_handoffs
     from app.assistant.subconscious import concern_planner
     from app.assistant.subconscious.day_pass import run_day_pass
@@ -67,14 +67,14 @@ def run_brain() -> Dict[str, Any]:
     # A concern the brain closed takes its open list entries with it, so dayflow ends their work.
     from app.assistant.subconscious import brain_list
     closed_entries = brain_list.cancel_for_closed_concerns(load_register(), at=datetime.now(timezone.utc))
-    briefs = run_briefs()
+    summaries = run_summaries()
     plans = concern_planner.run_planners()
     handoffs = run_handoffs()
     register, now = load_register(), datetime.now(timezone.utc)
     from app.assistant.subconscious.brain_inbox import next_presence_due
     due = [t for t in (gate["next_ready_at"], concern_planner.next_hold_at(register, now),
                        next_presence_due(now_utc=now)) if t is not None]
-    # Last: a day pass that fails does not hold up the concerns' briefs and handoffs. Today's calendar is
+    # Last: a day pass that fails does not hold up the concerns' summaries and plans. Today's calendar is
     # handed to dayflow one placement at a time (subconscious/belief_occurrences.py).
     from app.assistant.subconscious.brain_trace import trace
     with trace(stage="day_pass"):
@@ -107,7 +107,7 @@ def run_brain() -> Dict[str, Any]:
     except Exception as exc:
         logger.error("[brain_wake] the day's record (shadow) failed: %s", exc, exc_info=True)
         recorded = {"day_record": f"failed: {type(exc).__name__}"}
-    return {**gate, **{f"brain_{k}": v for k, v in brain.items()}, **briefs, **plans, **handoffs, **day, **occurrences,
+    return {**gate, **{f"brain_{k}": v for k, v in brain.items()}, **summaries, **plans, **handoffs, **day, **occurrences,
             **stories, **decided, **recorded, "closed_concern_entries": closed_entries,
             "next_wake_at": min(due) if due else None}
 

@@ -16,7 +16,7 @@ import pytest
 
 import app.assistant.tests.test_setup  # noqa: F401
 import app.assistant.subconscious.day_pass as drs
-from app.assistant.subconscious import belief_occurrences, concern_brief, concern_door, day_plan, persist
+from app.assistant.subconscious import belief_occurrences, concern_door, day_plan, persist
 from app.assistant.tests.concern_store_helpers import ScratchRegister
 from app.assistant.utils.time_utils import get_local_timezone
 from belief_engine.intake.store import sqlite_file
@@ -189,14 +189,3 @@ def test_the_door_does_not_compare_candidates_with_retired_standing_concerns():
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
     register = {**EMPTY, 'dormant': [{'concern_id': 'c1', 'kind': 'standing'}, {'concern_id': 'c2', 'chronic': True}]}
     assert [c['concern_id'] for c in concern_door._comparable(register, now)] == ['c2']
-
-
-def test_a_brief_is_written_again_only_when_the_record_changes():
-    matter = {'concern_id': 'c2', 'title': 'Bake sale', 'kind': 'anticipated_need', 'done_when': 'x'}
-    b = concern_brief.basis(matter, 'active')
-    assert concern_brief.basis({**matter, 'brief': {'what': 'w'}, 'plan': {'decision': 'hold'}}, 'active') == b
-    briefed = {**matter, 'brief': {'basis': b}}
-    assert concern_brief.stale({'active': [briefed], 'addressing': []}) == []
-    failed = {**matter, 'brief_error': {'basis': b, 'writer': concern_brief.WRITER_REVISION}}
-    assert concern_brief.stale({'active': [failed], 'addressing': []}) == [], "a failed brief waits for a change"
-    assert len(concern_brief.stale({'active': [{**matter, 'notes': 'new'}], 'addressing': []})) == 1

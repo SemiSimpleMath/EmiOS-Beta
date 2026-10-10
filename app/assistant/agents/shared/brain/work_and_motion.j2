@@ -1,7 +1,6 @@
 {#- Past work and what is already in motion. Expects `agent_input` with linked_work, similar_work,
-    active_work, reminders, and calendar_lines (the brain: lines with their labels, brain_step.build_payload) or
-    calendar (text: the brief writer, until it is a projection too); a ref labelled in agent_input.source_labels
-    shows its label. -#}
+    active_work, reminders, and calendar_lines (lines with their labels, brain_step.build_payload); a ref labelled
+    in agent_input.source_labels shows its label. -#}
 {%- set L = (agent_input.get("source_labels") if agent_input is defined else none) or {} -%}
 ## Past work linked to this matter
 
@@ -33,10 +32,6 @@ Scheduled reminders:
 (none)
 {% endfor %}
 Calendar:
-{% if agent_input.calendar_lines is defined -%}
 {% for l in agent_input.calendar_lines -%}
 {% if l.ref is defined %}- [{{ l.ref }}] {{ l.text }}{% elif l.event %}- {{ l.text }}{% else %}{{ l.text }}{% endif %}
 {% endfor -%}
-{% else -%}
-{{ agent_input.calendar }}
-{% endif -%}

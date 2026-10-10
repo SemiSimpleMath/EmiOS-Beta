@@ -364,8 +364,8 @@ def test_work_reports_render_under_their_work_and_attached_work_under_its_concer
 
 
 def test_the_wake_sleeps_until_a_room_goes_quiet_or_a_hold_passes_whichever_is_first(monkeypatch):
-    from app.assistant.subconscious import (belief_occurrences, brain_wake, concern_brief, concern_handoff,
-                                            concern_planner, concern_store, day_pass)
+    from app.assistant.subconscious import (belief_occurrences, brain_wake, concern_handoff, concern_planner,
+                                            concern_store, concern_summary, day_pass)
     quiet, hold = NOW + timedelta(minutes=4), NOW + timedelta(minutes=2)
     monkeypatch.setattr(day_pass, "run_day_pass", lambda: {"day_pass": "unchanged"})
     monkeypatch.setattr(belief_occurrences, "run_occurrence_handoffs", lambda: {"occurrences_handed": 0})
@@ -377,7 +377,7 @@ def test_the_wake_sleeps_until_a_room_goes_quiet_or_a_hold_passes_whichever_is_f
     monkeypatch.setattr(brain_step, "run_brain_step", lambda: {"matters": 0})
     from app.assistant.subconscious import brain_list
     monkeypatch.setattr(brain_list, "cancel_for_closed_concerns", lambda register, at: [])
-    monkeypatch.setattr(concern_brief, "run_briefs", lambda: {})
+    monkeypatch.setattr(concern_summary, "run_summaries", lambda: {})
     monkeypatch.setattr(concern_handoff, "run_handoffs", lambda: {})
     monkeypatch.setattr(concern_store, "load_register", lambda: {})
     monkeypatch.setattr(concern_planner, "next_hold_at", lambda register, now: hold)
