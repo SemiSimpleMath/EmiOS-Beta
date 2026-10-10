@@ -274,15 +274,6 @@ def initialize_system():
     else:
         logger.info("⏸️ Ingest service DISABLED via subsystems.yaml")
 
-    # One-time move of concerns to attached work, before anything delivers work feedback
-    # (subconscious/persist.rederive_attached_work; a no-op once every concern has its record).
-    from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
-    from app.assistant.subconscious.concern_feedback import report_earlier_endings
-    from app.assistant.subconscious.persist import rederive_attached_work
-    work_store = get_dayflow_work_store()
-    report_earlier_endings(rederive_attached_work(
-        lambda: [work_store.load(s["id"]) for s in work_store.list_work_objects()]))
-
     from app.assistant.subconscious import brain_wake
     brain_wake.start()
     DI.event_hub.register_event("afk_state_changed", brain_wake.handle_afk_state_changed)

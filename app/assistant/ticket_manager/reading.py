@@ -82,6 +82,7 @@ def _reply_line(reply: Dict[str, Any]) -> str:
 def _concern(ref: str) -> Optional[Dict[str, Any]]:
     """A concern by full id or `concern:<8+ chars>`, with the parts a reader needs."""
     from app.assistant.subconscious.concern_store import load_register
+    from app.assistant.subconscious.concern_view import attempts
     from app.assistant.subconscious.persist import history_for_prompt
     key = ref[len("concern:"):] if ref.startswith("concern:") else ref
     register = load_register()
@@ -92,14 +93,7 @@ def _concern(ref: str) -> Optional[Dict[str, Any]]:
                 return {"concern_id": cid, "status": bucket, "title": c.get("title"), "subject": c.get("subject"),
                         "done_when": c.get("done_when"), "owner_words": (c.get("owner_request") or {}).get("words"),
                         "history": history_for_prompt(c),
-                        "attached_work": [{"work_id": w["work_id"], "objective": w.get("objective"),
-                                           "status": w.get("status"), "attached_at": w.get("attached_at"),
-                                           "judgments": [{"title": j.get("title"), "verdict": j.get("verdict"),
-                                                          "at": j.get("at"), "outcome": j.get("outcome"),
-                                                          "replies": [_reply_line(r) for r in j.get("replies") or []]}
-                                                         for j in w.get("judgments") or []],
-                                           "ended": w.get("ended")}
-                                          for w in (c.get("attached_work") or {}).values()],
+                        "attached_work": attempts(c),
                         "evidence": [str(e.get("ref") or "") for e in c.get("evidence") or []],
                         "evidence_kinds": {str(e.get("ref") or ""): e.get("kind") for e in c.get("evidence") or []}}
     return None

@@ -158,10 +158,11 @@ def test_the_day_view_shows_today_s_calendar(reg):
 def test_the_day_view_gives_the_ribbon_the_lines_and_the_cards(reg):
     _seed_matter(reg)
     _run(reg, Agents(matter=_lines, concern=CONCERN_STORY, day=DAY_STORY))
-    day = brain_stories._window_days(NOW)[-1]
+    # The day the events were seeded on: an hour back is yesterday between midnight and 1 AM.
+    day = brain_stories._local(HOUR_AGO).date().isoformat()
     view = brain_stories.day_view(day, now_utc=NOW, connect=reg.connect, register_connect=reg.connect,
                                   handed_on=lambda a, b: 1)
-    assert view["story"] == DAY_STORY and view["today"]
+    assert view["story"] == DAY_STORY and view["today"] == (day == brain_stories._window_days(NOW)[-1])
     assert view["ribbon"] == {"came_in": 2, "by_source": {"email": 1, "chat": 1}, "matters": 1,
                               "concerns_touched": 1, "handed_on": 1, "settled": 0}
     [item] = view["matters"][0]["items"]

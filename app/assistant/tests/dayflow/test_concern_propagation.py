@@ -1,11 +1,8 @@
-"""Concern back-propagation (2026-08-01 subconscious audit; attached work 2026-09-30).
+"""Concern back-propagation (2026-08-01 subconscious audit; attached work 2026-09-30; references 2026-10-09).
 
-Work outcomes never reached the concerns register (19 AC-service re-mints, 4 after
-an explicit user decline). Now: the evaluator cites concern:<prefix> in based_on ->
-work_persist stores it on the work object, which is attached to the concern -> the
-work's ending is recorded on the concern (user words verbatim); user-declined concerns
-park dormant (the projection reads only `active`, so the evaluator pressure stops at
-the source); otherwise, with no work in progress, the concern is open for the brain.
+Work outcomes never reached the concerns register (19 AC-service re-mints, 4 after an explicit user decline). Now
+work made for a concern carries it (`concern_refs`), the concern holds a reference to the work, and the work's
+judgments and ending reach the brain, which decides (test_concern_outbox.py pins delivery).
 """
 from __future__ import annotations
 
@@ -18,7 +15,7 @@ import app.assistant.tests.test_setup  # noqa: F401
 from app.assistant.tests.concern_store_helpers import ScratchRegister
 
 from app.assistant.subconscious.concern_feedback import propagate_work_outcome
-from app.assistant.subconscious.persist import apply_work_outcome
+from app.assistant.subconscious.persist import attach_work
 
 _CID = "a2a8a4b0-2d34-4c94-9d2e-f5e6f9c6e5d7"
 
@@ -42,63 +39,19 @@ def _register(tmp_path) -> Path:
     return path
 
 
-class TestApplyWorkOutcome:
+class TestAttachWork:
 
-    def test_user_decline_parks_dormant_with_words(self, tmp_path):
+    def test_a_reference_once_per_receipt(self, tmp_path):
         path = _register(tmp_path)
-        result = apply_work_outcome(
-            f"concern:{_CID[:8]}", work_id="work_x", outcome="abandoned",
-            user_response={"user_text": "No thanks", "response_details": {
-                "meaning": "decline", "label": "No thanks", "typed_text": "",
-                "scope": "Arrange AC service"}},
-            connect=path.connect)
-        assert result == "user_declined"
-        reg = path.read()
-        assert reg["active"] == []
-        concern = reg["dormant"][0]
-        assert concern["attached_work"]["work_x"]["ended"]["owner_reply"]["user_text"] == "No thanks"
-        assert "No thanks" not in concern["reinforcement_notes"]    # the reply reaches the brain as a ticket event
-        assert concern["user_declined_at_utc"]
-        assert concern["last_disposition_at_count"] == 23   # pressure window reset
-
-    def test_done_records_the_ending_and_leaves_the_decision_to_the_brain(self, tmp_path):
-        path = _register(tmp_path)
-        result = apply_work_outcome(_CID, work_id="work_x", outcome="done",
-                                    connect=path.connect)
-        assert result == "ended"
-        reg = path.read()
-        concern = reg["active"][0]                      # done work does not settle the concern
-        assert concern["attached_work"]["work_x"]["ended"]["outcome"] == "done"
-        assert "WORK ENDED" not in concern["reinforcement_notes"]
-
-    def test_the_last_work_ending_takes_the_concern_out_of_progress(self, tmp_path):
-        path = _register(tmp_path)
-        reg = path.read()
-        concern = reg["active"].pop()
-        concern["attached_work"] = {w: {"work_id": w, "status": "active", "judgments": [], "ended": None}
-                                    for w in ("work_x", "work_y")}
-        reg["addressing"].append(concern)
-        path.write(reg)
-        apply_work_outcome(_CID, work_id="work_x", outcome="done", connect=path.connect)
-        assert len(path.read()["addressing"]) == 1      # work_y is still going
-        apply_work_outcome(_CID, work_id="work_y", outcome="abandoned", connect=path.connect)
-        reg = path.read()
-        assert reg["addressing"] == [] and len(reg["active"]) == 1
-
-    def test_system_abandon_without_words_only_journals(self, tmp_path):
-        path = _register(tmp_path)
-        result = apply_work_outcome(_CID, work_id="work_x", outcome="abandoned",
-                                    connect=path.connect)
-        assert result == "ended"
-        reg = path.read()
-        assert len(reg["active"]) == 1      # a system drop must not silence a real concern
+        assert attach_work(f"concern:{_CID[:8]}", work_id="work_x", receipt_id="r1", connect=path.connect) == "attached"
+        assert attach_work(_CID, work_id="work_x", receipt_id="r1", connect=path.connect) == "already_applied"
+        [concern] = path.read()["active"]
+        assert list(concern["attached_work"]) == ["work_x"] and concern["work_receipts"] == ["r1"]
 
     def test_unknown_ref_is_unresolved(self, tmp_path):
         path = _register(tmp_path)
-        assert apply_work_outcome("concern:ffffffff", work_id="work_x",
-                                  outcome="done", connect=path.connect) == "unresolved"
-        reg = path.read()
-        assert len(reg["active"]) == 1      # untouched
+        assert attach_work("concern:ffffffff", work_id="work_x", connect=path.connect) == "unresolved"
+        assert "attached_work" not in path.read()["active"][0]
 
 
 class TestPropagateWorkOutcome:

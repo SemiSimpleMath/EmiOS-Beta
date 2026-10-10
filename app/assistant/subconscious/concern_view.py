@@ -30,18 +30,33 @@ def basis(concern: Dict[str, Any], bucket: str) -> str:
 
 
 def attempts(concern: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """The work attached to the concern, oldest first, as every reader shows it: objective, status,
-    where it stands now (read live from the work store: what is done, what is still to come and what
-    each step waits for), each judgment with the owner's replies as lines, and the ending."""
+    """The work attached to the concern, oldest first, read live from the work store every time (rule 3b; until
+    2026-10-09 a copy kept on the concern, which went stale): objective, status, where it stands now (what is done,
+    what is still to come and what each step waits for), each task's judgment in the finalizer's words with the
+    owner's replies as lines, and the ending."""
+    from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
     from app.assistant.subconscious.concern_feedback import _reply_line
-    from app.assistant.subconscious.work_links import progress
-    works = sorted((concern.get("attached_work") or {}).values(), key=lambda w: str(w.get("attached_at") or ""))
-    return [{"work_id": w["work_id"], "title": w.get("title"), "objective": w.get("objective"),
-             "attached_at": w.get("attached_at"), "status": w.get("status"), "progress": progress(w["work_id"]),
-             "judgments": [{**j, "replies": [_reply_line(r) for r in j.get("replies") or []]}
-                           for j in w.get("judgments") or []],
-             "ended": w.get("ended")}
-            for w in works]
+    from work_objects.concern_outbox import _replies
+    from work_objects.progress import work_progress
+    store = get_dayflow_work_store()
+    out = []
+    for ref in sorted((concern.get("attached_work") or {}).values(), key=lambda w: str(w.get("attached_at") or "")):
+        wo = store.load(ref["work_id"])
+        goal = wo.nodes.get(wo.goal_node_id)
+        terminal = (goal.payload.get("terminal") or {}) if goal else {}
+        ended = wo.status in ("done", "abandoned")
+        out.append({
+            "work_id": wo.id, "title": wo.title, "objective": (wo.constraints or {}).get("objective") or wo.title,
+            "attached_at": ref.get("attached_at"), "status": wo.status if ended else "active",
+            "progress": work_progress(wo),
+            "judgments": [{"node_id": n.id, "title": n.title, "outcome": n.payload["finalizer"].get("outcome"),
+                           "at": n.payload["finalizer"].get("at"),
+                           "replies": [_reply_line(r) for r in _replies(wo, n.id)]}
+                          for n in sorted(wo.nodes.values(), key=lambda n: str(n.created_at))
+                          if wo.is_work_unit(n) and (n.payload or {}).get("finalizer")],
+            "ended": {"outcome": wo.status, "at": terminal.get("at") or str(wo.updated_at),
+                      "reason": terminal.get("reason") or ""} if ended else None})
+    return out
 
 
 def view(concern: Dict[str, Any], bucket: str) -> Dict[str, Any]:

@@ -5,7 +5,7 @@ says act_now becomes one intake item in the planner's inbox (past triage), carry
 and the things that should be done; once per plan version; not while an earlier handoff is still in the
 inbox, but work in progress does not hold it back (the plan decided it should be added to or corrected);
 hold and no_action are not handed over, and a passed hold is planned again; work made from the item
-carries the concern whatever the steward cites; the planner's answer is journalled on the concern.
+carries the concern whatever the steward cites.
 Scratch register; the dayflow item store and work store are fakes. Invented data only.
 """
 from __future__ import annotations
@@ -33,8 +33,15 @@ PROGRESS = {
 
 @pytest.fixture(autouse=True)
 def _work_store(monkeypatch):
-    from app.assistant.subconscious import work_links
-    monkeypatch.setattr(work_links, "progress", lambda work_id: PROGRESS[work_id])
+    """The attached work as the work store would show it live (concern_view.attempts): each record below, with where
+    it stands and the owner's replies worded."""
+    from app.assistant.subconscious import concern_view
+    from app.assistant.subconscious.concern_feedback import _reply_line
+    monkeypatch.setattr(concern_view, "attempts", lambda concern: [
+        {**w, "progress": PROGRESS[w["work_id"]],
+         "judgments": [{**j, "replies": [_reply_line(r) for r in j.get("replies") or []]}
+                       for j in w.get("judgments") or []]}
+        for w in (concern.get("attached_work") or {}).values()])
 
 
 @pytest.fixture(autouse=True)
@@ -123,16 +130,6 @@ def test_work_made_from_the_item_carries_the_concern_whatever_the_steward_cites(
     sources = source_records([item], ["concern:c-bake:abc"])
     assert sources[0]["concern_id"] == "c-bake"
     assert concern_refs_of(sources) == ["concern:c-bake"]
-
-
-def test_the_planners_answer_is_journalled_on_the_concern(tmp_path):
-    reg = ScratchRegister(tmp_path).write({"active": [{"concern_id": "c-bake", "title": "t", "notes": "n", "evidence": []}],
-                                           "addressing": [], "resolved": [], "dormant": []})
-    concern_handoff.record_intake_outcome({"concern_id": "c-bake", "item_id": "concern:c-bake:abc"},
-                                          "reviewed it as no_action", "already handled by the school", connect=reg.connect)
-    [c] = reg.read()["active"]
-    assert "HANDOFF concern:c-bake:abc: the planner reviewed it as no_action: already handled by the school" in (
-        c["reinforcement_notes"])
 
 
 def test_citing_a_handoff_item_does_not_look_like_a_concern_ref():

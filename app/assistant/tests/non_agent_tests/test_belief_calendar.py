@@ -172,19 +172,6 @@ def test_work_made_from_a_placement_carries_the_belief():
 
 # ── beliefs are not concerns ──────────────────────────────────────────────────────────────────────────
 
-def test_standing_concerns_retire_to_dormant(tmp_path):
-    reg = ScratchRegister(tmp_path).write({**EMPTY, 'active': [
-        {'concern_id': 'c1', 'title': 'Evening AC', 'kind': 'standing', 'occurrences': {'d': []}},
-        {'concern_id': 'c2', 'title': 'Bake sale', 'kind': 'anticipated_need'}]})
-    assert persist.retire_standing_concerns('beliefs are not concerns', connect=reg.connect) == ['c1']
-    after = reg.read()
-    assert [c['concern_id'] for c in after['active']] == ['c2']
-    [retired] = after['dormant']
-    assert retired['dormant_reason'] == 'beliefs are not concerns' and 'occurrences' not in retired
-    assert 'RETIRED to dormant' in retired['reinforcement_notes']
-    assert persist.retire_standing_concerns('again', connect=reg.connect) == []
-
-
 def test_the_door_does_not_compare_candidates_with_retired_standing_concerns():
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
     register = {**EMPTY, 'dormant': [{'concern_id': 'c1', 'kind': 'standing'}, {'concern_id': 'c2', 'chronic': True}]}

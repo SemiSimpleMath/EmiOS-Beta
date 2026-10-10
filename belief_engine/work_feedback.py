@@ -123,8 +123,40 @@ def _embedder():
     return embed_texts
 
 
+def _last_user_reply(wo) -> dict:
+    """Newest explicitly attributed reply, ordered by response/evidence time (moved here from
+    concern_feedback on 2026-10-09: a belief's outcome is its only reader now).
+
+    Tool prose is never user text. Historical `created_by=reply` records remain
+    readable as unclassified user words; ordinary `ask`/tool authors alone do not
+    establish a reply (their records can also contain timeouts and errors).
+    """
+    from copy import deepcopy
+    from datetime import datetime, timezone
+    from app.assistant.utils.time_utils import parse_iso_utc
+    replies = []
+    for node in (getattr(wo, "nodes", {}) or {}).values():
+        if getattr(node, "type", "") != "evidence":
+            continue
+        reply = (getattr(node, "payload", {}) or {}).get("user_reply")
+        if isinstance(reply, dict) and (getattr(node, "created_by", "") not in {"create_dayflow_ticket", "ask"}
+                                        or not reply.get("ticket_id")):
+            continue
+        if not isinstance(reply, dict):
+            if getattr(node, "created_by", "") != "reply" or not (getattr(node, "content", "") or "").strip():
+                continue
+            reply = {"user_text": node.content, "provenance": "legacy_reply"}
+        details = reply.get("response_details") or {}
+        history = details.get("response_history") or []
+        latest = history[-1] if history else details
+        when = (parse_iso_utc(str(latest.get("responded_at") or reply.get("responded_at") or ""))
+                or parse_iso_utc(str(getattr(node, "created_at", "") or ""))
+                or datetime.min.replace(tzinfo=timezone.utc))
+        replies.append((when, str(getattr(node, "id", "")), reply))
+    return deepcopy(max(replies, key=lambda row: row[:2])[2]) if replies else {}
+
+
 def _deliver_receipt(store, receipt) -> bool:
-    from app.assistant.subconscious.concern_feedback import _last_user_reply
     from types import SimpleNamespace
 
     payload = receipt["payload"]

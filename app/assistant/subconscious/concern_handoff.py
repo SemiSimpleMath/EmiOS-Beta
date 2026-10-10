@@ -23,7 +23,7 @@ active; the planner sees that work and decides act_now only when it should be ad
 - Work made from the item gets the concern in `constraints.concern_refs` from the item's record
   (dayflow_orchestrator/work_intake.py), not from the steward's citation, so its outcome reaches
   the concern and its agents read the brief.
-- The steward's answer is journalled on the concern (`record_intake_outcome`).
+- Until 2026-10-09 the steward's answer was journalled on the concern; only the brain writes its notes now.
 
 Today's calendar is not handed over through concerns: each placement goes to dayflow from the calendar
 (subconscious/belief_occurrences.py). Until 2026-10-03 a placed belief got a standing concern whose
@@ -159,11 +159,3 @@ def run_handoffs(*, register_connect=None, now_utc: Optional[datetime] = None,
         logger.info("[handoff] handed %d concern(s) to dayflow: %s", len(handed), handed)
         (poke or _poke_dayflow)()
     return {"handed_over": len(handed), "handoff_skipped": len(skipped)}
-
-
-def record_intake_outcome(meta: Dict[str, Any], outcome: str, detail: str, *, connect=None) -> None:
-    """Journal the steward's answer to a handoff item on its concern: transferred to work, no action,
-    or deferred. Called by the steward's persist node after its writes are committed."""
-    from app.assistant.subconscious import persist
-    persist.journal_concern(meta["concern_id"],
-                            f"HANDOFF {meta['item_id']}: the planner {outcome}: {detail}", connect=connect)

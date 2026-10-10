@@ -235,9 +235,10 @@ def test_the_brain_prompt_renders_every_section():
     assert "name in your note every item that depends on the old fact" in system
 
 
-def test_a_work_report_the_brain_cites_attaches_the_work_to_that_concern(inbox, tmp_path):
-    """Work made for another concern settled this one: the brain cites its report here, so the work is
-    attached to this concern too, as it is now (ended), and the concern is not left in progress."""
+def test_a_work_report_the_brain_attaches_is_evidence_and_the_work_stays_where_it_was_made(inbox, tmp_path):
+    """Until 2026-10-09 citing a work report on a concern attached the work to it (`attach_seen_work`), and a dog-walk
+    follow-up landed on a friend's birthday. The report is the concern's evidence now; the work belongs to the concern
+    its list entry was made for."""
     reg = _register(tmp_path, active=[_concern("c-vet", "Vet appointment for the dog")])
     brain_inbox.ensure_schema(inbox)
     with inbox(True) as c:
@@ -250,14 +251,10 @@ def test_a_work_report_the_brain_cites_attaches_the_work_to_that_concern(inbox, 
                     "concern_updates": [{"concern": "C1", "action": "note", "relies_on": ["E1"], "attach": ["E1"],
                                          "note": "The appointment is now Friday 9:00."}],
                     "new_concerns": []})
-    record = {"title": "Fix the calendar", "objective": "Clean up next week's calendar", "status": "done",
-              "ended": {"outcome": "done", "at": NOW.isoformat(), "reason": "cleaned up"}}
-    brain_step.run_brain_step(connect=inbox, register_connect=reg.connect, call=brain, judge=_all_new,
-                              work_record=lambda wid: record)
+    brain_step.run_brain_step(connect=inbox, register_connect=reg.connect, call=brain, judge=_all_new)
     [c] = reg.read()["active"]
-    work = c["attached_work"]["work_cal"]
-    assert (work["status"], work["ended"]["outcome"]) == ("done", "done")
-    assert "WORK ATTACHED" not in c["reinforcement_notes"]
+    assert not c.get("attached_work"), "the work is not attached by judgment"
+    assert c["evidence"][-1]["ref"] == "work:work_cal:000-r1" and c["evidence"][-1]["kind"] == "work"
 
 
 def test_only_attach_attaches_and_references_are_stored_as_objects(inbox, tmp_path):
@@ -274,8 +271,7 @@ def test_only_attach_attaches_and_references_are_stored_as_objects(inbox, tmp_pa
     brain = _brain({"event_decisions": [{"event": "E1", "decision": "used", "reason": "the AC is set"}],
                     "concern_updates": [{"concern": "C1", "action": "note", "relies_on": ["E1"], "attach": [],
                                          "note": "The thermostat work ended; the visit is unchanged."}]})
-    brain_step.run_brain_step(connect=inbox, register_connect=reg.connect, call=brain, judge=_all_new,
-                              work_record=lambda wid: pytest.fail("nothing named in attach"))
+    brain_step.run_brain_step(connect=inbox, register_connect=reg.connect, call=brain, judge=_all_new)
     [c] = reg.read()["active"]
     assert not c.get("attached_work"), "read, not attached"
     from app.assistant.subconscious import relations
@@ -299,4 +295,4 @@ def test_only_reference_fields_are_checked_never_the_words():
          "concern_updates": [{"concern": "C1", "action": "note", "relies_on": ["E1"], "attach": ["W2", "C1"],
                               "note": "C1 remains open"}]}, events, ["C1"], labels)
     assert not any("written into" in p for p in problems)
-    assert any("attach names events (E) and work (W) only, got ['C1']" in p for p in problems)
+    assert any("attach names events (E) only, got ['W2', 'C1']" in p for p in problems)

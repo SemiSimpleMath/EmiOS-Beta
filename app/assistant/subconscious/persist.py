@@ -5,7 +5,10 @@ dormant), read and written whole under one lock; replaced resource_concerns_regi
 
 Until 2026-10-09 the daily noticer wrote here too (new concerns, reinforcements, addressing, resolutions,
 escalations, forced dispositions, questions to the owner and their answers); it now raises issues for the brain's
-inbox and writes nothing here (docs/design/concerns_as_state_2026-10-09.md).
+inbox and writes nothing here (docs/design/concerns_as_state_2026-10-09.md). The same day work feedback stopped
+copying each judgment and ending onto the concern and moving it between active and addressing, a decline button
+stopped parking it dormant, and the brain stopped attaching work by judgment: a concern holds references to the work
+made for it, read live (rule 3b), and only the brain, or its expiry, closes it.
 """
 from __future__ import annotations
 
@@ -123,43 +126,6 @@ def apply_brain_matter(updates: List[Dict[str, Any]], plan: List[Dict[str, Any]]
     return admitted
 
 
-def retire_standing_concerns(reason: str, *, connect=None) -> List[str]:
-    """Move every open standing concern (one made from the owner's beliefs by the day pass, until
-    2026-10-03) to dormant, journalled with `reason`. Beliefs are no longer made into concerns
-    (docs/design/what_was_done_reaches_the_brain_2026-10-03.md). Returns the concern ids moved."""
-    with _REGISTER_LOCK:
-        register = _load_register(connect)
-        now_iso = datetime.now(timezone.utc).isoformat()
-        moved = []
-        for bucket in ("active", "addressing"):
-            for c in [c for c in register.get(bucket) or [] if c.get("kind") == "standing"]:
-                register[bucket].remove(c)
-                c.pop("occurrences", None)
-                c["dormant_at_utc"] = now_iso
-                c["dormant_reason"] = reason
-                _journal_on(c, now_iso, f"RETIRED to dormant: {reason}")
-                register.setdefault("dormant", []).append(c)
-                moved.append(c["concern_id"])
-        if moved:
-            register["last_updated_utc"] = now_iso
-            _save_register(connect, register)
-    return moved
-
-
-def journal_concern(concern_id: str, line: str, *, connect=None) -> None:
-    """Append one dated line to a concern's journal, whatever bucket it is in. Raises when the
-    concern is not in the register."""
-    with _REGISTER_LOCK:
-        register = _load_register(connect)
-        for bucket in ("active", "addressing", "resolved", "dormant"):
-            for concern in register.get(bucket) or []:
-                if concern.get("concern_id") == concern_id:
-                    _journal_on(concern, datetime.now(timezone.utc).isoformat(), line)
-                    _save_register(connect, register)
-                    return
-    raise KeyError(f"concern {concern_id} is not in the register")
-
-
 def set_concern_summary(concern_id: str, lines: int, *, text: Optional[str] = None, error: Optional[str] = None,
                         connect=None) -> None:
     """Store a concern's summary of the note it was raised with and its first `lines` journal entries (subconscious/
@@ -237,46 +203,25 @@ def _find_concern(register: Dict[str, Any], concern_ref: str):
     return matches[0] if len(matches) == 1 else None
 
 
-def concern_id_for(concern_ref: str, *, connect=None) -> Optional[str]:
-    """The full concern_id a ref names, or None when it names no single concern."""
-    found = _find_concern(_load_register(connect), concern_ref)
-    return found[2]["concern_id"] if found else None
-
-
-def _move(register: Dict[str, Any], bucket: str, index: int, concern: Dict[str, Any], to: str) -> None:
-    register[bucket].pop(index)
-    register.setdefault(to, []).append(concern)
-
-
-def _work_in_progress(concern: Dict[str, Any]) -> List[str]:
-    return [w for w, rec in (concern.get("attached_work") or {}).items() if rec.get("status") == "active"]
-
-
-def attach_work(concern_ref: str, *, work_id: str, work: Dict[str, Any], receipt_id: str = "",
-                connect=None) -> str:
-    """A work object now cites this concern (owner, 2026-09-30: the concern does not become the work,
-    the work is attached to it, so the concern shows how it is progressing). The work gets its record
-    on the concern; an active concern becomes `addressing`: something is being done about it.
-    Returns 'attached' | 'already_applied' | 'unresolved'."""
+def attach_work(concern_ref: str, *, work_id: str, receipt_id: str = "", connect=None) -> str:
+    """A work object cites this concern (the concern does not become the work, the work is attached to it; owner,
+    2026-09-30). The concern keeps a reference only, the work's id and when it was attached; every reader renders the
+    work from the work store when it reads it (concern_view.attempts; owner, 2026-10-09: "attached work should just be
+    a reference to the work object. then its rendered"). Attaching changes nothing else: whether something is being
+    done is read from the work. Returns 'attached' | 'already_applied' | 'unresolved'."""
     with _REGISTER_LOCK:
         register = _load_register(connect)
         found = _find_concern(register, concern_ref)
         if found is None:
             logger.warning("[persist.attach_work] concern ref %r names no single concern", concern_ref)
             return "unresolved"
-        bucket, index, concern = found
+        _, _, concern = found
         if receipt_id and receipt_id in concern.get("work_receipts", []):
             return "already_applied"
         now_iso = datetime.now(timezone.utc).isoformat()
-        concern.setdefault("attached_work", {}).setdefault(work_id, {
-            "work_id": work_id, "title": work.get("title"), "objective": work.get("objective"),
-            "success_criteria": work.get("success_criteria") or "", "attached_at": work.get("attached_at"),
-            "status": "active", "judgments": [], "ended": None})
+        concern.setdefault("attached_work", {}).setdefault(work_id, {"work_id": work_id, "attached_at": now_iso})
         if receipt_id:
             concern.setdefault("work_receipts", []).append(receipt_id)
-        if bucket == "active":
-            _move(register, bucket, index, concern, "addressing")
-            concern["addressing_since_utc"] = now_iso
         register["last_updated_utc"] = now_iso
         _save_register(connect, register)
         return "attached"
@@ -286,233 +231,3 @@ def concern_title(concern_ref: str, *, connect=None) -> Optional[str]:
     """The title of the concern a ref names, or None when it names no single concern."""
     found = _find_concern(_load_register(connect), concern_ref)
     return found[2].get("title") if found else None
-
-
-def concerns_holding_work(work_id: str, *, connect=None) -> List[str]:
-    """Every concern, in any bucket, that holds this work as attached work: the ones it cites, and the
-    ones the brain attached it to (`attach_seen_work`). Concern ids."""
-    register = _load_register(connect)
-    return [c["concern_id"] for b in ("active", "addressing", "dormant", "resolved") for c in register.get(b) or []
-            if work_id in (c.get("attached_work") or {})]
-
-
-def attach_seen_work(concern_id: str, *, work_id: str, work: Dict[str, Any], receipt_id: str,
-                     connect=None) -> str:
-    """The brain found that work bears on a concern it was not made for (it used the work's report on the
-    concern; docs/design/what_was_done_reaches_the_brain_2026-10-03.md): the work is attached here too, so
-    its later judgments and its ending reach this concern by code. `work` carries the work's status now
-    ('active' | 'done' | 'abandoned') and, when it ended, `ended`; the concern is in progress only while
-    the work is. Returns 'attached' | 'already_attached' | 'unresolved'."""
-    with _REGISTER_LOCK:
-        register = _load_register(connect)
-        found = _find_concern(register, concern_id)
-        if found is None:
-            logger.warning("[persist.attach_seen_work] %r names no single concern", concern_id)
-            return "unresolved"
-        bucket, index, concern = found
-        if work_id in (concern.get("attached_work") or {}) or receipt_id in concern.get("work_receipts", []):
-            return "already_attached"
-        now_iso = datetime.now(timezone.utc).isoformat()
-        status = work.get("status") or "active"
-        concern.setdefault("attached_work", {})[work_id] = {
-            "work_id": work_id, "title": work.get("title"), "objective": work.get("objective"),
-            "success_criteria": work.get("success_criteria") or "", "attached_at": now_iso,
-            "status": status, "judgments": [], "ended": work.get("ended")}
-        concern.setdefault("work_receipts", []).append(receipt_id)
-        if bucket == "active" and status == "active":
-            _move(register, bucket, index, concern, "addressing")
-            concern["addressing_since_utc"] = now_iso
-        register["last_updated_utc"] = now_iso
-        _save_register(connect, register)
-        return "attached"
-
-
-def record_judgment(concern_ref: str, *, work_id: str, task: Dict[str, Any], receipt_id: str = "",
-                    connect=None) -> str:
-    """The finalizer judged one task of attached work: its verdict, account, and the owner's replies,
-    kept on the work's record. Returns 'recorded' | 'already_applied' | 'unresolved'; raises when the
-    work was never attached to the concern."""
-    with _REGISTER_LOCK:
-        register = _load_register(connect)
-        found = _find_concern(register, concern_ref)
-        if found is None:
-            logger.warning("[persist.record_judgment] concern ref %r names no single concern", concern_ref)
-            return "unresolved"
-        _, _, concern = found
-        if receipt_id and receipt_id in concern.get("work_receipts", []):
-            return "already_applied"
-        record = (concern.get("attached_work") or {}).get(work_id)
-        if record is None:
-            raise ValueError(f"work {work_id} was never attached to concern {concern['concern_id']}")
-        fin = task.get("finalizer") or {}
-        judgment = {"node_id": task.get("node_id"), "title": task.get("title"), "verdict": fin.get("verdict"),
-                    "next_step": fin.get("next_step"), "outcome": fin.get("outcome"),
-                    "recommendation": fin.get("recommendation"), "at": fin.get("at"),
-                    "replies": list(task.get("replies") or [])}
-        if not any((j.get("node_id"), j.get("at")) == (judgment["node_id"], judgment["at"])
-                   for j in record["judgments"]):
-            record["judgments"].append(judgment)
-        if receipt_id:
-            concern.setdefault("work_receipts", []).append(receipt_id)
-        register["last_updated_utc"] = datetime.now(timezone.utc).isoformat()
-        _save_register(connect, register)
-        return "recorded"
-
-
-def apply_work_outcome(
-    concern_ref: str,
-    *,
-    work_id: str,
-    outcome: str,
-    user_words: str = "",
-    user_response: Optional[dict] = None,
-    connect=None,
-    receipt_id: str = "",
-    work_context: Optional[dict] = None,
-) -> str:
-    """Attached work ended (2026-08-01 audit: outcomes never reached the register — 19 AC-service
-    re-mints, 4 after an explicit user decline).
-
-    ``concern_ref`` is the full concern_id or the rendered short form ``concern:<prefix>``.
-    The work's record on the concern gets its ending (outcome, the reason, the owner's last reply).
-      abandoned + unqualified explicit decline button -> park DORMANT
-      otherwise, once no attached work is in progress   -> `addressing` back to `active`: whether the
-                                                          concern is settled is the brain's decision,
-                                                          made from the ending as a brain event
-    The owner's reply is kept on the work's record, not journalled: it reaches the brain as a ticket event, and
-    the concern's notes are the brain's (docs/design/concerns_as_state_2026-10-09.md, rule 2). Returns
-    'user_declined' | 'ended' |
-    'already_applied' | 'unresolved'. Lives with the other register writers: one lock, one atomic save.
-    """
-    with _REGISTER_LOCK:
-        register = _load_register(connect)
-        found = _find_concern(register, concern_ref)
-        if found is None:
-            logger.warning("[persist.work_outcome] concern ref %r names no single concern — unresolved",
-                           concern_ref)
-            return "unresolved"
-        bucket, index, concern = found
-        if receipt_id and receipt_id in concern.get("work_receipts", []):
-            return "already_applied"
-        now_iso = datetime.now(timezone.utc).isoformat()
-
-        response = dict(user_response or {})
-        context = dict(work_context or {})
-        record = concern.setdefault("attached_work", {}).setdefault(work_id, {
-            "work_id": work_id, "title": context.get("title"), "objective": context.get("title"),
-            "success_criteria": "", "attached_at": None, "status": "active", "judgments": [], "ended": None})
-        record["status"] = outcome
-        record["ended"] = {"outcome": outcome, "at": now_iso,
-                           "reason": (context.get("terminal") or {}).get("reason") or "",
-                           "owner_reply": response, "legacy_user_words": user_words}
-        if receipt_id:
-            concern.setdefault("work_receipts", []).append(receipt_id)
-
-        details = response.get("response_details") or {}
-        history = details.get("response_history") or []
-        latest = history[-1] if history else details
-        # Typed text can qualify or override any button. Leave that interpretation
-        # to the brain; do not infer intent from words or lifecycle state.
-        explicit_decline = (latest.get("meaning") == "decline"
-                            and not str(latest.get("typed_text") or "").strip())
-        if outcome == "abandoned" and explicit_decline:
-            concern["user_declined_at_utc"] = now_iso
-            concern["last_disposition_at_count"] = int(concern.get("reinforcement_count") or 0)
-            if bucket in ("active", "addressing"):
-                _move(register, bucket, index, concern, "dormant")
-            result = "user_declined"
-        else:
-            if bucket == "addressing" and not _work_in_progress(concern):
-                _move(register, bucket, index, concern, "active")
-                concern.pop("addressing_since_utc", None)
-                concern.pop("addressing_reviewed_at_utc", None)
-            result = "ended"
-
-        register["last_updated_utc"] = now_iso
-        _save_register(connect, register)
-        logger.info("[persist.work_outcome] %s -> %s (%s, outcome=%s)",
-                    work_id, concern.get("concern_id"), result, outcome)
-        return result
-
-
-def rederive_attached_work(load_work_objects, *, connect=None) -> List[Dict[str, Any]]:
-    """One-time move to attached work (owner-approved, 2026-09-30), for every concern without an
-    `attached_work` record: its record is built from the work objects citing it (objective, status,
-    each task's latest finalizer judgment and the owner's replies to it) and from its old
-    `work_outcomes` endings; `work_outcomes` is dropped and `work_outcome_receipts` becomes
-    `work_receipts`. Its bucket then follows the work: `addressing` when attached work is in progress,
-    otherwise an `addressing` concern goes back to `active`.
-
-    Returns the concerns that went back to `active`, each with its latest ended work
-    ({concern_id, work}): their work ended before its ending could reach the brain, so the caller
-    reports each ending to the brain as a live ending would be. `load_work_objects()` returns the
-    store's work objects; it is called only when a concern still has no record (new concerns are
-    created with one, concern_door.apply_admission)."""
-    from work_objects.concern_outbox import _replies
-    citing: Dict[str, List[Any]] = {}
-    with _REGISTER_LOCK:
-        register = _load_register(connect)
-        if all("attached_work" in c for b in ("active", "addressing", "resolved", "dormant")
-               for c in register.get(b) or []):
-            return []
-        for wo in load_work_objects():
-            for ref in (wo.constraints or {}).get("concern_refs") or []:
-                found = _find_concern(register, ref)
-                if found:
-                    citing.setdefault(found[2]["concern_id"], []).append(wo)
-        changed, reopened = 0, []
-        for bucket in ("active", "addressing", "resolved", "dormant"):
-            for concern in list(register.get(bucket) or []):
-                if "attached_work" in concern:
-                    continue
-                attached = {}
-                for wo in citing.get(concern["concern_id"], []):
-                    k = wo.constraints or {}
-                    goal = wo.nodes.get(wo.goal_node_id)
-                    terminal = (goal.payload.get("terminal") or {}) if goal else {}
-                    attached[wo.id] = {
-                        "work_id": wo.id, "title": wo.title, "objective": k.get("objective") or wo.title,
-                        "success_criteria": k.get("success_criteria") or "", "attached_at": str(wo.created_at),
-                        "status": wo.status if wo.status in ("done", "abandoned") else "active",
-                        "judgments": [{"node_id": n.id, "title": n.title,
-                                       "verdict": n.payload["finalizer"].get("verdict"),
-                                       "next_step": n.payload["finalizer"].get("next_step"),
-                                       "outcome": n.payload["finalizer"].get("outcome"),
-                                       "recommendation": n.payload["finalizer"].get("recommendation"),
-                                       "at": n.payload["finalizer"].get("at"), "replies": _replies(wo, n.id)}
-                                      for n in sorted(wo.nodes.values(), key=lambda n: str(n.created_at))
-                                      if wo.is_work_unit(n) and n.payload.get("finalizer")],
-                        "ended": {"outcome": wo.status, "at": terminal.get("at") or str(wo.updated_at),
-                                  "reason": terminal.get("reason") or "", "owner_reply": {},
-                                  "legacy_user_words": ""} if wo.status in ("done", "abandoned") else None}
-                for w, old in (concern.pop("work_outcomes", None) or {}).items():
-                    rec = attached.setdefault(w, {"work_id": w, "title": (old.get("context") or {}).get("title"),
-                                                  "objective": (old.get("context") or {}).get("title"),
-                                                  "success_criteria": "", "attached_at": None,
-                                                  "status": old.get("outcome"), "judgments": [], "ended": None})
-                    rec["ended"] = {"outcome": old.get("outcome"), "at": old.get("recorded_at"),
-                                    "reason": ((old.get("context") or {}).get("terminal") or {}).get("reason") or "",
-                                    "owner_reply": old.get("user_response") or {},
-                                    "legacy_user_words": old.get("legacy_user_words") or ""}
-                concern["attached_work"] = attached
-                concern["work_receipts"] = concern.pop("work_outcome_receipts", None) or []
-                in_progress = _work_in_progress(concern)
-                if bucket == "active" and in_progress:
-                    register["active"].remove(concern)
-                    register.setdefault("addressing", []).append(concern)
-                elif bucket == "addressing" and not in_progress:
-                    register["addressing"].remove(concern)
-                    register.setdefault("active", []).append(concern)
-                    concern.pop("addressing_since_utc", None)
-                    concern.pop("addressing_reviewed_at_utc", None)
-                    ended = [w for w in attached.values() if w["ended"]]
-                    if ended:
-                        reopened.append({"concern_id": concern["concern_id"], "title": concern.get("title"),
-                                         "work": max(ended, key=lambda w: str(w["ended"]["at"]))})
-                changed += 1
-        if changed:
-            register["last_updated_utc"] = datetime.now(timezone.utc).isoformat()
-            _save_register(connect, register)
-            logger.info("[persist] attached work derived for %d concern(s); %d back to active",
-                        changed, len(reopened))
-        return reopened

@@ -92,11 +92,6 @@ class ConcernOutboxMixin:
                                'finalizer': n.payload.get('finalizer') or {}}
                               for n in wo.nodes.values() if wo.is_work_unit(n)],
                 },
-                'reply_nodes': [dict(id=n.id, type=n.type, created_by=n.created_by,
-                                    created_at=str(n.created_at), content=n.content,
-                                    payload={'user_reply': n.payload.get('user_reply')})
-                                for n in wo.nodes.values() if n.type == 'evidence'
-                                and (n.payload.get('user_reply') or n.created_by == 'reply')],
             }))
         for position, (kind, payload) in enumerate(rows):
             self._conn.execute(

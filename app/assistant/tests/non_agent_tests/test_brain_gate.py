@@ -342,18 +342,19 @@ def test_work_reports_render_under_their_work_and_attached_work_under_its_concer
     labelled = conversations.render(conversations.build([event], now_utc=NOW, work_labels={"work_a": "W1"}))
     assert "### Work [W1]" in labelled and "### Work work_a" not in labelled
     monkeypatch.setattr(brain_step, "_evidence_text", lambda e: e.get("snippet") or "")
-    from app.assistant.subconscious import work_links
-    monkeypatch.setattr(work_links, "progress", lambda work_id: {
-        "work_id": work_id, "state": "done", "ended_at": "2026-03-10T11:00:00+00:00", "reason": "judged complete",
-        "replanning": False, "dropped": [], "unfinished": [], "to_come": [],
-        "done": [{"title": "Ask", "verdict": "achieved", "at": "2026-03-10T10:30:00+00:00"}]})
-    concern = {"concern_id": "c1", "title": "Stress", "_status": "addressing", "evidence": [],
-               "attached_work": {"work_a": {"work_id": "work_a", "title": "Check in", "objective": "Check in on stress",
-                   "attached_at": "2026-03-10T10:00:00+00:00", "status": "done", "ended": {
-                       "outcome": "done", "at": "2026-03-10T11:00:00+00:00", "reason": "judged complete"},
-                   "judgments": [{"node_id": "ask", "title": "Ask", "verdict": "achieved", "next_step": "",
-                                  "outcome": "He is less stressed.", "at": "2026-03-10T10:30:00+00:00",
-                                  "replies": [{"question": "How is work?", "user_text": "less stress now"}]}]}}}
+    from app.assistant.subconscious import concern_view
+    live = {"work_id": "work_a", "title": "Check in", "objective": "Check in on stress",
+            "attached_at": "2026-03-10T10:00:00+00:00", "status": "done",
+            "ended": {"outcome": "done", "at": "2026-03-10T11:00:00+00:00", "reason": "judged complete"},
+            "progress": {"work_id": "work_a", "state": "done", "ended_at": "2026-03-10T11:00:00+00:00",
+                         "reason": "judged complete", "replanning": False, "dropped": [], "unfinished": [],
+                         "to_come": [], "done": [{"title": "Ask", "verdict": "achieved", "at": "2026-03-10T10:30:00+00:00"}]},
+            "judgments": [{"node_id": "ask", "title": "Ask", "outcome": "He is less stressed.",
+                           "at": "2026-03-10T10:30:00+00:00",
+                           "replies": ['The owner was asked: "How is work?"; said: "less stress now"']}]}
+    monkeypatch.setattr(concern_view, "attempts", lambda c: [live] if c.get("attached_work") else [])
+    concern = {"concern_id": "c1", "title": "Stress", "_status": "active", "evidence": [],
+               "attached_work": {"work_a": {"work_id": "work_a", "attached_at": "2026-03-10T10:00:00+00:00"}}}
     c = brain_step._concern_view("C1", concern)
     rendered = work_context._ENV.from_string("{% include 'shared/brain/concern.j2' %}").render(c=c)
     from app.assistant.utils.time_utils import local_time_text
