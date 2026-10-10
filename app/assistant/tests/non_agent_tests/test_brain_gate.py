@@ -689,3 +689,28 @@ def test_noticer_run_puts_its_issues_in_the_brain_inbox_and_wakes_the_brain(monk
     monkeypatch.setattr(handlers, "_run_subconscious_agent", lambda **kw: {"summary": "no list"})
     with pytest.raises(RuntimeError, match="no issues list"):
         handlers.noticer_run()
+
+
+def test_which_replies_the_work_reports_is_decided_before_the_write(connect):
+    """2026-10-09: `reports` read the concern register inside the write; in production both take the one writer slot,
+    which is not reentrant, so the brain's thread waited on itself and every writer in the app queued behind it."""
+    from contextlib import contextmanager
+    writing = []
+
+    @contextmanager
+    def tracked(write):
+        if write:
+            writing.append(True)
+        try:
+            with connect(write) as c:
+                yield c
+        finally:
+            if write:
+                writing.pop()
+
+    def reports(work_id):
+        assert not writing, "reports ran inside the write"
+        return work_id == "work_concern"
+    replies = [tkt(1, 10, "dayflow_orchestrator", "Going?", "yes", work_id="work_concern"),
+               tkt(2, 5, "dayflow_orchestrator", "Coming?", "no", work_id="work_routine")]
+    assert inbox.ingest_tickets(now_utc=NOW, connect=tracked, fetch=lambda since: replies, reports=reports) == 1

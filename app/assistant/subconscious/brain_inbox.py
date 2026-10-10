@@ -414,12 +414,13 @@ def ingest_tickets(*, now_utc: Optional[datetime] = None, connect=None, fetch=No
     rows = (fetch or _fetch_answered_tickets)(since)
     if reports is None:
         from app.assistant.subconscious.concern_feedback import reports_to_brain as reports
+    # Decided before the write: `reports` reads the concern register, and a read inside the write would wait on the
+    # writer slot this write holds (2026-10-09: the brain's thread waited on itself and every writer queued behind it).
+    rows = [t for t in rows if not (t.get("work_id") and reports(t["work_id"]))]
     received = _iso(now_utc)
     added = 0
     with connect(True) as c:
         for t in rows:
-            if t.get("work_id") and reports(t["work_id"]):
-                continue
             reply = str(t.get("user_text") or "").strip()
             action = str(t.get("user_action") or "").strip()
             text = (f"Ticket ({t['ticket_type']}): {str(t.get('title') or '').strip()}\n"
