@@ -90,6 +90,13 @@ node that runs as soon as its depends_on are complete):
    delivery arrives, an email comes in, an approval lands, another trigger. Describe it plainly ("a reply from the
    brother to the trip email"); the state_mover receives these events and matches them to that description.
 
+A step waiting on a condition that can happen more than once, and that is to be acted on EACH time it happens
+("forward each further email from that address", "tell me whenever the school writes"), is one task, a standing
+watch: give it `repeats_until` as well, the time the watch ends (an absolute ISO datetime with offset): the end the
+owner or the goal gives, or else when the concern it serves no longer matters. After each run it waits for the next
+occurrence on its own, and it closes when its time runs out; never plan one task per occurrence. Only an outside
+event repeats: a clock repetition ("every hour") is not a watch.
+
 Every incoming email and chat message reaches dayflow on its own, and a step waiting on someone's reply is
 woken when it arrives. A step never checks a mailbox or a thread for a reply: waiting for one is a `wake_ref`.
 

@@ -114,7 +114,7 @@ def test_finalizer_sees_retry_bound_before_current_judgment(prior_failures, warn
     from types import SimpleNamespace
     rendered = render_view("finalizer_input", view=SimpleNamespace(
         task=SimpleNamespace(id="reminder", title="Routine check-in", directive="Send once",
-                             success_kind="", status="done", result_error_code=""),
+                             success_kind="", status="done", result_error_code="", watch=None),
         work=SimpleNamespace(failure_episode_count=prior_failures), records=[]),
         result_text="Notification expired unanswered", repeat_failure_limit=2)
     assert ("it reaches the retry bound (2)" in rendered) is warns

@@ -28,7 +28,7 @@ Sharp role separation, one bounded LLM judgment per role, deterministic mechanic
 | work_architect | the STRUCTURE of one goal (DAG + wake gates + dedupe) | `work_architect_apply` projects the delta; a dedupe prune is licensed only after the named survivor is verified live |
 | state_mover | did the awaited event arrive; is now the wrong moment | promotion itself is deterministic `is_ready` (time + deps) |
 | switchboard | WHERE one ready node goes, by READING its goal | two routes only: ticket the user, or run the worker |
-| work_finalizer | was ONE node's GOAL achieved (achieved / achieved_plan_changes / retry / unrecoverable) + an `outcome` account for the planner | sole producer of `closed`; `is_satisfied` keys on `closed`; `_STATUS_FOR` maps each verdict to a status sequence; repeated failure is escalated to `ask_user` deterministically |
+| work_finalizer | was ONE node's GOAL achieved (achieved / achieved_plan_changes / achieved_keep_open / retry / unrecoverable) + an `outcome` account for the planner | sole producer of `closed`; `is_satisfied` keys on `closed`; `_STATUS_FOR` maps each verdict to a status sequence; repeated failure is escalated to `ask_user` deterministically |
 | worker (`work_emi_team_manager`) | HOW a node gets done | render-loop manager; results land as evidence children |
 
 `work_repair` was retired on 2026-09-16; its three dispositions moved to the finalizer's verdicts
@@ -238,12 +238,23 @@ account of what was found and what was not. Then:
 |---|---|---|
 | `achieved` | goal met (failed sub-steps are provenance in `outcome`) | `-> closed` (only `closed` counts toward the goal) |
 | `achieved_plan_changes` | goal met, and the result changes the plan | `-> closed` + `recommendation` (route `plan_changes`); rollup holds the goal until the architect consumes it |
+| `achieved_keep_open` | a STANDING WATCH's run did what it was for, and the watch goes on | `-> waiting` on the same condition (`payload.watch`: the condition, `until`, `waiting_since`, each run's outcome); past `until` it closes as `achieved` does; refused on a task that is not a watch |
 | `retry` | not met; minor; `recommendation` NAMES what will differ | `-> failed -> proposed` (counted once, back in the architect's inbox) |
 | `unrecoverable` | not met, no recovery on this path; `next_step` = stop / new_approach / ask_user (+ `question_for_user`) | `-> failed` + the route |
 
 `retry` must name the difference: re-running a step whose circumstances have not changed reproduces
 its error. A single node's result never ends a whole work object; a finalizer that thinks the goal is
 finished or moot says so in `outcome` (with a `stop` route) and the architect ends it next tick.
+
+**A standing watch** (owner, 2026-10-10: "Success but keep node open if the node is of the type where it needs
+to be ran repeatedly") is one step waiting on an outside event that is acted on each time it happens until a time:
+the architect gives a `wake_ref` step `repeats_until` (store `watch_node`). After each run judged
+`achieved_keep_open` the step waits again on the same condition, from that run (`watch.waiting_since`, which the
+state mover sees, with each arrival the tasks it already woke). Each run is a new dispatch epoch, as a retry is; the
+wake evidence names the attempt it is for. The end is the code's: each planning tick's prep closes a watch waiting
+past its `until` (`watches.end_watches`, store `end_watch`, verdict `watch_ended`), and the scheduler arms a tick
+for the soonest end ahead. A watch woken but not yet run is left to run. Only an event wait repeats: a clock
+repetition is not a watch.
 
 **Verdicts persist on the NODE**, not in memory: `nodes.payload.finalizer`, beside the terminal
 epitaph. The architect that acts on a route runs on a LATER tick, and every tick builds

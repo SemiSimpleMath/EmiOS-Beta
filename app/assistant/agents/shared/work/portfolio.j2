@@ -22,7 +22,7 @@ TASKS (main assignments only)
 {% if task.awaiting_judgment %}  AWAITING JUDGMENT: result exists; completion has not been accepted.
 {% endif %}{% if task.dependencies %}  DEPENDS ON: {% for dep in task.dependencies %}{{ L.get(dep.id, dep.id) }} [{{ dep.status }}; {% if dep.satisfied %}satisfied{% else %}BLOCKED{% endif %}]{% if not loop.last %}, {% endif %}{% endfor %}
 {% endif %}{% if task.wake_kind %}  WAIT: {{ task.wake_kind }}{% if task.wake_at %} | {{ task.wake_at }}{% endif %}{% if task.wake_ref %} | {{ task.wake_ref }}{% endif %}
-{% endif %}{% if task.terminal %}  REASON: {{ task.terminal.get('reason', '') }}
+{% endif %}{% with watch = task.watch %}{% include 'shared/work/watch.j2' %}{% endwith %}{% if task.terminal %}  REASON: {{ task.terminal.get('reason', '') }}
 {% endif %}{% if task.finalizer or task.awaiting_judgment %}{% set finalizer = task.finalizer %}{% include 'shared/work/finalizer_summary.j2' %}{% endif %}
 {% endfor %}
 {% if work.actions %}ACTIONS TAKEN ({{ work.actions|length }}) — already performed; do not repeat without justification

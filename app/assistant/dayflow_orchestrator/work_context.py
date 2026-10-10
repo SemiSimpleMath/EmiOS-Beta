@@ -37,8 +37,19 @@ def source_context(wo):
         source = n.payload.get("external_source")
         if source:
             sources.append({**source, "matched_condition": n.payload.get("matched_condition"),
-                            "interpretation": n.content, "task_id": n.parent_id})
+                            "interpretation": n.content, "task_id": n.parent_id,
+                            "for_attempt": n.payload.get("for_attempt")})
     return sources
+
+
+def watch_data(watch):
+    """A standing watch (store `watch_node`) as its readers see it, in local times; None for a task that runs once."""
+    if not watch:
+        return None
+    return {"condition": watch["condition"], "until": local_stamp(watch["until"]),
+            "waiting_since": local_stamp(watch["waiting_since"]), "ended": local_stamp(watch.get("ended_at")),
+            "runs": [{"attempt": r["attempt"], "at": local_stamp(r["at"]), "outcome": r["outcome"]}
+                     for r in watch.get("runs") or []]}
 
 
 def task_data(wo, node, now=None):
@@ -51,6 +62,7 @@ def task_data(wo, node, now=None):
             "awaiting_judgment": wo.needs_finalization(node),
             "wake_kind": node.wake_kind if node.status in {"proposed", "actionable", "waiting", "dispatched"} else None,
             "wake_at": local_stamp(node.wake_at), "wake_ref": node.wake_ref,
+            "watch": watch_data(node.payload.get("watch")),
             "dependencies": [{"id": nid, "status": wo.nodes[nid].status if nid in wo.nodes else "missing",
                               "satisfied": nid in wo.nodes and wo.is_satisfied(wo.nodes[nid])}
                              for nid in wo.deps_of(node.id)]}

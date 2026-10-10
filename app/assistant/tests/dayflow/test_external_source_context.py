@@ -150,3 +150,36 @@ def test_a_wait_shows_when_it_began_and_an_arrival_the_tasks_that_already_acted_
         state_mover_ids=bb.get_state_value("state_mover_ids"))
     assert "waiting since: " + wait["waiting_since"] in text
     assert 'already acted on by the task "research" (proposed)' in text
+
+
+def test_a_watch_woken_once_shows_the_arrival_as_taken_and_waits_from_its_run():
+    """A standing watch (test_standing_watch.py) is woken once per occurrence: the arrival that woke it shows as taken
+    up by it, the next wait begins at its run, and its worker sees which attempt the arrival is for and what the work
+    already did outside, which it checks before acting (2026-10-10: the second forward of the same email)."""
+    from datetime import datetime, timedelta, timezone
+    store, wid = scenario()
+    store.apply("watch_node", {"work_id": wid, "node_id": "relay",
+                               "until": datetime.now(timezone.utc) + timedelta(hours=3)})
+    persist(prepare(wid, [email("approval", "Yes, choose option B.")]))
+    wo = store.load(wid)
+    text = render_view("worker", view=worker_data(wo, "relay"))
+    assert "(its attempt 1)" in text and "WHAT THIS WORK HAS ALREADY DONE OUTSIDE" in text
+    assert "STANDING WATCH" in text and "it has not run yet" in text
+    store.apply("set_status", {"work_id": wid, "node_id": "relay", "status": "dispatched"})
+    store.apply("record_action", {"work_id": wid, "node_id": "relay", "channel": "email",
+                                  "target": "owner@example.test", "summary": "forwarded the approval"})
+    store.apply("set_status", {"work_id": wid, "node_id": "relay", "status": "done"})
+    store.apply("finalize_task", {"work_id": wid, "node_id": "relay", "expected_dispatch_epoch": 1,
+                                  "finalizer": {"verdict": "achieved_keep_open", "outcome": "forwarded the approval"}})
+    bb = FakeBlackboard()
+    StateMoverPrepNode(name="prep", blackboard=bb, agent_registry={}, tool_registry={})._build_work_object_waits(
+        [email("approval", "Yes, choose option B.")])
+    [wait] = bb.get_state_value("waiting_work_nodes")
+    relay = store.load(wid).nodes["relay"]
+    assert wait["waiting_since"] == local_time_text(relay.payload["watch"]["waiting_since"])
+    assert wait["waiting_for"] == "Approver explicitly approves one appliance"
+    [source] = bb.get_state_value("work_wait_intake")
+    assert source["acted_on_by"] == [{"title": "relay", "status": "waiting"}]
+    text = render_view("worker", view=worker_data(store.load(wid), "relay"))
+    assert "forwarded the approval" in text and "owner@example.test" in text
+    assert "run, attempt 1, judged" in text

@@ -254,6 +254,9 @@ def apply_architect_dag(store, work_id: str, nodes: List[Dict[str, Any]],
             queue("defer_node", {"work_id": work_id, "node_id": nid, "wake_kind": wk,
                                        "wake_at": wake_at, "wake_ref": wake_ref}, actor="architect")
             waits += 1
+        repeats_until = _to_dt(spec.get("repeats_until"))
+        if repeats_until is not None:
+            queue("watch_node", {"node_id": nid, "until": repeats_until}, actor="architect")
 
     if deduplicated:
         queue("redirect_dependencies", {"replacements": {nid: dupes[nid] for nid in deduplicated}})

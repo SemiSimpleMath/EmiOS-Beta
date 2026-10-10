@@ -390,8 +390,10 @@ class DayflowScheduler:
             store = get_dayflow_work_store()
             now_utc = datetime.now(timezone.utc)
 
+            from app.assistant.dayflow_orchestrator.watches import watch_end
             unreadable = set()
             candidates = []  # (wake_at, wo_id, node_id)
+            watch_ends = []  # when each standing watch ends: the planning tick's prep closes it
             for summary in store.list_work_objects():
                 if str(summary.get("status") or "").lower() in ("done", "abandoned"):
                     continue
@@ -404,6 +406,9 @@ class DayflowScheduler:
                                  "skipping it this scan: %s", summary.get("id"), e)
                     unreadable.add(summary["id"])
                     continue
+                end = watch_end(wo)
+                if end is not None and end > now_utc:   # one already past is closed by the next tick's prep
+                    watch_ends.append(end)
                 for node in wo.nodes.values():
                     if not wo.is_work_unit(node) or node.wake_kind != "time" or node.status not in ("proposed", "waiting"):
                         continue
@@ -449,6 +454,10 @@ class DayflowScheduler:
                         logger.error("[DayflowScheduler] failed to arm work-wake %s: %s", job_id, e)
             if armed:
                 logger.info("[DayflowScheduler] armed %d work-object time-wake(s).", armed)
+            if watch_ends:
+                # A sooner run already scheduled is kept (_schedule_tick).
+                self._schedule_tick(delay_seconds=(min(watch_ends) - now_utc).total_seconds() + 1,
+                                    reason="watch_end")
         except Exception as e:
             logger.error("[DayflowScheduler] _arm_work_node_wakes failed: %s", e)
             logger.debug("[DayflowScheduler] arm work-wake exception details", exc_info=True)

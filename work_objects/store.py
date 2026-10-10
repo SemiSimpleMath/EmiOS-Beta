@@ -136,6 +136,19 @@ def _satisfying_children(wo: WorkObject, goal) -> str:
     return "every owned step finished: " + "; ".join(parts)
 
 
+def _finalizer_entry(fin: dict, now: str) -> dict:
+    """The finalizer's verdict as it is kept on the node it judged (`payload.finalizer`)."""
+    return {
+        "verdict": str(fin.get("verdict") or ""),
+        "outcome": str(fin.get("outcome") or ""),
+        "recommendation": str(fin.get("recommendation") or ""),
+        "next_step": str(fin.get("next_step") or ""),
+        "question_for_user": str(fin.get("question_for_user") or ""),
+        "escalated": bool(fin.get("escalated")),
+        "at": now,
+    }
+
+
 def _count_unmet_attempt(wo: WorkObject, node, now: str) -> None:
     """Record, ON THE GOAL, that one more attempt did not achieve it.
 
@@ -449,7 +462,8 @@ class WorkStore(ConcernOutboxMixin, BeliefOutboxMixin, ExecutionStoreMixin):
         # (set_work_status, last).
         allowed = {"add_node", "add_edge", "set_status", "edit_node", "defer_node",
                    "consume_finalizer_instruction", "redirect_dependencies", "revise_goal",
-                   "consume_goal_instructions", "record_goal_review", "set_work_status", "instruct_goal"}
+                   "consume_goal_instructions", "record_goal_review", "set_work_status", "instruct_goal",
+                   "watch_node"}
         for change in data.get("operations", []):
             op = change.get("op")
             if op not in allowed or op not in self._HANDLERS:
@@ -536,8 +550,10 @@ class WorkStore(ConcernOutboxMixin, BeliefOutboxMixin, ExecutionStoreMixin):
             raise StaleResult("stale or duplicate judgment")
         fin = dict(data["finalizer"])
         verdict = fin.get("verdict")
-        if verdict not in {"achieved", "achieved_plan_changes", "retry", "unrecoverable"}:
+        if verdict not in {"achieved", "achieved_plan_changes", "achieved_keep_open", "retry", "unrecoverable"}:
             raise ValueError("invalid finalizer verdict")
+        if verdict == "achieved_keep_open" and not node.payload.get("watch"):
+            raise ValueError(f"achieved_keep_open: {node.id!r} is not a standing watch")
         if not str(fin.get("outcome") or "").strip():
             raise ValueError("finalizer outcome is required")
         fin["escalated"] = False
@@ -565,6 +581,24 @@ class WorkStore(ConcernOutboxMixin, BeliefOutboxMixin, ExecutionStoreMixin):
                 # The finalizer may accept a result despite an execution error.
                 # Normalize inside this transaction; no intermediate state is published.
                 node.status = "done"
+            watch = node.payload.get("watch")
+            if watch:
+                watch.setdefault("runs", []).append({"attempt": epoch, "at": now, "verdict": verdict,
+                                                     "outcome": str(fin.get("outcome") or "")})
+            if verdict == "achieved_keep_open" and datetime.fromisoformat(watch["until"]) > datetime.fromisoformat(now):
+                # A STANDING WATCH waits again for its next occurrence (owner, 2026-10-10: "Success but keep node
+                # open if the node is of the type where it needs to be ran repeatedly"). Its success does not
+                # close it: the run is recorded (its evidence, and `watch.runs`), and the task parks on the same
+                # condition, waiting from now. Each later run is a new dispatch epoch, as a retry is. Past its
+                # `until` the watch is over and the run closes it like `achieved`.
+                node.status = "waiting"
+                node.wake_kind, node.wake_at, node.wake_ref = "event", None, watch["condition"]
+                watch["waiting_since"] = now
+                node.payload["finalizer"] = _finalizer_entry(fin, now)
+                node.payload["finalizer"]["dispatch_epoch"] = epoch
+                node.payload["finalized_epoch"] = epoch
+                node.updated_at = now
+                return
         self._op_set_status(wo, {"node_id": node.id, "status": target, "reason": fin["outcome"],
                                  "verdict": verdict, "finalizer": fin}, now, "finalizer")
         node.payload["finalizer"]["dispatch_epoch"] = epoch
@@ -801,16 +835,7 @@ class WorkStore(ConcernOutboxMixin, BeliefOutboxMixin, ExecutionStoreMixin):
             # of a tick is thrown away before the reader exists. The graph is the return channel for
             # results; it is the return channel for judgments too. Sits beside `terminal` rather
             # than in `content`, which is the node's immutable directive.
-            fin = data["finalizer"]
-            node.payload["finalizer"] = {
-                "verdict": str(fin.get("verdict") or ""),
-                "outcome": str(fin.get("outcome") or ""),
-                "recommendation": str(fin.get("recommendation") or ""),
-                "next_step": str(fin.get("next_step") or ""),
-                "question_for_user": str(fin.get("question_for_user") or ""),
-                "escalated": bool(fin.get("escalated")),
-                "at": now,
-            }
+            node.payload["finalizer"] = _finalizer_entry(data["finalizer"], now)
         if data.get("note") is not None:
             # Append-only lifecycle note (e.g. the sweeper's timeout reason).
             # Lives in the payload so the node's `content` — its immutable
@@ -934,6 +959,39 @@ class WorkStore(ConcernOutboxMixin, BeliefOutboxMixin, ExecutionStoreMixin):
         if node.status == "dispatched" and wake_kind != "user_reply":
             node.status = "waiting"
         node.updated_at = now
+
+    def _op_watch_node(self, wo, data, now, actor=None) -> None:
+        """Make a main task waiting on an outside event a STANDING WATCH: it runs each time its condition happens, and
+        after each run achieved it waits again (`achieved_keep_open`), until `until` (the architect's `repeats_until`).
+        The condition is kept with the watch, since a wake clears the task's own."""
+        node = wo.nodes.get(data["node_id"])
+        if node is None or not wo.is_work_unit(node):
+            raise ValueError("watch_node: a watch is a main task of this goal")
+        if node.wake_kind != "event" or not str(node.wake_ref or "").strip():
+            raise ValueError(f"watch_node: {node.id!r} does not wait on an outside event; only an event wait repeats")
+        until = _iso(data["until"])
+        if datetime.fromisoformat(until) <= datetime.fromisoformat(now):
+            raise ValueError(f"watch_node: {node.id!r} would run until {until}, which has passed")
+        node.payload["watch"] = {**(node.payload.get("watch") or {}), "condition": node.wake_ref, "until": until,
+                                 "waiting_since": (node.payload.get("watch") or {}).get("waiting_since") or now}
+        node.updated_at = now
+
+    def _op_end_watch(self, wo, data, now, actor=None) -> None:
+        """A standing watch whose time has run out, waiting for its next occurrence, is closed: it did what it was for
+        each time its condition happened (its `watch.runs`, none when it never did). A watch woken but not yet run
+        is left to run; its judgment then closes it."""
+        node = wo.nodes.get(data["node_id"])
+        watch = node.payload.get("watch") if node is not None else None
+        if not watch or node.status != "waiting" or node.wake_kind != "event":
+            raise ValueError(f"end_watch: {data['node_id']!r} is not a standing watch waiting for its next occurrence")
+        if datetime.fromisoformat(watch["until"]) > datetime.fromisoformat(now):
+            raise ValueError(f"end_watch: {node.id!r} runs until {watch['until']}")
+        runs = len(watch.get("runs") or [])
+        node.status = "done"    # waiting -> closed passes through done inside this transaction, as a judgment does
+        node.wake_kind, node.wake_at, node.wake_ref = None, None, None
+        watch["ended_at"] = now
+        self._op_set_status(wo, {"node_id": node.id, "status": "closed", "verdict": "watch_ended",
+                                 "reason": f"the watch ran its time; it acted {runs} time(s)"}, now, actor)
 
     def _op_record_action(self, wo, data, now, actor=None) -> None:
         """Append one outward-facing act to this work object's ledger.
@@ -1110,5 +1168,7 @@ WorkStore._HANDLERS = {
     "attach_pod": WorkStore._op_attach_pod,
     "consume_finalizer_instruction": WorkStore._op_consume_finalizer_instruction,
     "defer_node": WorkStore._op_defer_node,
+    "watch_node": WorkStore._op_watch_node,
+    "end_watch": WorkStore._op_end_watch,
     "record_action": WorkStore._op_record_action,
 }

@@ -24,6 +24,9 @@ constraint on it:
                              rollup completes the WorkObject.
   - ACHIEVED_PLAN_CHANGES -> the same close, PLUS a recommendation on the node; the architect revises
                              the graph from it next tick (the rollup holds the goal open meanwhile).
+  - ACHIEVED_KEEP_OPEN    -> a STANDING WATCH only (the architect's `repeats_until`): the run is recorded and
+                             the task waits again for its condition's next occurrence (`waiting`); past the
+                             watch's end it closes as ACHIEVED does (owner, 2026-10-10).
   - RETRY                 -> `failed` (counted as an attempt that did not land) then `proposed` — back
                              in the architect's inbox with a recommendation naming what will differ.
   - UNRECOVERABLE         -> `failed`, with `next_step` typed: stop / new_approach / ask_user. The
@@ -84,6 +87,8 @@ _REPEAT_FAILURE_LIMIT = 2
 _STATUS_FOR = {
     "achieved": ("closed",),
     "achieved_plan_changes": ("closed",),
+    # A standing watch (store `watch_node`) waits again for its next occurrence; past its end it closes.
+    "achieved_keep_open": ("waiting",),
     "retry": ("failed", "proposed"),
     "unrecoverable": ("failed",),
 }

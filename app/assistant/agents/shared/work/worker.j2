@@ -6,7 +6,16 @@ task: {{ view.task.directive }}
 success when: {{ view.task.success_kind }}
 parent goal: {{ view.work.objective }}
 {% if view.work.success_criteria %}goal success criteria: {{ view.work.success_criteria }}{% endif %}
+{% with watch = view.task.watch %}{% include 'shared/work/watch.j2' %}{% endwith %}
 {% if not view.owning_task %}{% with task = view.task, receipts = view.earlier_receipts %}{% include 'shared/work/prior_attempt.j2' %}{% endwith %}{% endif %}
+## WHAT THIS WORK HAS ALREADY DONE OUTSIDE
+{% for action in view.work.actions %}- {{ action.when }} | {{ action.channel }} -> {{ action.target }} [{{ action.outcome }}] {{ action.summary }}
+{% else %}(nothing yet)
+{% endfor %}
+An arrival that woke this task (in the source context, "task receiving event") was matched to it by the state
+mover's judgment, which is not a check. Before acting on it, compare it with what this work has already done and
+with your task's earlier attempts: an arrival this work already handled is not handled again. Then record that it
+was already handled, and by what, and act on nothing outside.
 ## YOUR INTERNAL CHECKLIST — provenance, not orchestrator tasks
 Echo [id:...] to update an item, omit the id to add one. Mark done only after a result is recorded.
 {% for item in view.checklist %}- [id:{{ item.id }}] [{{ item.status }}] {{ item.title }}

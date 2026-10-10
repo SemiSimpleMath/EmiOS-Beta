@@ -1,5 +1,6 @@
 """The planning tick's first stage: what every later stage reads, prepared once.
 
+- Standing watches whose time has run out are closed (dayflow_orchestrator/watches.py).
 - Pending concern and belief feedback is delivered (receipts a crash left undelivered; concern_feedback,
   belief_engine/work_feedback).
 - The reminders the fixed scheduler sent recently (`scheduled_reminder_history`), read by the architect and the
@@ -28,6 +29,8 @@ class WorkPrepNode(ControlNode):
 
         self.blackboard.update_state_value("next_agent", None)
         store = get_dayflow_work_store()
+        from app.assistant.dayflow_orchestrator.watches import end_watches
+        end_watches(store, datetime.now(timezone.utc))    # before the feedback, which then carries their closing
         recover_pending_concern_feedback(store)
         recover_pending_belief_feedback(store)
         self.blackboard.update_state_value("scheduled_reminder_history",

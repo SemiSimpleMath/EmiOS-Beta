@@ -11,7 +11,7 @@
 {% endif %}{% endif %}  source summary (not a verbatim quote): {{ source.get('summary', '') }}
 {% if source.get('excerpt') and not (compact_sources | default(false)) %}  source excerpt: {{ source.excerpt }}
 {% endif %}  full source: {% if source.get('pod_id') and L.get(source.pod_id) %}[{{ L[source.pod_id] }}]{% else %}{{ source.get('pod_id') or 'no pod reference recorded' }}{% endif %}
-{% if source.get('matched_condition') %}  task receiving event: {{ L.get(source.get('task_id', ''), source.get('task_id', '')) }}
+{% if source.get('matched_condition') %}  task receiving event: {{ L.get(source.get('task_id', ''), source.get('task_id', '')) }}{% if source.get('for_attempt') %} (its attempt {{ source.for_attempt }}){% endif %}
   matched waiting condition: {{ source.matched_condition }}
   wake interpretation (agent judgment): {{ source.get('interpretation', '') }}
 {% endif %}{% endfor %}

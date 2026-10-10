@@ -38,6 +38,7 @@ class FakeNode:
         self.status = status
         self.type = "subtask"
         self.parent_id = "goal"
+        self.payload = {}
 
 
 class FakeWO:

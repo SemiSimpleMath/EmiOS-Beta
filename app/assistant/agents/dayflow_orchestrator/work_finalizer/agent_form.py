@@ -25,7 +25,7 @@ from typing import List
 
 from pydantic import BaseModel, Field, model_validator
 
-VERDICTS = ("achieved", "achieved_plan_changes", "retry", "unrecoverable")
+VERDICTS = ("achieved", "achieved_plan_changes", "achieved_keep_open", "retry", "unrecoverable")
 NEXT_STEPS = ("stop", "new_approach", "ask_user")
 
 
@@ -44,6 +44,8 @@ class AgentForm(BaseModel):
         "'achieved_plan_changes' — the goal was met, AND what came back changes the plan around it: some "
         "existing steps are now moot or wrong, or new ones are needed. Say what should change in "
         "`recommendation`.\n"
+        "'achieved_keep_open' — ONLY for a task marked as a STANDING WATCH: this run did what it was for, and the "
+        "watch goes on; the task waits for the next occurrence of its condition, until its end.\n"
         "'retry' — the goal was NOT met, the failure is minor, and it makes sense to try again later or a "
         "little differently. `recommendation` must say WHAT will be different (a precondition, a route, "
         "a time). The node goes back to the architect's inbox.\n"
@@ -83,9 +85,9 @@ class AgentForm(BaseModel):
             raise ValueError(f"verdict must be one of {VERDICTS}")
         if not str(self.outcome or "").strip():
             raise ValueError("outcome is required on every verdict — it is what the planner reads")
-        if v == "achieved":
+        if v in ("achieved", "achieved_keep_open"):
             if ns:
-                raise ValueError("next_step must be empty when verdict='achieved'")
+                raise ValueError(f"next_step must be empty when verdict='{v}'")
             return self
         if not str(self.recommendation or "").strip():
             raise ValueError(f"recommendation is required when verdict='{v}' — say what should happen")

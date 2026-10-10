@@ -28,6 +28,11 @@ you do not.
   steps are now moot or wrong, or new ones are needed. Say what should change in `recommendation`; the
   architect turns it into graph changes. Do not design the nodes.
 
+- ACHIEVED_KEEP_OPEN — only for a task marked as a STANDING WATCH: this run did what it was for (or found that the
+  occurrence that woke it was already handled, so nothing was owed), and the watch goes on: the task waits for the
+  next time its condition happens, until its end. The code ends the watch when its time runs out. When the result
+  shows that nothing is left to watch for (the goal's own end was reached), use ACHIEVED, which closes it.
+
 - RETRY — not met; the failure is minor and it makes sense to try again later or a little differently.
   `recommendation` must name what will be DIFFERENT: a precondition ("the account needs re-authorising
   first"), a route, or a time ("after 5pm when they are home"). The node goes back to the architect's

@@ -1,0 +1,4 @@
+{% if watch %}  STANDING WATCH: it runs each time this happens: {{ watch.condition }}; until {{ watch.until }}{% if watch.ended %}; ended {{ watch.ended }}{% else %}; waiting for the next occurrence since {{ watch.waiting_since }}{% endif %}
+{% for run in watch.runs %}  run, attempt {{ run.attempt }}, judged {{ run.at }}: {{ run.outcome }}
+{% else %}  it has not run yet
+{% endfor %}{% endif %}

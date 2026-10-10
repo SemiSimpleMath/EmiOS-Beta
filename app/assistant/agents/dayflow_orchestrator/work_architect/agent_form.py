@@ -44,6 +44,11 @@ class WorkNode(BaseModel):
         description="PROSE wake — the node parks until this natural-language condition is met: an OUTSIDE "
         "event someone/something else must produce ('a reply from the brother to the trip email', 'the "
         "package is delivered', 'an approval lands'). The state_mover matches it against reality.")
+    repeats_until: Optional[str] = Field(
+        default=None,
+        description="With a wake_ref only: the task is a STANDING WATCH. It runs each time its condition happens "
+        "('each further email from the school') and after each run waits for the next, until this time — an ISO "
+        "8601 datetime with timezone offset. Empty for a task that runs once.")
     wait_reason: Optional[str] = Field(
         default=None, description="Human-readable reason this node waits.")
 
@@ -51,6 +56,9 @@ class WorkNode(BaseModel):
     def _validate_wake(self):
         if str(self.wake_at or "").strip() and str(self.wake_ref or "").strip():
             raise ValueError("a node waits on a time (wake_at) OR a condition (wake_ref), not both.")
+        if str(self.repeats_until or "").strip() and not str(self.wake_ref or "").strip():
+            raise ValueError("repeats_until is for a task waiting on a condition (wake_ref): only an outside "
+                             "event repeats, never a clock time.")
         return self
 
 

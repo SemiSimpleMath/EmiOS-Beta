@@ -215,7 +215,10 @@ class StateMoverPersistNode(ControlNode):
                             "content": evidence, "pod_ref": source.get("pod_id") or None,
                             "payload": {"external_source": dict(source),
                                         "context_role": "external_wake",
-                                        "matched_condition": candidate["waiting_for"]}}},
+                                        "matched_condition": candidate["waiting_for"],
+                                        # The attempt this arrival starts: a standing watch is woken once per
+                                        # occurrence, and its worker must tell this run's arrival from earlier ones.
+                                        "for_attempt": int(node.payload.get("dispatch_epoch") or 0) + 1}}},
                     ],
                 }, actor="state_mover")
                 woken.append(tid)

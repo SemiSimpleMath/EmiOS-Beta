@@ -2,7 +2,9 @@
 JUST-COMPLETED NODE — id: {{ view.task.id }} | title: {{ view.task.title }}
 FULL TASK: {{ view.task.directive }}
 SUCCESS CONDITION: {{ view.task.success_kind }}
-TOOL STATUS: {% if view.task.status == 'failed' %}the tool reported it could not run{% else %}the call returned{% endif %}. That is input, not the verdict — judge whether the node's GOAL was achieved from the result below.
+{% if view.task.watch %}THIS TASK IS A STANDING WATCH: each time its condition happens it runs, and after a run that did what it was for it waits for the next occurrence, until its end. The earlier runs and how each was judged:
+{% with watch = view.task.watch %}{% include 'shared/work/watch.j2' %}{% endwith %}
+{% endif %}TOOL STATUS: {% if view.task.status == 'failed' %}the tool reported it could not run{% else %}the call returned{% endif %}. That is input, not the verdict — judge whether the node's GOAL was achieved from the result below.
 {% if view.work.failure_episode_count + 1 >= repeat_failure_limit %}
 {{ view.work.failure_episode_count }} PRIOR ATTEMPTS HAVE NOT ACHIEVED THIS GOAL since the last successful finalized task, under one task id or another. If this attempt is also unmet, it reaches the retry bound ({{ repeat_failure_limit }}). Another try of the same shape will not help. Unless the appropriate next step is STOP, if this result is not achieved, the runtime will escalate it to ask the user whatever would unblock it — so put that question in `question_for_user` yourself, precisely. For unanswered contact, use STOP at the bound instead of asking permission to try again.
 {% endif %}
