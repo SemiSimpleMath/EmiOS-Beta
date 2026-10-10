@@ -1,5 +1,11 @@
 """Work feedback — whatever is done reports to the concerns that hold it, and to the brain.
 
+Since 2026-10-09 only work connected to a concern reports to the brain (owner: "if the work is not connected to a
+concern it should not come back to the brain. brain gets the info via tickets anyways, also the context calendar is
+updated"). Until then every work object's judgments and ending were brain events, the gate routed the reports of
+routine calendar work to the nearest concern by theme, and the brain filed them there (a dog-walk follow-up under a
+birthday): 43 of the 63 events the gate routed on 2026-10-09 were work reports.
+
 WorkStore commits a receipt in the same transaction as each change (work_objects/concern_outbox.py):
 the work was attached (it cites a concern), the finalizer judged one of its tasks, or the work ended,
 including automatic rollup. Every work object's judgments and ending are receipts, whether it cites a
@@ -131,6 +137,18 @@ def report_earlier_endings(reopened) -> int:
     return added
 
 
+def reports_to_brain(work_id: str, *, store=None) -> bool:
+    """Whether a work object's judgments and ending reach the brain: only work connected to a concern (it cites one,
+    or a concern holds it). Owner, 2026-10-09: "if the work is not connected to a concern it should not come back to
+    the brain. brain gets the info via tickets anyways"."""
+    from app.assistant.subconscious import persist
+    if store is None:
+        from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+        store = get_dayflow_work_store()
+    wo = store.load(work_id)
+    return bool((wo.constraints or {}).get("concern_refs")) or bool(persist.concerns_holding_work(work_id))
+
+
 def _deliver_receipt(store, receipt):
     from types import SimpleNamespace
     from app.assistant.subconscious import brain_inbox, brain_wake, persist
@@ -154,7 +172,9 @@ def _deliver_receipt(store, receipt):
             receipt_id=receipt['id'], work_context=payload['context']) for ref in refs]
     if 'unresolved' in results:
         raise ValueError('one or more concern references could not be resolved')
-    if kind != 'attached':
+    # Only work connected to a concern reports to the brain (reports_to_brain); other work's outcome reaches its belief
+    # and the day's context, and what the owner said in its tickets reaches the brain as a ticket reply.
+    if kind != 'attached' and refs:
         brain_inbox.add_work_event(
             work_id=work_id, receipt_id=receipt['id'], occurred_at=receipt['created_at'],
             text=_event_text(receipt, [t for t in (persist.concern_title(ref) for ref in refs) if t]))

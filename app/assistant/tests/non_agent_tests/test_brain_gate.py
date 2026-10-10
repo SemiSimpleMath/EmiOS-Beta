@@ -599,27 +599,30 @@ def test_calendar_changes_render_as_their_own_group_and_wake_the_brain(monkeypat
 
 # ── ticket replies (2026-10-09) ────────────────────────────────────────────
 
-def tkt(i, minutes, kind, title, reply, action="answer"):
+def tkt(i, minutes, kind, title, reply, action="answer", work_id=None):
     return {"ticket_id": f"t{i}", "ticket_type": kind, "title": title, "message": f"{title}.", "user_action": action,
-            "user_text": reply, "responded_at": NOW - timedelta(minutes=minutes)}
+            "user_text": reply, "responded_at": NOW - timedelta(minutes=minutes), "work_id": work_id}
 
 
-def test_every_ticket_reply_reaches_the_brain_but_dayflows_own(connect):
+def test_every_ticket_reply_reaches_the_brain_but_one_its_work_reports(connect):
     """Until 2026-10-09 the brain read no ticket: the reply "This is not something you can set a recurring schedule
-    for. You do this every night." to a question on 10-03 reached no decider. Replies to dayflow's own tickets return
-    to the task that asked and reach the brain in its work report, so they are not read twice."""
+    for. You do this every night." to a question on 10-03 reached no decider. A reply to a task of work connected to
+    a concern reaches the brain in that work's report, so it is not read twice; every other reply, a dayflow task's
+    included, is read here (owner: "brain gets the info via tickets anyways")."""
     replies = [tkt(1, 30, "ask_user", "Set a recurring thermostat schedule?", "You do this every night."),
                tkt(2, 20, "cron_reminder", "Vitamins", "stop reminding me at this time", action="dismiss"),
-               tkt(3, 10, "dayflow_orchestrator", "Did you take the dogs out?", "yes")]
+               tkt(3, 10, "dayflow_orchestrator", "Going to homecoming?", "Not going", work_id="work_routine"),
+               tkt(4, 5, "dayflow_orchestrator", "Did the library get the book?", "yes", work_id="work_concern")]
     fetch = lambda since: [t for t in replies if t["responded_at"] > since]
-    assert inbox.ingest_tickets(now_utc=NOW, connect=connect, fetch=fetch) == 2
+    reports = lambda work_id: work_id == "work_concern"
+    assert inbox.ingest_tickets(now_utc=NOW, connect=connect, fetch=fetch, reports=reports) == 3
     rows = {e["source_ref"].split(":")[1]: e for e in inbox.pending(connect)}
-    assert set(rows) == {"t1", "t2"}
+    assert set(rows) == {"t1", "t2", "t3"}
     assert rows["t1"]["text"] == ("Ticket (ask_user): Set a recurring thermostat schedule?\n"
                                   "Set a recurring thermostat schedule?.\nThe owner replied: You do this every night. "
                                   "(action: answer)")
     assert rows["t2"]["speaker"] == "owner" and "stop reminding me at this time" in rows["t2"]["text"]
-    assert inbox.ingest_tickets(now_utc=NOW, connect=connect, fetch=fetch) == 0, "once"
+    assert inbox.ingest_tickets(now_utc=NOW, connect=connect, fetch=fetch, reports=reports) == 0, "once"
     assert inbox.ready(inbox.pending(connect), NOW) == inbox.pending(connect), "ready at once"
     assert brain_step._evidence(rows["t1"])["kind"] == "ticket_reply"
 
@@ -627,7 +630,8 @@ def test_every_ticket_reply_reaches_the_brain_but_dayflows_own(connect):
 def test_the_first_look_reaches_back_an_hour(connect):
     old = [tkt(1, 120, "cron_reminder", "Stretch", "Done"), tkt(2, 30, "cron_reminder", "Water", "Done")]
     assert inbox.ingest_tickets(now_utc=NOW, connect=connect, fetch=lambda since: [t for t in old
-                                                                                   if t["responded_at"] > since]) == 1
+                                                                                   if t["responded_at"] > since],
+                                reports=lambda work_id: False) == 1
 
 
 def test_ticket_replies_render_as_their_own_group_and_wake_the_brain():

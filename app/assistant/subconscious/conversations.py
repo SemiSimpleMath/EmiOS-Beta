@@ -292,7 +292,7 @@ def _ticket_group(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     turns = sorted((_event_turn(e) for e in events), key=lambda t: t["at"])
     return [{"heading": "Tickets answered",
              "description": "The owner's replies to tickets the assistant raised (a scheduled reminder, a notice, a "
-                            "question): each shows the ticket's words, then the owner's reply.",
+                            "question, a task's ask): each shows the ticket's words, then the owner's reply.",
              "first_at": turns[0]["at"],
              "conversations": [{"label": "Answered", "turns": _render_turns(turns)}]}]
 

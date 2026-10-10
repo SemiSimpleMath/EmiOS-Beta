@@ -288,14 +288,17 @@ def test_noticer_prompt_renders_handling_policy():
     assert 'attached_work' in prompt
 
 
-def test_work_citing_no_concern_still_reports_to_the_brain(setup):
+def test_work_connected_to_no_concern_does_not_report_to_the_brain(setup):
+    """Owner, 2026-10-09: "if the work is not connected to a concern it should not come back to the brain. brain gets
+    the info via tickets anyways". Until then every work object reported, and routine work's reports were filed under
+    the nearest concern by theme. Its receipts are still delivered (acknowledged)."""
     store,path,inbox=setup
     wid=graph(store,refs=[])
     finish(store,wid)
     assert [r['outcome'] for r in store.pending_concern_feedback()]==['judged','done']
     assert concern_feedback.recover_pending_concern_feedback(store)==2
-    judged, ended = work_events(inbox)
-    assert judged['gate_status']=='pending' and 'Made for the concerns' not in judged['text']
+    assert work_events(inbox)==[] and store.pending_concern_feedback()==[]
+    assert concern_feedback.reports_to_brain(wid, store=store) is False
     assert path.read()['active'][0].get('attached_work', {})=={}   # no concern holds it
 
 
@@ -313,7 +316,7 @@ def test_a_concern_the_brain_attached_hears_later_judgments(setup):
 
 def test_a_judgment_carries_the_research_findings_its_task_recorded_whole(setup,monkeypatch):
     store,path,inbox=setup
-    wid=graph(store,refs=[])
+    wid=graph(store)
     store.apply('add_node', {'work_id':wid,'id':'search','type':'subtask','title':'Search the shop sites',
         'parent_id':'main','status':'done','pod_ref':'datapod:research_finding:abc'})
     store.apply('add_node', {'work_id':wid,'id':'note','type':'evidence','title':'An email',
