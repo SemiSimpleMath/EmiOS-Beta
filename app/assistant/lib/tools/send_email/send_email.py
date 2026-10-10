@@ -305,6 +305,7 @@ class SendEmail(BaseTool):
                     subject=subject,
                     body=body,
                     attachment_paths=attachment_paths or None,
+                    headers=_own_mail_headers(),
                 )
             finally:
                 if tempdir:
@@ -365,6 +366,20 @@ class SendEmail(BaseTool):
 
     def publish_msg(self, msg):
             return msg
+
+
+def _own_mail_headers() -> dict:
+    """The marks that let the fetch know this email as the assistant's own, with the work and task it was sent for
+    when it runs in a work session (gmail_api_client.SENT_BY_ASSISTANT_HEADER)."""
+    from app.assistant.dayflow_orchestrator.action_ledger import current_work_context
+    from app.assistant.lib.core_tools.email_tool.utils.gmail_api_client import (
+        SENT_BY_ASSISTANT_HEADER, SENT_FOR_TASK_HEADER, SENT_FOR_WORK_HEADER)
+    headers = {SENT_BY_ASSISTANT_HEADER: "true"}
+    work_id, node_id = current_work_context()
+    if work_id:
+        headers[SENT_FOR_WORK_HEADER] = work_id
+        headers[SENT_FOR_TASK_HEADER] = node_id
+    return headers
 
 
 def get_tool_class():

@@ -35,6 +35,18 @@ _EMAIL_PARSER_SCOPE = ScopeContext(
     resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
 )
 
+def sent_by_assistant(email_message, label_ids) -> dict:
+    """The assistant's own mark on an email it sent (send_email puts the headers on), as email fields: empty for any
+    other email. Gmail's SENT label proves this account sent it; a stranger can write the header but not the label."""
+    from app.assistant.lib.core_tools.email_tool.utils.gmail_api_client import (
+        SENT_BY_ASSISTANT_HEADER, SENT_FOR_TASK_HEADER, SENT_FOR_WORK_HEADER)
+    if email_message.get(SENT_BY_ASSISTANT_HEADER) is None or "SENT" not in label_ids:
+        return {}
+    return {"sent_by_assistant": True,
+            "sent_for_work": email_message.get(SENT_FOR_WORK_HEADER),
+            "sent_for_task": email_message.get(SENT_FOR_TASK_HEADER)}
+
+
 class EmailUtils:
     """Handles email fetching, processing, and storing using Gmail API."""
 
@@ -232,6 +244,7 @@ class EmailUtils:
                     "account_id": resolved_account_id,
                     "direction": "inbound",
                     "body": email_body,
+                    **sent_by_assistant(email_message, full_email["label_ids"]),
                 }
 
                 importance_raw = email_data.get("importance")
@@ -328,7 +341,11 @@ class EmailUtils:
                                 e,
                             )
 
-                    sender_name = str(email_data.get("sender") or "").strip() or "Unknown Sender"
+                    if email_data.get("sent_by_assistant"):
+                        from app.assistant.pod_store.email_pods import email_sender_line
+                        sender_name = email_sender_line(email_data)
+                    else:
+                        sender_name = str(email_data.get("sender") or "").strip() or "Unknown Sender"
                     subject = str(email_data.get("subject") or "").strip() or "[No Subject]"
                     summary = str(email_data.get("summary") or "").strip()
                     importance = int(email_data.get("importance", 0) or 0)
@@ -443,6 +460,7 @@ class EmailUtils:
                 "thread_id": str(email_meta.get("threadId") or ""),
                 "data_type": "email",
                 "account_id": resolved_account_id,
+                **sent_by_assistant(email_message, full_email["label_ids"]),
             }
 
             # Require a valid importance; if missing or invalid, skip
@@ -608,6 +626,7 @@ class EmailUtils:
                 "thread_id": str(hit.get("threadId") or ""),
                 "data_type": "email",
                 "account_id": resolved_account_id,
+                **sent_by_assistant(email_message, full_email["label_ids"]),
             }
 
             importance_raw = email_data.get("importance")

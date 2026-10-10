@@ -29,6 +29,14 @@ SCOPES = [
     'https://www.googleapis.com/auth/gmail.modify'  # Required to mark emails as read
 ]
 
+# Headers the send_email tool puts on every email the assistant sends. It sends from the owner's account, so an email
+# it sends to the owner lands in the owner's inbox with the owner as its sender; the fetch reads these to tell the
+# assistant's own mail from the owner's (email_utils.sent_by_assistant). Until 2026-10-10 nothing marked it, and the
+# brain read the assistant's forward as the owner forwarding.
+SENT_BY_ASSISTANT_HEADER = "X-Assistant-Sent"
+SENT_FOR_WORK_HEADER = "X-Assistant-Work"
+SENT_FOR_TASK_HEADER = "X-Assistant-Task"
+
 class GmailAPIClient:
     """Gmail API client using OAuth2"""
     
@@ -138,7 +146,8 @@ class GmailAPIClient:
             
             return {
                 'uid': message_id,
-                'raw_email': raw_email
+                'raw_email': raw_email,
+                'label_ids': list(message.get('labelIds') or []),
             }
             
         except HttpError as e:
@@ -459,7 +468,8 @@ class GmailAPIClient:
             logger.debug("search_emails_metadata exception details", exc_info=True)
             raise
 
-    def send_email(self, to, subject, body, attachment_paths: Optional[Sequence[str]] = None):
+    def send_email(self, to, subject, body, attachment_paths: Optional[Sequence[str]] = None,
+                   headers: Optional[dict] = None):
         """
         Send an email via Gmail API. Supports optional file attachments.
 
@@ -467,6 +477,7 @@ class GmailAPIClient:
             to: Recipient email address
             subject: Email subject
             body: Email body (plain text)
+            headers: Extra headers, name -> value (the assistant's own-mail marks above)
             attachment_paths: Optional list of absolute paths to files to
                 attach. Each path must exist; missing/unreadable files
                 cause the whole send to fail (callers should resolve
@@ -510,6 +521,8 @@ class GmailAPIClient:
 
             message['to'] = to
             message['subject'] = subject
+            for name, value in (headers or {}).items():
+                message[name] = value
 
             raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
 

@@ -69,10 +69,11 @@ def build_email_pod(email_data: Dict[str, Any]) -> Pod:
     summary = str(email_data.get("summary") or "").strip()
     importance = email_data.get("importance")
 
-    if sender and subject:
-        one_liner = f"{sender}: {subject}"
+    who = email_sender_line(email_data) if email_data.get("sent_by_assistant") else sender
+    if who and subject:
+        one_liner = f"{who}: {subject}"
     else:
-        one_liner = subject or (f"email from {sender}" if sender else "email (no subject)")
+        one_liner = subject or (f"email from {who}" if who else "email (no subject)")
 
     metadata = {k: v for k, v in email_data.items() if k != _BODY_KEY}
     metadata.update({
@@ -144,12 +145,17 @@ def recent_emails(*, received_since: datetime, min_importance: int = MIN_IMPORTA
 
 
 def email_sender_line(record: Dict[str, Any]) -> str:
-    """"Name <address>" as the email's sender, for readers."""
+    """"Name <address>" as the email's sender, for readers; for an email the assistant sent from the owner's account
+    (email_utils.sent_by_assistant), the assistant, sending from it."""
     sender = str(record.get("sender_display") or record.get("sender") or "").strip()
     address = str(record.get("sender_email") or record.get("email_address") or "").strip()
     if sender and address and sender.lower() != address.lower():
-        return f"{sender} <{address}>"
-    return sender or address
+        line = f"{sender} <{address}>"
+    else:
+        line = sender or address
+    if record.get("sent_by_assistant"):
+        return f"the assistant, sending from {line}"
+    return line
 
 
 def email_text(record: Dict[str, Any]) -> str:
