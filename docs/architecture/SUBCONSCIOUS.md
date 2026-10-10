@@ -1,6 +1,6 @@
 # Subconscious
 
-The Subconscious is EmiOS's autonomous background "mind." It runs while the user is away, maintains a durable **concerns register**, turns concerns into two kinds of output — **proposals** (intention pods) and **questions** (the pending-questions queue) — surfaces a daily **digest**, and feeds the **proactive outreach** channel. Nothing it produces acts on the world directly: the noticer *observes and delegates* (routing concerns to dayflow / proposers via `addressable_by`), proposers *propose* (pods the user comments on), and high-stakes questions become tickets the user answers.
+The Subconscious is EmiOS's autonomous background "mind." It runs while the user is away, maintains a durable **concerns register**, turns concerns into **proposals** (intention pods) and entries on the brain's list that dayflow makes work from, surfaces a daily **digest**, and feeds the **proactive outreach** channel. Nothing it produces acts on the world directly: the brain *decides*, the noticer *raises issues* for the brain, proposers *propose* (pods the user comments on), and questions in the pending-questions queue reach the owner in chat or as tickets.
 
 > Cross-refs: proactive outreach is a Dayflow pipeline stage — see [05_DAYFLOW.md](05_DAYFLOW.md). Proposal/feedback artifacts are pods — see [14_PODS.md](14_PODS.md). The feedback→belief sink writes the belief store — see [16_BELIEF_ENGINE.md](16_BELIEF_ENGINE.md). Meal planning is the deepest proposer lane — see [MEAL_PLANNING.md](MEAL_PLANNING.md). Routine plumbing — see [06_PIPELINES_AND_ROUTINES.md](06_PIPELINES_AND_ROUTINES.md).
 
@@ -12,11 +12,11 @@ The Subconscious is EmiOS's autonomous background "mind." It runs while the user
                                         ▲ │
                   reinforces / resolves │ │ reads active+addressing
                                         │ ▼
-  context_builder ──► subconscious::noticer ──► persist.apply_noticer_output
-   (24 pre-injected      (LLM, no tools)          │  ├─ concern CRUD (in-place)
-    context items)                                │  ├─ enqueue pending_questions
-                                                  │  └─ tick log (jsonl audit)
-                                                  │
+  every event (chat, email, camera, presence, time, calendar, tickets, work, noticer issues)
+       ──► brain inbox ──► gate ──► brain step ──► persist.apply_brain_matter (notes, resolutions, new concerns)
+
+  context_builder ──► subconscious::noticer ──► brain_inbox.add_noticer_issues (one event per issue)
+   (pre-injected         (LLM, no tools)                                      │
    proposers (meal/wellness/romantic) read active+addressing concerns whose
    addressable_by names them ─► mint intention.* pods
                                                   │
@@ -26,8 +26,7 @@ The Subconscious is EmiOS's autonomous background "mind." It runs while the user
                                                   │
    pending_question queue ──► two delivery bridges ──► user reply
        │                       (in-chat nudge, conversation_starter fast-path)
-       └─► answer_capture ──► subconscious::answer_matcher ──► mark_answered
-                              ──► annotate_concern ──► trigger_noticer (cooldown)
+       └─► answer_capture ──► subconscious::answer_matcher ──► mark_answered ──► the creator drains it
 
    every dayflow work object (receipts: attached, each judgment, the ending)
        ──► concern_feedback ──► for the concerns that hold it: persist.attach_work (active→addressing) /
@@ -36,7 +35,7 @@ The Subconscious is EmiOS's autonomous background "mind." It runs while the user
            decides, and attaches the work to a concern it cites it on (brain_wake)
 ```
 
-The register is the **spine**: every other component either feeds it (the brain step, the noticer, answer-capture, work-outcome propagation) or reads it (briefs, the concern planner, proposers, digest, dashboard). The brain step (§2) is its main writer: it notes, resolves and raises concerns from every event the gate passes on. The noticer (§4) is a daily second pass over the same register; it cannot close a concern the owner asked for (`persist._refuse_owner_close`). New concerns from either enter only through the concern door (`concern_door.py`). The propagation writers are deterministic id-joins: work made from a concern's entry on the brain's list gets `constraints.concern_refs` from that entry (`brain_list_intake._shell`), every judgment and ending of every work object reports back (`concern_feedback`), and the brain attaches work it cites to the concern it cites it on. (2026-08-01: before outcomes were joined by id, 19 duplicate AC-service work objects were minted because outcomes never reached the register.)
+The register is the **spine**: every other component either feeds it (the brain step, work-outcome propagation) or reads it (briefs, the concern planner, proposers, digest, dashboard, the noticer). The brain step (§2) is its writer of notes, resolutions and new concerns, from every event the gate passes on. The noticer (§4) raises issues as events for the brain; it writes no concern (2026-10-09, `docs/design/concerns_as_state_2026-10-09.md`). New concerns enter only through the concern door (`concern_door.py`). The propagation writers are deterministic id-joins: work made from a concern's entry on the brain's list gets `constraints.concern_refs` from that entry (`brain_list_intake._shell`), every judgment and ending of every work object reports back (`concern_feedback`), and the brain attaches work it cites to the concern it cites it on. (2026-08-01: before outcomes were joined by id, 19 duplicate AC-service work objects were minted because outcomes never reached the register.)
 
 ### Dispatch & scope
 
@@ -46,14 +45,14 @@ Scope comes from `app/assistant/subconscious/scope.yaml`, loaded as `load_scope_
 
 ## 2. The Brain
 
-Since 2026-09-30 the brain is the subconscious's centre: it reads everything that happens, keeps the concerns, and decides what work exists, as entries on its list that dayflow makes work from. The noticer (§4) is now a daily second pass. Designs: `docs/design/brain_delegates_work_2026-10-04.md`, `docs/design/what_was_done_reaches_the_brain_2026-10-03.md`.
+Since 2026-09-30 the brain is the subconscious's centre: it reads everything that happens, keeps the concerns, and decides what work exists, as entries on its list that dayflow makes work from. The noticer (§4) raises issues from the long view into its inbox. Designs: `docs/design/brain_delegates_work_2026-10-04.md`, `docs/design/what_was_done_reaches_the_brain_2026-10-03.md`.
 
 ### The wake
 
 `subconscious/brain_wake.py` runs `run_brain` on one thread (started at boot by `initialize_system.py`) when something happens, not on a clock:
 
 - the gut (ingest service) hands it a new chat message or email (`handle_envelope`);
-- a register write from outside the brain calls `poke` (`concern_store.save_register` pokes on every save: a work outcome, the noticer, an edit; work feedback also pokes after writing its inbox event);
+- a register write from outside the brain calls `poke` (`concern_store.save_register` pokes on every save: a work outcome, an edit; work feedback also pokes after writing its inbox event, and the noticer after raising issues);
 - a timer comes due: a room going quiet (`brain_inbox.QUIET`, 5 minutes after its last message), the earliest hold of a concern plan (`concern_planner.next_hold_at`), or an absence reaching `brain_inbox.PRESENCE_AWAY` (10 minutes, `brain_inbox.next_presence_due`);
 - the owner comes back to the computer (`afk_state_changed` with content `active`, `handle_afk_state_changed`);
 - boot (one run picks up what arrived while the app was down), and the heartbeat: a run at least every `HEARTBEAT_SECONDS` (600), for inputs that change without an event (the day pass's, a new day).
@@ -83,9 +82,10 @@ Each pass is recorded as a run (`brain_trace`, trigger boot / event / timer). A 
 - `email`: every email pod the parser scored at least `MIN_EMAIL_IMPORTANCE` (6), full body;
 - `camera`: the frames image_ingest flagged notable (`CAMERA_SOURCE_KINDS`), as the vision model described them;
 - `presence` (2026-10-07): the owner leaving the computer (once the latest keyboard spell has been over for `PRESENCE_AWAY`) or coming back after an absence of `PRESENCE_AWAY` or more, read from the AFK monitor's keyboard spells (`afk_db` active segments);
-- `work`: every finalizer judgment and every ending of every work object (`concern_feedback` → `add_work_event`), worded by `shared/work/work_report.j2`, naming the concerns the work was made for as the gate's hint.
+- `work`: every finalizer judgment and every ending of every work object (`concern_feedback` → `add_work_event`), worded by `shared/work/work_report.j2`, naming the concerns the work was made for as the gate's hint;
+- `noticer` (2026-10-09): each issue a noticer pass raised (`add_noticer_issues`, ref `noticer:<run>:<n>`): its title, what it is, why now, its kind and whom it is about. Each issue is its own matter.
 
-Every row arrives `pending` and is gated. Readiness (`ready`): email, camera, presence and work at once; a chat room's messages all together once its latest is `QUIET` old.
+Every row arrives `pending` and is gated. Readiness (`ready`): email, camera, presence, work and noticer issues at once; a chat room's messages all together once its latest is `QUIET` old.
 
 ### The gate
 
@@ -155,66 +155,52 @@ The door merged beliefs about different acts and the concern's single rule misde
 - The standing concerns were retired to dormant (`persist.retire_standing_concerns`) and the door no longer
   compares candidates with them.
 
-### Lifecycle pressure
+### History
 
-`persist.compute_pressure(register)` is a **pure deterministic read** that forces the noticer to make a decision on long-running concerns. It returns `{needs_disposition, addressing_stale}`:
+Until 2026-10-09 the noticer also wrote here: it forced a disposition (`accept_chronic`, `re_escalate`,
+`keep_active`) on every concern reinforced eight times or addressed for four days, each run, and logged every
+tick to `resources/subconscious/resource_subconscious_tick_log.jsonl`. Those writes filed the same paragraph on
+a concern each day and, at least once, on the wrong concern; they were removed with the noticer's writer role
+(`docs/design/concerns_as_state_2026-10-09.md`). The register's `last_noticer_tick_utc` stamp is no longer
+written.
 
-- **`needs_disposition`** — any active/addressing concern where `reinforcement_count − last_disposition_at_count ≥ DISPOSITION_REINFORCEMENT_THRESHOLD` (8). Stops eternal "reinforcement sink" concerns that accrete evidence forever with no decision.
-- **`addressing_stale`** — any `addressing` concern with `addressing_since_utc` older than `ADDRESSING_STALE_DAYS` (4) — the handoff likely dropped.
+## 4. The Noticer
 
-The context builder injects these under a **"CONCERNS UNDER PRESSURE — disposition REQUIRED this tick"** prompt block; the LLM must emit exactly one `concern_dispositions` entry per pressured id:
+The long view; the brain (§2) does the event-by-event thinking. Agent `subconscious::noticer` (`app/assistant/agents/subconscious/noticer/`): `model_tier: mini`, **`allowed_tools: []`** (context is fully pre-injected). Owner, 2026-10-09: "noticer is supposed to look at long term things. it should just raise issues that can then become concerns."
 
-- `accept_chronic` → moves to `dormant`, sets `chronic=true`, archives evidence.
-- `re_escalate` → back to `active` with a fresh high-urgency escalation marker; resets the pressure window.
-- `keep_active` → justified continuation; resets `last_disposition_at_count` so the rule doesn't re-fire next tick.
-
-Growth caps keep the register bounded: evidence is trimmed to head 3 + tail 9 (`_trim_evidence`), the reinforcement journal to the newest 10 (`_trim_journal`), with dropped counts recorded.
-
-### Audit
-
-Every tick appends one JSONL line `{tick_utc, output}` to `resources/subconscious/resource_subconscious_tick_log.jsonl` (the full AgentForm dump, for replay + the dashboard). The register itself stamps `last_updated_utc` / `last_noticer_tick_utc`.
-
-## 4. The Noticer Loop
-
-The daily second pass over the register; the brain (§2) does the event-by-event thinking. Agent `subconscious::noticer` (`app/assistant/agents/subconscious/noticer/`): `model_tier: mini`, **`allowed_tools: []`** (no tools — context is fully pre-injected; tool access is a planned v0.5 step).
-
-**Context** — `context_builder.build_noticer_context(trigger_mode=...)` returns a flat dict, one string per `user_context_items` key. Every section builder **fails soft**, returning `"(no <kind> data available)"` rather than raising, because the prompt is written to handle partial context. Notable sources:
+**Context** — `context_builder.build_noticer_context()` returns a flat dict, one string per `user_context_items` key. Every section builder **fails soft**, returning `"(no <kind> data available)"`, because the prompt is written to handle partial context. Notable sources:
 
 | Context item | Source |
 |---|---|
 | `recent_friction_signals` | `chat_cluster` pods' `metadata.friction_signal`, grouped by `(subject, kind)` over 14d; self-aliases (`self`/`me`/first-name) collapse to one bucket so the 3+ pattern threshold fires. |
-| `concerns_register_active` | The register's active+addressing, plus the injected pressure block. |
-| `question_mailbox` | `pending_questions.get_for_noticer_processing()` — captured answers + stale-asked questions awaiting an outcome. |
-| `dayflow_recent` | Recent `dayflow_item` rows from `unified_log_2026`, filtered to signal. CAVEAT (2026-08-01 audit): post-WO-cutover the item lane carries intake only — no `Result:` outcome lines exist anymore, so the ADDRESSED disposition cannot fire from this input; work outcomes now reach the register via closure propagation instead (§work-outcome path). Repointing this builder at work-store terminals is an open repair. |
+| `concerns_open` | The concerns the brain tracks now, each by title, subject and done-when; never notes or ids. |
+| `concerns_recently_closed` | Concerns resolved in the last 14 days and every dormant one, by title and why they closed. |
+| `dayflow_recent` | Recent `dayflow_item` rows from `unified_log_2026`, filtered to signal. |
 | `recent_chat_clusters`, `recent_passing_mentions` | 48h chat clusters; 60–220-char un-clustered user utterances. |
-| `calendar_today_tomorrow` / `_week_summary` / `_30_90d` | Three calendar windows via the `get_calendar_events` tool (Pass B reads 8–90d). |
+| `calendar_today_tomorrow` / `_week_summary` / `_30_90d` | Three calendar windows via the `get_calendar_events` tool. |
 | `watchlist_summary`, `recurring_obligations`, `family_graph_digest` | User-curated `resource_subconscious_watchlist.md` / `resource_recurring_obligations.md`; KG cards + ≤90d birthdays for non-household important_people. |
 | `kg_household_digests`, `family_roster` | Per-member KG entity-card descriptions; household resolved from `resource_user_data.json` important_people with household relationships. |
 
-**Two passes** (framed in `system.j2`): **Pass A inward** — verify existing concerns, process the forced dispositions, drain the question mailbox, detect new pattern_drift from the friction aggregate. **Pass B outward** — mandatory anticipated-need calendar scan + optional opportunity/gift scouting off `family_graph`/`watchlist`.
+**Output** (`agent_form.AgentForm`): `issues` (each `title`, `kind`, `subject`, `what`, `why_now`) and `summary`.
 
-**Output** (`agent_form.AgentForm`): `new_concerns`, `reinforced_concerns`, `addressing_concerns`, `resolved_concerns`, `escalated_concerns`, `concern_dispositions`, `question_outcomes`, `belief_updates`, `pending_questions`, plus `summary` / `skipped_pass_b` / `skipped_pass_b_reason`.
+**Run** — `noticer_run` (`routine_handlers/subconscious.py`) builds the context, runs the agent, puts each issue in the brain's inbox (`brain_inbox.add_noticer_issues`) and pokes the brain; it raises when the answer carries no issues list. It writes nothing else. One pass at a time (`_NOTICER_RUN_LOCK`). The brain decides whether an issue becomes a concern, notes an open one, or needs nothing. `run_noticer.py` runs it from the command line (`--context`, `--raise`).
 
-**Persist** — `persist.apply_noticer_output(output)` applies each list to the register in order (new→active, reinforce in-place, active→addressing, resolve, escalate, dispositions, question outcomes), trims caps, appends the tick-log line, then enqueues `pending_questions` into the queue. `belief_updates` are recorded in the tick log only (not yet written to the belief store).
-
-**Triggers** — routine `subconscious_noticer` → `noticer_run` (interval 86400 in a 04:00–22:00 window — note: interval semantics make the run time DRIFT a few minutes later each day rather than anchoring at 04:00; observed ~10:45 local after a week), plus an ad-hoc tick fired by answer-capture (cooldown-guarded; see §6).
+**Triggers** — routine `subconscious_noticer` → `noticer_run` (interval 86400 in a 04:00–22:00 window — note: interval semantics make the run time DRIFT a few minutes later each day rather than anchoring at 04:00).
 
 ## 5. Pending-Questions Store + Two Delivery Bridges
 
-A simple SQLite queue of questions the assistant wants to ask — the substrate for **all** proactive data-gathering, not just the noticer's.
+A simple SQLite queue of questions the assistant wants to ask — the substrate for proactive data-gathering. Its creators today are the KG's date-gap drain and the wiki's synthetic-fact drain; until 2026-10-09 the noticer asked here too.
 
 **Model** — `app/assistant/database/pending_question.py`, table `pending_question`. Fields: `question_text`, `topical_tag` (free string, e.g. `meals`/`family`/`wellness`/`general`), `priority` (low/medium/high), `status`, `related_concern_id`, `ask_mode` (`chat` | `ticket`), answer-capture columns (`answered_at`, `answer_text`, `answer_message_id`), `created_by`, `expires_at`, `asked_at`, `asked_in_message_id`. Lifecycle:
 
 ```
-pending ──► asked ──► answered ──► closed       (noticer processed the answer)
+pending ──► asked ──► answered ──► closed       (its creator processed the answer)
    │          └─────► (stale) ───► expired       (no answer in window; stated default applied)
    ├──► dismissed   (cancelled before ask)
    └──► expired     (freshness window passed before it was asked)
 ```
 
-**Store API** — `app/assistant/pending_questions/store.py` (sessions are short-lived, never held across I/O): `enqueue_question` (3-day default expiry), `get_pending` (pick order: priority then oldest), `mark_asked`, `get_asked_unanswered`, `get_for_noticer_processing` (drain-your-own — the noticer only sees questions it `created_by`), `mark_answered`, `close_question`, `mark_dismissed`, `expire_stale`, `count_asked_in_window`. Re-exported from the package `__init__`.
-
-The noticer's `_enqueue_pending_questions` derives each row from its related concern: `topical_tag` = concern's first `domain_tag`, `priority` = severity, `expires_after_hours` = horizon-mapped (today/this_week → 24h/7d, long_horizon → never). `if_unanswered` is folded into the question text as a "(if no reply, I'll go with: …)" tail. **Routing rule**: `ask_mode="ticket"` only when `severity=="high"` and horizon ∈ `{today, this_week}`; everything else is `chat`.
+**Store API** — `app/assistant/pending_questions/store.py` (sessions are short-lived, never held across I/O): `enqueue_question` (3-day default expiry), `get_pending` (pick order: priority then oldest), `mark_asked`, `get_asked_unanswered`, `get_by_creator` (drain-your-own — a creator sees only the questions it `created_by`), `mark_answered`, `close_question`, `mark_dismissed`, `expire_stale`, `count_asked_in_window`. Re-exported from the package `__init__`.
 
 ### Bridge 1 — in-chat nudge (the default)
 
@@ -230,7 +216,7 @@ The Dayflow conversation_starter stage (§7) also calls `pick_question_for_nudge
 
 ### Ticket delivery (high-stakes)
 
-`pending_questions.ticket_delivery.deliver_question_as_ticket(...)` (called from the noticer's enqueue path for `ask_mode="ticket"`) creates an `ask_user` ticket, marks it proposed, publishes a `proactive_suggestion` event, and flips the question to `asked` with `asked_in_message_id="ticket:<id>"` — which also removes it from the chat injector's pool (the `ticket:` anchor makes the chat-side matcher skip it). On failure it stays `pending` and the chat injector delivers it normally. `register_ticket_answer_listener()` (called once at boot, `initialize_system.py`) subscribes to `dayflow_ticket_responded`: an answered ticket routes into the same answer loop (mark answered → journal concern → trigger noticer); a dismissed ticket expires the question immediately.
+`pending_questions.ticket_delivery.deliver_question_as_ticket(...)` (for a question of `ask_mode="ticket"`) creates an `ask_user` ticket, marks it proposed, publishes a `proactive_suggestion` event, and flips the question to `asked` with `asked_in_message_id="ticket:<id>"` — which also removes it from the chat injector's pool (the `ticket:` anchor makes the chat-side matcher skip it). On failure it stays `pending` and the chat injector delivers it normally. `register_ticket_answer_listener()` (called once at boot, `initialize_system.py`) subscribes to `dayflow_ticket_responded`: an answered ticket marks the question answered; a dismissed ticket expires the question immediately. The reply itself reaches the brain as a ticket event (§2).
 
 ## 6. Answer-Capture Loop
 
@@ -239,9 +225,9 @@ The Dayflow conversation_starter stage (§7) also calls `pick_question_for_nudge
 - **Per-turn** — `RoomSessionManager._maybe_check_question_answers(room_id=...)` runs after a user message. It cheap-gates on `get_asked_unanswered(limit=1)`, then spawns a daemon thread (`answer-capture-{room_id}`) so the check is **off the reply path**.
 - **Hourly sweeper** — routine `subconscious_answer_sweep` → `answer_sweep_run` → `check_open_questions()` (unscoped), catching answers given after restarts or odd timing.
 
-`check_open_questions` is **free in the common case**: no asked-unanswered questions → pure SQL, no LLM. For each open question it pulls candidate user messages in the asked room since `asked_at` (cap 12), and judges them with one `subconscious::answer_matcher` call (`model_tier: mini`, no tools). The matcher returns `verdict` ∈ `{answered, partial, no_answer}` + `answer_text` / `answer_message_id` / `confidence` / `notes`; it biases to `partial`+low-confidence when unsure because a wrong captured answer corrupts the concern it routes back to.
+`check_open_questions` is **free in the common case**: no asked-unanswered questions → pure SQL, no LLM. For each open question it pulls candidate user messages in the asked room since `asked_at` (cap 12), and judges them with one `subconscious::answer_matcher` call (`model_tier: mini`, no tools). The matcher returns `verdict` ∈ `{answered, partial, no_answer}` + `answer_text` / `answer_message_id` / `confidence` / `notes`; it biases to `partial`+low-confidence when unsure because a wrong captured answer misleads the creator that drains it.
 
-On `answered`: `mark_answered` → if `related_concern_id`, `annotate_concern_answer` journals the answer onto the concern immediately (atomic write) → after the loop, `trigger_noticer(...)` fires one background noticer tick, guarded by a **600s monotonic cooldown** (the tick reads all captured answers anyway), so the register reacts within minutes instead of at the next daily tick. Work feedback no longer wakes the noticer (2026-09-30): every judgment and ending of every work object goes to the brain as an inbox event (§2).
+On `answered`: `mark_answered`; the question's creator drains its answers. The owner's reply reaches the brain as chat. Until 2026-10-09 a captured answer was also journalled on its concern and fired a noticer tick.
 
 ## 7. Proactive Outreach
 
@@ -261,15 +247,15 @@ Config knobs (current): `max_per_day=8`, `min_interval_minutes=45`, `randomizati
 
 ## 8. The Digest
 
-A daily "what I've been noticing" message — **pure Python templating, no LLM** (the noticer's 04:00 tick already did the thinking; the digest is the voice).
+A daily "what I've been noticing" message — **pure Python templating, no LLM** (the brain already did the thinking; the digest is the voice).
 
-`digest_runner.run_digest_pass(room_id="master_room")` loads the register + `resource_digest_state.json` + the last tick's `pending_questions`, renders via `digest_builder.render_digest`, writes `app/subconscious_digests/digest_YYYY-MM-DD.md`, persists an assistant row to `unified_log_2026` (`source="subconscious_digest"`, so it appears in master_room history regardless of live sockets), and pushes to live SocketIO subscribers via `DI.outbound_chat_publisher`.
+`digest_runner.run_digest_pass(room_id="master_room")` loads the register + `resource_digest_state.json` + up to two pending questions, renders via `digest_builder.render_digest`, writes `app/subconscious_digests/digest_YYYY-MM-DD.md`, persists an assistant row to `unified_log_2026` (`source="subconscious_digest"`, so it appears in master_room history regardless of live sockets), and pushes to live SocketIO subscribers via `DI.outbound_chat_publisher`.
 
 `render_digest` sections: **New this round** (active/addressing not in `previously_surfaced_concern_ids`, multi-line, severity-sorted), **Still tracking** (one-liners), **Resolved** (≤5 most-recent), and up to **2 pending questions** (rendered on quiet days too — a quiet digest is a natural moment to ask). Deliberately omits belief updates, dormant concerns, full evidence, and reasoning. After rendering, the state file keeps the currently-active concern ids as `previously_surfaced_concern_ids` so they're "ONGOING" next time. **The digest is a third delivery bridge**: questions come from the pending_question store (`get_pending(limit=2)`), and after the digest row persists they are marked `asked` anchored to that row — the user's later reply in master_room goes through the same answer capture as a chat-nudged ask. Preview runs (`post=False`) render without consuming anything. Routine `subconscious_digest` → `digest_run` (interval 86400, window 07:30–22:00).
 
 ## 9. Proposer / Distiller Lanes
 
-Daily, the noticer's concerns fan out to **proposer** agents, which mint `intention.*` pods; a **scheduler arbiter** then synthesizes them into one weekly plan. Each lane has a `<lane>_context_builder.py` (pre-injects context — all agents are toolless), a `<lane>_persist.py`, and a routine handler. The proposer agents are **bare top-level agents** (`name: wellness_proposer`, not `subconscious::…`). The twelve agents namespaced under `agents/subconscious/` are the brain's and the noticer's (see Key Files).
+Daily, the concerns fan out to **proposer** agents, which mint `intention.*` pods; a **scheduler arbiter** then synthesizes them into one weekly plan. Each lane has a `<lane>_context_builder.py` (pre-injects context — all agents are toolless), a `<lane>_persist.py`, and a routine handler. The proposer agents are **bare top-level agents** (`name: wellness_proposer`, not `subconscious::…`). The twelve agents namespaced under `agents/subconscious/` are the brain's and the noticer's (see Key Files).
 
 | Lane | Agent (model) | Reads | Writes |
 |------|---------------|-------|--------|
@@ -294,7 +280,7 @@ All proposers read the arbiter's latest plan back through `context_builder.build
 All daily lanes are `runner: function` routines under `configs/routines/public/`, scheduled by `interval` (86400s) + an `active_window` whose `from` time is the effective fire time:
 
 ```
-04:00  subconscious_noticer            (the day's thinking)
+04:00  subconscious_noticer            (the long view: issues for the brain)
 04:00  feedback_extractor_daily        (drain yesterday's comments → beliefs, window 04:00–05:00)
 04:30  subconscious_grocery_sync       (refresh inventory snapshot, window 04:30–05:00)
 05:00  subconscious_daily_meal_proposer  ┐
@@ -313,7 +299,7 @@ All share `on_error: {max_failures:3, then:"disable_with_ticket"}` with backoff 
 
 ## 10. The /subconscious Page
 
-`app/routes/subconscious.py` (`subconscious_bp`). `GET /subconscious` renders two things: the proposers' **output** (upcoming `intention.*` pods grouped by date, with per-item comment boxes) and the **mind overview** (`dashboard_service.load_mind_overview` → the concerns register sliced by bucket, recent tick activity from the tick log, and the latest digest).
+`app/routes/subconscious.py` (`subconscious_bp`). `GET /subconscious` renders two things: the proposers' **output** (upcoming `intention.*` pods grouped by date, with per-item comment boxes) and the **mind overview** (`dashboard_service.load_mind_overview` → the concerns register sliced by bucket, the issues the noticer raised lately with the gate's route for each, and the latest digest).
 
 `POST /subconscious/comment` is the **universal comment endpoint** — every surface (this page, `/meals`, future per-domain pages) POSTs `{target_pod_id, text, target_scope?}` here. It mints a `feedback.comment` pod (`feedback_service.mint_feedback_comment`, tags `["feedback","user_comment","unprocessed"]`, `for_agents=["feedback_extractor"]`) and returns the refreshed comment list.
 
@@ -350,7 +336,6 @@ Design: `docs/design/brain_insight_2026-10-02.md`.
 
 | Path | Writer | Role |
 |------|--------|------|
-| `resource_subconscious_tick_log.jsonl` | `persist` | Append-only audit (one tick per line). |
 | `resource_digest_state.json` | `digest_builder` | `previously_surfaced_concern_ids`, `last_digest_at_utc`, `history_count`. |
 | `resource_subconscious_watchlist.md` | user | Pass B external-scouting input. |
 | `resource_recurring_obligations.md` | user | Pass B anticipated-need input. |
@@ -359,7 +344,7 @@ Design: `docs/design/brain_insight_2026-10-02.md`.
 | `resource_meal_feedback_state.json` | `meal_feedback_runner` | Asked-meal dedup + question→pod map. |
 | `app/subconscious_digests/digest_*.md` | `digest_runner` | Rendered daily digests. |
 
-SQLite (emi.db): the `concerns` register (`concern_store.py`; written by `persist`, `answer_capture` and work feedback), the brain's `brain_events`, `brain_matters`, `brain_list_entries`, `brain_list_changes`, `brain_day_decisions`, `brain_stories`, `brain_runs` / `brain_steps` (§2, §10), and the `pending_question` table (`app/assistant/database/pending_question.py`). The belief store (`user_beliefs` / `belief_evidence`) is written by `feedback_extractor`.
+SQLite (emi.db): the `concerns` register (`concern_store.py`; written by `persist` for the brain step and work feedback), the brain's `brain_events`, `brain_matters`, `brain_list_entries`, `brain_list_changes`, `brain_day_decisions`, `brain_stories`, `brain_runs` / `brain_steps` (§2, §10), and the `pending_question` table (`app/assistant/database/pending_question.py`). The belief store (`user_beliefs` / `belief_evidence`) is written by `feedback_extractor`.
 
 ### Pod kinds (two-axis: kind = handling class, variant tag = routing handle)
 
@@ -392,9 +377,9 @@ All pod ids follow `datapod:<kind>:<uuid4-hex-24>`. See [14_PODS.md](14_PODS.md)
 | `subconscious/{brain_trace,brain_stories}.py` | Runs and steps; the owner's stories |
 | `dayflow_orchestrator/brain_list_intake.py`, `configs/brain_lanes.json` | Dayflow's work from the list; the lane switches |
 | `subconscious/scope.yaml` | Authority-99 permission scope for the subsystem |
-| `subconscious/context_builder.py` | Noticer context (24 items) + shared `build_weekly_schedule_block` |
-| `subconscious/persist.py` | `apply_noticer_output`, `compute_pressure`, register CRUD, question enqueue |
-| `subconscious/answer_capture.py` | `check_open_questions`, judge, `annotate_concern_answer`, `trigger_noticer` |
+| `subconscious/context_builder.py` | Noticer context + shared `build_weekly_schedule_block` |
+| `subconscious/persist.py` | Register writers: `apply_brain_matter`, work attachment, judgments and endings |
+| `subconscious/answer_capture.py` | `check_open_questions`, judge, `mark_answered` |
 | `subconscious/digest_runner.py` / `digest_builder.py` | Digest pass + pure-Python renderer |
 | `subconscious/scheduler_arbiter_*.py` | Arbiter context + `plan.weekly_schedule` mint + conflict tickets |
 | `subconscious/{wellness,romantic,meal}_*.py` | Proposer context builders + persisters |

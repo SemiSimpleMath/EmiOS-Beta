@@ -2,7 +2,7 @@
 
     reg = ScratchRegister(tmp_path)
     reg.write({"active": [...]})                 # seed
-    persist.apply_noticer_output(out, connect=reg.connect, tick_log_path=...)
+    persist.apply_brain_matter(updates, plan, connect=reg.connect)
     reg.read()["dormant"]                        # inspect
 """
 from __future__ import annotations
@@ -17,7 +17,6 @@ from belief_engine.intake.store import sqlite_file
 class ScratchRegister:
     def __init__(self, tmp_path: Path, name: str = "concerns.db"):
         self.connect = sqlite_file(Path(tmp_path) / name)
-        self.tick_log = Path(tmp_path) / "ticks.jsonl"
 
     def write(self, register: Dict[str, Any]) -> "ScratchRegister":
         concern_store.save_register(register, connect=self.connect)

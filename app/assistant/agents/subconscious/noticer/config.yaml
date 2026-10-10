@@ -5,10 +5,8 @@ llm_params:
   llm_provider: "openai"
   model_tier: "mini"
 
-# v0 prototype: no tools. Stage 2 (gather more context) is a no-op for now;
-# context is fully pre-injected via the wrapping pipeline step. Tool access
-# (ask_kg, pod_search, web_manager) added in v0.5 once the context-build →
-# reason → emit flow is proven end-to-end.
+# No tools: context is fully pre-injected (subconscious/context_builder.build_noticer_context). It raises issues for
+# the brain's inbox and writes nothing else (2026-10-09).
 allowed_tools: []
 except_tools: []
 allowed_nodes: []
@@ -19,10 +17,8 @@ allowed_nodes: []
 accept_auto_skills: false
 
 user_context_items:
-  - assistant_persona
   - date_time
   - day_of_week
-  - trigger_mode
   - diet_log_7d
   - recent_chat_clusters
   - recent_friction_signals
@@ -33,10 +29,8 @@ user_context_items:
   - activity_log_7d
   - family_roster
   - kg_household_digests
-  - ambient_state_digest
-  - concerns_register_active
+  - concerns_open
   - concerns_recently_closed
-  - question_mailbox
   - exploration_outcomes_30d
   - dayflow_recent
   - watchlist_summary

@@ -3,7 +3,11 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.assistant.agents.subconscious.noticer.agent_form import ConcernKind, Horizon, Severity
+# The brain raises concerns (until 2026-10-09 these types lived with the noticer, which raised them too).
+ConcernKind = Literal["pattern_drift", "anticipated_need", "opportunity_external", "opportunity_internal",
+                      "schedule_collision", "gift_opportunity"]
+Severity = Literal["low", "medium", "high"]
+Horizon = Literal["today", "this_week", "this_month", "long_horizon"]
 
 
 class EventDecision(BaseModel):

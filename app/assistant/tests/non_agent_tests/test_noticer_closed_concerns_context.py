@@ -1,10 +1,11 @@
-"""The noticer must see the concerns it already closed (2026-09-14).
+"""The noticer must see the concerns already closed (2026-09-14).
 
 A concern was resolved on one tick and re-minted under a fresh UUID on the
 next, because the context rendered `active` + `addressing` only. The evidence
 that produced the concern is still in context for days after the decision --
-the friction aggregate spans 14 days -- so the noticer re-derived it, and
-persist's concern_id dedup never fires against a brand-new UUID.
+the friction aggregate spans 14 days -- so the noticer re-derived it. Since
+2026-10-09 the noticer raises issues for the brain and reads each concern by
+its title and why it closed, never its id.
 """
 from __future__ import annotations
 
@@ -46,7 +47,7 @@ def test_recent_resolution_is_rendered_with_its_reason():
         "dormant": [],
     }
     out = _build_concerns_recently_closed(register)
-    assert "c-sleep" in out
+    assert "c-sleep" not in out
     assert "Fatigue and poor sleep have recurred this week" in out
     # The reason is the whole point: it is what tells the noticer whether new
     # evidence actually contradicts the decision.
@@ -64,13 +65,13 @@ def test_closure_older_than_the_window_is_dropped():
         ],
     }
     out = _build_concerns_recently_closed(register)
-    assert "c-fresh" in out
-    assert "c-old" not in out
+    assert "Just settled" in out
+    assert "Long settled" not in out
 
 
 def test_dormant_never_ages_out():
-    """accept_chronic is a standing decision -- a sleep concern archived months
-    ago is still the reason not to re-mint it today."""
+    """A dormant concern is a standing decision -- a sleep concern archived months
+    ago is still the reason not to raise it again today."""
     register = {
         "active": [], "addressing": [], "resolved": [],
         "dormant": [
@@ -80,8 +81,7 @@ def test_dormant_never_ages_out():
         ],
     }
     out = _build_concerns_recently_closed(register)
-    assert "c-chronic" in out
-    assert "chronic" in out.lower()
+    assert "Sleep comments are a recurring pattern" in out
     assert "Long-term pattern, user aware." in out
 
 
@@ -97,8 +97,8 @@ def test_undated_closure_is_listed_not_dropped():
         ],
     }
     out = _build_concerns_recently_closed(register)
-    assert "c-nodate" in out
-    assert "c-bad" in out
+    assert "No timestamp recorded" in out
+    assert "Unparseable timestamp" in out
 
 
 def test_empty_register_says_so_without_raising():

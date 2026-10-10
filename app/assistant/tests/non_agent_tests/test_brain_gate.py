@@ -648,3 +648,44 @@ def test_ticket_replies_render_as_their_own_group_and_wake_the_brain():
     t.start()
     t.join()
     assert brain_wake._poked.is_set()
+
+
+# ── noticer issues (2026-10-09) ────────────────────────────────────────────
+
+ISSUE = {"title": "Late nights three weeks running", "kind": "pattern_drift", "subject": "owner",
+         "what": "The owner has been up past 1 AM on most nights since mid-February.",
+         "why_now": "It held through this week as well."}
+
+
+def test_a_noticer_issue_is_an_event_for_the_brain_once_and_its_own_matter(connect):
+    """The noticer raises issues; the brain decides whether each becomes a concern. Until 2026-10-09 the noticer wrote
+    concerns itself and filed a disposition on every long-open one each day."""
+    assert inbox.add_noticer_issues([ISSUE, {**ISSUE, "title": "Second"}], run_at=NOW, connect=connect) == 2
+    assert inbox.add_noticer_issues([ISSUE], run_at=NOW, connect=connect) == 0, "a pass lands once"
+    first, second = inbox.pending(connect)
+    assert first["source"] == "noticer" and first["speaker"] == "noticer"
+    assert first["text"] == ("Late nights three weeks running\n"
+                             "The owner has been up past 1 AM on most nights since mid-February.\n"
+                             "Why now: It held through this week as well.\n(pattern drift; about owner)")
+    assert brain_step._evidence(first) == {"kind": "noticer_issue", "ref": first["source_ref"],
+                                           "snippet": first["text"]}
+    matters = brain_step.group_matters([{**e, "gate_status": "routed", "route": "new_matter", "concern_ids": []}
+                                        for e in (first, second)])
+    assert len(matters) == 2, "each issue its own matter"
+    text = conversations.render(conversations.build([{**first, "mark": "E1"}], now_utc=NOW))
+    assert "### The noticer" in text and "Late nights three weeks running" in text
+
+
+def test_noticer_run_puts_its_issues_in_the_brain_inbox_and_wakes_the_brain(monkeypatch):
+    from app.assistant.routine_handlers import subconscious as handlers
+    from app.assistant.subconscious import brain_wake, context_builder
+    raised, poked = [], []
+    monkeypatch.setattr(context_builder, "build_noticer_context", lambda: {})
+    monkeypatch.setattr(handlers, "_run_subconscious_agent", lambda **kw: {"issues": [ISSUE], "summary": "s"})
+    monkeypatch.setattr(inbox, "add_noticer_issues", lambda issues, run_at: raised.append(issues) or len(issues))
+    monkeypatch.setattr(brain_wake, "poke", lambda: poked.append(True))
+    assert handlers.noticer_run() == {"status": "ok", "issues_raised": 1, "summary": "s"}
+    assert raised == [[ISSUE]] and poked == [True]
+    monkeypatch.setattr(handlers, "_run_subconscious_agent", lambda **kw: {"summary": "no list"})
+    with pytest.raises(RuntimeError, match="no issues list"):
+        handlers.noticer_run()

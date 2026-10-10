@@ -1,7 +1,7 @@
 {
   "id": "subconscious_noticer",
   "enabled": true,
-  "name": "Subconscious noticer — daily Pass A + Pass B scan",
+  "name": "Subconscious noticer — daily long view, raises issues for the brain",
   "runner": "function",
   "spec": {
     "function_name": "noticer_run"
@@ -26,5 +26,5 @@
     "then": "disable_with_ticket",
     "auto_retry_after_seconds": 3600
   },
-  "notes": "Single daily noticer pass (Pass A inward pattern detection + Pass B outward opportunity scouting). run_policy interval=86400 => once per day; the wide 04:00-22:00 local window means it runs at ~04:00 when the machine is on (concerns ready before the 05:00 proposers) but FALLS BACK to the first tick during waking hours if the machine was off overnight, so it no longer silently skips days (it missed 2026-06-06 under the old 1h window). Output: concerns_register + belief_updates + pending_questions + escalations to dayflow."
+  "notes": "Single daily noticer pass: it looks at the long term and raises issues, each an event in the brain's inbox; it writes nothing else (2026-10-09). run_policy interval=86400 => once per day; the wide 04:00-22:00 local window means it runs at ~04:00 when the machine is on but FALLS BACK to the first tick during waking hours if the machine was off overnight, so it does not silently skip days (it missed 2026-06-06 under the old 1h window)."
 }

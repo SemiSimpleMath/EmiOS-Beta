@@ -1,6 +1,6 @@
 """The subconscious daily digest pass — importable core.
 
-Reads the concerns_register (populated by noticer ticks), renders the
+Reads the concerns register (written by the brain), renders the
 markdown digest (new vs ongoing vs recently-resolved concerns + pending
 questions), writes it to ``app/subconscious_digests/digest_YYYY-MM-DD.md``,
 persists it to unified_log_2026 (so it appears in master_room chat

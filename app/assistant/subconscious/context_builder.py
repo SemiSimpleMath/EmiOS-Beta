@@ -30,10 +30,9 @@ _NO_DATA_FMT = "(no {kind} data available)"
 
 def build_noticer_context(
     *,
-    trigger_mode: str = "daily",
     household_members: Optional[List[str]] = None,
 ) -> Dict[str, str]:
-    """Assemble the full context dict for one noticer tick.
+    """Assemble the full context dict for one noticer pass.
 
     Returns a dict keyed by the user_context_items names in the noticer's
     config.yaml. Each value is a string ready to interpolate into user.j2.
@@ -43,12 +42,9 @@ def build_noticer_context(
 
     household_members = household_members or _resolve_household_members()
 
-    from app.assistant.utils.identity_names import get_assistant_persona_block
     return {
-        "assistant_persona": get_assistant_persona_block(),
         "date_time": now_local.strftime("%Y-%m-%d %H:%M %Z"),
         "day_of_week": now_local.strftime("%A"),
-        "trigger_mode": trigger_mode,
         "diet_log_7d": _build_diet_log(),
         "recent_chat_clusters": _build_recent_chat_clusters(now_utc=now_utc),
         "recent_friction_signals": _build_recent_friction_signals(now_utc=now_utc),
@@ -59,10 +55,8 @@ def build_noticer_context(
         "activity_log_7d": _build_activity_log(),
         "family_roster": _build_family_roster(household_members),
         "kg_household_digests": _build_kg_household_digests(household_members),
-        "ambient_state_digest": _build_ambient_state_digest(household_members),
-        "concerns_register_active": _build_concerns_register_active(),
+        "concerns_open": _build_concerns_open(),
         "concerns_recently_closed": _build_concerns_recently_closed(),
-        "question_mailbox": _build_question_mailbox(),
         "exploration_outcomes_30d": _build_exploration_outcomes(now_utc=now_utc),
         "dayflow_recent": _build_dayflow_recent(now_utc=now_utc),
         "watchlist_summary": _build_watchlist_summary(),
@@ -557,49 +551,21 @@ def _kg_digest_for(name: str) -> str:
         return f"(error reading KG: {e})"
 
 
-def _build_ambient_state_digest(members: List[str]) -> str:
-    """v0: not yet derived. Per-tick state would come from chat + observation
-    rollup. Stub for now — the noticer's prompt handles missing data."""
-    return _NO_DATA_FMT.format(kind="ambient state")
+def _concern_line(c: Dict[str, Any]) -> str:
+    """One concern as the noticer reads it: what it is about and what settles it. The noticer raises issues for the
+    brain; it reads a concern only to know what the brain already tracks, never its notes (2026-10-09)."""
+    done_when = c.get("done_when") or "(not stated)"
+    return f"- {c.get('title', '(no title)')} (about {c.get('subject') or 'household'}; done when: {done_when})"
 
 
-def _build_concerns_register_active() -> str:
-    """Render the active + addressing concerns from the concerns table."""
+def _build_concerns_open() -> str:
+    """The concerns the brain tracks now, by title."""
     from app.assistant.subconscious.concern_store import load_register
     data = load_register()
-
-    active = data.get("active") or []
-    addressing = data.get("addressing") or []
-    if not active and not addressing:
-        return "(concerns_register is empty — this is a fresh tick or all concerns resolved)"
-
-    lines: List[str] = []
-    for c in active:
-        lines.append(_render_concern_summary(c, status="active"))
-    for c in addressing:
-        lines.append(_render_concern_summary(c, status="addressing"))
-
-    # Lifecycle pressure: long-running concerns MUST get a disposition this
-    # tick (deterministic detection; the noticer decides what to do).
-    from app.assistant.subconscious.persist import compute_pressure
-    pressure = compute_pressure(data)
-    pressured = {c.get("concern_id"): "reinforced many times since last decision"
-                 for c in pressure["needs_disposition"]}
-    for c in pressure["addressing_stale"]:
-        cid = c.get("concern_id")
-        why = f"addressing review due; last review/start {str(c.get('addressing_reviewed_at_utc') or c.get('addressing_since_utc') or '')[:10]}"
-        pressured[cid] = f"{pressured[cid]} AND {why}" if cid in pressured else why
-    if pressured:
-        by_id = {c.get("concern_id"): c for c in [*active, *addressing]}
-        lines.append("## CONCERNS UNDER PRESSURE")
-        for cid, why in pressured.items():
-            c = by_id.get(cid) or {}
-            count = c.get("reinforcement_count")
-            lines.append(
-                f"- {cid} — {c.get('title', '(no title)')} "
-                f"[{why}; reinforcements={count if count is not None else '?'}]"
-            )
-    return "\n\n".join(lines)
+    open_concerns = [*(data.get("active") or []), *(data.get("addressing") or [])]
+    if not open_concerns:
+        return "(none)"
+    return "\n".join(_concern_line(c) for c in open_concerns)
 
 
 # A concern closed inside this window is still being re-supplied by the very
@@ -609,20 +575,9 @@ _CLOSED_CONCERN_WINDOW_DAYS = 14
 
 
 def _build_concerns_recently_closed(register: Optional[Dict[str, Any]] = None) -> str:
-    """Render the decisions the noticer already made: concerns resolved inside
-    the window, plus every dormant (accept_chronic) one.
-
-    Without this section the noticer decides blind. It resolves a concern, and on
-    the next tick the evidence that produced it is still in context while the
-    decision is not — so it re-derives the same concern and files it under a fresh
-    UUID. `persist.apply_noticer_output` dedups on concern_id against active +
-    addressing only, so a fresh UUID never collides and the register grows a twin.
-    One sleep concern was re-minted five times this way, twice past an
-    accept_chronic that had deliberately archived it.
-
-    Dormant entries are never aged out: accept_chronic is a standing decision that
-    a pattern is real but no longer worth tick-by-tick attention, and that stays
-    true however long ago it was taken.
+    """The decisions already made: concerns resolved inside the window, plus every dormant one, each by its title
+    and why it was closed. The signals behind a closed concern stay in the noticer's context for up to 14 days, so it
+    would otherwise raise the same issue again (one sleep concern was re-minted five times this way).
 
     `register` is injected by tests; production reads the concerns table.
     """
@@ -659,98 +614,19 @@ def _build_concerns_recently_closed(register: Optional[Dict[str, Any]] = None) -
     _UNDATED = datetime.min.replace(tzinfo=timezone.utc)
     recent_resolved.sort(key=lambda item: item[0] or _UNDATED, reverse=True)
 
-    lines = [
-        "These are decisions you already made. The signals behind them are still "
-        "in your context, so re-deriving one of them is expected — recognising it "
-        "as already-decided is the point of this section."
-    ]
+    lines = []
     for when, c in recent_resolved:
         stamp = when.date().isoformat() if when else "date unknown"
-        lines.append(_render_closed_concern(c, status=f"resolved {stamp}",
-                                            why=c.get("resolution_reason")))
+        lines.append(_render_closed_concern(c, status=f"resolved {stamp}", why=c.get("resolution_reason")))
     for c in dormant:
-        lines.append(_render_closed_concern(c, status="dormant",
-                                            why=c.get("dormant_reason")))
-    return "\n\n".join(lines)
-
-
-def _render_closed_concern(c: Dict[str, Any], *, status: str, why: Any) -> str:
-    """One block for a concern that is no longer tracked."""
-    return "\n".join([
-        f"[{status}] {c.get('concern_id', '?')} — {c.get('title', '(no title)')}",
-        f"  subject: {c.get('subject') or 'household'}",
-        f"  kind: {c.get('kind')} | horizon: {c.get('horizon')}",
-        f"  why it was closed: {str(why or '(no reason recorded)').strip()}",
-        _render_handling_history(c),
-    ])
-
-
-def _build_question_mailbox() -> str:
-    """Captured answers to noticer questions + stale unanswered asks.
-
-    Every listed item demands a question_outcomes entry from the noticer:
-    answered questions get processed into concern updates; stale ones get
-    their stated default applied (outcome expired)."""
-    try:
-        from app.assistant.pending_questions import get_for_noticer_processing
-        mailbox = get_for_noticer_processing()
-    except Exception as e:
-        logger.warning("[noticer.context] question mailbox fetch failed: %s", e)
-        return "(question mailbox unavailable this tick)"
-
-    answered = mailbox.get("answered") or []
-    stale = mailbox.get("stale_asked") or []
-    if not answered and not stale:
-        return "(no answers waiting, no stale questions)"
-
-    lines: List[str] = []
-    if answered:
-        lines.append("### ANSWERS RECEIVED — process each into its concern")
-        for q in answered:
-            lines.append(
-                f"- question_id={q.id}\n"
-                f"  asked: {q.question_text}\n"
-                f"  USER'S ANSWER: {q.answer_text}\n"
-                f"  related_concern_id: {q.related_concern_id or '(none)'}"
-            )
-    if stale:
-        lines.append("### UNANSWERED >48h — apply the stated default (outcome: expired)")
-        for q in stale:
-            lines.append(
-                f"- question_id={q.id}\n"
-                f"  asked: {q.question_text}\n"
-                f"  asked_at: {q.asked_at}\n"
-                f"  related_concern_id: {q.related_concern_id or '(none)'}"
-            )
+        lines.append(_render_closed_concern(c, status="dormant", why=c.get("dormant_reason")))
     return "\n".join(lines)
 
 
-def _render_concern_summary(c: Dict[str, Any], *, status: str) -> str:
-    """One-block readable summary for a concern in the register."""
-    parts = [
-        f"[{status}] {c.get('concern_id', '?')} — {c.get('title', '(no title)')}",
-        f"  subject: {c.get('subject') or 'household'}",
-        f"  kind: {c.get('kind')} | severity: {c.get('severity')} | horizon: {c.get('horizon')}",
-        f"  domain_tags: {', '.join(c.get('domain_tags') or [])}",
-        f"  addressable_by: {', '.join(c.get('addressable_by') or [])}",
-        f"  first_observed: {c.get('first_observed')}",
-        f"  done_when: {c.get('done_when') or '(not stated)'}",
-        *([f"  the owner asked for this: \"{c['owner_request']['words']}\" "
-           "(it closes when its done_when is met or the owner says it is over; you cannot resolve it or "
-           "accept it as chronic)"] if c.get("owner_request") else []),
-        f"  notes: {(c.get('notes') or '')[:300]}",
-    ]
-    parts.append(_render_handling_history(c))
-    return "\n".join(parts)
-
-
-def _render_handling_history(c: Dict[str, Any]) -> str:
-    """Data only; lifecycle policy belongs in the noticer Jinja prompt."""
-    from app.assistant.subconscious.persist import journal_for_prompt
-    return "\n".join([
-        "  attached_work: " + json.dumps(c.get("attached_work") or {}, ensure_ascii=False),
-        "  journal: " + journal_for_prompt(str(c.get("reinforcement_notes") or "")),
-    ])
+def _render_closed_concern(c: Dict[str, Any], *, status: str, why: Any) -> str:
+    """One closed concern: its title, when and why it was closed."""
+    return (f"- {c.get('title', '(no title)')} (about {c.get('subject') or 'household'}; {status}: "
+            f"{str(why or '(no reason recorded)').strip()})")
 
 
 def _build_exploration_outcomes(*, now_utc: datetime, days: int = 30) -> str:

@@ -4,9 +4,7 @@ The concerns register is the subconscious's spine. Pinned here:
 - an UNREADABLE concern row raises instead of silently starting fresh (the old
   behavior meant the next save destroyed every concern);
 - an EMPTY concerns table still bootstraps (first run);
-- answer capture's concern journaling lives in persist (one lock, one
-  transaction) and journals onto the right concern;
-- a second noticer tick started while one is in flight SKIPS instead of
+- a second noticer run started while one is in flight SKIPS instead of
   running concurrently against the same register;
 - the arbiter's single product (plan.weekly_schedule) fails LOUD on a mint
   error instead of reporting ok with nothing persisted;
@@ -31,8 +29,7 @@ from app.models.base import Base, get_session
 from app.assistant.database.pending_question import PendingQuestion
 from app.assistant.pending_questions import enqueue_question, mark_answered, mark_asked
 from app.assistant.pending_questions.store import count_asked_in_window
-from app.assistant.subconscious import concern_store
-from app.assistant.subconscious.persist import annotate_concern_answer, apply_noticer_output
+from app.assistant.subconscious import concern_door, concern_store, persist
 from app.assistant.tests.concern_store_helpers import ScratchRegister
 
 
@@ -53,6 +50,15 @@ def _store(tmp_path, register=None) -> ScratchRegister:
     return store.write(register) if register is not None else store
 
 
+def _new_concern(store: ScratchRegister, title: str):
+    """A brain matter raising one new concern (nothing open to compare with, so no judge call)."""
+    candidate = {"label": "N1", "title": title, "kind": "anticipated_need", "severity": "low", "horizon": "today",
+                 "done_when": "d", "notes": "n", "evidence": []}
+    plan = concern_door.plan_admission([candidate], {"active": [], "addressing": [], "resolved": [], "dormant": []},
+                                       judge=None)
+    return persist.apply_brain_matter([], plan, connect=store.connect)
+
+
 def _corrupt_row(store: ScratchRegister) -> None:
     """A concern row whose record is not JSON — the table's version of a corrupt file."""
     concern_store.ensure_schema(store.connect)
@@ -69,10 +75,7 @@ def test_corrupt_register_raises_and_is_not_overwritten(tmp_path):
     store = _store(tmp_path)
     _corrupt_row(store)
     with pytest.raises(json.JSONDecodeError):
-        apply_noticer_output(
-            {"new_concerns": [{"label": "N1", "title": "t", "done_when": "d"}]},
-            connect=store.connect, tick_log_path=store.tick_log,
-        )
+        _new_concern(store, "t")
     # The unreadable record is still there for a human to recover — nothing wiped.
     with store.connect(False) as c:
         assert c.execute("SELECT data FROM concerns WHERE concern_id='c-bad'").fetchone()[0].startswith("{ this is not")
@@ -81,39 +84,12 @@ def test_corrupt_register_raises_and_is_not_overwritten(tmp_path):
 
 def test_missing_register_bootstraps_empty(tmp_path):
     store = _store(tmp_path)
-    summary = apply_noticer_output(
-        {"new_concerns": [{"label": "N1", "title": "fresh start", "done_when": "d"}]},
-        connect=store.connect, tick_log_path=store.tick_log,
-    )
-    assert summary["new_concerns_count"] == 1
+    assert list(_new_concern(store, "fresh start")) == ["N1"]
     assert [c["title"] for c in store.read()["active"]] == ["fresh start"]
 
 
 # ---------------------------------------------------------------------------
-# answer journaling lives in persist (one lock, one transaction)
-# ---------------------------------------------------------------------------
-
-def test_annotate_concern_answer_journals(tmp_path):
-    store = _store(tmp_path, {"schema_version": 1, "active": [
-        {"concern_id": "c-a", "title": "t", "reinforcement_notes": ""},
-    ], "addressing": [], "resolved": [], "dormant": []})
-
-    assert annotate_concern_answer("c-a", question_text="Q?", answer_text="A!", connect=store.connect) is True
-    assert "USER ANSWERED (Q?): A!" in store.read()["active"][0]["reinforcement_notes"]
-
-    # Unknown concern → False, register untouched.
-    assert annotate_concern_answer("nope", question_text="Q?", answer_text="A!", connect=store.connect) is False
-
-
-def test_annotate_on_corrupt_register_raises(tmp_path):
-    store = _store(tmp_path)
-    _corrupt_row(store)
-    with pytest.raises(json.JSONDecodeError):
-        annotate_concern_answer("c-a", question_text="Q?", answer_text="A!", connect=store.connect)
-
-
-# ---------------------------------------------------------------------------
-# one noticer tick at a time
+# one noticer run at a time
 # ---------------------------------------------------------------------------
 
 def test_noticer_run_skips_when_one_is_in_flight():

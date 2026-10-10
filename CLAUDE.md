@@ -267,8 +267,8 @@ means attached work is in progress: set on attach, left when the last attached w
 Judgments and endings of every work object become pending brain inbox events
 (`brain_inbox.add_work_event`), routed by the gate like chat and email; the concerns the work
 was made for are named in the event as a hint, and the brain attaches cited work to the concerns
-it updates. Concerns are resolved by the brain and by the daily noticer routine, never by
-dayflow. A completed notification does not prove the need resolved.
+it updates. Concerns are resolved by the brain, never by dayflow; the daily noticer only
+raises issues for the brain's inbox. A completed notification does not prove the need resolved.
 
 
 ### Belief outcome delivery

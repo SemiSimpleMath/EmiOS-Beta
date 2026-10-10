@@ -117,6 +117,8 @@ def group_matters(events: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
             key = ("calendar",)
         elif e["source"] == "ticket":
             key = ("tickets",)
+        elif e["source"] == "noticer":
+            key = ("noticer", e["id"])          # each issue its own matter
         else:
             key = ("room", e.get("room_id"))
         groups.setdefault(key, []).append(e)
@@ -428,6 +430,8 @@ def _evidence(e: Dict[str, Any]) -> Dict[str, Any]:
         return {"kind": "calendar_event", "ref": e["source_ref"].split("|")[0], "snippet": e["text"]}
     if e["source"] == "ticket":
         return {"kind": "ticket_reply", "ref": e["source_ref"], "snippet": e["text"]}
+    if e["source"] == "noticer":
+        return {"kind": "noticer_issue", "ref": e["source_ref"], "snippet": e["text"]}
     return {"kind": "chat_msg", "ref": e["source_ref"], "snippet": e["text"]}
 
 

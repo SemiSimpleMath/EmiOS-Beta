@@ -1,26 +1,24 @@
-"""Answer capture for noticer questions — closes the ask→answer loop.
+"""Answer capture for the question mailbox — closes the ask→answer loop.
 
-When a noticer question is woven into chat, the user's reply must find
-its way back to the subconscious. Two triggers share this one mechanism:
+When a mailbox question is woven into chat, the user's reply must be found and recorded on it. Two triggers share
+this one mechanism:
 
 - per-turn: after a user message lands in a room with an open asked
   question (post-turn background check, off the reply path)
 - hourly sweeper: the `subconscious_answer_sweep` routine catches answers
   given after restarts / in odd timing windows
 
-Both call ``check_open_questions(...)``: candidate user messages since the
-ask are judged by ``subconscious::answer_matcher`` (cheap model). A
-captured answer marks the row `answered`, annotates the related concern's
-journal immediately, and triggers a noticer tick (cooldown-guarded) so the
-register reacts within minutes instead of at tomorrow's 04:00 tick.
+Both call ``check_open_questions(...)``: candidate user messages since the ask are judged by
+``subconscious::answer_matcher`` (cheap model). A captured answer marks the row `answered`; the question's creator
+drains its own answers (pending_questions.store.get_by_creator). The owner's reply itself reaches the brain as chat.
+Until 2026-10-09 a captured answer was also journalled on its concern and triggered a noticer tick: the noticer no
+longer asks questions or writes concerns.
 
 The sweep is FREE in the common case: no asked-unanswered questions means
 pure SQL, no LLM call.
 """
 from __future__ import annotations
 
-import threading
-import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -30,12 +28,6 @@ from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 _CANDIDATE_MESSAGE_CAP = 12
-
-# A captured answer triggers an immediate noticer tick, but never more than
-# once per cooldown window (the tick reads ALL captured answers anyway).
-_NOTICER_TRIGGER_COOLDOWN_S = 600
-_noticer_trigger_lock = threading.Lock()
-_last_noticer_trigger_monotonic: float = 0.0
 
 
 def _resolve_asked_room(asked_in_message_id: str) -> Optional[str]:
@@ -119,37 +111,6 @@ def _judge(question, candidates: List[Dict[str, Any]]) -> Optional[Dict[str, Any
     )
 
 
-def annotate_concern_answer(concern_id: str, *, question_text: str, answer_text: str) -> bool:
-    """Journal the captured answer onto the concern immediately — the
-    noticer formally processes it on its (triggered) next tick. Delegates to
-    persist.annotate_concern_answer: ALL register writes live in persist
-    behind one lock and one atomic writer."""
-    from app.assistant.subconscious.persist import annotate_concern_answer as _annotate
-    return _annotate(concern_id, question_text=question_text, answer_text=answer_text)
-
-
-def trigger_noticer(reason: str) -> bool:
-    """Fire one noticer tick in a background thread (cooldown-guarded)."""
-    global _last_noticer_trigger_monotonic
-    with _noticer_trigger_lock:
-        now = time.monotonic()
-        if now - _last_noticer_trigger_monotonic < _NOTICER_TRIGGER_COOLDOWN_S:
-            logger.info("[answer_capture] noticer trigger suppressed (cooldown): %s", reason)
-            return False
-        _last_noticer_trigger_monotonic = now
-
-    def _run():
-        try:
-            from app.assistant.routine_handlers.subconscious import noticer_run
-            summary = noticer_run()
-            logger.info("[answer_capture] triggered noticer tick (%s): %s", reason, summary)
-        except Exception:
-            logger.exception("[answer_capture] triggered noticer tick failed (%s)", reason)
-
-    threading.Thread(target=_run, name="noticer-answer-trigger", daemon=True).start()
-    return True
-
-
 def check_open_questions(*, room_id: Optional[str] = None) -> Dict[str, Any]:
     """Judge every asked-unanswered question (optionally one room only).
 
@@ -205,13 +166,5 @@ def check_open_questions(*, room_id: Optional[str] = None) -> Dict[str, Any]:
         if not ok:
             continue
         answered += 1
-        if q.related_concern_id:
-            annotate_concern_answer(
-                q.related_concern_id,
-                question_text=q.question_text,
-                answer_text=answer_text,
-            )
 
-    if answered:
-        trigger_noticer(f"{answered} answer(s) captured")
     return {"checked": len(questions), "answered": answered}

@@ -45,8 +45,8 @@ def render_digest(
     `register` is the concerns_register dict (active/addressing/resolved/dormant).
     `previously_surfaced_ids` are concern_ids that appeared in past digests —
     used to distinguish NEW from ONGOING.
-    `pending_questions` come from the most recent noticer tick (not stored
-    long-term in the register).
+    `pending_questions` are up to two pending questions from the question
+    store (digest_runner.load_latest_pending_questions).
     """
     if digest_date_local is None:
         # %a %b %d is cross-platform; strip leading zero on day for readability
@@ -124,7 +124,7 @@ def render_digest(
 
 
 def _append_pending_questions(lines: List[str], pending_questions: Optional[List[Dict[str, Any]]]) -> None:
-    """Render up to 2 open questions (the noticer's own cap). Shared by the
+    """Render up to 2 open questions. Shared by the
     normal and quiet-day paths so the runner's ask-anchoring (mark-asked with
     the digest row id) always matches what the user actually saw."""
     if not pending_questions:

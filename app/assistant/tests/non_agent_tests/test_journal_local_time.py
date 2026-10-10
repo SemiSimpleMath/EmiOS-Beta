@@ -3,7 +3,8 @@
 Stored entries are "[<UTC ISO>] text"; prompts show every time local. The concern planner read UTC stamps beside a
 local Current Time and called a 9 AM notice "now-past" at 3:31 AM. Pins: each stamped entry is shown through the
 shared local_time_text; a line without a stamp (the archive marker) or with a bracket that is not a time is shown
-as stored; the brain's concern view, the concern door, the planner and the noticer all read it that way.
+as stored; the brain's concern view, the concern door and the planner all read it that way (the noticer reads
+concerns by title only since 2026-10-09).
 """
 from app.assistant.subconscious import persist
 from app.assistant.utils.time_utils import local_time_text
@@ -21,13 +22,12 @@ def test_each_stamped_entry_is_shown_in_local_time_and_the_rest_as_stored():
 
 
 def test_every_agent_view_of_a_concern_reads_the_local_journal():
-    from app.assistant.subconscious import brain_step, concern_door, concern_planner, context_builder
+    from app.assistant.subconscious import brain_step, concern_door, concern_planner
     concern = {"concern_id": "c1", "title": "Ring battery", "_status": "active", "evidence": [], "attached_work": {},
                "reinforcement_notes": NOTES}
     local = local_time_text(STAMP)
     assert local in brain_step._concern_view("C1", concern)["history"]
     assert local in concern_planner.concern_text(concern, "active")
-    assert local in context_builder._render_handling_history(concern)
     assert local in concern_door.build_payload([], [concern])["existing"][0]["history"]
 
 

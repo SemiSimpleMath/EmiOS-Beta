@@ -2,11 +2,10 @@
 
 The page used to show only the proposers' OUTPUT (intention.* pods). These
 helpers surface the subconscious itself: the concerns register with its
-lifecycle, recent noticer tick activity, and the latest digest.
+lifecycle, the issues the noticer raised lately and what became of them, and the latest digest.
 """
 from __future__ import annotations
 
-import json
 from typing import Any, Dict, List
 
 from app.assistant.subconscious.digest_builder import load_digest_state
@@ -15,13 +14,12 @@ from app.assistant.utils.path_utils import get_repo_root
 
 logger = get_logger(__name__)
 
-_TICK_LOG_REL = "resources/subconscious/resource_subconscious_tick_log.jsonl"
 _DIGEST_DIR_REL = "app/subconscious_digests"
 
 _EVIDENCE_CAP = 8
 _REINFORCEMENT_NOTE_TAIL = 4
 _RESOLVED_CAP = 8
-_TICKS_CAP = 7
+_NOTICER_ISSUES_CAP = 12
 
 
 def _slim_concern(c: Dict[str, Any]) -> Dict[str, Any]:
@@ -70,11 +68,11 @@ def load_mind_overview() -> Dict[str, Any]:
     resolved = [c for c in (register.get("resolved") or []) if isinstance(c, dict)]
     buckets["resolved"] = [_slim_concern(c) for c in resolved[-_RESOLVED_CAP:]][::-1]
 
-    ticks = _load_recent_ticks()
+    issues = _load_noticer_issues()
     digest = _load_latest_digest()
 
     return {
-        "last_tick_utc": str(register.get("last_noticer_tick_utc") or "")[:16].replace("T", " "),
+        "last_noticer_utc": issues[0]["at"] if issues else "",
         "counts": {
             "active": len(register.get("active") or []),
             "addressing": len(register.get("addressing") or []),
@@ -82,38 +80,21 @@ def load_mind_overview() -> Dict[str, Any]:
             "dormant": len(register.get("dormant") or []),
         },
         "concerns": buckets,
-        "ticks": ticks,
+        "noticer_issues": issues,
         "digest": digest,
     }
 
 
-def _load_recent_ticks() -> List[Dict[str, Any]]:
-    path = get_repo_root() / _TICK_LOG_REL
-    if not path.is_file():
-        return []
-    try:
-        lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
-    except Exception as e:
-        logger.error("[dashboard] failed reading tick log: %s", e)
-        return []
-    out: List[Dict[str, Any]] = []
-    for line in lines[-_TICKS_CAP:][::-1]:
-        try:
-            tick = json.loads(line)
-        except Exception:
-            continue
-        output = tick.get("output") or {}
-        new_c = output.get("new_concerns") or []
-        out.append({
-            "tick_utc": str(tick.get("tick_utc") or "")[:16].replace("T", " "),
-            "new": len(new_c),
-            "new_titles": [str(c.get("title") or "")[:90] for c in new_c[:3] if isinstance(c, dict)],
-            "reinforced": len(output.get("reinforced_concerns") or []),
-            "resolved": len(output.get("resolved_concerns") or []),
-            "escalated": len(output.get("escalated_concerns") or []),
-            "questions": len(output.get("pending_questions") or []),
-        })
-    return out
+def _load_noticer_issues() -> List[Dict[str, Any]]:
+    """The issues the noticer raised lately (brain events of source `noticer`), newest first, each with the gate's
+    route and the brain's decision. Until 2026-10-09 this read the noticer's tick log, which it no longer writes."""
+    from app.assistant.subconscious.db import connect
+    with connect(False) as c:
+        rows = [dict(r) for r in c.execute(
+            "SELECT occurred_at, text, gate_status, route FROM brain_events WHERE source = 'noticer' "
+            "ORDER BY occurred_at DESC, id DESC LIMIT ?", (_NOTICER_ISSUES_CAP,))]
+    return [{"at": str(r["occurred_at"])[:16].replace("T", " "), "title": r["text"].split("\n", 1)[0],
+             "route": r["route"] or r["gate_status"]} for r in rows]
 
 
 def _load_latest_digest() -> Dict[str, Any]:

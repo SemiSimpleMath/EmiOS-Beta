@@ -4,8 +4,8 @@ Pins: events group into matters (by the concerns they bear on, else by conversat
 a note lands on the concern as a [brain] journal line with the events as evidence; a resolution
 closes it; a new concern the owner asked for keeps the owner's words and must quote them exactly;
 every event gets a decision that its citations agree with; an invalid answer gets one correction,
-then the matter is recorded failed, nothing is written and it is not retried; the noticer cannot
-close a concern the owner asked for; the brain reads earlier chat summaries and evidence as text.
+then the matter is recorded failed, nothing is written and it is not retried; the brain reads earlier chat
+summaries and evidence as text.
 Scratch stores; the brain and the concern door judge are fakes. Invented data only.
 """
 from __future__ import annotations
@@ -17,7 +17,6 @@ import pytest
 
 import app.assistant.tests.test_setup  # noqa: F401
 from app.assistant.subconscious import brain_inbox, brain_step, conversations
-from app.assistant.subconscious.persist import apply_noticer_output
 from app.assistant.tests.concern_store_helpers import ScratchRegister
 from belief_engine.intake.store import sqlite_file
 
@@ -185,16 +184,6 @@ def test_decisions_must_agree_with_what_cites_the_events():
     # a school pickup), which attached the Nest work to it. The correction names the honest way out too.
     assert any("or decide needs_nothing if it changes none" in p for p in problems)
     assert any("E2 is decided needs_nothing but" in p for p in problems)
-
-
-def test_the_noticer_cannot_close_what_the_owner_asked_for(tmp_path):
-    asked = _concern("c-pass", "Passport renewal", owner_request={"words": "watch it", "at": "t", "ref": "message:m1"})
-    reg = _register(tmp_path, active=[asked])
-    apply_noticer_output({"resolved_concerns": [{"concern_id": "c-pass", "reason": "no recent signal", "evidence": []}],
-                          "concern_dispositions": [{"concern_id": "c-pass", "action": "accept_chronic", "reason": "r"}]},
-                         connect=reg.connect, tick_log_path=reg.tick_log)
-    [c] = reg.read()["active"]
-    assert c["reinforcement_notes"].count("REFUSED a noticer") == 2
 
 
 def test_the_brain_prompt_renders_every_section():

@@ -18,7 +18,9 @@ hub_and_spokes_2026-10-09.md gap 2; until then a calendar change woke dayflow an
 beside some other event). Tickets: the owner's reply to every ticket the assistant raised (a scheduled reminder, a
 notice, a question, a dayflow task's ask) (2026-10-09), except a reply to a task of work connected to a concern: that
 work reports to the brain (concern_feedback.reports_to_brain) and its report carries the reply. Until then a reply
-such as "you do this every night" to a question, or "stop reminding me" to a reminder, reached no decider. The gate
+such as "you do this every night" to a question, or "stop reminding me" to a reminder, reached no decider. Noticer:
+each issue the daily noticer raises about the long term (a pattern across weeks, a need a date ahead brings), as the
+noticer worded it (2026-10-09; until then the noticer wrote concerns itself). The gate
 (subconscious/gate.py) routes each row against the open concerns once it is ready (`ready`): an
 email or camera event at once, a chat room's messages once the room has been quiet for QUIET — `concern` (bears
 on named concerns), `new_matter`, or `none`. Work: dayflow's judgments and endings of work attached
@@ -433,6 +435,28 @@ def ingest_tickets(*, now_utc: Optional[datetime] = None, connect=None, fetch=No
     return added
 
 
+def add_noticer_issues(issues: List[Dict[str, Any]], *, run_at: datetime, connect=None) -> int:
+    """The issues one noticer pass raised (subconscious/routine_handlers noticer_run, 2026-10-09): each an event for the
+    brain, in the noticer's words: its title, what it is and why now, with its kind and whom it is about. The brain
+    decides whether it becomes a concern. Ref `noticer:<run>:<n>`, so a pass lands once. Returns rows added."""
+    connect = connect or _connect
+    ensure_schema(connect)
+    at = _iso(run_at)
+    added = 0
+    with connect(True) as c:
+        for n, issue in enumerate(issues, 1):
+            text = (f"{issue['title']}\n{issue['what']}\nWhy now: {issue['why_now']}\n"
+                    f"({str(issue['kind']).replace('_', ' ')}; about {issue['subject']})")
+            cur = c.execute(
+                "INSERT OR IGNORE INTO brain_events (source, source_ref, occurred_at, room_id, speaker, text, "
+                "received_at) VALUES ('noticer', ?, ?, NULL, 'noticer', ?, ?)",
+                (f"noticer:{at}:{n}", at, text, at))
+            added += cur.rowcount
+    if added:
+        logger.info("[brain_inbox] the noticer raised %d issue(s)", added)
+    return added
+
+
 def _fetch_answered_tickets(since_utc: datetime) -> List[Dict[str, Any]]:
     """Tickets answered after `since_utc`, oldest first. responded_at is stored as naive UTC."""
     since = since_utc.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
@@ -544,7 +568,7 @@ def pending(connect=None) -> List[Dict[str, Any]]:
 
 
 def ready(events: List[Dict[str, Any]], now_utc: datetime) -> List[Dict[str, Any]]:
-    """The events whose matter is complete: every email, camera, presence, calendar, ticket and work event, and the chat of every room whose latest
+    """The events whose matter is complete: every email, camera, presence, calendar, ticket, noticer and work event, and the chat of every room whose latest
     message is at least QUIET old. Messages of a room still talking wait, all of them together."""
     last = _last_message_by_room(events)
     return [e for e in events

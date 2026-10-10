@@ -20,6 +20,7 @@ Now each reader (gate, noticer) gets the events in groups, each under a line say
 - time: the clock reporting that the day a concern was raised for has ended.
 - calendar: an event added to, changed on or removed from the calendar of the coming week, in time order.
 - tickets: the owner's reply to a ticket the assistant raised (a reminder, a notice, a question), in time order.
+- noticer: the issues the daily noticer raised about the long term, in the order raised.
 
 Nothing is cut. Events carry the reader's mark (the gate's E-label, the noticer's ref) and
 optionally a note; the other turns are context only. Times are local, with a date header whenever
@@ -297,6 +298,18 @@ def _ticket_group(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
              "conversations": [{"label": "Answered", "turns": _render_turns(turns)}]}]
 
 
+def _noticer_group(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not events:
+        return []
+    turns = sorted((_event_turn(e) for e in events), key=lambda t: t["at"])
+    return [{"heading": "The noticer",
+             "description": "Issues the daily noticer raised from the long view: a pattern across weeks of signals, "
+                            "a need a date ahead brings, a timely chance to do something for someone. Each is its "
+                            "reading of the signals, for the brain to judge; nobody said it.",
+             "first_at": turns[0]["at"],
+             "conversations": [{"label": "Raised", "turns": _render_turns(turns)}]}]
+
+
 def build(events: List[Dict[str, Any]], *, now_utc: Optional[datetime] = None,
           work_labels: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
     """Group events (brain_events rows, each with a `mark` and optionally a `note`) into chat rooms,
@@ -307,7 +320,7 @@ def build(events: List[Dict[str, Any]], *, now_utc: Optional[datetime] = None,
     reader must know where something was said and to whom."""
     now = now_utc or datetime.now(timezone.utc)
     by_source: Dict[str, List[Dict[str, Any]]] = {"chat": [], "email": [], "work": [], "camera": [], "presence": [],
-                                                  "time": [], "calendar": [], "ticket": []}
+                                                  "time": [], "calendar": [], "ticket": [], "noticer": []}
     for e in events:
         if e["source"] not in by_source:
             raise ValueError(f"brain event {e['source_ref']} has unknown source {e['source']!r}")
@@ -315,7 +328,8 @@ def build(events: List[Dict[str, Any]], *, now_utc: Optional[datetime] = None,
     groups = (_chat_groups(by_source["chat"], now) + _email_groups(by_source["email"])
               + _work_groups(by_source["work"], work_labels or {}) + _camera_groups(by_source["camera"])
               + _presence_group(by_source["presence"]) + _time_group(by_source["time"])
-              + _calendar_group(by_source["calendar"]) + _ticket_group(by_source["ticket"]))
+              + _calendar_group(by_source["calendar"]) + _ticket_group(by_source["ticket"])
+              + _noticer_group(by_source["noticer"]))
     groups.sort(key=lambda g: g["first_at"])
     for g in groups:
         del g["first_at"]

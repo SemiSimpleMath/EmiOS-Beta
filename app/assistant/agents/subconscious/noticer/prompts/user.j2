@@ -1,78 +1,20 @@
-{% if assistant_persona %}## Who these questions are spoken as (the assistant — any `question_text` you emit is said to the user verbatim in THIS voice, first person)
-{{ assistant_persona }}
-
-{% endif %}Current date and time: {{ date_time }}
+Current date and time: {{ date_time }}
 Day of week: {{ day_of_week }}
-Trigger mode: {{ trigger_mode }}
 
-============================================================
-PRIORITY DIRECTIVE — do this BEFORE writing summary or making judgment calls
-============================================================
-Below in `recent_friction_signals` you will see groups (subject, kind) with
-counts over the last 14 days.
+## Recent friction signals (last 14 days, aggregated by subject + kind)
+Each chat burst may carry a friction signal (intensity, kind, subject, quote); below is their aggregation over the
+window. Read the quotes of every group with a count of 3 or more.
+{{ recent_friction_signals }}
 
-For EVERY group with count >= 3 whose quotes share substantive content
-(same underlying topic — sleep, fatigue, a routine, a relationship), you
-MUST emit a pattern_drift concern in new_concerns. This is not optional
-and not a judgment call.
-
-If a group has count >= 3 but the quotes are about wildly unrelated
-gripes (different objects/tools each time), skip THAT group but still
-process the rest.
-
-If a pattern_drift concern matching this signal already exists in
-concerns_register_active, add it to reinforced_concerns instead of
-new_concerns.
-
-If a matching concern appears in concerns_recently_closed, that group is
-already decided. Re-raise it only when evidence dated AFTER the closure
-contradicts the reason it was closed — then emit a new concern whose notes
-name what changed since that decision. Otherwise leave it closed and give
-it one line in your summary saying which closure covers it. The friction
-aggregate keeps supplying these signals for 14 days after you close
-something, so a group being loud is expected and is not by itself a reason
-to reopen.
-
-Either way, you must produce SOMETHING for each qualifying group — a
-reinforcement, a new concern, or that summary line.
-
-After you've processed the friction aggregate, do the other Pass A and
-Pass B work normally.
-
-============================================================
-
-## What was eaten — today + last 7 days
-{{ diet_log_7d }}
+## Recent passing chat mentions (last 7 days)
+Short utterances that did not cluster; useful to corroborate a pattern.
+{{ recent_passing_mentions }}
 
 ## Recent significant chat clusters (last 48h)
 {{ recent_chat_clusters }}
 
-## Recent friction signals (last 14 days, aggregated by subject + kind)
-The pod_classifier labels each chat burst with an optional friction_signal
-(intensity / kind / subject / quote). Below is the aggregation across the
-window. Use this as the PRIMARY input for pattern_drift detection: same
-(subject, kind) appearing 3+ times = pattern_drift concern; intensifying
-intensity over time = severity rises; new subject newly accumulating =
-emerging concern.
-{{ recent_friction_signals }}
-
-## Recent passing chat mentions (last 7 days)
-Short utterances that did not cluster into significance. Useful as
-secondary evidence when the friction-signal aggregate already flagged a
-pattern — quote one of these to corroborate.
-{{ recent_passing_mentions }}
-
-## Calendar — today + tomorrow (all calendars)
-{{ calendar_today_tomorrow }}
-
-## Calendar — week-ahead summary
-{{ calendar_week_summary }}
-
-## Calendar — 30-90 day horizon (anticipated_need scanning)
-Things far enough out that prep matters but close enough to act on.
-Trips, appointments, school events, family travel. Pass B (B1) uses
-this as the primary input for anticipated_need concerns.
-{{ calendar_30_90d }}
+## What was eaten — today + last 7 days
+{{ diet_log_7d }}
 
 ## Sleep observations (last 7 days)
 {{ sleep_log_7d }}
@@ -80,55 +22,43 @@ this as the primary input for anticipated_need concerns.
 ## Activity / exercise observations (last 7 days)
 {{ activity_log_7d }}
 
-## Family roster (who's home / traveling this week)
+## Calendar — today + tomorrow (all calendars)
+{{ calendar_today_tomorrow }}
+
+## Calendar — week-ahead summary
+{{ calendar_week_summary }}
+
+## Calendar — 30-90 day horizon
+{{ calendar_30_90d }}
+
+## Recurring obligations
+{{ recurring_obligations }}
+
+## Family roster
 {{ family_roster }}
 
 ## Household members — KG entity card digests
 {{ kg_household_digests }}
 
-## Family graph — extended family + close friends (Pass B input)
-Non-household important_people. Their birthdays, KG snapshots, and
-recent mentions in chat. Pass B (B2) uses this to spot
-opportunity_external concerns (a relative going through something,
-a friend's milestone coming up, etc.).
+## Family graph — extended family and close friends
+Their birthdays, KG snapshots and recent mentions in chat.
 {{ family_graph_digest }}
 
-## Ambient state per household member (last 7 days)
-A short distilled "what's going on with them right now" per person —
-mood, current load, anything affecting them. Companion to the long-term
-KG digest above.
-{{ ambient_state_digest }}
+## Watchlist
+{{ watchlist_summary }}
 
-## Current concerns_register (active + addressing)
-{{ concerns_register_active }}
-
-## Already decided — concerns you closed (resolved in the last 14 days + dormant)
-*Not a work list. Read it before writing `new_concerns`: if a concern you are about to raise is here, the decision already exists. Reopen it as a new concern only when evidence postdating the closure contradicts the stated reason, and say in `notes` what changed.*
-{{ concerns_recently_closed }}
-
-## Question mailbox (answers to YOUR questions + stale asks)
-*Every item here MUST get a `question_outcomes` entry this tick. A captured answer must also update its related concern (reinforce / resolve / disposition / belief update) — an answer that changes nothing was a wasted ask.*
-{{ question_mailbox }}
-
-## Recent exploration outcomes (accepted/rejected novel suggestions, last 30 days)
+## Recent exploration outcomes (last 30 days)
 {{ exploration_outcomes_30d }}
 
-## Recent dayflow items + outcomes (last 48h)
-*"Result: ..." lines show what the dayflow orchestrator actually accomplished. If one of your active concerns was already researched/acted on here but not resolved, use `addressing_concerns` (see ADDRESSED).*
+## Recent dayflow items and outcomes (last 48h)
 {{ dayflow_recent }}
 
-## Recurring obligations (Pass B — anticipated_need scanning)
-Predictable due-date items (physicals, insurance, car service, etc.).
-When today is within lead_time_days of next_due, surface an
-anticipated_need concern.
-{{ recurring_obligations }}
+## Concerns the brain tracks now
+{{ concerns_open }}
 
-## Watchlist sources (Pass B — opportunity scanning)
-User-curated things to keep an eye out for: restaurants, products,
-books, family members worth checking on. Pass B (B2) cross-references
-this with the week's other context for opportunity_external concerns.
-{{ watchlist_summary }}
+## Concerns the brain closed recently (decisions already made)
+{{ concerns_recently_closed }}
 
 ---
 
-Operate in the five stages per your system prompt. Output an AgentForm.
+Raise the issues worth the brain's attention.

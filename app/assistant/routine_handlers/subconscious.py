@@ -9,7 +9,7 @@ The flow is uniform across all of them:
     1. build_<X>_context(...)       → context dict for the agent
     2. DI.agent_factory.create_agent(<agent_name>)
     3. agent.action_handler(Message(agent_input=context, scope_context=...))
-    4. apply_<X>_output(result.data) → persist concerns / intentions / etc.
+    4. apply the output (the noticer: its issues to the brain's inbox; others: their own stores)
     5. return a small summary dict (visible in routine_manager's decision log)
 
 Corresponding routine JSON entries live in:
@@ -17,7 +17,7 @@ Corresponding routine JSON entries live in:
 
 Cadence (local times — see each json for the canonical config):
 
-    04:00–05:00   noticer                       (Pass A inward + Pass B outward)
+    04:00–05:00   noticer                       (long-term issues for the brain's inbox)
     05:00–05:30   daily_meal_proposer           (reads concerns + minted)
     05:00–05:30   wellness_proposer             (parallel; reads same concerns)
     05:00–05:30   romantic_proposer             (parallel)
@@ -35,11 +35,7 @@ from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-# One noticer tick at a time. The scheduled routine and answer-capture's
-# triggered tick (which calls noticer_run() directly, bypassing the routine
-# manager) can otherwise overlap — two concurrent ticks read the same
-# register and double-enqueue questions. A tick that finds one in flight
-# SKIPS: the running tick reads all captured answers anyway.
+# One noticer pass at a time: a pass that finds another in flight skips.
 _NOTICER_RUN_LOCK = threading.Lock()
 
 
@@ -100,17 +96,19 @@ def noticer_run(
     routine: Any = None,
     event_message: Any = None,
 ) -> Dict[str, Any]:
-    """Run one noticer pass. Default trigger_mode='daily'. Serialized: a tick
-    that finds another already in flight skips (see _NOTICER_RUN_LOCK)."""
+    """Run one noticer pass: it looks at the long term and raises issues, and each issue becomes an event in the
+    brain's inbox (brain_inbox.add_noticer_issues); the brain decides whether it becomes a concern. It writes nothing
+    else (owner, 2026-10-09). Serialized: a pass that finds another in flight skips."""
+    from datetime import datetime, timezone
+    from app.assistant.subconscious import brain_inbox, brain_wake
     from app.assistant.subconscious.context_builder import build_noticer_context
-    from app.assistant.subconscious.persist import apply_noticer_output
 
     if not _NOTICER_RUN_LOCK.acquire(blocking=False):
-        logger.info("[noticer_run] another noticer tick is in flight — skipping this one")
+        logger.info("[noticer_run] another noticer pass is in flight — skipping this one")
         return {"status": "skipped_concurrent_run"}
     try:
         from app.assistant.subconscious.brain_trace import trace
-        context = build_noticer_context(trigger_mode="daily")
+        context = build_noticer_context()
         with trace(stage="noticer"):
             output = _run_subconscious_agent(
                 handler_label="noticer_run",
@@ -119,17 +117,14 @@ def noticer_run(
                 scope_id="subconscious::noticer",
                 actor_id="routine::noticer_run",
             )
-        summary = apply_noticer_output(output) or {}
-        logger.info(
-            "[noticer_run] new=%d reinforced=%d resolved=%d escalated=%d beliefs=%d questions=%d",
-            len(output.get("new_concerns") or []),
-            len(output.get("reinforced_concerns") or []),
-            len(output.get("resolved_concerns") or []),
-            len(output.get("escalated_concerns") or []),
-            len(output.get("belief_updates") or []),
-            len(output.get("pending_questions") or []),
-        )
-        return {"status": "ok", **summary}
+        issues = output.get("issues")
+        if not isinstance(issues, list):
+            raise RuntimeError(f"[noticer_run] the noticer returned no issues list: {output!r}")
+        raised = brain_inbox.add_noticer_issues(issues, run_at=datetime.now(timezone.utc))
+        if raised:
+            brain_wake.poke()
+        logger.info("[noticer_run] raised %d issue(s): %s", raised, [i.get("title") for i in issues])
+        return {"status": "ok", "issues_raised": raised, "summary": output.get("summary")}
     finally:
         _NOTICER_RUN_LOCK.release()
 

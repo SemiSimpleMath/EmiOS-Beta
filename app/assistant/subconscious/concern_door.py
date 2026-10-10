@@ -1,15 +1,14 @@
 """The one way a concern enters the register (2026-09-30).
 
-Every source that raises a concern (today the noticer; next the brain step, chat and dayflow)
-hands its candidates here. Before this, the noticer wrote them straight in, under ids it made up,
+The brain step hands its candidates here (until 2026-10-09 the noticer did too; it now raises issues for the
+brain). Before this, the noticer wrote them straight in, under ids it made up,
 and the only duplicate check was an anchor the model almost never filled: the 60 most recent
 concerns held four for one makeup picture day, three for one school evening, and about six
 variants of the same sleep pattern.
 
 Two phases, so the model call never runs under the register lock:
 
-1. `plan_admission` (no lock). A candidate whose anchor the owner already settled (declined, or
-   accepted as chronic) is suppressed by code. The rest go to `subconscious::concern_door`, which
+1. `plan_admission` (no lock). The candidates go to `subconscious::concern_door`, which
    sees them beside every open concern, every concern resolved in the last CLOSED_WINDOW, and every
    dormant one (dormant concerns carry the owner's rulings), and decides for each candidate: a new
    matter, the same matter as an open concern, the same as a closed one, or the same as another
@@ -84,7 +83,7 @@ def build_payload(candidates: List[Dict[str, Any]], existing: List[Dict[str, Any
     return {
         "candidates": [{
             "label": f"N{i}", "title": c.get("title"), "subject": c.get("subject") or "household",
-            "kind": c.get("kind"), "horizon": c.get("horizon"), "anchor": c.get("anchor"),
+            "kind": c.get("kind"), "horizon": c.get("horizon"),
             "done_when": c.get("done_when"), "notes": c.get("notes") or "",
             "owner_words": (c.get("owner_request") or {}).get("words"),
             "evidence": [{"kind": e.get("kind"), "ref": e.get("ref"), "snippet": e.get("snippet")}
@@ -92,7 +91,7 @@ def build_payload(candidates: List[Dict[str, Any]], existing: List[Dict[str, Any
         } for i, c in enumerate(candidates, 1)],
         "existing": [{
             "label": f"C{i}", "status": c["_status"], "title": c.get("title"),
-            "subject": c.get("subject") or "household", "kind": c.get("kind"), "anchor": c.get("anchor"),
+            "subject": c.get("subject") or "household", "kind": c.get("kind"),
             "done_when": c.get("done_when"),
             "owner_words": (c.get("owner_request") or {}).get("words"),
             "first_observed": c.get("first_observed"),
@@ -157,22 +156,12 @@ def plan_admission(candidates: List[Dict[str, Any]], register: Dict[str, Any], *
     `target` is the concern_id matched (merge_open, suppress_closed) or the index of the candidate
     it joins (merge_candidate). Raises on a candidate without title or done_when, and when the
     judge's answer is still invalid after one correction."""
-    from app.assistant.subconscious.persist import _settled_anchors
     for c in candidates:
         if not str(c.get("title") or "").strip() or not str(c.get("done_when") or "").strip():
             raise ValueError(f"a concern candidate needs a title and done_when: {c.get('label')!r}")
     now = now_utc or datetime.now(timezone.utc)
-    settled = _settled_anchors(register)
     steps: List[Optional[Dict[str, Any]]] = [None] * len(candidates)
-    judged: List[int] = []
-    for i, c in enumerate(candidates):
-        prior = settled.get(str(c.get("anchor") or "").strip()) if c.get("anchor") else None
-        if prior is not None:
-            ruling = "declined" if prior.get("user_declined_at_utc") else "accepted as chronic"
-            steps[i] = {"candidate": c, "action": "suppress_closed", "target": prior["concern_id"],
-                        "reason": ruling}
-        else:
-            judged.append(i)
+    judged: List[int] = list(range(len(candidates)))
 
     existing = _comparable(register, now)
     if judged and not existing and len(judged) == 1:
@@ -263,7 +252,6 @@ def apply_admission(steps: List[Dict[str, Any]], register: Dict[str, Any], *, so
             target.setdefault("evidence", []).extend(c.get("evidence") or [])
             if c.get("owner_request") and not target.get("owner_request"):
                 target["owner_request"] = c["owner_request"]
-            persist._bump_reinforcement_count(target)
             target["last_reinforced_utc"] = now_iso
             persist._journal_on(target, now_iso, f"MERGED a re-raise from {source}: {title} ({step['reason']})")
             landed[i] = target_id

@@ -90,7 +90,7 @@ A pre-planned task IR (intermediate representation) saved as JSON under `tasks/<
 
 ### concerns register
 
-The durable spine of the **Subconscious** (`resources/subconscious/resource_concerns_register.json`) — four buckets: `active` (live; the only bucket proposers read), `addressing` (work in flight), `resolved`, `dormant` (accepted-chronic, compacted). Each concern carries `concern_id`, `title`, `kind`, `severity`, `horizon`, `evidence[]`, `addressable_by[]` (which lanes route it), plus lifecycle bookkeeping. The **noticer** is the only LLM that mutates concern lifecycle; lifecycle *pressure* (`compute_pressure`) forces a disposition on long-running concerns. Every other component feeds it (noticer, answer-capture) or reads it (proposers, digest, dashboard). See [SUBCONSCIOUS.md](architecture/SUBCONSCIOUS.md) §2.
+The durable spine of the **Subconscious** (the `concerns` table in emi.db, `subconscious/concern_store.py`) — four buckets: `active` (live; the only bucket proposers read), `addressing` (work in flight), `resolved`, `dormant` (accepted-chronic, compacted). Each concern carries `concern_id`, `title`, `kind`, `severity`, `horizon`, `evidence[]`, `addressable_by[]` (which lanes route it), plus lifecycle bookkeeping. The **brain** step writes notes, resolutions and new concerns; work feedback records attached work and its outcomes. Proposers, the digest, the dashboard and the noticer read it. See [SUBCONSCIOUS.md](architecture/SUBCONSCIOUS.md) §2.
 
 ### confidence band
 
@@ -274,7 +274,7 @@ Base class for agent-orchestrating managers. Lives in `manager_classes/MultiAgen
 
 ### noticer
 
-The single LLM that runs the **Subconscious**'s "thinking" (`subconscious::noticer`, `gpt-5.4-mini`, **`allowed_tools: []`** — context fully pre-injected). Two passes: **inward** (verify existing concerns, process forced dispositions, drain the answered-question mailbox, detect new pattern-drift from friction signals) and **outward** (mandatory calendar anticipated-need scan + opportunity/gift scouting). Output applied by `persist.apply_noticer_output` to the **concerns register**; it *observes and delegates* (routes concerns to dayflow/proposers via `addressable_by`) — it never acts. Triggered nightly (04:00, window 04:00–22:00) plus a cooldown-guarded ad-hoc tick from **answer_matcher**. See [SUBCONSCIOUS.md](architecture/SUBCONSCIOUS.md) §3.
+The **Subconscious**'s long view (`subconscious::noticer`, **`allowed_tools: []`** — context fully pre-injected): once a day it reads weeks of signals, the calendar ahead and the concerns already tracked (by title), and raises **issues** (title, kind, subject, what, why now). Each issue becomes an event in the brain's inbox (`brain_inbox.add_noticer_issues`); the brain decides whether it becomes a concern. It writes nothing else (2026-10-09). See [SUBCONSCIOUS.md](architecture/SUBCONSCIOUS.md) §4.
 
 ### per_manager
 

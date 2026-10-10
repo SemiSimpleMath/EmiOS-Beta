@@ -120,27 +120,7 @@ def _on_ticket_responded(message: Any) -> None:
                     "(ticket %s)", question_id[:8], ticket_id,
                 )
                 return
-            # Same downstream as the chat path: journal + immediate tick.
-            session_row = None
-            from app.models.base import get_session
-            from app.assistant.database.pending_question import PendingQuestion
-            session = get_session()
-            try:
-                session_row = session.query(PendingQuestion).filter_by(id=question_id).first()
-                session.expunge_all()
-            finally:
-                session.close()
-            from app.assistant.subconscious.answer_capture import (
-                annotate_concern_answer,
-                trigger_noticer,
-            )
-            if session_row is not None and session_row.related_concern_id:
-                annotate_concern_answer(
-                    session_row.related_concern_id,
-                    question_text=session_row.question_text,
-                    answer_text=user_text,
-                )
-            trigger_noticer(f"ticket answer for question {question_id[:8]}")
+            # The question's creator drains its own answers; the reply reaches the brain as a ticket reply.
             logger.info(
                 "[ticket_delivery] ticket %s answered question %s",
                 ticket_id, question_id[:8],

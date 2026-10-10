@@ -18,7 +18,7 @@
             <span class="mind-stat"><strong>{{ mind.counts.active }}</strong> active</span>
             <span class="mind-stat"><strong>{{ mind.counts.addressing }}</strong> addressing</span>
             <span class="mind-stat"><strong>{{ mind.counts.resolved }}</strong> resolved</span>
-            {% if mind.last_tick_utc %}<span class="mind-stat mind-stat-dim">last tick {{ mind.last_tick_utc }} UTC</span>{% endif %}
+            {% if mind.last_noticer_utc %}<span class="mind-stat mind-stat-dim">noticer last raised {{ mind.last_noticer_utc }} UTC</span>{% endif %}
             {% if mind.digest.last_digest_at %}<span class="mind-stat mind-stat-dim">last digest {{ mind.digest.last_digest_at }} UTC</span>{% endif %}
         </div>
 
@@ -83,16 +83,16 @@
             {% endif %}
         </section>
 
-        <!-- ── Tick activity ───────────────────────────────────────── -->
-        {% if mind.ticks %}
+        <!-- ── Noticer issues ──────────────────────────────────────── -->
+        {% if mind.noticer_issues %}
         <section class="mind-section">
-            <h2 class="mind-h2"><i class="fas fa-heartbeat"></i> Recent noticer activity</h2>
+            <h2 class="mind-h2"><i class="fas fa-heartbeat"></i> Issues the noticer raised</h2>
             <div class="tick-list">
-                {% for t in mind.ticks %}
+                {% for t in mind.noticer_issues %}
                 <div class="tick-row">
-                    <span class="tick-time">{{ t.tick_utc }}</span>
-                    <span class="tick-counts">{{ t.new }} new · {{ t.reinforced }} reinforced · {{ t.resolved }} resolved{% if t.escalated %} · {{ t.escalated }} escalated{% endif %}{% if t.questions %} · {{ t.questions }} questions{% endif %}</span>
-                    {% if t.new_titles %}<span class="tick-new-titles">{{ t.new_titles|join(' | ') }}</span>{% endif %}
+                    <span class="tick-time">{{ t.at }}</span>
+                    <span class="tick-counts">{{ t.route }}</span>
+                    <span class="tick-new-titles">{{ t.title }}</span>
                 </div>
                 {% endfor %}
             </div>

@@ -243,14 +243,12 @@ class TestDeclineReachesTheConcern:
         into work."""
         from work_objects.result_recorder import record_tool_result
         from app.assistant.subconscious import concern_feedback, persist
-        import app.assistant.subconscious.answer_capture as answer_capture
 
         concern_id = "3a9f2c71-6b84-4d15-ae32-91f0c7b5e628"
         register_path = self._register(tmp_path, concern_id)
         # propagate_work_outcome takes no store; route persist's register I/O to the scratch store.
         monkeypatch.setattr(persist, "_load_register", lambda connect=None: register_path.read())
         monkeypatch.setattr(persist, "_save_register", lambda connect, reg: register_path.write(reg))
-        monkeypatch.setattr(answer_capture, "trigger_noticer", lambda reason=None: None)
 
         store = _store()
         wid, gid = _mk_wo(store, constraints={"concern_refs": [f"concern:{concern_id[:8]}"]})

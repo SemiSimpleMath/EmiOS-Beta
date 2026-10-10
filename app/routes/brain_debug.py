@@ -112,7 +112,7 @@ def brain_noticer_api():
     calendar), so it takes a few seconds."""
     from app.assistant.subconscious import brain_step
     from app.assistant.subconscious.context_builder import build_noticer_context
-    context = build_noticer_context(trigger_mode="daily")
+    context = build_noticer_context()
     inputs: List[Dict[str, Any]] = [{"key": k, "chars": len(str(v)), "text": str(v)} for k, v in context.items()]
     prompts = _render_prompts("subconscious::noticer", context, "subconscious::noticer")
     return jsonify({"inputs": inputs, "reports_unconsumed": len(brain_step.pending_events()), **prompts})
