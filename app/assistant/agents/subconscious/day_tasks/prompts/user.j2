@@ -23,7 +23,7 @@
 (no belief comes close in meaning)
 {% endfor %}
 {% if A.earlier %}
-## Earlier things your entries rely on
+## Earlier things named above, not shown elsewhere here
 {% for x in A.earlier -%}
 {% if x.missing is defined %}- [{{ x.ref }}] (no longer stored)
 {% elif x.kind == "work" %}{% with w = x.work %}{% include 'shared/brain/past_work.j2' %}{% endwith %}
@@ -35,22 +35,7 @@
 {% endif -%}
 {% endfor %}{% endif %}
 
-## What the brain read and decided today
-{% for m in A.matters -%}
-### [{{ m.ref }}] {{ m.at | local_time }}
-{% for e in m.events -%}
-- {{ e.source }} at {{ e.at | local_time }}: {{ e.text }}
-  the brain: {{ e.decision | replace("_", " ") }}: {{ e.reason }}
-{% endfor -%}
-{% for n in m.notes -%}
-- note on a concern: {{ n.note }}
-{% endfor -%}
-{% for n in m.new_concerns -%}
-- raised a concern: {{ n.title }}
-{% endfor %}
-{% else -%}
-(nothing yet today)
-{% endfor %}
+{% with matters = A.matters %}{% include 'shared/brain/matters_today.j2' %}{% endwith %}
 {% if A.correction %}
 ## Your previous answer was refused
 {{ A.correction }}

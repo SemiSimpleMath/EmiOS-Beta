@@ -87,7 +87,7 @@ def _inputs(conn):
             e["ref"], e["shown_by"] = k, []
         return {"day": DAY, "now": now.isoformat(), "current": None, "events": events, "milestones": milestones,
                 "concerns": [{"ref": "C1", "concern_id": "c-sick", "title": "The daughter is home sick",
-                              "subject": "the daughter", "what": "She has a cold.",
+                              "subject": "the daughter", "what": "She has a cold.", "raised_today": None,
                               "today": [{"at": NOW.isoformat(), "text": "Still sick today; staying home."}]}],
                 "matters": [], "labels": labels, "correction": None}
     return gather

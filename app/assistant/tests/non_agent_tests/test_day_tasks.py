@@ -363,7 +363,7 @@ def test_what_an_entry_relies_on_is_kept_by_id_and_shown_again_by_label(tmp_path
     assert mine["relies_on_labels"] == ["W1", "M2"], "relabelled in the new call"
     assert seen[0]["labels"]["W1"] == ["work", "work_yesterday"] and seen[0]["labels"]["M2"] == ["message", "m1"]
     user = _ENV.get_template("subconscious/day_tasks/prompts/user.j2").render(agent_input=seen[0])
-    assert "relies on: [W1], [M2]" in user and "## Earlier things your entries rely on" in user
+    assert "relies on: [W1], [M2]" in user and "## Earlier things named above, not shown elsewhere here" in user
     assert "### Set the AC yesterday [W1; done;" in user and "[M2] (no longer stored)" in user
     assert "work_yesterday" not in user and own["id"] not in user, "no id is shown"
 
@@ -424,3 +424,61 @@ def test_earlier_entries_whose_work_is_in_motion_are_the_deciders_to_rewrite(tmp
                            "relies_on": []}], cause="test", at=NOW + timedelta(minutes=5), connect=conn)
     [entry] = [e for e in L.open_before(DAY, connect=conn) if e["id"] == carried["id"]]
     assert entry["when_local"] == "10:20 AM" and entry["day"] == "2026-03-09", "the owning entry changed, so its work will"
+
+
+def test_the_look_back_shows_finished_work_once_briefly_and_leaves_open_concerns_notes_to_them(tmp_path, monkeypatch):
+    """Owner, 2026-10-11: "we have really a lot of text for things that have finished". A work's judgment and its
+    ending are one item, the work as it stands now with the brain's decision on each report; its label leads to the
+    work in full. A note on a concern still open is shown with the concern, not again here; one on a concern since
+    closed stays. A message keeps its own words."""
+    from app.assistant.dayflow_orchestrator.work_context import _ENV
+    from app.assistant.subconscious import brain_inbox, brain_step, concern_store
+    from app.assistant.utils.time_utils import local_time_text
+    conn = sqlite_file(tmp_path / "d.db")
+    brain_inbox.ensure_schema(conn)
+    brain_step.ensure_schema(conn)
+    full = "Objective: set the AC. Where the work stands now: every step finished."
+    at = lambda m: (NOW + timedelta(minutes=m)).isoformat()
+    with conn(True) as c:
+        for ref, source, m, text in (("work:work_ac:r1", "work", 1, "judged. " + full), ("work:work_ac:r2", "work", 2,
+                                     "ended. " + full), ("message:9", "chat", 3, "it is cold in here")):
+            c.execute("INSERT INTO brain_events (source, source_ref, occurred_at, room_id, speaker, text, received_at) "
+                      "VALUES (?, ?, ?, NULL, 'x', ?, ?)", (source, ref, at(m), text, at(m)))
+        c.execute("INSERT INTO brain_matters (created_at, event_ids, concern_ids, status, decisions) VALUES (?,?,?,?,?)",
+                  (at(4), "[1,2,3]", "[]", "applied", json.dumps({
+                      "events": {"work:work_ac:r1": {"decision": "changes_concern", "reason": "The AC is at 75."},
+                                 "work:work_ac:r2": {"decision": "changes_concern", "reason": "The work is done."},
+                                 "message:9": {"decision": "changes_concern", "reason": "The owner is cold."}},
+                      "concern_updates": [{"concern_id": "c-open", "action": "note", "note": "AC at 75 at 6."},
+                                          {"concern_id": "c-closed", "action": "resolve", "note": "Met; closed."}],
+                      "new_concerns": []})))
+    monkeypatch.setattr(concern_store, "load_register", lambda: {"active": [{"concern_id": "c-open"}], "addressing": []})
+    brief = {"work_id": "work_ac", "title": "Set the AC to 75", "status": "done", "updated": "Tue 03-10 08:02 AM",
+             "ended_because": "every step finished"}
+    matters = D.matters_today(DAY, NOW + timedelta(minutes=5), connect=conn, work_brief=lambda w: dict(brief))
+    [m] = matters
+    assert [e["source"] for e in m["events"]] == ["work", "chat"], "one item per work"
+    assert [d["reason"] for d in m["events"][0]["decisions"]] == ["The AC is at 75.", "The work is done."]
+    assert [n["concern_id"] for n in m["notes"]] == ["c-closed"]
+    monkeypatch.setattr(D, "describe", lambda kind, obj_id, connect=None: {"missing": True})
+    s = situation()
+    projected = D.project(DAY, s, matters, [], connect=conn)
+    assert projected["labels"]["W1"] == ["work", "work_ac"], "the label leads to the work in full"
+    user = _ENV.get_template("subconscious/day_tasks/prompts/user.j2").render(
+        agent_input={"day": DAY, "own": [], "situation": s, "matters": matters, "beliefs": [], "correction": None,
+                     **projected})
+    look = user[user.index("## What the brain read and decided today"):]
+    assert ('- work [W1] "Set the AC to 75", as it stands now: done Tue 03-10 08:02 AM: every step finished\n'
+            f"  the brain, on its report at {local_time_text(at(1))}: changes concern: The AC is at 75.\n"
+            f"  the brain, on its report at {local_time_text(at(2))}: changes concern: The work is done.\n") in look
+    assert f"- chat at {local_time_text(at(3))}: it is cold in here" in look
+    assert full not in user and "AC at 75 at 6." not in look
+    assert "- note on a concern no longer open: Met; closed." in look
+    record = _ENV.get_template("subconscious/day_record/prompts/user.j2").render(agent_input={
+        "day": DAY, "now": NOW.isoformat(), "current": None, "events": [], "milestones": [], "correction": None,
+        "concerns": [{"ref": "C1", "title": "AC", "subject": "household", "what": "At 6: AC to 75.",
+                      "raised_today": NOW.isoformat(), "today": []}],
+        "matters": [{**m, "ref": "B1", "events": [{**e, "work": dict(brief)} if "work" in e else e
+                                                   for e in m["events"]]}]})
+    assert f"At 6: AC to 75.\n(raised {local_time_text(NOW.isoformat())})\n(no notes today)" in record
+    assert '- work "Set the AC to 75", as it stands now: done' in record and full not in record

@@ -128,11 +128,22 @@ def with_concerns(situation: Dict[str, Any], *, connect=None) -> None:
             e["work"] = work.get(e["id"])
 
 
-def matters_today(day: str, now_utc: datetime, *, connect=None) -> List[Dict[str, Any]]:
-    """What the brain read and decided today (brain_matters, applied): when, each event in its own words with the
-    brain's decision and reason, the notes it wrote on concerns, the concerns it raised."""
+def matters_today(day: str, now_utc: datetime, *, connect=None, work_brief=None) -> List[Dict[str, Any]]:
+    """What the brain read and decided today (brain_matters, applied): when, each event with the brain's decision and
+    reason, the notes it wrote on concerns no longer open, the concerns it raised.
+
+    A look-back, so what is shown in full elsewhere is shown here briefly (owner, 2026-10-11: "a lot of text for
+    things that have finished"). A message or an email is shown in its own words. The work events of one work, its
+    judgments and its ending, are one item: the work as it stands now (`work`, work_brief: title, status, when it last
+    changed, why it ended) with the brain's decision on each; the full report was read when it arrived, and a reader
+    that looks closer has the work in full (the day's tasks: its label, project). A note on a concern still open is
+    left out: every reader shows an open concern's notes with it."""
     from app.assistant.pipelines.context import day_window_local
+    from app.assistant.subconscious.concern_store import load_register
     connect = connect or _connect
+    work_brief = work_brief or _work_brief
+    register = load_register()
+    still_open = {c["concern_id"] for b in ("active", "addressing") for c in register.get(b) or []}
     start = day_window_local(day)[0].astimezone(timezone.utc).isoformat()
     with connect(False) as c:
         rows = c.execute("SELECT id, created_at, decisions FROM brain_matters WHERE status = 'applied' AND created_at >= ? "
@@ -140,14 +151,30 @@ def matters_today(day: str, now_utc: datetime, *, connect=None) -> List[Dict[str
         out = []
         for r in rows:
             d = json.loads(r["decisions"])
-            events = []
+            events, works = [], {}
             for ref, decided in d["events"].items():
                 e = c.execute("SELECT source, occurred_at, text FROM brain_events WHERE source_ref = ?", (ref,)).fetchone()
-                events.append({"source": e["source"], "at": e["occurred_at"], "text": e["text"],
-                               "decision": decided["decision"], "reason": decided["reason"]})
-            out.append({"id": r["id"], "at": r["created_at"], "events": events, "notes": d.get("concern_updates") or [],
+                said = {"at": e["occurred_at"], "decision": decided["decision"], "reason": decided["reason"]}
+                if e["source"] != "work":
+                    events.append({"source": e["source"], "at": e["occurred_at"], "text": e["text"], **said})
+                    continue
+                work_id = ref.split(":")[1]   # work:<work_id>:<receipt id> (brain_inbox.add_work_event)
+                if work_id not in works:
+                    works[work_id] = {"source": "work", "at": e["occurred_at"], "work": work_brief(work_id),
+                                      "decisions": []}
+                    events.append(works[work_id])
+                works[work_id]["decisions"].append(said)
+            out.append({"id": r["id"], "at": r["created_at"], "events": events,
+                        "notes": [n for n in d.get("concern_updates") or [] if n["concern_id"] not in still_open],
                         "new_concerns": d.get("new_concerns") or []})
     return out
+
+
+def _work_brief(work_id: str) -> Dict[str, Any]:
+    """One work as the look-back shows it: what it is, how it stands now, and why it ended."""
+    from app.assistant.subconscious import work_links
+    w = work_links.work_view(work_id, link="look-back")
+    return {k: w[k] for k in ("work_id", "title", "status", "updated", "ended_because")}
 
 
 # The kinds of object the day's tasks reads, by label prefix (docs/design/objects_and_projections_2026-10-08.md).
@@ -214,6 +241,10 @@ def project(day: str, situation: Dict[str, Any], matters: List[Dict[str, Any]], 
     for e in own:
         e["relies_on_labels"] = [label_of(k, i) for k, i in e.get("relies_on") or []]
         e["concern_ref"] = label_of("concern", e["concern_id"]) if e.get("concern_id") else None
+    # The look-back shows each work briefly (matters_today); its label leads to the work in full, in the situation's
+    # work or, when not there, among the earlier things.
+    for x in [x for m in matters for x in m["events"] if "work" in x]:
+        x["work"]["ref"] = label_of("work", x["work"]["work_id"])
     for w in [*situation["work"]["in_motion"], *situation["work"]["ended"]]:
         entry = w.get("list_entry")
         label = p.label_of("list_entry", entry) if entry else None

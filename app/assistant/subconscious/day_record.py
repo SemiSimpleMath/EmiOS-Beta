@@ -243,7 +243,9 @@ def time_milestones(day: str, now_utc: datetime, *, sleep: Optional[List[Dict[st
 # ── what the model reads ───────────────────────────────────────────────────
 
 def _today_notes(concern: Dict[str, Any], start_utc: datetime) -> List[Dict[str, str]]:
-    """The concern's journal lines written since the day began, each with when (UTC ISO) and its words."""
+    """The concern's journal lines written since the day began, each with when (UTC ISO) and its words. Until
+    2026-10-11 a concern raised today also showed the note it was raised with here, word for word the description
+    shown above it (open_concerns `what`); now it says when it was raised (`raised_today`)."""
     from app.assistant.utils.time_utils import parse_iso_utc
     out = []
     for line in (concern.get("reinforcement_notes") or "").splitlines():
@@ -252,16 +254,14 @@ def _today_notes(concern: Dict[str, Any], start_utc: datetime) -> List[Dict[str,
         stamp = parse_iso_utc(line[1:end]) if line.startswith("[") and end > 0 else None
         if stamp and stamp >= start_utc:
             out.append({"at": stamp.isoformat(), "text": line[end + 1:].strip()})
-    first = concern.get("first_observed")
-    if first and parse_iso_utc(first) and parse_iso_utc(first) >= start_utc and concern.get("notes"):
-        out.insert(0, {"at": first, "text": str(concern["notes"]).strip()})
     return out
 
 
 def open_concerns(start_utc: datetime) -> List[Dict[str, Any]]:
-    """Every open concern as it stands now: its title, what it is about (the note it was raised with), and the notes
-    made today."""
+    """Every open concern as it stands now: its title, what it is about (the note it was raised with), when it was
+    raised if that was today, and the notes made today."""
     from app.assistant.subconscious.concern_store import load_register
+    from app.assistant.utils.time_utils import parse_iso_utc
     register = load_register()
     out = []
     for bucket in ("active", "addressing"):
@@ -269,6 +269,8 @@ def open_concerns(start_utc: datetime) -> List[Dict[str, Any]]:
             out.append({"concern_id": c["concern_id"], "title": c.get("title") or "",
                         "subject": c.get("subject") or "household",
                         "what": (c.get("notes") or "").strip(),
+                        "raised_today": (c["first_observed"] if c.get("first_observed")
+                                         and parse_iso_utc(c["first_observed"]) >= start_utc else None),
                         "today": _today_notes(c, start_utc)})
     return out
 
