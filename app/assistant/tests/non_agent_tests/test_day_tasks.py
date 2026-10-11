@@ -472,7 +472,9 @@ def test_the_look_back_shows_ended_work_by_its_line_and_work_in_motion_briefly(t
         agent_input={"day": DAY, "own": [], "situation": s, "matters": matters, "beliefs": [], "correction": None,
                      **projected})
     look = user[user.index("## What the brain read and decided today"):]
-    assert "- work [W1], ended: The AC was set to COOL 75 at 6:00 AM.\n- work [W2]" in look, "an ended work: one line"
+    assert "- work [W1], ended (summary): The AC was set to COOL 75 at 6:00 AM.\n- work [W2]" in look, "one line"
+    assert ("a one-line summary of its report, written after it ended; the summary can be wrong, and\nthe report is "
+            "what happened. The work in full is under its label.") in look, "the reader knows it is a summary"
     assert "The AC is at 75." not in look and "The work is done." not in look
     assert ('- work [W2] "Share a fact", as it stands now: in progress\n'
             f"  the brain, on its report at {local_time_text(at(2))}: changes concern: A fact is ready.\n") in look
@@ -485,4 +487,5 @@ def test_the_look_back_shows_ended_work_by_its_line_and_work_in_motion_briefly(t
         "matters": [{**m, "ref": "B1", "events": [{**e, "work": dict(briefs[e["work"]["work_id"]])} if "work" in e
                                                    else e for e in m["events"]]}]})
     assert f"At 6: AC to 75.\n(raised {local_time_text(NOW.isoformat())})\n(no notes today)" in record
-    assert "- work, ended: The AC was set to COOL 75 at 6:00 AM." in record and full not in record
+    assert "- work, ended (summary): The AC was set to COOL 75 at 6:00 AM." in record and full not in record
+    assert "the report is what happened.\n" in record and "under its label" not in record, "no label to point to"

@@ -1,13 +1,21 @@
 {#- What the brain read and decided today, a look-back (day_tasks.matters_today): a message or an email in its own
     words with the brain's decision; an ended work by its one line (subconscious/work_line.py), a work still in
     motion briefly as it stands now with the brain's decision on each of its reports; the concerns raised. Expects
-    `matters`, each with `ref`. -#}
+    `matters`, each with `ref`. The line is an agent's summary of the work's report, never its record: the reader is
+    told so once, and where the work carries its label, that the work in full is under it (owner, 2026-10-11). -#}
 ## What the brain read and decided today
+{% set seen = namespace(lined=false, labelled=false) -%}
+{% for m in matters %}{% for e in m.events %}{% if e.work is defined and e.work.line %}{% set seen.lined = true %}{% if e.work.get("ref") %}{% set seen.labelled = true %}{% endif %}{% endif %}{% endfor %}{% endfor -%}
+{% if seen.lined -%}
+An ended work is shown by a one-line summary of its report, written after it ended; the summary can be wrong, and
+the report is what happened.{% if seen.labelled %} The work in full is under its label.{% endif %}
+
+{% endif -%}
 {% for m in matters -%}
 ### [{{ m.ref }}] {{ m.at | local_time }}
 {% for e in m.events -%}
 {% if e.work is defined and e.work.line -%}
-- work{% if e.work.get("ref") %} [{{ e.work.ref }}]{% endif %}, ended: {{ e.work.line }}
+- work{% if e.work.get("ref") %} [{{ e.work.ref }}]{% endif %}, ended (summary): {{ e.work.line }}
 {% elif e.work is defined -%}
 {% set w = e.work -%}
 - work{% if w.get("ref") %} [{{ w.ref }}]{% endif %} "{{ w.title }}", as it stands now: {% if w.status == "active" %}in progress{% else %}{{ w.status }} {{ w.updated }}{% if w.ended_because %}: {{ w.ended_because }}{% endif %}{% endif %}
