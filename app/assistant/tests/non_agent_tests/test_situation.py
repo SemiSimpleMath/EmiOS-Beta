@@ -2,7 +2,9 @@
 
 Pins: a conversation still going is left out until the room goes quiet (the gate's rule), a finished one is read
 whole (what wakes a decider is not the situation, day_tasks.fingerprint); work made from the calendar is left out when
-asked (shadow), work from elsewhere stays; the template shows every time local and says plainly what is not known.
+asked (shadow), work from elsewhere stays; the template shows every time local and says plainly what is not known;
+the brain reads the day's time at and away from the computer as the daily context tracker does, the stretch still
+going included (2026-10-11: it read the owner, back at the keyboard, as away until now).
 Invented data; no database.
 """
 from datetime import datetime, timedelta, timezone
@@ -56,7 +58,7 @@ def test_the_template_shows_times_local_and_says_what_is_not_known():
     assert "Weather: Springfield, 61 F, Clear" in text and "- 2026-03-12 (2d away): Sam's birthday" in text
     assert NOW.isoformat() not in text, "every time in the prompt is local"
     quiet = situation(presence={"is_afk": False, "status_label": "UNKNOWN", "duration_minutes": 0.0,
-                                "start_time_local": "", "most_recent_afk": None},
+                                "start_time_local": ""},
                       weather={"city": None, "temperature": None, "condition": None}, health="", tickets=[],
                       reminders={"status": "unavailable", "since": NOW.isoformat(), "through": NOW.isoformat(),
                                  "records": []})
@@ -73,3 +75,23 @@ def test_the_template_shows_times_local_and_says_what_is_not_known():
     assert "- ended because: The battery status could not be read." in ended
     assert '- task "Check battery": The integration returned no camera details.' in ended
     assert "FINALIZER" not in ended and "NEXT" not in ended, "outside dayflow the finalizer's prose only"
+
+
+def test_time_back_at_the_keyboard_is_not_read_as_away(monkeypatch):
+    """2026-10-10: away 8:22 to 8:58 PM, then at the keyboard; at 9:07 the brain read "last away from 8:22 to 9:07"
+    and decided the evening dog walk was still going."""
+    from app.assistant.dayflow_orchestrator.work_context import _ENV
+    from app.assistant.pipelines.dayflow.utils import context_sources
+    from app.assistant.utils.time_utils import local_time_text
+    away, back, now = NOW - 45 * MIN, NOW - 9 * MIN, NOW
+    seen = []
+    monkeypatch.setattr(context_sources, "activity_spans", lambda since: seen.append(since) or [
+        {"start_utc": away - 60 * MIN, "end_utc": away, "type": "Active", "ongoing": False},
+        {"start_utc": away, "end_utc": back, "type": "AFK", "ongoing": False},
+        {"start_utc": back, "end_utc": now, "type": "Active", "ongoing": True}])
+    activity = S.activity("2026-03-10")
+    assert seen and seen[0].tzinfo is not None and seen[0] < away - 60 * MIN, "from the day's start"
+    text = _ENV.get_template("shared/brain/situation.j2").render(s=situation(activity=activity))
+    assert f"- {local_time_text(away.isoformat())} to {local_time_text(back.isoformat())}: away" in text
+    assert f"- {local_time_text(back.isoformat())} until now: at the computer" in text
+    assert NOW.isoformat() not in text

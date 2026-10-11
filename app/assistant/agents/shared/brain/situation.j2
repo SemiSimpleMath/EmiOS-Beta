@@ -11,7 +11,12 @@ The owner is at the keyboard{% if p.start_time_local %}, since {{ p.start_time_l
 {%- else -%}
 Whether the owner is at the keyboard is not known right now.
 {%- endif %}
-{%- if p.most_recent_afk %} Last away from {{ p.most_recent_afk.start_local }} to {{ p.most_recent_afk.end_local }}.{% endif %}
+{%- if s.activity %}
+At and away from the computer today:
+{%- for a in s.activity %}
+- {{ a.start | local_time }} {% if a.ongoing %}until now{% else %}to {{ a.end | local_time }}{% endif %}: {{ {"Active": "at the computer", "AFK": "away", "Intermittent": "on and off"}[a.type] }}
+{%- endfor %}
+{%- endif %}
 Where the owner is, and expected to be in the next 24 hours:
 {{ s.location }}
 Weather: {% if s.weather.condition %}{{ s.weather.city }}, {{ s.weather.temperature }} F, {{ s.weather.condition }}{% else %}(not known){% endif %}

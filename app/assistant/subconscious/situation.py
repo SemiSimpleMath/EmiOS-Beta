@@ -122,6 +122,18 @@ def open_concerns() -> List[Dict[str, Any]]:
             for b in ("active", "addressing") for c in register.get(b) or []]
 
 
+def activity(day: str) -> List[Dict[str, Any]]:
+    """The day's time at and away from the computer, as the daily context tracker reads it (context_sources.
+    activity_spans: the keyboard and mouse data, the stretch still going included, short blips absorbed). Until
+    2026-10-11 the brain read one "last away" interval worked out apart from it, which left out the stretch still
+    going and so read every time at the keyboard as away until now."""
+    from app.assistant.pipelines.context import day_window_local
+    from app.assistant.pipelines.dayflow.utils.context_sources import activity_spans
+    return [{"start": a["start_utc"].isoformat(), "end": a["end_utc"].isoformat(), "type": a["type"],
+             "ongoing": a["ongoing"]}
+            for a in activity_spans(day_window_local(day)[0].astimezone(timezone.utc))]
+
+
 # ── the whole ──────────────────────────────────────────────────────────────
 
 def gather(now_utc: datetime) -> Dict[str, Any]:
@@ -148,6 +160,7 @@ def gather(now_utc: datetime) -> Dict[str, Any]:
         "calendar_ahead": _calendar_lines(day_window_local(day)[0].astimezone(timezone.utc)),
         "day_theme": str(daily.get("day_theme") or ""), "current_status": str(daily.get("current_status") or ""),
         "presence": get_current_presence_status(),
+        "activity": activity(day),
         "location": get_user_location_summary(hours_ahead=24),
         "weather": {"city": (weather.get("location") or {}).get("city"),
                     "temperature": (weather.get("current") or {}).get("temperature"),

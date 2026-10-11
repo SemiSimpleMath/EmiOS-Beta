@@ -462,7 +462,6 @@ def get_current_presence_status() -> Dict[str, Any]:
             "status_label": "AT_KEYBOARD",
             "duration_minutes": 0.0,
             "start_time_local": "",
-            "most_recent_afk": None,
         }
 
         monitor = getattr(DI, "afk_monitor", None)
@@ -488,35 +487,6 @@ def get_current_presence_status() -> Dict[str, Any]:
                             result["duration_minutes"] = round(active_mins, 1)
                             result["start_time_local"] = utc_to_local(active_start).strftime(_DATED)
 
-        # Most recent completed AFK interval (best-effort)
-        try:
-            from app.assistant.afk_manager.afk_statistics import get_afk_intervals_overlapping_range
-
-            start_window = now_utc - timedelta(hours=8)
-            afk_intervals = get_afk_intervals_overlapping_range(
-                start_utc=start_window,
-                end_utc=now_utc,
-                include_provisional=False,
-            )
-            if afk_intervals:
-                sorted_intervals = sorted(
-                    afk_intervals, key=lambda x: x.get("end_utc", ""), reverse=True
-                )
-                for interval in sorted_intervals:
-                    start_utc = _parse_utc(interval.get("start_utc"))
-                    end_utc = _parse_utc(interval.get("end_utc"))
-                    if start_utc and end_utc and end_utc > start_utc:
-                        duration = (end_utc - start_utc).total_seconds() / 60.0
-                        if duration >= 5:
-                            result["most_recent_afk"] = {
-                                "start_local": utc_to_local(start_utc).strftime(_DATED),
-                                "end_local": utc_to_local(end_utc).strftime(_DATED),
-                                "duration_minutes": round(duration, 0),
-                            }
-                            break
-        except Exception as e:
-            logger.debug("Could not get recent AFK intervals: %s", e, exc_info=True)
-
         return result
     except Exception as e:
         logger.warning("Could not get presence status: %s", e)
@@ -525,7 +495,6 @@ def get_current_presence_status() -> Dict[str, Any]:
             "status_label": "UNKNOWN",
             "duration_minutes": 0.0,
             "start_time_local": "",
-            "most_recent_afk": None,
         }
 
 
