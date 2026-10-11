@@ -87,8 +87,8 @@ def _inputs(conn):
             e["ref"], e["shown_by"] = k, []
         return {"day": DAY, "now": now.isoformat(), "current": None, "events": events, "milestones": milestones,
                 "concerns": [{"ref": "C1", "concern_id": "c-sick", "title": "The daughter is home sick",
-                              "subject": "the daughter", "what": "She has a cold.", "raised_today": None,
-                              "today": [{"at": NOW.isoformat(), "text": "Still sick today; staying home."}]}],
+                              "subject": "the daughter", "history": "[Mon 03-09 07:40 AM] She has a cold.\n"
+                                                                    "[Tue 03-10 11:30 AM] Still sick today; staying home."}],
                 "matters": [], "labels": labels, "correction": None}
     return gather
 
@@ -145,3 +145,26 @@ def test_the_prompt_shows_labels_and_no_id(tmp_path):
     system = _ENV.get_template("subconscious/day_record/prompts/system.j2").render(
         resource_assistant_data={"name": "the assistant"}, resource_user_data={"first_name": "Sam"})
     assert "Time passing alone is never a reason to write happened" in system
+
+
+def test_a_concern_is_read_whole_and_each_note_says_when_it_was_written(monkeypatch):
+    """2026-10-11: a concern raised the day before said "She has a doctor appointment at 10:30 today."; shown undated,
+    with "(no notes today)", the record put the appointment on the next day, while the concern's summary said when it
+    was. The record reads each concern as every reader does: its summary and every note since, each dated."""
+    from app.assistant.subconscious import concern_store
+    from app.assistant.utils.time_utils import local_time_text
+    raised, noted = NOW - timedelta(days=1), NOW - timedelta(hours=2)
+    register = {"active": [
+        {"concern_id": "c-new", "title": "The daughter is sick", "subject": "the daughter",
+         "first_observed": raised.isoformat(), "notes": "She has a doctor appointment at 10:30 today."},
+        {"concern_id": "c-old", "title": "The son's testing day", "subject": "the son",
+         "first_observed": (NOW - timedelta(days=5)).isoformat(), "notes": "Testing is on the 19th.",
+         "summary": {"text": "Testing is on the 19th; the device is not known.", "lines": 1,
+                     "through": raised.isoformat()},
+         "reinforcement_notes": f"[{raised.isoformat()}] folded\n[{noted.isoformat()}] He uses a school Chromebook."}],
+        "addressing": []}
+    monkeypatch.setattr(concern_store, "load_register", lambda: register)
+    new, old = R.open_concerns()
+    assert new["history"] == f"[{local_time_text(raised)}] She has a doctor appointment at 10:30 today."
+    assert old["history"] == (f"Summary of the notes up to {local_time_text(raised)}: Testing is on the 19th; the "
+                              f"device is not known.\n[{local_time_text(noted)}] He uses a school Chromebook.")

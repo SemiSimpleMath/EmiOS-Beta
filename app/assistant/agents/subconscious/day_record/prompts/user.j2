@@ -1,7 +1,7 @@
 {#- The day's record input (subconscious/day_record.py), a projection: every object shows its label of this call and
     its data, never its id; times local. Expects agent_input: day, now, events [{ref, title, start_utc, end_utc, state,
     basis, note, shown_by}], milestones [{at_utc, description, basis, origin, shown_by}], concerns [{ref, title,
-    subject, what, raised_today, today [{at, text}]}], matters (day_tasks.matters_today, each with ref), correction. -#}
+    subject, history}] (persist.history_for_prompt), matters (day_tasks.matters_today, each with ref), correction. -#}
 {%- set A = agent_input -%}
 Now: {{ A.now | local_time }}{% if A.current %}; {{ A.current.words }}{% endif %}
 
@@ -22,14 +22,8 @@ Milestones recorded:
 ## The open concerns
 {% for c in A.concerns -%}
 ### [{{ c.ref }}] {{ c.title }} (about {{ c.subject }})
-{{ c.what }}
-{% if c.raised_today %}(raised {{ c.raised_today | local_time }})
-{% endif -%}
-{% for n in c.today -%}
-- today {{ n.at | local_time }}: {{ n.text }}
-{% else -%}
-(no notes today)
-{% endfor %}
+{{ c.history }}
+
 {% else -%}
 (none)
 {% endfor %}

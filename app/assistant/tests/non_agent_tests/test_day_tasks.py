@@ -482,10 +482,9 @@ def test_the_look_back_shows_ended_work_by_its_line_and_work_in_motion_briefly(t
     assert full not in user and "AC at 75 at 6." not in look and "Met; closed." not in look
     record = _ENV.get_template("subconscious/day_record/prompts/user.j2").render(agent_input={
         "day": DAY, "now": NOW.isoformat(), "current": None, "events": [], "milestones": [], "correction": None,
-        "concerns": [{"ref": "C1", "title": "AC", "subject": "household", "what": "At 6: AC to 75.",
-                      "raised_today": NOW.isoformat(), "today": []}],
+        "concerns": [{"ref": "C1", "title": "AC", "subject": "household", "history": "[Tue 03-10 05:01 AM] At 6: AC to 75."}],
         "matters": [{**m, "ref": "B1", "events": [{**e, "work": dict(briefs[e["work"]["work_id"]])} if "work" in e
                                                    else e for e in m["events"]]}]})
-    assert f"At 6: AC to 75.\n(raised {local_time_text(NOW.isoformat())})\n(no notes today)" in record
+    assert "### [C1] AC (about household)\n[Tue 03-10 05:01 AM] At 6: AC to 75.\n" in record
     assert "- work, ended (summary): The AC was set to COOL 75 at 6:00 AM." in record and full not in record
     assert "the report is what happened.\n" in record and "under its label" not in record, "no label to point to"
