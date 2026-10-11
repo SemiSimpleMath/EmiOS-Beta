@@ -54,15 +54,18 @@ The calendar ahead:
 ## Work the assistant has in motion
 {% for w in s.work.in_motion -%}
 - {% if w.ref is defined %}[{{ w.ref }}] {% endif %}{{ w.objective or w.title }} (started {{ w.created }}{% if w.from_list is defined and w.from_list %}; made from {{ w.from_list }}{% endif %})
-{% with p = w.progress, pad = "  " %}{% include 'shared/work/work_progress.j2' %}{% endwith -%}
+{% if w.get("shown_under") %}  where it stands is shown under [{{ w.shown_under }}]
+{% else %}{% with p = w.progress, pad = "  " %}{% include 'shared/work/work_progress.j2' %}{% endwith %}{% endif -%}
 {% else -%}
 (none)
 {% endfor %}
-## Work that ended in the last 18 hours
+## Work that ended in the last 18 hours (work that ended before today in one line each)
 {% for w in s.work.ended -%}
-{% include 'shared/brain/past_work.j2' %}{% if w.from_list is defined and w.from_list %}- made from {{ w.from_list }}
+{% if w.get("shown_under") %}- [{{ w.ref }}] {{ w.title }}: {{ w.status }}, last changed {{ w.updated }}; shown in full under [{{ w.shown_under }}]
+{% elif w.get("before_today") %}- [{{ w.ref }}] {{ w.title }}: {{ w.status }} {{ w.updated_at | local_time }}{% if w.line %}; in a line (a summary): {{ w.line }}{% elif w.ended_because %}: {{ w.ended_because }}{% endif %}
+{% else %}{% include 'shared/brain/past_work.j2' %}{% if w.from_list is defined and w.from_list %}- made from {{ w.from_list }}
 {% endif %}
-{% else -%}
+{% endif %}{% else -%}
 (none)
 {% endfor %}
 ## Questions and notices waiting for the owner
@@ -75,9 +78,9 @@ The calendar ahead:
 
 ## Open concerns
 {% for c in s.concerns -%}
-{% if c.text is defined -%}
+{% if c.view is defined -%}
 ### {% if c.ref is defined %}[{{ c.ref }}] {% endif %}{{ c.title }} (record last changed {{ c.changed_at | local_time }})
-{{ c.text }}
+{% with concerns = [c.view], brief_work = true %}{% include 'shared/work/concern_view.j2' %}{% endwith %}
 On the brain's list for this concern:
 {% for e in c.entries -%}
 - {% if e.ref is defined %}[{{ e.ref }}] {% endif %}{{ e.what }}{% if e.assistant_part and e.assistant_part != e.what %} (the assistant: {{ e.assistant_part }}){% endif %}{% if e.when_local %}, {{ e.when_local }}{% endif %}; {{ e.status }}, decided {{ e.updated_at | local_time }}

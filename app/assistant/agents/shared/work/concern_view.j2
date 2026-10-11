@@ -1,4 +1,6 @@
-{#- The concerns a work object serves, each with its record. Expects `concerns` (concern_view.view). -#}
+{#- The concerns a work object serves, each with its record. Expects `concerns` (concern_view.view). With `brief_work`
+    (the day's tasks, 2026-10-11) each attempt is one line, by its label when the call shows it in full elsewhere. -#}
+{% set brief = brief_work is defined and brief_work -%}
 {% for c in concerns %}
 {% if c.get('unresolved') %}- concern {{ c.ref }}: not found ({{ c.unresolved }})
 {% else %}- concern {{ c.concern_id[:8] }}: {{ c.title }} [{{ c.status }}]
@@ -10,9 +12,10 @@
 {{ c.history | indent(4, true) }}
 {% endif %}{% if c.get('plan') and c.plan.todo %}  things that should be done:
 {% for t in c.plan.todo %}    - {{ t }}
-{% endfor %}{% endif %}{% for w in c.get('attempts') or [] %}{% if loop.first %}  work on this concern so far:
-{% endif %}    - {{ w.objective }} ({{ w.work_id }}; attached {{ w.attached_at | local_time }})
+{% endfor %}{% endif %}{% for w in c.get('attempts') or [] %}{% if loop.first %}  work on this concern so far{% if brief %} (each in one line; work with a label is shown in full where its label is){% endif %}:
+{% endif %}{% if brief %}    - {% if w.get('ref') %}[{{ w.ref }}] {% endif %}{{ w.objective }}: {% if w.ended %}{{ w.ended.outcome }} {{ w.ended.at | local_time }}{% if w.ended.reason %}: {{ w.ended.reason }}{% endif %}{% else %}in progress{% endif %}
+{% else %}    - {{ w.objective }} ({{ w.work_id }}; attached {{ w.attached_at | local_time }})
 {% with p = w.progress, pad = "      " %}{% include 'shared/work/work_progress.j2' %}{% endwith %}{% for j in w.judgments %}{% if loop.first %}      judgments of its steps:
 {% endif %}      - task "{{ j.title }}" ({{ j.at | local_time }}): {{ j.outcome }}
 {% for r in j.replies %}        - {{ r }}
-{% endfor %}{% endfor %}{% endfor %}{% endif %}{% endfor %}
+{% endfor %}{% endfor %}{% endif %}{% endfor %}{% endif %}{% endfor %}

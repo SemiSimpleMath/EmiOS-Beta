@@ -161,7 +161,7 @@ def test_the_brain_s_view_concerns_in_full_with_their_entries_and_today_s_decisi
     """day_tasks reads what the brain knows: each open concern's whole record and its entries on the list, and what
     the brain read and decided today; a concern's entry and a brain decision are facts a change can cite."""
     from app.assistant.dayflow_orchestrator.work_context import _ENV
-    from app.assistant.subconscious import concern_planner, concern_store
+    from app.assistant.subconscious import concern_store, concern_view
     conn = sqlite_file(tmp_path / "d.db")
     L.apply_entries(DAY, [{"entry": "new", "action": "new", "what": "the owner knows the family eats out tonight",
                            "assistant_part": "tell the owner the table is at 6", "when": "5:30 PM", "why": "He asked.",
@@ -181,7 +181,10 @@ def test_the_brain_s_view_concerns_in_full_with_their_entries_and_today_s_decisi
                  "assistant_part": "remind the owner", "when": "5:45 PM", "why": "It expires today."}]}
     monkeypatch.setattr(concern_store, "load_register",
                         lambda: {"active": [{"concern_id": "c-dinner", "plan": plan}], "addressing": []})
-    monkeypatch.setattr(concern_planner, "concern_text", lambda c, b: f"THE WHOLE RECORD of {c['concern_id']} ({b})")
+    monkeypatch.setattr(concern_view, "view", lambda c, b: {
+        "concern_id": c["concern_id"], "title": "Dinner out tonight", "status": b, "severity": None, "done_when": None,
+        "source": "", "expires": "", "history": f"THE WHOLE RECORD of {c['concern_id']} ({b})", "plan": None,
+        "attempts": []})
     s = situation(concerns=[{"concern_id": "c-dinner", "bucket": "active", "title": "Dinner out tonight",
                              "severity": "low", "changed_at": NOW.isoformat()}])
     D.with_concerns(s, connect=conn)
@@ -326,7 +329,7 @@ def test_work_is_marked_with_the_entry_it_was_made_from_by_label():
     s = situation(work={"in_motion": [{"work_id": "w9", "list_entry": "day:2026-03-10:ab"},
                                       {"work_id": "w10", "list_entry": None},
                                       {"work_id": "w11", "list_entry": "day:2026-03-09:cd"}],
-                        "ended": [{"work_id": "w7", "list_entry": "con:42"}]})
+                        "ended": [{"work_id": "w7", "list_entry": "con:42", "updated_at": NOW.isoformat()}]})
     D.project(DAY, s, [], [{"id": "day:2026-03-10:ab"}])
     assert [w["from_list"] for w in s["work"]["in_motion"]] == [
         "your own entry O1", None, "an entry on the list of 2026-03-09"]
@@ -343,7 +346,8 @@ def test_what_an_entry_relies_on_is_kept_by_id_and_shown_again_by_label(tmp_path
     conn = sqlite_file(tmp_path / "d.db")
     s1 = situation(chat="the AC can wait until 9", work={"in_motion": [], "ended": [
         {"work_id": "work_yesterday", "title": "Set the AC yesterday", "status": "done", "objective": "",
-         "created": "Mon 2026-03-09", "updated": "Mon 2026-03-09", "ended_because": "done", "outcomes": [],
+         "created": "Mon 2026-03-09", "updated": "Mon 2026-03-09", "updated_at": (NOW - timedelta(days=1)).isoformat(),
+         "ended_because": "done", "outcomes": [],
          "link": "ended", "score": None, "list_entry": None}]})
     answer = {"entries": [_own(what="The AC is at 70 at 9", part="set the AC to 70", when="9:00 PM",
                                why="Yesterday's setting was for yesterday; the owner asked again today.",
@@ -489,3 +493,60 @@ def test_the_look_back_shows_ended_work_by_its_line_and_work_in_motion_briefly(t
             "since, each with when it was written):\n[Tue 03-10 05:01 AM] At 6: AC to 75.\n") in record
     assert "- work, ended (summary): The AC was set to COOL 75 at 6:00 AM." in record and full not in record
     assert "the report is what happened.\n" in record and "under its label" not in record, "no label to point to"
+
+
+def test_each_work_is_shown_in_full_once_under_the_entry_it_was_made_from(tmp_path):
+    """Owner, 2026-10-11: "start with showing each work once". A work was shown in full under its entry, under the
+    concern it serves, and in the work in motion; now in full under its entry only. The work section names it by its
+    label and where it is, and a concern's attempts are one line each: a past work, never in view, by how it ended."""
+    from app.assistant.dayflow_orchestrator.work_context import _ENV
+    conn = sqlite_file(tmp_path / "d.db")
+    later = (NOW + timedelta(hours=6)).isoformat()
+    progress = {"state": "in_progress", "replanning": False, "done": [], "dropped": [], "unfinished": [],
+                "to_come": [{"title": "Set the AC to 70", "wait": {"kind": "scheduled", "at": later}}]}
+    s = situation(work={"in_motion": [{"work_id": "work_ac", "objective": "The house is at 70 tonight",
+                                       "title": "AC to 70", "created": "Tue 03-10", "list_entry": "con:ac1",
+                                       "progress": progress}],
+                         "ended": [{"work_id": "work_lights", "title": "Lights off last night", "status": "done",
+                                    "objective": "", "created": "Mon 2026-03-09", "updated": "Mon 2026-03-09",
+                                    "updated_at": (NOW - timedelta(hours=20)).isoformat(),
+                                    "ended_because": "every step finished", "covered_by": [], "list_entry": None,
+                                    "outcomes": [{"title": "Lights off", "outcome": "YESTERDAY'S OUTCOME",
+                                                  "at": None}], "link": "ended", "score": None}]})
+    ac = s["concerns"][0]
+    ac.update(view={"concern_id": "c-ac", "title": ac["title"], "status": "active", "severity": "low",
+                    "done_when": None, "source": "", "expires": "", "history": "[Mon 03-09 08:00 PM] Set it to 70.",
+                    "plan": None,
+                    "attempts": [{"work_id": "work_old", "objective": "The house was at 70 last night",
+                                  "attached_at": (NOW - timedelta(days=1)).isoformat(), "status": "done",
+                                  "progress": {**progress, "state": "done", "to_come": []},
+                                  "judgments": [{"title": "Set it", "at": NOW.isoformat(), "outcome": "LAST NIGHT'S "
+                                                 "JUDGMENT", "replies": []}],
+                                  "ended": {"outcome": "done", "at": (NOW - timedelta(hours=20)).isoformat(),
+                                            "reason": "every step finished"}},
+                                 {"work_id": "work_ac", "objective": "The house is at 70 tonight",
+                                  "attached_at": NOW.isoformat(), "status": "active", "progress": progress,
+                                  "judgments": [], "ended": None}]},
+              entries=[{"id": "con:ac1", "kind": "concern", "what": "The house is at 70 tonight",
+                        "decision": "needed", "assistant_part": "set the AC to 70", "when_local": "9:00 PM",
+                        "status": "open", "updated_at": NOW.isoformat(),
+                        "work": {"work_id": "work_ac", "status": "active", "ended_because": "", "outcomes": [],
+                                 "progress": progress}}],
+              cancelled=[], plan=None)
+    projected = D.project(DAY, s, [], [], connect=conn)
+    assert projected["labels"]["W1"] == ["work", "work_ac"]
+    user = _ENV.get_template("subconscious/day_tasks/prompts/user.j2").render(
+        agent_input={"day": DAY, "own": [], "situation": s, "matters": [], "beliefs": [], "correction": None,
+                     **projected})
+    assert user.count("Still to come in this work") == 1, "the work's steps once, under its entry"
+    assert "- [E1] The house is at 70 tonight" in user and "  its work [W1]: active\n" in user
+    assert "- [W1] The house is at 70 tonight (started Tue 03-10; made from the concern's entry E1)\n" \
+           "  where it stands is shown under [E1]\n" in user
+    old_end = (NOW - timedelta(hours=20)).isoformat()
+    from app.assistant.utils.time_utils import local_time_text
+    assert "    - [W1] The house is at 70 tonight: in progress\n" in user
+    assert f"    - The house was at 70 last night: done {local_time_text(old_end)}: every step finished\n" in user
+    assert "LAST NIGHT'S JUDGMENT" not in user and "work_old" not in user and "work_ac" not in user
+    ended = local_time_text((NOW - timedelta(hours=20)).isoformat())
+    assert f"- [W2] Lights off last night: done {ended}: every step finished\n" in user
+    assert "YESTERDAY'S OUTCOME" not in user, "work ended before today: one line"

@@ -97,20 +97,20 @@ def fingerprint(inputs: Dict[str, Any]) -> str:
 
 
 def with_concerns(situation: Dict[str, Any], *, connect=None) -> None:
-    """Each open concern of the situation, in place, with its whole record as the brain's agents read it (`text`,
-    concern_planner.concern_text), the record's basis (`basis`, concern_view.basis: what the fingerprint counts), its
+    """Each open concern of the situation, in place, with its whole record as the brain's agents read it (`view`,
+    concern_view.view; rendered after the call's labels are given, project), the record's basis (`basis`,
+    concern_view.basis: what the fingerprint counts), its
     planner's plan (`plan`: the decision, why, until when, when it was written, and the changes it proposes, or None),
     its entries on the brain's list (`entries`) and the ones cancelled, with why (`cancelled`; 2026-10-06: a decider
     re-created a question it had cancelled the night before, not seeing it)."""
     from app.assistant.subconscious import brain_list
-    from app.assistant.subconscious.concern_view import basis
-    from app.assistant.subconscious.concern_planner import concern_text
+    from app.assistant.subconscious.concern_view import basis, view
     from app.assistant.subconscious.concern_store import load_register
     register = load_register()
     by_id = {c["concern_id"]: c for b in ("active", "addressing") for c in register.get(b) or []}
     for c in situation["concerns"]:
         concern = by_id[c["concern_id"]]
-        c["text"] = concern_text(concern, c["bucket"])
+        c["view"] = view(concern, c["bucket"])
         c["basis"] = basis(concern, c["bucket"])
         plan = concern.get("plan")
         c["plan"] = None if not plan else {
@@ -224,10 +224,29 @@ def project(day: str, situation: Dict[str, Any], matters: List[Dict[str, Any]], 
     for line in situation["calendar_ahead"]:
         if line["anchor"]:
             line["ref"] = p.label("K", "calendar_event", line["anchor"][len("calendar:"):])
-    entry_work = [e.get("work") for e in own] + [e.get("work") for c in situation["concerns"] for e in c.get("entries") or []]
-    for w in entry_work:
+    entries = [*own, *[e for c in situation["concerns"] for e in c.get("entries") or []]]
+    for w in [e.get("work") for e in entries]:
         if w:
             w["ref"] = p.label("W", "work", w["work_id"])
+    # Each work is shown in full once (owner, 2026-10-11): under the entry it was made from, where its decider decides
+    # that entry; the work sections name it by label and say where it is, and a concern's attempts are one line each.
+    # Until then a work could be shown in full five times: under its entry, under each concern it serves, in the work
+    # in motion or the work ended, and in the look-back.
+    under = {e["work"]["work_id"]: e["ref"] for e in entries if e.get("work")}
+    for w in [*situation["work"]["in_motion"], *situation["work"]["ended"]]:
+        w["shown_under"] = under.get(w["work_id"])
+    # Work that ended before the day began is one line: its line (subconscious/work_line.py), or how it ended.
+    from app.assistant.pipelines.context import day_window_local
+    from app.assistant.subconscious import work_line
+    from app.assistant.utils.time_utils import parse_iso_utc
+    start = day_window_local(day)[0].astimezone(timezone.utc)
+    before = [w for w in situation["work"]["ended"] if parse_iso_utc(w["updated_at"]) < start]
+    written = work_line.lines([w["work_id"] for w in before], connect=connect)
+    for w in situation["work"]["ended"]:
+        w["before_today"] = w in before
+        w["line"] = written.get(w["work_id"])
+    for a in [a for c in situation["concerns"] for a in (c.get("view") or {}).get("attempts") or []]:
+        a["ref"] = p.label_of("work", a["work_id"])
     earlier: List[Dict[str, Any]] = []
 
     def label_of(kind: str, obj_id: str) -> str:

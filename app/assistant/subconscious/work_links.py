@@ -105,7 +105,7 @@ def work_view(work_id: str, *, link: str, score: Optional[float] = None) -> Dict
         "work_id": work_id, "title": wo.title or summary["title"], "status": summary["status"],
         "objective": str((wo.constraints or {}).get("objective") or ""),
         "created": _local(summary["created_at"]), "updated": _local(summary["updated_at"]),
-        "ended_because": _goal_epitaph(wo), "covered_by": covered,
+        "updated_at": summary["updated_at"], "ended_because": _goal_epitaph(wo), "covered_by": covered,
         "list_entry": (wo.constraints or {}).get("list_entry_id"),
         "outcomes": [{"title": n.title, "outcome": n.payload["finalizer"].get("outcome"),
                       "at": n.payload["finalizer"].get("at")} for n in nodes.values()
