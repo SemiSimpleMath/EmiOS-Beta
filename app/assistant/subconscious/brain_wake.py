@@ -7,7 +7,8 @@ every five minutes and read chat in five-minute slices while the conversation wa
 
 A wake runs `run_brain` once: new chat and email into the inbox, the gate routes what is ready (an
 email at once, a room's messages once the room has been quiet for brain_inbox.QUIET), the brain
-decides each matter, a concern whose notes grew long is summarized (subconscious/concern_summary.py), the concern
+decides each matter, a concern whose notes grew long is summarized (subconscious/concern_summary.py), each work that
+ended gets its one line (subconscious/work_line.py), the concern
 planner works out what each changed concern needs (subconscious/concern_planner.py), and the day's tasks decide the
 list dayflow makes work from. Each stage is free when it has nothing to do.
 
@@ -65,6 +66,10 @@ def run_brain() -> Dict[str, Any]:
     gate = run_gate()
     brain = run_brain_step()
     summaries = run_summaries()
+    # Each work that ended gets the one line it is known by (subconscious/work_line.py), before the day's tasks and
+    # the day's record look back over the day.
+    from app.assistant.subconscious.work_line import run_lines
+    lines = run_lines()
     plans = concern_planner.run_planners()
     register, now = load_register(), datetime.now(timezone.utc)
     from app.assistant.subconscious.brain_inbox import next_presence_due
@@ -103,7 +108,7 @@ def run_brain() -> Dict[str, Any]:
     except Exception as exc:
         logger.error("[brain_wake] the day's record (shadow) failed: %s", exc, exc_info=True)
         recorded = {"day_record": f"failed: {type(exc).__name__}"}
-    return {**gate, **{f"brain_{k}": v for k, v in brain.items()}, **summaries, **plans, **day,
+    return {**gate, **{f"brain_{k}": v for k, v in brain.items()}, **summaries, **lines, **plans, **day,
             **stories, **decided, **recorded, "expired": expired, "closed_concern_entries": closed_entries,
             "next_wake_at": min(due) if due else None}
 

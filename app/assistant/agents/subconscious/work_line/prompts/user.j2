@@ -1,0 +1,21 @@
+{#- The ended work as subconscious/work_line.build_payload prepares it: purpose (the work's full objective), tasks
+    [{title, status, outcome, at}] (outcome: the finalizer's account, or none when the task was not judged), ended
+    {status, at, reason}. Times are UTC ISO, shown local. -#}
+{%- set A = agent_input -%}
+## What the work was for
+{{ A.purpose }}
+
+## Its tasks
+{% for t in A.tasks -%}
+- "{{ t.title }}": {% if t.outcome %}{{ t.outcome }} ({{ t.at | local_time }}){% else %}not run; {{ t.status }} when the work ended{% endif %}
+{% else -%}
+(none)
+{% endfor %}
+## How it ended
+{{ A.ended.status }} at {{ A.ended.at | local_time }}{% if A.ended.reason %}: {{ A.ended.reason }}{% endif %}
+{% if A.get('correction') %}
+## Correct your previous answer
+
+It did not satisfy the contract: {{ A.correction }}
+{% endif %}
+Write the line this work is known by.

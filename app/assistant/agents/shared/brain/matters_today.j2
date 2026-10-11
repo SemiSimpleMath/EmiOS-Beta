@@ -1,11 +1,14 @@
 {#- What the brain read and decided today, a look-back (day_tasks.matters_today): a message or an email in its own
-    words, a work briefly as it stands now with the brain's decision on each of its reports, the notes on concerns no
-    longer open (an open concern shows its own), the concerns raised. Expects `matters`, each with `ref`. -#}
+    words with the brain's decision; an ended work by its one line (subconscious/work_line.py), a work still in
+    motion briefly as it stands now with the brain's decision on each of its reports; the concerns raised. Expects
+    `matters`, each with `ref`. -#}
 ## What the brain read and decided today
 {% for m in matters -%}
 ### [{{ m.ref }}] {{ m.at | local_time }}
 {% for e in m.events -%}
-{% if e.work is defined -%}
+{% if e.work is defined and e.work.line -%}
+- work{% if e.work.get("ref") %} [{{ e.work.ref }}]{% endif %}, ended: {{ e.work.line }}
+{% elif e.work is defined -%}
 {% set w = e.work -%}
 - work{% if w.get("ref") %} [{{ w.ref }}]{% endif %} "{{ w.title }}", as it stands now: {% if w.status == "active" %}in progress{% else %}{{ w.status }} {{ w.updated }}{% if w.ended_because %}: {{ w.ended_because }}{% endif %}{% endif %}
 {% for d in e.decisions -%}
@@ -15,9 +18,6 @@
 - {{ e.source }} at {{ e.at | local_time }}: {{ e.text }}
   the brain: {{ e.decision | replace("_", " ") }}: {{ e.reason }}
 {% endif -%}
-{% endfor -%}
-{% for n in m.notes -%}
-- note on a concern no longer open: {{ n.note }}
 {% endfor -%}
 {% for n in m.new_concerns -%}
 - raised a concern: {{ n.title }}

@@ -133,17 +133,16 @@ def matters_today(day: str, now_utc: datetime, *, connect=None, work_brief=None)
     reason, the notes it wrote on concerns no longer open, the concerns it raised.
 
     A look-back, so what is shown in full elsewhere is shown here briefly (owner, 2026-10-11: "a lot of text for
-    things that have finished"). A message or an email is shown in its own words. The work events of one work, its
-    judgments and its ending, are one item: the work as it stands now (`work`, work_brief: title, status, when it last
-    changed, why it ended) with the brain's decision on each; the full report was read when it arrived, and a reader
-    that looks closer has the work in full (the day's tasks: its label, project). A note on a concern still open is
-    left out: every reader shows an open concern's notes with it."""
+    things that have finished"; the end result should be one line). A message or an email is shown in its own words.
+    The work events of one work, its judgments and its ending, are one item: the work as it stands now (`work`,
+    work_brief: title, status, when it last changed, why it ended, and once it has ended its `line`,
+    subconscious/work_line.py) with the brain's decision on each; the template shows an ended work by its line alone.
+    The full report was read when it arrived, and a reader that looks closer has the work in full (the day's tasks:
+    its label, project). The notes the brain wrote on concerns are left out: an open concern shows its notes with it,
+    and what the brain made of a matter now closed is in its decision on the event, or in the work's line."""
     from app.assistant.pipelines.context import day_window_local
-    from app.assistant.subconscious.concern_store import load_register
     connect = connect or _connect
     work_brief = work_brief or _work_brief
-    register = load_register()
-    still_open = {c["concern_id"] for b in ("active", "addressing") for c in register.get(b) or []}
     start = day_window_local(day)[0].astimezone(timezone.utc).isoformat()
     with connect(False) as c:
         rows = c.execute("SELECT id, created_at, decisions FROM brain_matters WHERE status = 'applied' AND created_at >= ? "
@@ -165,16 +164,16 @@ def matters_today(day: str, now_utc: datetime, *, connect=None, work_brief=None)
                     events.append(works[work_id])
                 works[work_id]["decisions"].append(said)
             out.append({"id": r["id"], "at": r["created_at"], "events": events,
-                        "notes": [n for n in d.get("concern_updates") or [] if n["concern_id"] not in still_open],
                         "new_concerns": d.get("new_concerns") or []})
     return out
 
 
 def _work_brief(work_id: str) -> Dict[str, Any]:
-    """One work as the look-back shows it: what it is, how it stands now, and why it ended."""
-    from app.assistant.subconscious import work_links
+    """One work as the look-back shows it: what it is, how it stands now, why it ended, and its line once written."""
+    from app.assistant.subconscious import work_line, work_links
     w = work_links.work_view(work_id, link="look-back")
-    return {k: w[k] for k in ("work_id", "title", "status", "updated", "ended_because")}
+    return {**{k: w[k] for k in ("work_id", "title", "status", "updated", "ended_because")},
+            "line": work_line.lines([work_id]).get(work_id)}
 
 
 # The kinds of object the day's tasks reads, by label prefix (docs/design/objects_and_projections_2026-10-08.md).

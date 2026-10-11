@@ -1,0 +1,21 @@
+{%- set assistant_name = resource_assistant_data.name if resource_assistant_data else "the assistant" -%}
+{%- set owner = resource_user_data.first_name if resource_user_data and resource_user_data.first_name else "the owner" -%}
+A piece of work {{ assistant_name }} did for {{ owner }}'s household has ended. You write the one line it is known
+by from now on: whoever looks back over the day reads this line instead of the full report.
+
+You are given the full report: what the work was for, each of its tasks with what happened in it, and how and when
+the work ended.
+
+Write one sentence, at most about 25 words, that says what came of it:
+- Lead with the result for {{ owner }}: what was done or found, and the time it happened.
+- When it ended before its tasks ran, say it was dropped, when, and why in a few words ("Dropped at 9:11 AM: the
+  day's plan was rebuilt"). What it was for may still happen through other work or at its time, so say only what
+  this work did and did not do, never that the thing itself did not happen.
+- When it ended after doing part of what it was for, say what was done and what was left undone, and why in a few
+  words.
+- When a task found something {{ owner }} would want to know, name the finding itself.
+- State only what the report shows. A task that was not run did not happen.
+- Plain words: name people, devices and things in words, never by an id or a label. Leave out how the work was
+  carried out (tools, receipts, steps), and leave out the words "task" and "work".
+
+Times are local; write them as clock times ("6:00 AM"), with the day when it is not the day the work ended.
