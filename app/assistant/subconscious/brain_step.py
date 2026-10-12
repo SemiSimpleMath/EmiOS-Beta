@@ -280,8 +280,12 @@ def build_payload(events: List[Dict[str, Any]], register: Dict[str, Any],
     for c in concern_views:
         for w in c["attached_work"]:
             source_labels[w["work_id"]] = p.label("W", "work", w["work_id"])
+    # Each work is shown in full once: under the concern it is attached to, where the brain reads that concern's work;
+    # elsewhere it is one line naming that concern (2026-10-12; a work event's work was shown four times).
+    under = {w["work_id"]: c["label"] for c in concern_views for w in c["attached_work"]}
     for w in [*linked, *similar, *active]:
         source_labels[w["work_id"]] = p.label("W", "work", w["work_id"])
+        w["shown_under"] = under.get(w["work_id"])
     for r in reminders:
         source_labels[r["ref"]] = p.label("R", "reminder", r["ref"].split(":", 1)[1])
     for line in lines:

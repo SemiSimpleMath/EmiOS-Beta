@@ -1,18 +1,21 @@
 {#- Past work and what is already in motion. Expects `agent_input` with linked_work, similar_work,
     active_work, reminders, and calendar_lines (lines with their labels, brain_step.build_payload); a ref labelled
-    in agent_input.source_labels shows its label. -#}
+    in agent_input.source_labels shows its label. A work shown in full under a concern above (`shown_under`, that
+    concern's label) is one line here. -#}
 {%- set L = (agent_input.get("source_labels") if agent_input is defined else none) or {} -%}
 ## Past work linked to this matter
 
 {% for w in agent_input.linked_work -%}
-{% include 'shared/brain/past_work.j2' %}
+{% if w.get("shown_under") %}- [{{ L.get(w.work_id, w.work_id) }}] {{ w.title }}: {{ w.status }}, last changed {{ w.updated }}; {{ w.link }}; shown in full under [{{ w.shown_under }}]
+{% else %}{% include 'shared/brain/past_work.j2' %}{% endif %}
 {% else -%}
 (none: no work cites these concerns or came from these email threads)
 {% endfor %}
 ## Similar past work (found by meaning; judge whether it is the same matter)
 
 {% for w in agent_input.similar_work -%}
-{% include 'shared/brain/past_work.j2' %}
+{% if w.get("shown_under") %}- [{{ L.get(w.work_id, w.work_id) }}] {{ w.title }}: {{ w.status }}, last changed {{ w.updated }}; {{ w.link }}{% if w.score is not none %} {{ w.score }}{% endif %}; shown in full under [{{ w.shown_under }}]
+{% else %}{% include 'shared/brain/past_work.j2' %}{% endif %}
 {% else -%}
 (none close enough)
 {% endfor %}
@@ -21,7 +24,8 @@
 Active work:
 {% for w in agent_input.active_work -%}
 - {{ w.title }} [{{ L.get(w.work_id, w.work_id) }}] (started {{ w.created }}){% if w.objective and w.objective != w.title %}: {{ w.objective }}{% endif %}
-{% with p = w.progress, pad = "  " %}{% include 'shared/work/work_progress.j2' %}{% endwith -%}
+{% if w.get("shown_under") %}  where it stands is shown under [{{ w.shown_under }}]
+{% else %}{% with p = w.progress, pad = "  " %}{% include 'shared/work/work_progress.j2' %}{% endwith %}{% endif -%}
 {% else -%}
 (none)
 {% endfor %}

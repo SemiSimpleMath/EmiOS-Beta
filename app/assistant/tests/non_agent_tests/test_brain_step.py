@@ -259,6 +259,45 @@ def test_the_brain_prompt_renders_every_section():
     assert "name in your note every item that depends on the old fact" in system
 
 
+def test_each_work_is_shown_in_full_once_under_its_concern(inbox, tmp_path, monkeypatch):
+    """2026-10-12: a work event's work was shown four times in one brain call: in the event, under its concern, as
+    past work linked to the matter and as work in motion."""
+    from app.assistant.dayflow_orchestrator import work_context
+    from app.assistant.subconscious import concern_view, work_links
+    to_come = {"work_id": "w1", "state": "in_progress", "ended_at": None, "reason": None, "replanning": False,
+               "done": [], "dropped": [], "unfinished": [],
+               "to_come": [{"title": "Send the vet reminder", "wait": {"kind": "ready"}}]}
+    monkeypatch.setattr(concern_view, "attempts", lambda c: [
+        {"work_id": "w1", "title": "Remind about the vet", "objective": "Remind about the vet",
+         "attached_at": NOW.isoformat(), "status": "active", "progress": to_come, "ended": None,
+         "judgments": [{"node_id": "n1", "title": "Find the time", "outcome": "The vet said Friday at 9.",
+                        "at": NOW.isoformat(), "replies": []}]}])
+    monkeypatch.setattr(work_links, "linked_work", lambda concern_ids, threads: [
+        {"work_id": "w1", "title": "Remind about the vet", "status": "active", "objective": "Remind about the vet",
+         "created": "Mon", "updated": "Tue", "ended_because": "", "link": "cites a concern of this matter",
+         "score": None, "outcomes": [{"title": "Find the time", "outcome": "The vet said Friday at 9.", "at": None}]}])
+    monkeypatch.setattr(work_links, "active_work", lambda: [
+        {"work_id": "w1", "title": "Remind about the vet", "objective": "", "created": "Mon", "progress": to_come},
+        {"work_id": "w2", "title": "Water the garden", "objective": "", "created": "Mon",
+         "progress": {**to_come, "work_id": "w2", "to_come": [{"title": "Tell the user to water",
+                                                               "wait": {"kind": "ready"}}]}}])
+    reg = _register(tmp_path, active=[_concern("c-vet", "Vet appointment for the dog")])
+    _event(inbox, 1, 10, "The vet moved us to Friday at 9.", route="concern", concerns=["c-vet"])
+    brain = _brain({"event_decisions": [{"event": "E1", "decision": "changes_concern", "concern": "C1",
+                                         "reason": "new date"}],
+                    "concern_updates": [{"concern": "C1", "action": "note", "relies_on": ["E1"], "attach": ["E1"],
+                                         "note": "The appointment moved to Friday 9:00.", "expires_at": LATER}],
+                    "new_concerns": []})
+    brain_step.run_brain_step(connect=inbox, register_connect=reg.connect, call=brain, judge=_all_new)
+    user = work_context._ENV.get_template("subconscious/brain/prompts/user.j2").render(agent_input={**brain.seen[0], "correction": None})
+    label = brain.seen[0]["source_labels"]["w1"]
+    assert user.count("The vet said Friday at 9.") == 1 and user.count("Send the vet reminder") == 1
+    assert (f"- [{label}] Remind about the vet: active, last changed Tue; cites a concern of this matter; "
+            f"shown in full under [C1]") in user
+    assert f"- Remind about the vet [{label}] (started Mon)\n  where it stands is shown under [C1]" in user
+    assert "Tell the user to water" in user, "work under no concern of the call is shown in full"
+
+
 def test_a_work_report_the_brain_attaches_is_evidence_and_the_work_stays_where_it_was_made(inbox, tmp_path):
     """Until 2026-10-09 citing a work report on a concern attached the work to it (`attach_seen_work`), and a dog-walk
     follow-up landed on a friend's birthday. The report is the concern's evidence now; the work belongs to the concern
