@@ -93,28 +93,26 @@ def objective(entry: Dict[str, Any]) -> str:
 
 
 def brief(entry: Dict[str, Any]) -> str:
-    """The entry with what it serves in full: the concern as the brain's agents read it and the emails and messages
-    it came from word for word, or the calendar belief with the beliefs read beside it, as the run that decided the
-    entry saw them (day_tasks.decided_placement)."""
+    """The entry with the emails and messages its concern came from word for word, or the calendar belief with the
+    beliefs read beside it, as the run that decided the entry saw them (day_tasks.decided_placement). The concern
+    itself is not copied in: every reader of the brief shows it live from the work's concern_refs (until 2026-10-11 a
+    copy was kept here, stale from the moment the record next changed, and the architect read it twice)."""
     from app.assistant.dayflow_orchestrator.work_context import render_view
-    concern_text, belief, sources = "", None, []
+    belief, sources = None, []
     if entry.get("concern_id"):            # a concern's entry, or a day's entry made for a concern (2026-10-08)
         from app.assistant.subconscious.brain_step import _evidence_text
-        from app.assistant.subconscious.concern_planner import concern_text as render_concern
         from app.assistant.subconscious.concern_store import load_register
         register = load_register()
-        found = [(c, b) for b in ("active", "addressing", "resolved", "dormant") for c in register.get(b) or []
+        found = [c for b in ("active", "addressing", "resolved", "dormant") for c in register.get(b) or []
                  if c["concern_id"] == entry["concern_id"]]
         if not found:
             raise KeyError(f"brain list entry {entry['id']}: concern {entry['concern_id']} is not in the register")
-        concern, bucket = found[0]
-        concern_text = render_concern(concern, bucket)
-        sources = [_evidence_text(e) for e in concern.get("evidence") or []]
+        sources = [_evidence_text(e) for e in found[0].get("evidence") or []]
     elif entry["kind"] == "calendar":
         from app.assistant.subconscious.day_tasks import decided_placement
         belief = decided_placement(entry["day"], entry["belief_key"])
     return render_view("brain_entry_brief", entry={**entry, "times": entry.get("placement_time") or ""},
-                       concern_text=concern_text, belief=belief, sources=sources).strip()
+                       belief=belief, sources=sources).strip()
 
 
 def _sources(entry: Dict[str, Any]) -> List[Dict[str, Any]]:

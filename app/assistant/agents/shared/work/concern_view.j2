@@ -3,7 +3,7 @@
 {% set brief = brief_work is defined and brief_work -%}
 {% for c in concerns %}
 {% if c.get('unresolved') %}- concern {{ c.ref }}: not found ({{ c.unresolved }})
-{% else %}- concern {{ c.concern_id[:8] }}: {{ c.title }} [{{ c.status }}]
+{% else %}- concern {% if c.label is defined %}[{{ c.label }}]{% else %}{{ c.concern_id[:8] }}{% endif %}: {{ c.title }} [{{ c.status }}]
 {% if c.get('severity') %}  severity: {{ c.severity }} (how much it matters to the household, as the brain judged it)
 {% endif %}  done when: {{ c.done_when or "(not stated)" }}
 {% if c.source %}  raised from: {{ c.source }}

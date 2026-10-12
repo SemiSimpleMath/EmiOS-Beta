@@ -113,3 +113,35 @@ def test_the_architect_s_own_graph_and_portfolio_show_labels_not_ids():
     graph = A._render_existing_graph(wo, ids)
     assert "T1 | Find a free slot" in graph and f"{wo.id}_t0" not in graph and wo.id not in graph
     assert "=== WORK OBJECT W1 ===" in text and other.id not in text and f"{other.id}_t0" not in text
+
+
+def test_each_concern_is_shown_once_and_each_work_object_names_it_by_label(monkeypatch):
+    """2026-10-11: a concern four work objects served was printed in full four times in one architect call (32k of
+    102k characters), and the goal's own concern twice."""
+    from app.assistant.dayflow_orchestrator import work_context
+    store = _store()
+    wo = _goal(store, "Remind about the reading notes", "Tell the user the notes are due")
+    other = _goal(store, "Remind about the math practice", "Tell the user the practice is due")
+    unrelated = _goal(store, "Water the garden", "Tell the user to water")
+
+    def concern(w):
+        if w.id == unrelated.id:
+            return []
+        return [{"concern_id": "c0ffee00aa", "title": "Coursework is done by its due dates", "status": "active",
+                 "severity": "medium", "done_when": "Each assignment is submitted.", "source": "", "expires": "",
+                 "history": "[Fri 10-09 11:00 PM] Reading notes due Sunday; math practice due the 23rd.",
+                 "plan": None,
+                 "attempts": [{"work_id": x.id, "objective": x.title, "attached_at": "2026-10-09T23:00:00+00:00",
+                               "ended": None, "progress": None, "judgments": []} for x in (wo, other)]}]
+    monkeypatch.setattr(work_context, "concern_context", concern)
+
+    labels, ids, text = A._view(store, wo, history=None, replan=True)
+    graph = A._render_existing_graph(wo, ids)
+    assert labels["C1"] == ["concern", "c0ffee00aa"]
+    assert (text + graph).count("Reading notes due Sunday") == 1, "the record is read once"
+    assert "## THE CONCERNS THE WORK SERVES" in text and "- concern [C1]: Coursework is done by its due dates" in text
+    pointer = "- [C1] Coursework is done by its due dates: its record is under THE CONCERNS THE WORK SERVES"
+    assert pointer in graph and text.count(pointer) == 1, "the goal's own graph and the other work point to it"
+    assert "    - [G] Remind about the reading notes: in progress" in text
+    assert f"    - [{ids[other.id]}] Remind about the math practice: in progress" in text
+    assert "c0ffee00" not in text + graph and other.id not in text

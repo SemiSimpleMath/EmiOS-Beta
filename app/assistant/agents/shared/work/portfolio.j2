@@ -12,7 +12,8 @@ Historical failure totals do not request another user decision. Follow current f
 SOURCE CONTEXT
 {% with sources = work.sources | default([]), compact_sources = true %}{% include 'shared/work/source_context.j2' %}{% endwith %}
 {% if work.concerns | default([]) %}CONCERN THIS WORK SERVES (the brain's record of it)
-{% with concerns = work.concerns %}{% include 'shared/work/concern_view.j2' %}{% endwith %}
+{% for c in work.concerns %}{% if c.get('concern_id') and c.concern_id in L %}- [{{ L[c.concern_id] }}] {{ c.title }}: its record is under THE CONCERNS THE WORK SERVES
+{% else %}{% with concerns = [c] %}{% include 'shared/work/concern_view.j2' %}{% endwith %}{% endif %}{% endfor %}
 {% endif %}
 TASKS (main assignments only)
 {% for task in work.tasks %}

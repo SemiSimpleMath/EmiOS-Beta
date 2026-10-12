@@ -188,12 +188,16 @@ def _view(store, wo, *, history, replan: bool):
     "directives"; on 2026-10-01 a reply to a test goal's question ("this task should be aborted") ended the goal that
     had just emailed a family member."""
     from app.assistant.dayflow_orchestrator.recent_work import recent_ended_items, render_recent_ended
-    from app.assistant.dayflow_orchestrator.work_portfolio import active_work_objects, render_portfolio
+    from app.assistant.dayflow_orchestrator.work_context import work_data
+    from app.assistant.dayflow_orchestrator.work_portfolio import active_work_objects
     summaries = store.list_work_objects()
     active, unreadable = active_work_objects(store, summaries)
     done, _ = recent_ended_items(summaries, store)
     p, ids = _projection(wo, active, [item["id"] for item in done])
-    portfolio = render_portfolio(active, shown_above=wo.id if replan else None, labels=ids)
+    works = [work_data(w) for w in active]
+    concerns = _concerns(p, works, wo.id)
+    ids = {ref[1]: label for label, ref in p.labels.items()}
+    portfolio = render_view("portfolio_list", works=works, shown_above=wo.id if replan else None, labels=ids)
     if unreadable:
         portfolio = render_view("incomplete_portfolio", unreadable=unreadable, portfolio=portfolio)
     completed, _ = render_recent_ended(done, [], labels=ids)
@@ -202,8 +206,24 @@ def _view(store, wo, *, history, replan: bool):
         reminders = {**history, "records": [{**r, "ref": p.label("R", "reminder", r["id"])}
                                             for r in history.get("records") or []]}
         ids = {ref[1]: label for label, ref in p.labels.items()}
-    text = render_view("situation", scheduled_reminder_history=reminders, portfolio=portfolio, completed=completed)
+    text = render_view("situation", scheduled_reminder_history=reminders, portfolio=portfolio, completed=completed,
+                       concerns=concerns)
     return p.labels, ids, text
+
+
+def _concerns(p, works, goal_id):
+    """Each concern the active work serves, once, labelled C (this goal's first): every work object names its concern by
+    that label (shared/work/portfolio.j2). Until 2026-10-11 each work object printed its concerns' records in full, so
+    a concern four work objects serve was read four times, and the goal's own twice (its brief kept a copy)."""
+    shown = {}
+    for w in sorted(works, key=lambda w: w["id"] != goal_id):
+        for c in w["concerns"]:
+            if c.get("concern_id") and c["concern_id"] not in shown:
+                shown[c["concern_id"]] = {**c, "label": p.label("C", "concern", c["concern_id"])}
+    for c in shown.values():
+        for a in c.get("attempts") or []:
+            a["ref"] = p.label_of("work", a["work_id"])
+    return list(shown.values())
 
 
 def _resolve(d: dict, labels: dict, wo) -> tuple[dict, dict]:

@@ -1,4 +1,6 @@
-{% if portfolio %}## WORK PORTFOLIO
+{% if concerns is defined and concerns %}## THE CONCERNS THE WORK SERVES (each once; a work object names the concerns it serves by these labels)
+{% with brief_work = true %}{% include 'shared/work/concern_view.j2' %}{% endwith %}
+{% endif %}{% if portfolio %}## WORK PORTFOLIO
 {{ portfolio }}
 {% endif %}{% if completed %}## RECENTLY COMPLETED
 {{ completed }}
