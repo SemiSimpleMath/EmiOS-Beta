@@ -1,10 +1,12 @@
 {#- Where one work object stands, for readers outside dayflow (work_objects/progress.work_progress).
-    Expects `p` (the progress) and `pad` (the indent of its lines).
+    Expects `p` (the progress) and `pad` (the indent of its lines). With `wording_explained` (the reader's system
+    prompt states once what the fixed wording means, shared/work/wording_explained.j2) the wording is short.
     docs/design/work_progress_for_outside_readers_2026-10-04.md -#}
+{%- set terse = wording_explained is defined and wording_explained -%}
 {%- if p.state == "in_progress" -%}
-{{ pad }}In progress. The assistant carries this work until every step is done, or abandons it with a reason.
+{{ pad }}In progress.{% if not terse %} The assistant carries this work until every step is done, or abandons it with a reason.{% endif %}
 {% elif p.state == "on_hold" -%}
-{{ pad }}On hold. The assistant carries this work until every step is done, or abandons it with a reason.
+{{ pad }}On hold.{% if not terse %} The assistant carries this work until every step is done, or abandons it with a reason.{% endif %}
 {% elif p.state == "done" -%}
 {{ pad }}Ended {{ p.ended_at | local_time }}: done, every step finished.
 {% elif p.state == "abandoned" -%}
@@ -24,7 +26,7 @@
 {% for t in p.unfinished -%}{% if loop.first %}{{ pad }}Not finished when the work ended:
 {% endif %}{{ pad }}  - {{ t.title }}
 {% endfor -%}
-{% for t in p.to_come -%}{% if loop.first %}{{ pad }}Still to come in this work (the assistant does each step itself, as part of this work):
+{% for t in p.to_come -%}{% if loop.first %}{{ pad }}Still to come{% if not terse %} in this work (the assistant does each step itself, as part of this work){% endif %}:
 {% endif %}{% set w = t.wait %}{{ pad }}  - {{ t.title }}: {% if w.kind == "ready" %}ready now; the assistant does it next
 {%- elif w.kind == "scheduled" %}scheduled for {{ w.at | local_time }}
 {%- elif w.kind == "after" %}after {% for x in w.tasks %}"{{ x }}"{% if not loop.last %} and {% endif %}{% endfor %}

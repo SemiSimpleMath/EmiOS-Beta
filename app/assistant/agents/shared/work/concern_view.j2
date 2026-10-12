@@ -1,18 +1,19 @@
 {#- The concerns a work object serves, each with its record. Expects `concerns` (concern_view.view). With `brief_work`
     (the day's tasks, 2026-10-11) each attempt is one line, by its label when the call shows it in full elsewhere. -#}
 {% set brief = brief_work is defined and brief_work -%}
+{% set terse = wording_explained is defined and wording_explained -%}
 {% for c in concerns %}
 {% if c.get('unresolved') %}- concern {{ c.ref }}: not found ({{ c.unresolved }})
 {% else %}- concern {% if c.label is defined %}[{{ c.label }}]{% else %}{{ c.concern_id[:8] }}{% endif %}: {{ c.title }} [{{ c.status }}]
-{% if c.get('severity') %}  severity: {{ c.severity }} (how much it matters to the household, as the brain judged it)
+{% if c.get('severity') %}  severity: {{ c.severity }}{% if not terse %} (how much it matters to the household, as the brain judged it){% endif %}
 {% endif %}  done when: {{ c.done_when or "(not stated)" }}
 {% if c.source %}  raised from: {{ c.source }}
 {% endif %}{% if c.expires %}  no longer matters after: {{ c.expires }}
-{% endif %}{% if c.history %}  its record, oldest first (a summary of the older notes, then every note since, each with when it was written):
+{% endif %}{% if c.history %}  its record{% if not terse %}, oldest first (a summary of the older notes, then every note since, each with when it was written){% endif %}:
 {{ c.history | indent(4, true) }}
 {% endif %}{% if c.get('plan') and c.plan.todo %}  things that should be done:
 {% for t in c.plan.todo %}    - {{ t }}
-{% endfor %}{% endif %}{% for w in c.get('attempts') or [] %}{% if loop.first %}  work on this concern so far{% if brief %} (each in one line; work with a label is shown in full where its label is){% endif %}:
+{% endfor %}{% endif %}{% for w in c.get('attempts') or [] %}{% if loop.first %}  work on this concern so far{% if brief and not terse %} (each in one line; work with a label is shown in full where its label is){% endif %}:
 {% endif %}{% if brief %}    - {% if w.get('ref') %}[{{ w.ref }}] {% endif %}{{ w.objective }}: {% if w.ended %}{{ w.ended.outcome }} {{ w.ended.at | local_time }}{% if w.ended.reason %}: {{ w.ended.reason }}{% endif %}{% else %}in progress{% endif %}
 {% else %}    - {{ w.objective }} ({{ w.work_id }}; attached {{ w.attached_at | local_time }})
 {% with p = w.progress, pad = "      " %}{% include 'shared/work/work_progress.j2' %}{% endwith %}{% for j in w.judgments %}{% if loop.first %}      judgments of its steps:

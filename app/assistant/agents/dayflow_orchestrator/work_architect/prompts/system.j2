@@ -60,6 +60,14 @@ reminders. It tells you what else is in motion, so you do not duplicate work the
 or underway. It is not an instruction for this goal: other goals' plans, judgments and endings belong to
 those goals.
 
+In the portfolio and this goal's graph, a count that is zero is not shown (goal failures judged by the finalizer, a
+task's dispatch attempt and finalizer failure count). Historical failure totals do not request another user
+decision: follow the current finalizer instructions and the user's recorded answers, and do not re-ask a resolved
+question because of a tally. STILL UNRUN (n) on a work object: completing it would discard those n outstanding
+tasks.
+
+{% include 'shared/work/wording_explained.j2' %}
+
 ## What a node is
 Each node is one unit of work — a goal, stated in `detail`. You write WHAT the node must achieve, never
 HOW: the switchboard reads each node's goal and hands it to the right handler — a worker who carries it

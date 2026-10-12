@@ -243,9 +243,8 @@ def test_the_brain_prompt_renders_every_section():
     assert "- [C2] Car service (active; about owner; done when: (not stated))" in user
     assert "### Bake cookies for the sale [w1; done; started Mon, last changed Tue; cites a concern of this matter]" in user
     assert '- task "Bake the cookies": Two dozen baked.' in user and "(none close enough)" in user
-    assert "- Remind about the sale [w2] (started Mon)\n  In progress. The assistant carries this work" in user
-    assert ("  Still to come in this work (the assistant does each step itself, as part of this work):\n"
-            "    - Send the reminder: ready now; the assistant does it next") in user
+    assert "- Remind about the sale [w2] (started Mon)\n  In progress.\n" in user, "its meaning is said once"
+    assert "  Still to come:\n    - Send the reminder: ready now; the assistant does it next" in user
     assert "- [reminder:r1] Bake cookies (one time; at Thu 18:00)" in user
     assert "- [K1] Bake sale @ Fri 08:00" in user and "calendar:bake" not in user
     assert "- Karjalohja: A place the family travels to." in user
@@ -257,6 +256,8 @@ def test_the_brain_prompt_renders_every_section():
     assert "A concern whose source is Sam closes only when\nits done-when is met or Sam says it is over" in system
     assert "Every concern expires" in system and "owner_words" not in system
     assert "name in your note every item that depends on the old fact" in system
+    assert ('A work "In progress" or "On hold" is carried by the assistant until every step is done' in system
+            and 'A work\'s steps "Still to come" are the assistant\'s own' in system), "the fixed wording, once"
 
 
 def test_each_work_is_shown_in_full_once_under_its_concern(inbox, tmp_path, monkeypatch):

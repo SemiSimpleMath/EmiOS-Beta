@@ -197,7 +197,8 @@ def _view(store, wo, *, history, replan: bool):
     works = [work_data(w) for w in active]
     concerns = _concerns(p, works, wo.id)
     ids = {ref[1]: label for label, ref in p.labels.items()}
-    portfolio = render_view("portfolio_list", works=works, shown_above=wo.id if replan else None, labels=ids)
+    portfolio = render_view("portfolio_list", works=works, shown_above=wo.id if replan else None, labels=ids,
+                            wording_explained=True)
     if unreadable:
         portfolio = render_view("incomplete_portfolio", unreadable=unreadable, portfolio=portfolio)
     completed, _ = render_recent_ended(done, [], labels=ids)
@@ -207,7 +208,7 @@ def _view(store, wo, *, history, replan: bool):
                                             for r in history.get("records") or []]}
         ids = {ref[1]: label for label, ref in p.labels.items()}
     text = render_view("situation", scheduled_reminder_history=reminders, portfolio=portfolio, completed=completed,
-                       concerns=concerns)
+                       concerns=concerns, wording_explained=True)
     return p.labels, ids, text
 
 
@@ -344,7 +345,7 @@ def _duplicate_pairs(data: dict) -> dict[str, str]:
 def _render_existing_graph(wo, ids=None) -> str:
     """The goal's own graph, main tasks only (provenance excluded), each object by its label of the call."""
     from app.assistant.dayflow_orchestrator.work_context import render_view, work_data
-    return render_view("portfolio", work=work_data(wo), labels=ids or {})
+    return render_view("portfolio", work=work_data(wo), labels=ids or {}, wording_explained=True)
 
 
 def _form_refusal(exc: BaseException):

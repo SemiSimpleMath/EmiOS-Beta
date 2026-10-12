@@ -489,8 +489,9 @@ def test_the_look_back_shows_ended_work_by_its_line_and_work_in_motion_briefly(t
         "concerns": [{"ref": "C1", "title": "AC", "subject": "household", "history": "[Tue 03-10 05:01 AM] At 6: AC to 75."}],
         "matters": [{**m, "ref": "B1", "events": [{**e, "work": dict(briefs[e["work"]["work_id"]])} if "work" in e
                                                    else e for e in m["events"]]}]})
-    assert ("### [C1] AC (about household)\nIts record, oldest first (a summary of the older notes, then every note "
-            "since, each with when it was written):\n[Tue 03-10 05:01 AM] At 6: AC to 75.\n") in record
+    assert ("## The open concerns\nEach with its record, oldest first: a summary of the older notes, then every note "
+            "since, each with when it was written.\n### [C1] AC (about household)\n[Tue 03-10 05:01 AM] At 6: AC to "
+            "75.\n") in record, "the order is said once, at the section's head"
     assert "- work, ended (summary): The AC was set to COOL 75 at 6:00 AM." in record and full not in record
     assert "the report is what happened.\n" in record and "under its label" not in record, "no label to point to"
 
@@ -538,7 +539,7 @@ def test_each_work_is_shown_in_full_once_under_the_entry_it_was_made_from(tmp_pa
     user = _ENV.get_template("subconscious/day_tasks/prompts/user.j2").render(
         agent_input={"day": DAY, "own": [], "situation": s, "matters": [], "beliefs": [], "correction": None,
                      **projected})
-    assert user.count("Still to come in this work") == 1, "the work's steps once, under its entry"
+    assert user.count("Still to come:") == 1, "the work's steps once, under its entry"
     assert "- [E1] The house is at 70 tonight" in user and "  its work [W1]: active\n" in user
     assert "- [W1] The house is at 70 tonight (started Tue 03-10; made from the concern's entry E1)\n" \
            "  where it stands is shown under [E1]\n" in user

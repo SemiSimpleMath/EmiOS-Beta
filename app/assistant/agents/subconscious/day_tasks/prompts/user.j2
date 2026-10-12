@@ -4,6 +4,7 @@
     and cancelled entries, day_tasks.with_concerns), matters (each with `ref`),
     earlier (objects an entry relies on that are not otherwise shown), source_labels, correction. Times local. -#}
 {%- set A = agent_input -%}
+{%- set wording_explained = true -%}{#- the system prompt states the fixed wording once -#}
 {%- macro relied(labels, pad) %}{% if labels %}
 {{ pad }}relies on: {% for x in labels %}[{{ x }}]{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}{% endmacro -%}
 ## The day: {{ A.day }}

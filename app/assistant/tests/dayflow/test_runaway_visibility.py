@@ -229,8 +229,14 @@ def test_the_architect_is_told_when_the_goal_keeps_failing(store):
     assert "goal failures judged by finalizer: 2" in rendered
     # What the tally must NOT do is send the architect back to the user. The old render told
     # it to "ask whether to keep going", which is how a settled question got re-asked; the
-    # current one says so explicitly and routes through the finalizer's instruction instead.
-    assert "do not re-ask a resolved question because of this tally" in rendered
+    # current one says so explicitly and routes through the finalizer's instruction instead. Said once, in the
+    # architect's system prompt, since 2026-10-12 (it was repeated on every work object of the portfolio).
+    from pathlib import Path
+    import app.assistant.agents as agents
+    system = (Path(agents.__file__).parent / "dayflow_orchestrator/work_architect/prompts/system.j2").read_text(
+        encoding="utf-8")
+    assert "do not re-ask a resolved\nquestion because of a tally" in system.replace("\r\n", "\n")
+    assert "Historical failure totals do not request" not in rendered, "said once, not per work object"
     assert "NEXT: ask_user" in rendered
 
 
