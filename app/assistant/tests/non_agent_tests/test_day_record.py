@@ -85,6 +85,18 @@ def test_the_night_and_the_computer_time_become_milestones_by_code(tmp_path):
     assert current == {"words": "at the computer since 8:40 AM (3 h 20 min)"}, "the span still going is the state now"
 
 
+def test_the_night_into_a_day_is_on_both_days_records(tmp_path):
+    """2026-10-12: Monday's activity began at the end of the night's first sleep, 11:44 PM Sunday, and its rebuild
+    failed on the span Sunday's record already held."""
+    conn = _conn(tmp_path)
+    t = lambda h, m=0: datetime(2026, 3, 10, h, m, tzinfo=timezone.utc)
+    spans = [{"start_utc": t(6, 44), "end_utc": t(7, 1), "type": "Active", "ongoing": False}]
+    R.time_milestones("2026-03-09", t(11, 57), sleep=[], spans=spans, connect=conn)
+    R.time_milestones(DAY, NOW, sleep=[], spans=spans, connect=conn)
+    for day in ("2026-03-09", DAY):
+        assert [m["description"] for m in R.records(day, connect=conn)[1]] == ["at the computer 11:44 PM to 12:01 AM, 17 min"]
+
+
 def _inputs(conn):
     def gather(now):
         R.sync_calendar(DAY, now, events=CAL[:2], connect=conn)

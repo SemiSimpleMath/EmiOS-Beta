@@ -213,7 +213,9 @@ def time_milestones(day: str, now_utc: datetime, *, sleep: Optional[List[Dict[st
     """The night and the day's time at and away from the computer, as milestones by code, rebuilt each pass (spans
     are re-segmented as activity arrives): the sleep pipeline's sleep periods (inferred: sleep is read from the
     absence of activity) and the finished activity spans since the day began (direct: the keyboard and mouse data).
-    Returns the span still going (the owner's state now), or None."""
+    Returns the span still going (the owner's state now), or None. Ids are the day's (`sleep:<day>:<start>`,
+    `activity:<day>:<start>`): the night leading into the day is on both days' records (until 2026-10-12 the ids were
+    the start alone, and the second day's rebuild failed on a span the first day held)."""
     if sleep is None:
         sleep = _sleep_periods(day)
     if spans is None:
@@ -221,7 +223,7 @@ def time_milestones(day: str, now_utc: datetime, *, sleep: Optional[List[Dict[st
         spans = activity_spans(_activity_from(day, sleep))
     connect = connect or _connect
     at = now_utc.isoformat()
-    rows = [(f"sleep:{p['start'].isoformat()}", p["start"].isoformat(),
+    rows = [(f"sleep:{day}:{p['start'].isoformat()}", p["start"].isoformat(),
              f"asleep ({p['kind'].replace('_', ' ')}) {_clock(p['start'])} to {_clock(p['end'])}, "
              f"{_minutes(p['start'], p['end'])}", "inferred", "sleep") for p in sleep]
     current = None
@@ -229,7 +231,7 @@ def time_milestones(day: str, now_utc: datetime, *, sleep: Optional[List[Dict[st
         if s["ongoing"]:
             current = s
             continue
-        rows.append((f"activity:{s['start_utc'].isoformat()}", s["start_utc"].isoformat(),
+        rows.append((f"activity:{day}:{s['start_utc'].isoformat()}", s["start_utc"].isoformat(),
                      f"{_SPAN_WORDS[s['type']]} {_clock(s['start_utc'])} to {_clock(s['end_utc'])}, "
                      f"{_minutes(s['start_utc'], s['end_utc'])}", "direct", "activity"))
     with connect(True) as c:
