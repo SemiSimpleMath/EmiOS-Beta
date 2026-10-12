@@ -110,7 +110,9 @@ def _state(row) -> Dict[str, Any]:
 
 def sync_calendar(day: str, now_utc: datetime, *, events: Optional[List[Dict[str, Any]]] = None, connect=None) -> int:
     """The day's Google events onto the record: a new one enters `planned`; one whose title or times changed is
-    updated; one gone from the calendar is `cancelled` (direct: the calendar itself shows it). Returns changes."""
+    updated; one gone from the calendar is `cancelled` (direct: the calendar itself shows it). Returns changes. An
+    event's record is the day's (`cal:<day>:<calendar item id>`): an event running past the day's boundary is on both
+    days' records (until 2026-10-12 the id was the calendar item's alone, and the second day's insert failed)."""
     if events is None:
         from app.assistant.pipelines.dayflow.utils.context_sources import get_calendar_events_structured_for_day
         events = get_calendar_events_structured_for_day(day)
@@ -122,7 +124,7 @@ def sync_calendar(day: str, now_utc: datetime, *, events: Optional[List[Dict[str
             "SELECT * FROM day_record_events WHERE day = ? AND origin = 'calendar'", (day,)).fetchall()}
         seen = set()
         for ev in events:
-            eid = f"cal:{ev['calendar_item_id']}"
+            eid = f"cal:{day}:{ev['calendar_item_id']}"
             seen.add(eid)
             fields = {"title": ev["title"], "start_utc": ev["start_utc"], "end_utc": ev.get("end_utc")}
             row = existing.get(eid)

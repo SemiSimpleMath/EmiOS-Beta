@@ -48,6 +48,21 @@ def test_the_days_events_are_those_in_its_window_not_its_calendar_date(monkeypat
     assert titles == ["morning walk", "after midnight"]
 
 
+def test_an_all_day_event_is_on_the_dates_it_covers_only(monkeypatch):
+    """2026-10-12: Monday's holiday (00:00 to 00:00) overlapped Sunday's 5 AM-to-5 AM window and was Sunday's too."""
+    def all_day(name, first, after):
+        return {"id": name, "summary": name, "start_utc": _local(*first, 0), "end_utc": _local(*after, 0),
+                "is_all_day": True, "attendees": [], "updated": ""}
+    monkeypatch.setattr(context_sources, "_load_calendar_events", lambda: [
+        all_day("Columbus Day", (2026, 10, 12), (2026, 10, 13)),
+        all_day("Trip", (2026, 10, 11), (2026, 10, 14)),
+    ])
+    titles = lambda day: [e["title"] for e in context_sources.get_calendar_events_structured_for_day(day)]
+    assert titles("2026-10-11") == ["Trip"]
+    assert titles("2026-10-12") == ["Trip", "Columbus Day"]
+    assert titles("2026-10-13") == ["Trip"] and titles("2026-10-14") == []
+
+
 def test_the_tracker_sees_only_events_before_its_day_ends(monkeypatch):
     """At 1 AM on the 7th the upcoming events the tracker reads stop at 5 AM: the 7th's 8 AM walk is not the 6th's."""
     now = _local(2026, 10, 7, 1)

@@ -71,6 +71,7 @@ def _load_calendar_events() -> List[Dict[str, Any]]:
                     "summary": data.get("summary", "Untitled"),
                     "start_utc": start,
                     "end_utc": end,
+                    "is_all_day": bool(data.get("is_all_day")),
                     "attendees": data.get("attendees", []) or [],
                     "updated": data.get("updated", ""),
                     "created": data.get("created", ""),
@@ -87,7 +88,9 @@ def get_calendar_events_structured_for_day(boundary_date_local: str) -> List[Dic
     """
     Return concrete structured calendar events overlapping the provided boundary day: its window from the boundary
     hour to the same hour the next calendar date (pipelines/context.day_window_local). Until 2026-10-07 this took the
-    calendar date, so an event at 1 AM belonged to the wrong day.
+    calendar date, so an event at 1 AM belonged to the wrong day. An all-day event belongs to the dates it covers, not
+    to the window: until 2026-10-12 Monday's holiday (00:00 to 00:00) overlapped Sunday's window too and was listed on
+    Sunday.
     This is intended to be consumed by downstream stateful systems (e.g. dayflow input layer).
     """
     from app.assistant.pipelines.context import day_window_local
@@ -113,7 +116,12 @@ def get_calendar_events_structured_for_day(boundary_date_local: str) -> List[Dic
 
         start_local_dt = utc_to_local(start_utc)
         end_local_dt = utc_to_local(end_utc) if end_utc else None
-        if start_utc >= window_end or (end_utc <= window_start if end_utc else start_utc < window_start):
+        if event.get("is_all_day"):
+            day = datetime.strptime(raw_boundary, "%Y-%m-%d").date()
+            last = end_local_dt.date() if end_local_dt else start_local_dt.date() + timedelta(days=1)
+            if not start_local_dt.date() <= day < last:
+                continue
+        elif start_utc >= window_end or (end_utc <= window_start if end_utc else start_utc < window_start):
             continue
 
         if end_utc and now_utc > end_utc:

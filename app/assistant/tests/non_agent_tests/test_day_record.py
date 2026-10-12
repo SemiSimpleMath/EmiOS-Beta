@@ -44,8 +44,18 @@ def test_the_calendar_enters_changes_and_leaves_by_code(tmp_path):
     R.sync_calendar(DAY, NOW, events=moved, connect=conn)
     events, _ = R.records(DAY, connect=conn)
     by = {e["id"]: e for e in events}
-    assert by["cal:dogs"]["title"] == "Take out the dogs (late)" and by["cal:dogs"]["state"] == "planned"
-    assert by["cal:school"]["state"] == "cancelled" and by["cal:school"]["note"] == "removed from the calendar"
+    assert by[f"cal:{DAY}:dogs"]["title"] == "Take out the dogs (late)" and by[f"cal:{DAY}:dogs"]["state"] == "planned"
+    assert by[f"cal:{DAY}:school"]["state"] == "cancelled" and by[f"cal:{DAY}:school"]["note"] == "removed from the calendar"
+
+
+def test_an_event_past_the_day_s_boundary_is_on_both_days_records(tmp_path):
+    """2026-10-12: Monday's holiday was also Sunday's (00:00 falls before Sunday's day ends at 5 AM); Monday's record
+    failed every pass on the id Sunday's had taken."""
+    conn = _conn(tmp_path)
+    night = [_ev("flight", "Night flight", 10, 13)]
+    assert R.sync_calendar("2026-03-09", NOW, events=night, connect=conn) == 1
+    assert R.sync_calendar(DAY, NOW, events=night, connect=conn) == 1
+    assert [e["id"] for e in R.records(DAY, connect=conn)[0]] == [f"cal:{DAY}:flight"]
 
 
 def test_time_passing_makes_unconfirmed_never_happened(tmp_path):
@@ -81,7 +91,7 @@ def _inputs(conn):
         events, milestones = R.records(DAY, connect=conn)
         for e in events:
             e["time_is_now"] = False
-        labels = {"K1": ["day_event", "cal:dogs"], "K2": ["day_event", "cal:school"],
+        labels = {"K1": ["day_event", f"cal:{DAY}:dogs"], "K2": ["day_event", f"cal:{DAY}:school"],
                   "C1": ["concern", "c-sick"], "B1": ["brain_matter", "4"]}
         for e, k in zip(events, ("K1", "K2")):
             e["ref"], e["shown_by"] = k, []
@@ -110,7 +120,7 @@ def test_a_concern_changes_the_day_and_every_change_keeps_what_showed_it(tmp_pat
     events, milestones = R.records(DAY, connect=conn)
     by = {e["title"]: e for e in events}
     assert by["Late start at school"]["state"] == "cancelled" and by["Late start at school"]["basis"] == "direct"
-    assert relations.targets(("day_event", "cal:school"), "shown_by", connect=conn) == [("concern", "c-sick")]
+    assert relations.targets(("day_event", f"cal:{DAY}:school"), "shown_by", connect=conn) == [("concern", "c-sick")]
     assert by["Doctor's call"]["start_utc"] == datetime(2026, 3, 10, 22, 0, tzinfo=timezone.utc).isoformat()
     assert milestones[0]["description"] == "The owner said she is staying home." and milestones[0]["origin"] == "model"
     assert R.run_day_record(now_utc=NOW, connect=conn, gather_inputs=_inputs(conn),
