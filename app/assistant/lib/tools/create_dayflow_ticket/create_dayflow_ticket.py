@@ -17,6 +17,13 @@ def _one_line(text) -> str:
     return " ".join(str(text or "").split())
 
 
+def shown_text(title, message) -> str:
+    """What the user was shown: the ticket's title and its message. Until 2026-10-13 results carried the title
+    alone, and the finalizer judged a message by its title ("did not include the dinner time")."""
+    title, message = _one_line(title), _one_line(message)
+    return f"{title}: {message}" if title and message else (message or title)
+
+
 def format_response_result(*, answer: str, question: str) -> str:
     """The result text for a user response.
 
@@ -165,7 +172,7 @@ class CreateDayflowTicketTool(BaseTool):
             if work_binding is not None:
                 work_store, work_id, node_id, epoch = work_binding
                 work_store.apply("record_action", {"work_id": work_id, "node_id": node_id,
-                    "channel": "ticket", "target": "user", "summary": title, "outcome": "sent",
+                    "channel": "ticket", "target": "user", "summary": shown_text(title, ticket.message), "outcome": "sent",
                     "payload": {"ticket_id": ticket.ticket_id, "dispatch_epoch": epoch}}, actor="create_dayflow_ticket")
 
             if speak_tts:
@@ -331,7 +338,8 @@ class CreateDayflowTicketTool(BaseTool):
 
         if state in cls._RESPONDED_STATES:
             response = getattr(ticket, "user_response_parsed", None) or {}
-            content = format_response_result(answer=user_text or action or state, question=title)
+            content = format_response_result(answer=user_text or action or state,
+                                             question=shown_text(title, getattr(ticket, "message", "")))
             if response.get("response_history"):
                 from app.assistant.dayflow_orchestrator.work_context import render_view
                 content = render_view("ticket_response", title=title,
@@ -349,7 +357,7 @@ class CreateDayflowTicketTool(BaseTool):
             return ToolResult(
                 result_type="ticket_response",
                 content=format_expiry_result(reason=f"the ticket ended unanswered ({state or 'unknown state'})",
-                                             question=title),
+                                             question=shown_text(title, getattr(ticket, "message", ""))),
                 data={"ticket_id": getattr(ticket, "ticket_id", ""), "title": title,
                       "action": "timeout", "user_text": ""},
             )
@@ -363,7 +371,7 @@ class CreateDayflowTicketTool(BaseTool):
                 return ToolResult(
                     result_type="ticket_response",
                     content=format_expiry_result(reason="the ticket's validity window passed unanswered",
-                                                 question=title),
+                                                 question=shown_text(title, getattr(ticket, "message", ""))),
                     data={"ticket_id": getattr(ticket, "ticket_id", ""), "title": title,
                           "action": "timeout", "user_text": ""},
                 )
@@ -418,10 +426,12 @@ class CreateDayflowTicketTool(BaseTool):
             # Register first, then reconcile the durable row: replies between publication
             # and subscription must complete the same call immediately.
             manager = get_ticket_manager()
+            row = {}
             def saved_result():
                 ticket = manager.get_ticket_by_id(ticket_id)
                 if ticket is None:
                     raise RuntimeError(f"Ticket {ticket_id} disappeared while awaiting its result")
+                row["shown"] = shown_text(getattr(ticket, "title", "") or title, getattr(ticket, "message", ""))
                 return CreateDayflowTicketTool.result_for_ticket(ticket)
             saved = saved_result()
             if saved is not None:
@@ -466,7 +476,7 @@ class CreateDayflowTicketTool(BaseTool):
                 return ToolResult(
                     result_type="ticket_response",
                     content=format_expiry_result(
-                        reason=f"no response within {int(timeout)}s", question=title),
+                        reason=f"no response within {int(timeout)}s", question=row["shown"]),
                     data={
                         "ticket_id": ticket_id,
                         "title": title,
@@ -484,7 +494,7 @@ class CreateDayflowTicketTool(BaseTool):
             # the same token reads differently on different layouts, and inventing prose
             # about intent is how a response ends up misquoted. One shared shape with the
             # work-node path so both callers of this tool agree on what a result is.
-            content = format_response_result(answer=user_text or action, question=title)
+            content = format_response_result(answer=user_text or action, question=row["shown"])
 
             logger.info("[create_dayflow_ticket] Ticket %s response: %s", ticket_id, content)
 

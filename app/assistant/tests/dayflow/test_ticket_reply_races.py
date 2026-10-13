@@ -34,6 +34,26 @@ def test_reply_winning_the_expiry_race_is_returned_as_a_reply(monkeypatch):
     assert result.data["action"] == "acknowledge"
 
 
+def test_a_result_says_the_message_the_user_was_shown_not_only_the_title(monkeypatch):
+    """2026-10-12: titled "Family time starts now", the message said dinner was at 6:30; the expiry result named the
+    title alone, and the finalizer wrote that the dinner time was never sent."""
+    ticket = answered_ticket()
+    ticket.state, ticket.title = "proposed", "Family time starts now"
+    ticket.message = "Family time is starting now, and dinner is planned for 6:30 PM."
+    def expire(*args, **kwargs):
+        ticket.state = "expired"
+        return True
+    tm = SimpleNamespace(get_ticket_by_id=lambda tid: ticket, mark_expired=expire)
+    monkeypatch.setattr(ticket_tool, "get_ticket_manager", lambda: tm)
+    monkeypatch.setattr(DI, "event_hub", SimpleNamespace(register_event=Mock(), unregister_event=Mock(), publish=Mock()))
+    expired = ticket_tool.CreateDayflowTicketTool._wait_for_ticket_response("ticket", "the node's title", 0)
+    assert "dinner is planned for 6:30 PM" in expired.content
+    assert "Family time starts now" in expired.content
+    ticket.state, ticket.user_text = "accepted", "OK"
+    answered = ticket_tool.CreateDayflowTicketTool.result_for_ticket(ticket)
+    assert "dinner is planned for 6:30 PM" in answered.content
+
+
 def test_ticket_execution_preserves_context_binding_and_action_ledger(monkeypatch):
     from work_objects.store import WorkStore
     from app.assistant.dayflow_orchestrator import work_store
@@ -63,6 +83,7 @@ def test_ticket_execution_preserves_context_binding_and_action_ledger(monkeypatc
     assert saved.nodes["ask"].payload["ticket_epoch"] == 1
     assert len(saved.actions) == 1
     assert saved.actions[0].payload["dispatch_epoch"] == 1
+    assert saved.actions[0].summary == "Review: Question"
     assert manager.create_ticket.call_args.kwargs["trigger_context"]["dispatch_epoch"] == 1
     store.close()
 
