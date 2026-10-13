@@ -99,8 +99,8 @@ def work_data(wo, now=None):
 
 def task_uses(wo, task_id):
     """What the planner said a task must read (relation `uses`, the architect since 2026-10-08), each with the id a
-    worker opens it by: an earlier task (work_graph_peek), a record or the email the work came from (pod_fetch), other
-    work. Until then the architect wrote the slug or the pod id into the task's text."""
+    worker opens it by: an earlier task (work_graph_peek), a record or the email the work came from (pod_fetch); other
+    work is shown whole (`used_work`). Until then the architect wrote the slug or the pod id into the task's text."""
     from app.assistant.subconscious import relations
     sources = {s.get("item_id"): s for s in source_context(wo)}
     out = []
@@ -116,9 +116,24 @@ def task_uses(wo, task_id):
             out.append({"kind": "source", "id": s.get("pod_id") or obj_id,
                         "what": f"the source: {s.get('subject') or s.get('summary') or s.get('source_type') or ''}",
                         "how": "pod_fetch" if s.get("pod_id") else ""})
+        elif kind == "work":
+            out.append({"kind": "work", "id": obj_id, "work": used_work(obj_id)})
         else:
             out.append({"kind": kind, "id": obj_id, "what": f"a {kind}", "how": ""})
     return out
+
+
+def used_work(work_id):
+    """Other work a task reads, shown in the worker's prompt: the graph tools open only the worker's own work. Each
+    main task with what its finalizer found. Until 2026-10-13 it was named by its id alone, which nothing opens, and
+    a fact chosen by another work was chosen again."""
+    from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+    other = get_dayflow_work_store().load(work_id)
+    goal = other.nodes.get(other.goal_node_id)
+    return {"objective": (goal.content or goal.title) if goal else other.title, "status": other.status,
+            "tasks": [{"title": n.title, "status": n.status,
+                       "outcome": (n.payload.get("finalizer") or {}).get("outcome")}
+                      for n in other.nodes.values() if other.is_work_unit(n)]}
 
 
 def worker_data(wo, node_id):

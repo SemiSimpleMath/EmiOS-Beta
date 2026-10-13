@@ -105,6 +105,30 @@ def test_uses_covered_by_and_duplicates_become_relations_readers_see():
     assert view["covered_by"][0]["title"] == "Remind about the phone yesterday" and view["covered_by"][0]["updated"]
 
 
+def test_other_work_a_task_reads_is_shown_whole_in_the_worker_s_prompt():
+    """2026-10-13: the 10 AM fact work was told to read the other fact works; it got their ids, which no tool opens
+    (work_graph_peek reads its own work), and chose the Venus fact the 11 AM work already held."""
+    from app.assistant.dayflow_orchestrator.work_context import render_view, worker_data
+    store = _store()
+    wo = _goal(store, "Share a fresh fact at 10 AM")
+    other = _goal(store, "Share a fresh fact at 11 AM")
+    store.apply("add_node", {"work_id": other.id, "id": f"{other.id}_t0", "type": "subtask",
+                             "parent_id": other.goal_node_id, "title": "Research a fact", "payload": {"finalizer": {
+                                 "outcome": "Selected and recorded the fact that a Venus day lasts 243 Earth days."}}})
+    p, _ = A._projection(wo, [wo, other], [])
+    answer = {"architect_summary": "One new fact.",
+              "nodes": [{"node_id": "research", "title": "Research a fact", "detail": "Choose one not chosen today.",
+                         "depends_on": [], "uses": ["W1"]}]}
+    mapped, links = A._resolve(answer, p.labels, wo)
+    res = apply_architect_dag(store, wo.id, mapped["nodes"], expected_updated_at=wo.updated_at)
+    A._keep_links(wo, links, res["added"])
+    [added] = res["added"]
+    text = render_view("worker", view=worker_data(store.load(wo.id), added))
+    assert "Share a fresh fact at 11 AM" in text
+    assert "a Venus day lasts 243 Earth days" in text
+    assert other.id not in text, "an id nothing opens is not offered"
+
+
 def test_the_architect_s_own_graph_and_portfolio_show_labels_not_ids():
     store = _store()
     wo = _goal(store, "Book the dentist", "Find a free slot")

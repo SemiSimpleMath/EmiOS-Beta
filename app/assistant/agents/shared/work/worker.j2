@@ -23,8 +23,10 @@ Echo [id:...] to update an item, omit the id to add one. Mark done only after a 
 {% endfor %}
 {% set records = view.records %}{% include 'shared/work/provenance.j2' %}
 {% if view.uses %}## WHAT THIS TASK READS — named by the planner (open each with its id)
-{% for u in view.uses %}- {{ u.what }} | {{ u.kind }} id: {{ u.id }}{% if u.how %} ({{ u.how }}){% endif %}
-{% endfor %}{% endif %}
+{% for u in view.uses %}{% if u.kind == "work" %}- other work, shown here (the graph tools open only this work): {{ u.work.objective }} [{{ u.work.status }}]
+{% for t in u.work.tasks %}  - {{ t.title }} [{{ t.status }}]{% if t.outcome %}: {{ t.outcome }}{% endif %}
+{% endfor %}{% else %}- {{ u.what }} | {{ u.kind }} id: {{ u.id }}{% if u.how %} ({{ u.how }}){% endif %}
+{% endif %}{% endfor %}{% endif %}
 ## RELEVANT INFO
 {% for fact in view.facts %}- {{ fact.content }}{% if fact.pod_ref %} | {{ fact.pod_ref }}{% endif %}
 {% endfor %}
