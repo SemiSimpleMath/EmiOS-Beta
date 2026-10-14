@@ -139,4 +139,25 @@ def test_a_belief_placed_earlier_today_keeps_its_placement_until_the_schedule_or
     monkeypatch.setattr(drs, '_last_attempt_utc', None)
     drs.run_day_pass(later + timedelta(hours=1, minutes=1), connect=day.plans)
     assert shown and '[belief:B1]' in shown[-1], "the schedule ahead changed: the beliefs are judged again"
+    assert "placed earlier today:\n    - 9:00 PM until 11:00 PM: B1 done" in shown[-1], \
+        "a belief judged again is shown its placement earlier today"
     assert _lines(day.plans) == []
+
+
+def test_the_same_schedule_written_with_other_clock_text_is_not_a_change(day, monkeypatch):
+    """2026-10-14: the calendar's "08:00 PM" became "8:00 PM"; the unchanged schedule read as changed, every belief
+    was judged again, and the morning phone-charge reminder was dropped."""
+    def schedule(start, end):
+        return {'expected_schedule': [{'title': 'Trash night', 'start_local': start, 'end_local': end,
+                                       'status': 'upcoming', 'start_utc': (day.now + timedelta(hours=7)).isoformat(),
+                                       'end_utc': (day.now + timedelta(hours=7, minutes=30)).isoformat()}],
+                'milestones': []}
+    monkeypatch.setattr(drs, '_read_daily_context', lambda: schedule('08:00 PM', '08:30 PM'))
+    drs.run_day_pass(day.now, connect=day.plans)
+    shown = []
+    monkeypatch.setattr(drs, '_write', lambda agent_input: shown.append(agent_input))
+    monkeypatch.setattr(drs, '_read_daily_context', lambda: schedule('8:00 PM', '8:30 PM'))
+    monkeypatch.setattr(drs, '_last_attempt_utc', None)
+    drs.run_day_pass(day.now + timedelta(hours=1, minutes=1), connect=day.plans)
+    assert not shown, "nothing is judged again"
+    assert sorted(line['belief_key'] for line in _lines(day.plans)) == ['B1', 'B3']

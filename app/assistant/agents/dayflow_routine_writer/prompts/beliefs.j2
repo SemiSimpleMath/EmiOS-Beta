@@ -13,6 +13,12 @@
     - [belief:{{ r.belief_key }}] {{ r.statement }}
 {%- endfor %}
 {%- endif %}
+{%- if belief.get('earlier') %}
+  placed earlier today:
+{%- for p in belief.earlier %}
+    - {{ p.time }}{% if p.until %} until {{ p.until }}{% endif %}: {{ p.outcome }}
+{%- endfor %}
+{%- endif %}
 {% else %}
 (no beliefs approved for the calendar)
 {% endfor %}

@@ -37,6 +37,9 @@ statement, its related beliefs) changed; only the others are judged again. What 
 its concern through the brain, which notes or resolves it. Until then every rewrite judged every belief afresh, and
 on 2026-10-10 the lights-off-after-bedtime belief was placed at 5:06, not at 6:09 and 7:19, placed at 8:21 and not at
 9:24 ("today's facts do not indicate that he has gone to bed"): each flip withdrew its concern and ended its work.
+A belief judged again is shown its placements earlier today still ahead, and keeps them unless something given now
+changes them (2026-10-14: judged afresh, the phone-charge belief kept the evening dog walk and lost the morning one
+on the same schedule, and the 7:50 AM reminder's work was ended).
 
 Inputs: resources/dayflow_pipeline_outputs/resource_daily_context_generator_output.json and
 resource_expected_calendar.json (the dayflow pipeline still produces them),
@@ -183,12 +186,35 @@ def _related(pool: List[dict], entries: List[dict], vectors: Dict[str, List[floa
     return out
 
 
-def _schedule_ahead(slots: List[dict], now_utc: datetime) -> List[Tuple[str, str, str]]:
+def _clock_of(text: str) -> Optional[Tuple[int, int]]:
+    """A calendar item's local clock time as (hour, minute); None when it has none."""
+    if not text:
+        return None
+    t = datetime.strptime(" ".join(text.upper().split()), "%I:%M %p")
+    return t.hour, t.minute
+
+
+def _schedule_ahead(slots: List[dict], now_utc: datetime) -> List[Tuple[str, Any, Any]]:
     """The calendar items of the hours from now on, as what they are and when (their status changes as the day goes
-    and is not a change of the schedule)."""
+    and is not a change of the schedule). The times are compared as clock times, not their text: on 2026-10-14 the
+    calendar's "08:00 AM" became "8:00 AM", the unchanged schedule read as changed, and every belief was judged
+    again."""
     hour = now_utc.astimezone(get_local_timezone()).replace(minute=0, second=0, microsecond=0)
-    return [(str(it.get("title") or ""), str(it.get("start_local") or ""), str(it.get("end_local") or ""))
+    return [(str(it.get("title") or ""), _clock_of(str(it.get("start_local") or "")),
+             _clock_of(str(it.get("end_local") or "")))
             for sl in slots if datetime.fromisoformat(sl["hour_local_iso"]) >= hour for it in sl["items"]]
+
+
+def _earlier_lines(earlier: Optional[Dict[str, Any]], now_utc: datetime) -> Dict[str, List[Dict[str, Any]]]:
+    """The earlier plan of the same day: belief_key -> its lines still ahead."""
+    from app.assistant.subconscious.calendar_concerns import expires_at
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    if earlier is None:
+        return out
+    for line in [*earlier["flags"], *(line for sl in earlier["slots"] for line in sl["lines"])]:
+        if expires_at(earlier["day"], line) > now_utc:
+            out.setdefault(line["belief_key"], []).append(line)
+    return out
 
 
 def _kept(earlier: Optional[Dict[str, Any]], slots: List[dict], given: Dict[str, str],
@@ -196,17 +222,15 @@ def _kept(earlier: Optional[Dict[str, Any]], slots: List[dict], given: Dict[str,
     """The placements of the earlier plan of the same day that stand: belief_key -> its placements still ahead, for
     every belief that plan placed whose statement and related beliefs are unchanged; none when the schedule ahead
     changed. A placement is decided once (module docstring)."""
-    from app.assistant.subconscious.calendar_concerns import expires_at
     if earlier is None or _schedule_ahead(earlier["slots"], now_utc) != _schedule_ahead(slots, now_utc):
         return {}
     kept: Dict[str, List[Dict[str, Any]]] = {}
-    for line in [*earlier["flags"], *(line for sl in earlier["slots"] for line in sl["lines"])]:
-        key = line["belief_key"]
-        same = (given.get(key) == line["statement"]
-                and [r["belief_key"] for r in related.get(key, [])] == [r["belief_key"] for r in line["related"]])
-        if same and expires_at(earlier["day"], line) > now_utc:
-            kept.setdefault(key, []).append({"belief_key": key, "time": line["time"], "until": line["until"],
-                                             "outcome": line["outcome"]})
+    for key, lines in _earlier_lines(earlier, now_utc).items():
+        same = (given.get(key) == lines[0]["statement"]
+                and [r["belief_key"] for r in related.get(key, [])] == [r["belief_key"] for r in lines[0]["related"]])
+        if same:
+            kept[key] = [{"belief_key": key, "time": line["time"], "until": line["until"], "outcome": line["outcome"]}
+                         for line in lines]
     return kept
 
 
@@ -341,12 +365,12 @@ def _place(placements: List[Dict[str, Any]], slots: List[dict], statements: Dict
 
 
 def _judge(batch: List[dict], related: Dict[str, List[Dict[str, str]]], base: Dict[str, Any], conditions: set,
-           step) -> List[Dict[str, Any]]:
-    """One writer call for a batch of approved beliefs (each with its related ones), against the day's facts and
-    schedule; one correction, then a loud failure."""
+           step, earlier: Dict[str, List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    """One writer call for a batch of approved beliefs (each with its related ones and its placements earlier today
+    still ahead), against the day's facts and schedule; one correction, then a loud failure."""
     keys = {e["belief_key"] for e in batch}
     agent_input = {**base, "beliefs_block": _render_belief_block(
-        [{**e, "related": related[e["belief_key"]]} for e in batch])}
+        [{**e, "related": related[e["belief_key"]], "earlier": earlier.get(e["belief_key"], [])} for e in batch])}
     data = _write(agent_input)
     problems = _problems(data, keys, conditions)
     if problems:
@@ -399,11 +423,12 @@ def run_day_pass(now_utc: Optional[datetime] = None, *, connect=None, concern_co
         "daily_context": daily_context_block}
     from app.assistant.subconscious.brain_trace import step
     kept = _kept(earlier, slots, given, related, now_utc)
+    earlier_lines = _earlier_lines(earlier, now_utc)
     ordered = sorted((e for e in pool if e["belief_key"] not in kept), key=lambda e: str(e["belief_key"]))
     judgments: List[Dict[str, Any]] = []
     for i in range(0, len(ordered), BATCH):
         batch = ordered[i:i + BATCH]
-        judgments += _judge(batch, related, base, conditions, step)
+        judgments += _judge(batch, related, base, conditions, step, earlier_lines)
     data = {"judgments": judgments}
     placements = [p for key in sorted(kept) for p in kept[key]] + _placements(data)
     plan_slots, flags = _place(placements, slots, given, related)
