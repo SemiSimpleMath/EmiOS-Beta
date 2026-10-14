@@ -2,7 +2,7 @@
 # brief + everything the planner gathered (visible via recent_history) into the
 # {ticket_kind, title, message, response_choices} the create_dayflow_ticket contract expects.
 name: ticket_builder::composer
-class_name: Agent
+class_name: TicketComposer
 action_required: false
 llm_params:
   llm_provider: "openai"
