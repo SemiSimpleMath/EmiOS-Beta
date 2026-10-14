@@ -11,6 +11,9 @@ llm_params:
 # it (send_email pod_ids). pod_search is included because chat_gate can
 # forward a pod task straight here without emi_team resolving the
 # pod_id first — so personal_admin must be able to locate it itself.
+# Google Docs: the manager lists the doc tools and the master room routes doc
+# tasks here; until 2026-10-14 this list left them out, and "create a Google
+# Doc" failed with the planner saying no doc tool existed.
 allowed_tools:
   # Email — read/find/send/triage
   - send_email
@@ -37,6 +40,10 @@ allowed_tools:
   - create_repeating_scheduler_event
   - delete_scheduler_event
   - get_scheduler_events
+  # Google Docs
+  - get_google_doc
+  - edit_google_doc
+  - create_google_doc
   # User interaction
   - ask_user
   # Pod actions — find a pod by query (pod_search) and read its body by id
