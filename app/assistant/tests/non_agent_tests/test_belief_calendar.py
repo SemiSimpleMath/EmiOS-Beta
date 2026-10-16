@@ -161,3 +161,19 @@ def test_the_same_schedule_written_with_other_clock_text_is_not_a_change(day, mo
     drs.run_day_pass(day.now + timedelta(hours=1, minutes=1), connect=day.plans)
     assert not shown, "nothing is judged again"
     assert sorted(line['belief_key'] for line in _lines(day.plans)) == ['B1', 'B3']
+
+
+def test_a_placement_begun_before_the_plan_is_kept_while_its_until_is_ahead(day, monkeypatch):
+    """2026-10-15: the noon rewrite kept the 9:00 AM until 4:30 PM companionship placement but filed it under an hour
+    the plan no longer held; no line was stored, its concern closed, and the afternoon's encouragements were
+    cancelled."""
+    monkeypatch.setattr(drs, '_write', lambda agent_input: {'judgments': [
+        {'belief_key': 'B1', 'why': 'Morning only.', 'applies_today': True, 'outcome': 'B1 done',
+         'times': [{'time': '9:00 AM', 'until': '10:00 AM'}]},
+        {'belief_key': 'B3', 'why': 'All workday.', 'applies_today': True, 'outcome': 'B3 done',
+         'times': [{'time': '9:00 AM', 'until': '4:30 PM'}]}]})
+    drs.run_day_pass(day.now, connect=day.plans)
+    plan = day_plan.load_plan('2026-01-07', connect=day.plans)
+    first = plan['slots'][0]
+    assert [line['belief_key'] for line in _lines(day.plans)] == ['B3'], "a begun placement whose until passed is not stored"
+    assert first['lines'][0]['time'] == '9:00 AM' and first['lines'][0]['until'] == '4:30 PM'

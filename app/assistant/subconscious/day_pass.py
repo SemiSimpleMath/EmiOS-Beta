@@ -336,11 +336,16 @@ def _placements(data: Dict[str, Any]) -> List[Dict[str, str]]:
 
 
 def _place(placements: List[Dict[str, Any]], slots: List[dict], statements: Dict[str, str],
-           related: Optional[Dict[str, List[Dict[str, str]]]] = None) -> Tuple[List[dict], List[dict]]:
+           related: Optional[Dict[str, List[Dict[str, str]]]] = None, *, day: str,
+           now_utc: datetime) -> Tuple[List[dict], List[dict]]:
     """Each placement in the slot of its hour, in time order, as data (time, belief key, statement, and the
     belief's related beliefs); 'all day' ones are the day's flags. A time whose hour is not in the grid (before its
-    first hour) has passed and is not stored. When the grid spans midnight an hour label repeats; the later
-    slot is today's."""
+    first hour) has begun: it is stored in the first slot, ahead of that slot's own lines, while its `until` is
+    still ahead, and is not stored once that has passed. Until 2026-10-15 every begun one was dropped: the noon
+    rewrite kept the 9:00 AM until 4:30 PM companionship placement, stored no line for it, and its concern closed
+    with the afternoon's encouragements. When the grid spans midnight an hour label repeats; the later slot is
+    today's."""
+    from app.assistant.subconscious.calendar_concerns import expires_at
     related = related or {}
     slot_of_hour = {datetime.fromisoformat(s["hour_local_iso"]).hour: s["slot"] for s in slots}
     timed: Dict[str, List[Tuple[int, dict]]] = {s["slot"]: [] for s in slots}
@@ -360,6 +365,8 @@ def _place(placements: List[Dict[str, Any]], slots: List[dict], statements: Dict
         hour, minute = _clock_hour_minute(when)
         if hour in slot_of_hour:
             timed[slot_of_hour[hour]].append((minute, line))
+        elif slots and expires_at(day, line) > now_utc:
+            timed[slots[0]["slot"]].append((-1, line))
     return ([{"slot": s["slot"], "hour_local_iso": s["hour_local_iso"], "items": s["items"],
               "lines": [line for _, line in sorted(timed[s["slot"]], key=lambda t: t[0])]} for s in slots], flags)
 
@@ -431,7 +438,7 @@ def run_day_pass(now_utc: Optional[datetime] = None, *, connect=None, concern_co
         judgments += _judge(batch, related, base, conditions, step, earlier_lines)
     data = {"judgments": judgments}
     placements = [p for key in sorted(kept) for p in kept[key]] + _placements(data)
-    plan_slots, flags = _place(placements, slots, given, related)
+    plan_slots, flags = _place(placements, slots, given, related, day=day, now_utc=now_utc)
     step("day_pass", "placed", day=day, approved=sorted(given),
          related={k: [r["belief_key"] for r in v] for k, v in related.items()},
          placements=placements, judgments=data.get("judgments") or [], kept=sorted(kept))

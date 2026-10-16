@@ -16,8 +16,13 @@ class ScheduleItem(BaseModel):
         default="",
         description="End time in local 12-hour format (e.g., '4:30 PM'). Empty if open-ended."
     )
-    status: Literal["upcoming", "ongoing", "completed", "cancelled"] = Field(
-        description="Lifecycle status relative to current time."
+    reported: Literal["scheduled", "done", "cancelled"] = Field(
+        description=(
+            "What the evidence says of this item: 'cancelled' when the user, a ticket answer or the calendar says it "
+            "is off today; 'done' when the user, a ticket answer or telemetry shows it has already happened; "
+            "otherwise 'scheduled'. The clock is not evidence: whether a scheduled item is upcoming, ongoing or past "
+            "is computed from its times."
+        )
     )
     source: str = Field(
         default="google_calendar",
@@ -72,7 +77,7 @@ class AgentForm(BaseModel):
         description=(
             "Today's adjusted schedule as a structured list. Start from calendar events, then adjust based on "
             "user reports and evidence (moved, cancelled, added items). Each item has local times — "
-            "the pipeline will convert to UTC. Mark completed events as 'completed', cancelled as 'cancelled'."
+            "the pipeline will convert to UTC and computes from them whether each is upcoming, ongoing or past."
         )
     )
     day_theme: str = Field(

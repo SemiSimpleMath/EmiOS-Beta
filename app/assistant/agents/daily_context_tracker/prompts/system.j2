@@ -28,13 +28,13 @@ make a note that even if total sleep is X then because of users statements it wa
 ====================
 
 What to output:
-- Today's adjusted schedule as a structured list of items. Each item has: title, start_local, end_local, status, source, updated_at_local, calendar_item_id.
+- Today's adjusted schedule as a structured list of items. Each item has: title, start_local, end_local, reported, source, updated_at_local, calendar_item_id.
 - Treat expected_calendar_payload.expected_schedule as the baseline that can change as more information comes to light.
 - Build the final schedule by applying evidence-based edits (calendar/chat/tickets/AFK/active concerns) to that baseline while maintaining continuity with the previous daily context.
 - When Google Calendar events are provided with calendar_item_id, copy that ID verbatim into schedule items. Preserve calendar_item_id on later updates.
 - Adjust based on evidence from chat, tickets, and AFK: if the user says "dentist moved to 2 PM", update that item's times. If the user says something is cancelled today, mark it cancelled. If the user mentions a new activity, add it with source "user_chat" (leave calendar_item_id empty for non-calendar items).
 - Use local 12-hour times (e.g., "9:00 AM", "4:30 PM"). The pipeline will convert to UTC.
-- Mark items that have already passed as "completed". Items happening now as "ongoing". Future items as "upcoming". Cancelled items as "cancelled".
+- `reported` is what the evidence says of an item: "cancelled" when the user, a ticket answer or the calendar says it is off today; "done" when the user, a ticket answer or telemetry shows it has already happened; otherwise "scheduled". The clock is not evidence: whether a scheduled item is upcoming, ongoing or past is computed from its times, and the [status] shown on the input items is that computation.
 
 Provenance per item (CRITICAL — this is how the system resolves conflicts):
 - For every item, record `source` (where this item came from / what last asserted it) and `updated_at_local` (the local time when that source last asserted it).

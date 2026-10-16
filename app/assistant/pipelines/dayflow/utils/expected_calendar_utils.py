@@ -40,6 +40,17 @@ def build_expected_calendar_markdown(expected_schedule: List[Dict[str, Any]]) ->
     return "\n".join(lines) + "\n"
 
 
+def clock_status(start_utc: Optional[datetime], end_utc: Optional[datetime], now_utc: datetime) -> str:
+    """Where a schedule item stands against the clock: 'completed' once its end has passed, 'ongoing' from its start
+    (an item with no end stays ongoing once begun), otherwise 'upcoming'. Computed, never judged: on 2026-10-15 the
+    context tracker, told it was 6:12 AM, marked the 4:00 PM therapy 'completed' and its notice was cancelled."""
+    if end_utc is not None and now_utc > end_utc:
+        return "completed"
+    if start_utc is not None and now_utc >= start_utc:
+        return "ongoing"
+    return "upcoming"
+
+
 def normalize_expected_schedule_to_utc(
     expected_schedule: List[Dict[str, Any]],
     *,

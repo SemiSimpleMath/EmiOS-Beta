@@ -32,6 +32,7 @@ from app.assistant.pipelines.dayflow.utils.context_sources import (
 )
 from app.assistant.pipelines.dayflow.utils.expected_calendar_utils import (
     build_expected_calendar_markdown,
+    clock_status,
     normalize_expected_schedule_to_utc,
 )
 from app.assistant.pipelines.dayflow.utils.room_scope import resolve_room_scope
@@ -41,6 +42,11 @@ from app.assistant.pipelines.dayflow.utils.subconscious_projection import (
 from app.assistant.utils.chat_formatting import messages_to_chat_excerpts
 
 logger = get_logger(__name__)
+
+# The tracker's evidence about a schedule item, as the item's status; 'scheduled' is the clock's (clock_status). Until
+# 2026-10-15 the tracker judged every status itself: told it was 6:12 AM, it marked the 4:00 PM therapy 'completed',
+# and the day's tasks cancelled that evening's notices.
+_REPORTED_STATUS = {"done": "completed", "cancelled": "cancelled", "scheduled": ""}
 
 
 class DailyContextGeneratorStep(BaseStep):
@@ -437,10 +443,16 @@ class DailyContextGeneratorStep(BaseStep):
             expected_schedule = []
         if not expected_schedule:
             expected_schedule = expected_calendar_schedule
+        expected_schedule = [item for item in expected_schedule if isinstance(item, dict)]
+        reported = [str(item.get("reported") or "scheduled") for item in expected_schedule]
         expected_schedule = normalize_expected_schedule_to_utc(
             expected_schedule,
             boundary_date_local=str(boundary_date),
         )
+        # The tracker says only what evidence shows (cancelled, done); where a scheduled item stands is the clock's.
+        for item, said in zip(expected_schedule, reported):
+            item["status"] = _REPORTED_STATUS[said] or clock_status(
+                self._parse_iso_utc(item["start_utc"]), self._parse_iso_utc(item["end_utc"]), now_utc)
 
         calendar_events_structured = get_calendar_events_structured_for_day(str(boundary_date))
         # Subconscious emergence: project active concerns + intentions +

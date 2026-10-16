@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from app.assistant.pipelines.dayflow.utils.expected_calendar_utils import clock_status
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_app_root, get_resources_dir
 from app.assistant.utils.time_utils import parse_time_string, utc_to_local
@@ -124,12 +125,7 @@ def get_calendar_events_structured_for_day(boundary_date_local: str) -> List[Dic
         elif start_utc >= window_end or (end_utc <= window_start if end_utc else start_utc < window_start):
             continue
 
-        if end_utc and now_utc > end_utc:
-            status = "completed"
-        elif now_utc >= start_utc and (end_utc is None or now_utc <= end_utc):
-            status = "ongoing"
-        else:
-            status = "upcoming"
+        status = clock_status(start_utc, end_utc, now_utc)
 
         source_id = str(event.get("id") or "").strip()
         if not source_id:

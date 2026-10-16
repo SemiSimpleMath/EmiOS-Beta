@@ -161,7 +161,9 @@ def test_a_9_pm_belief_is_filed_at_9_pm_and_a_belief_can_have_two_times(connect,
 def test_a_placement_before_the_grid_has_passed_and_is_not_stored(connect, day_inputs, monkeypatch):
     context, _ = day_inputs
     tz = _lesson_day(context)
-    monkeypatch.setattr(drs, '_write', _writer_for([], [{'belief_key': 'coffee.morning', 'time': '7:00 AM'}]))
+    answer = _judged([{'belief_key': 'coffee.morning', 'time': '7:00 AM'}])
+    answer['judgments'][1]['times'][0]['until'] = '8:00 AM'
+    monkeypatch.setattr(drs, '_write', lambda agent_input: answer)
     drs.run_day_pass(datetime(2026, 1, 1, 13, 30, tzinfo=tz).astimezone(timezone.utc), connect=connect)
     plan = day_plan.load_plan('2026-01-01', connect=connect)
     assert all(not s['lines'] for s in plan['slots']) and plan['flags'] == []
