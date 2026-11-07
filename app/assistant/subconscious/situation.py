@@ -150,7 +150,9 @@ def gather(now_utc: datetime) -> Dict[str, Any]:
     now_local = now_utc.astimezone(get_local_timezone())
     day = boundary_date_local_str(now_local)
     daily = _resource(scope, "resource_daily_context_generator_output")
-    weather = _resource(scope, "resource_weather")
+    # Weather is an optional integration: an install without it has no such resource, and the moment has no weather.
+    from app.assistant.ServiceLocator.service_locator import DI
+    weather = DI.resource_manager.get_resource(scope_context=scope, resource_id="resource_weather", required=False) or {}
     return {
         "now": now_utc.isoformat(), "day": day, "weekday": now_local.strftime("%A"),
         "key_dates": _build_key_dates(now_local=now_local),

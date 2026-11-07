@@ -494,6 +494,10 @@ def _run_schema_migrations(*, fresh_db: bool) -> None:
     # both schemas are current before serving.
     from belief_engine.db.ensure_schema import ensure_schema
     ensure_schema()
+    # The live belief catalog's tables are built by its store's constructor. Readers open them directly, so on a new
+    # install they must exist before anything serves.
+    from belief_engine.intake.run import app_store
+    app_store()
 
 
 def check_missing_tables():

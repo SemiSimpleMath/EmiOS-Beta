@@ -52,7 +52,7 @@ _BOOT = textwrap.dedent(
 
     # entity_card_v2 + kg_node_metadata are the FK pair the bug tripped on; the
     # others confirm core/news groups also built on the fresh DB.
-    required = {"entity_card_v2", "kg_node_metadata", "news_articles", "unified_log_2026"}
+    required = {"entity_card_v2", "kg_node_metadata", "news_articles", "unified_log_2026", "belief_intake_beliefs"}
     missing = sorted(required - names)
     assert not missing, f"fresh DB missing tables: {missing}"
     print(f"FRESH_DB_OK tables={len(names)}")
