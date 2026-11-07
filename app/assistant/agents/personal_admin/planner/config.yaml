@@ -23,6 +23,8 @@ allowed_tools:
   - get_important_emails
   - get_email_stats
   - trash_emails
+  # Write out a draft for the user: no tool sends or saves it, and its result reaches the final answer.
+  - scratchpad
   # Calendar
   - create_calendar_event
   - create_repeating_calendar_event

@@ -56,6 +56,7 @@ tool_visibility:
     - get_email_thread
     - send_email
     - trash_emails
+    - scratchpad
     - get_calendar_events
     - get_todo_tasks
     - ask_user
@@ -73,6 +74,7 @@ tools:
     - get_email_messages
     - send_email
     - trash_emails
+    - scratchpad
     - find_calendar_event_by_name
     - get_calendar_events
     - create_calendar_event
@@ -110,6 +112,7 @@ scope_contract:
       - get_email_messages
       - send_email
       - trash_emails
+      - scratchpad
       - find_calendar_event_by_name
       - get_calendar_events
       - create_calendar_event

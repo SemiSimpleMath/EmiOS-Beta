@@ -1,0 +1,47 @@
+{
+  "name": "scratchpad",
+  "description": "Write out text for the task's record, such as a drafted email, message or document. Nothing is sent or saved anywhere. The text comes back as the tool's result, so the final answer can give it to the user.",
+  "inputs": [
+    {
+      "name": "text",
+      "type": "string",
+      "required": true,
+      "description": "The complete text, written out in full."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "The text, exactly as written."
+    },
+    {
+      "path": "data.text",
+      "type": "string",
+      "description": "The text, exactly as written."
+    }
+  ],
+  "arguments_prompt": "text (required): the complete text, written out in full and word for word as the user should read it.",
+  "metadata": {
+    "min_authority": 0,
+    "approval_min_authority": 0,
+    "planner_description": "Write out a draft or other text for the user. Nothing is sent or saved; the text reaches the final answer.",
+    "domain": "writing",
+    "actions": [
+      "write",
+      "draft"
+    ],
+    "selectors": [
+      "text"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}
