@@ -177,3 +177,15 @@ def test_a_placement_begun_before_the_plan_is_kept_while_its_until_is_ahead(day,
     first = plan['slots'][0]
     assert [line['belief_key'] for line in _lines(day.plans)] == ['B3'], "a begun placement whose until passed is not stored"
     assert first['lines'][0]['time'] == '9:00 AM' and first['lines'][0]['until'] == '4:30 PM'
+
+
+# ── the catalog is read from the store ───────────────────────────────────────────────────────────────────
+
+def test_the_day_pass_reads_the_catalog_from_the_store(monkeypatch):
+    """A new install has beliefs in no file, and the store may be empty; that is an empty catalog, not a failed pass
+    (2026-11-06: the export's absence stopped every brain pass before the day's tasks)."""
+    from belief_engine.intake import catalog
+    monkeypatch.setattr(catalog, 'active_entries', lambda: [])
+    assert drs._read_belief_entries() == []
+    monkeypatch.setattr(catalog, 'active_entries', lambda: [dict(BELIEFS[0]), {'belief_key': 'B9', 'statement': ''}])
+    assert [e['belief_key'] for e in drs._read_belief_entries()] == ['B1']

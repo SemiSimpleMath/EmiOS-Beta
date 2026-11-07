@@ -43,8 +43,7 @@ on the same schedule, and the 7:50 AM reminder's work was ended).
 
 Inputs: resources/dayflow_pipeline_outputs/resource_daily_context_generator_output.json and
 resource_expected_calendar.json (the dayflow pipeline still produces them),
-resources/kg_derived/resource_user_beliefs.json (which beliefs are approved), and the intake store's statement
-embeddings (for `_related`).
+and the intake store: the belief catalog (which beliefs are approved) and the statement embeddings (for `_related`).
 """
 from __future__ import annotations
 
@@ -61,7 +60,6 @@ from app.assistant.utils.time_utils import get_local_timezone, parse_iso_utc
 logger = get_logger(__name__)
 
 _INPUTS_DIR = _get_resources_dir() / "dayflow_pipeline_outputs"
-_BELIEFS_PATH = _get_resources_dir() / "kg_derived" / "resource_user_beliefs.json"
 
 _MIN_REGEN_INTERVAL_SECONDS = 3600
 _BACKDROP_MIN_HOURS = 4  # calendar items longer than this are backdrops, not slots
@@ -146,11 +144,11 @@ def _format_daily_context(ctx_data: Dict[str, Any], items: List[dict], backdrops
 
 
 def _read_belief_entries() -> list[dict]:
-    if not _BELIEFS_PATH.exists():
-        raise FileNotFoundError(f"Belief export missing: {_BELIEFS_PATH}")
-    data = json.loads(_BELIEFS_PATH.read_text(encoding="utf-8"))
-    return [e for e in data.get("beliefs", [])
-            if e.get("statement") and e.get("status", "active") == "active"]
+    """The catalog from the store itself. Until 2026-11-06 this read the export, a copy that does not exist on a new
+    install (every brain pass stopped here, so the day's tasks never ran) and goes stale when the store is written
+    directly (retired beliefs kept being placed)."""
+    from belief_engine.intake.catalog import active_entries
+    return [e for e in active_entries() if e.get("statement")]
 
 
 def _render_belief_block(entries: list) -> str:
