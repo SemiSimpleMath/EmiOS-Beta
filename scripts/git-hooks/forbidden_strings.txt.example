@@ -1,13 +1,16 @@
-# Forbidden strings — substrings the pre-commit hook blocks from STAGED changes.
+# Forbidden strings — what the git hooks keep out of the public repo.
 #
 # Copy this to scripts/git-hooks/forbidden_strings.txt (gitignored) and fill in
 # YOUR real personal data + secrets. The live file is NEVER committed — it
 # contains the very strings we keep out of the public repo.
 #
-# Two entry formats (blank lines and #-comments ignored):
-#   <substring>     case-INSENSITIVE substring match. Use for PII like emails,
-#                   phone numbers, addresses — specific enough to avoid false
+# Three entry formats (blank lines and #-comments ignored; parsed by forbidden_list.sh):
+#   <substring>     a contact detail: case-INSENSITIVE substring match. Use for
+#                   emails, a street address — specific enough to avoid false
 #                   positives (a full email, not a common word).
+#   phone:<number>  a phone number, 10 digits, written any way. Matches the number
+#                   in any common format: 310 555 0100, (310) 555-0100,
+#                   310.555.0100, 3105550100.
 #   word:<Word>     case-SENSITIVE whole-WORD match. Use for personal names and
 #                   the hardcoded assistant name. A capitalized assistant-name
 #                   entry blocks it used as a bare display string but NOT
@@ -15,13 +18,17 @@
 #                   hardcoded as display text, not code references. A whole-word
 #                   entry also won't match inside a longer word.
 #
-# Only ADDED lines in the staged diff are scanned — existing tree content is
-# invisible; only NEW content in a commit can trip the hook.
+# Where each kind is checked:
+#   pre-commit  all three, against the ADDED lines of the staged diff.
+#   pre-push    contact details and phone numbers, against EVERY tracked file of
+#               the commit being pushed (catches what is already in the tree, and
+#               anything committed with --no-verify). Names are not checked at
+#               push time.
 #
 # Examples (REPLACE with your own — these are placeholders):
 # you@example.com
 # spouse@example.com
-# 555-0123
+# phone:555-555-0123
 # 123 Main St, Springfield
 # word:YourName
 # word:Aria        # your assistant's name, to catch it hardcoded as a string

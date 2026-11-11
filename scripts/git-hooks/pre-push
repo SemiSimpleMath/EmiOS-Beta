@@ -61,7 +61,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         0000000000000000000000000000000000000000) continue ;;  # delete is fine
     esac
     case "$remote_ref" in
-        refs/heads/main) pushing_commits=1 ;;  # OK — real commits to test below
+        refs/heads/main) pushing_commits=1; push_sha="$local_sha" ;;  # OK — real commits to check below
         refs/heads/*)
             stray="${remote_ref#refs/heads/}"
             echo ""                                                                      >&2
@@ -86,7 +86,38 @@ done <<EOF
 $refs
 EOF
 
-# ---------- Rule 3: regression guard — run the fast security/boot smoke suites. ----------
+# ---------- Rule 3: no contact details anywhere in the tree being pushed. ----------
+# pre-commit sees only a commit's new lines, so a detail already in the tree, or one
+# committed with --no-verify, passes it. This scans every tracked file of the commit
+# being pushed for the list's contact entries (emails, address, phone numbers).
+# Names are not scanned here: they are allowed in existing prompts and examples.
+if [ "${pushing_commits:-0}" = "1" ]; then
+    . "$(git rev-parse --show-toplevel)/scripts/git-hooks/forbidden_list.sh"
+    load_forbidden
+    found=""
+    if [ "${#forbidden_contacts[@]}" -gt 0 ]; then
+        args=(); for p in "${forbidden_contacts[@]}"; do args+=(-e "$p"); done
+        found="$found$(git grep -I -n -i -F "${args[@]}" "$push_sha" -- || true)"$'\n'
+    fi
+    if [ "${#forbidden_phones[@]}" -gt 0 ]; then
+        args=(); for p in "${forbidden_phones[@]}"; do args+=(-e "$p"); done
+        found="$found$(git grep -I -n -E "${args[@]}" "$push_sha" -- || true)"
+    fi
+    if [ -n "$(printf '%s' "$found" | tr -d '[:space:]')" ]; then
+        echo ""                                                                          >&2
+        echo "BLOCKED: contact details from the forbidden list are in the pushed tree:"  >&2
+        # git grep prints <sha>:<path>:<line>:<text>; show path:line only, not the detail.
+        printf '%s\n' "$found" | sed '/^$/d' | cut -d: -f2,3 | sort -u | sed 's/^/  /' >&2
+        echo ""                                                                          >&2
+        echo "origin is the PUBLIC repo. Replace them with placeholders (example.com,"   >&2
+        echo "555-01xx), commit, and push again."                                         >&2
+        echo "(List: scripts/git-hooks/forbidden_strings.txt — gitignored.)"              >&2
+        echo ""                                                                          >&2
+        exit 1
+    fi
+fi
+
+# ---------- Rule 4: regression guard — run the fast security/boot smoke suites. ----------
 # Catches the class of silent regression that has bitten this repo (a scope change
 # that broke every sub-100 authority scope; fresh-DB / fresh-install boot blockers;
 # an imported-but-undeclared dependency). Runs ONLY when pushing real commits to main.

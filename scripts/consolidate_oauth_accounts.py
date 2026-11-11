@@ -4,7 +4,7 @@ account_id exists in configs/oauth_accounts.json (the registry).
 
 Why: historical inconsistencies created dup rows for the same physical Google
 account under different account_id labels (e.g. 'primary', 'default',
-'semisimplemath@gmail.com', 'google_emi'). After upsert_credentials now
+'<owner>@gmail.com', 'google_emi'). After upsert_credentials now
 validates against the registry, those non-registry rows can never be refreshed
 and just sit in the DB. This cleans them up and promotes any fresher
 credentials they hold onto the registry row whose scopes they match.
