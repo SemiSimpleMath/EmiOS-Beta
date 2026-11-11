@@ -23,12 +23,14 @@ from typing import Any, Optional
 
 from app.assistant.utils.identity_names import get_required_assistant_name, resolve_principal
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_app_root, get_resources_dir
+from app.assistant.utils import resource_files
+from app.assistant.utils.path_utils import get_app_root
 
 logger = get_logger(__name__)
 
 _BUILTINS_PATH = get_app_root() / "assistant" / "env_registry" / "builtins.json"
-_USER_PATH = get_resources_dir() / "env_registry_user.json"
+# The owner's registry, or the shipped template until they have their own.
+_USER_REL = "env_registry_user.json"
 
 
 class EnvRegistryService:
@@ -36,15 +38,33 @@ class EnvRegistryService:
     account projection/resolution that used to live in emi_accounts.py."""
 
     # ── core entry reads ──────────────────────────────────────────────────────
+    @staticmethod
+    def _entries_of(data: Any, name: str) -> list[dict[str, Any]]:
+        if not isinstance(data, dict) or not isinstance(data.get("entries"), list):
+            raise ValueError(f"env registry {name}: top-level 'entries' list is required")
+        return [e for e in data["entries"] if isinstance(e, dict) and str(e.get("name") or "").strip()]
+
     def _load(self, path: Path, *, required: bool) -> list[dict[str, Any]]:
         if not path.exists():
             if required:
                 raise FileNotFoundError(f"env registry: required file missing: {path}")
             return []
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict) or not isinstance(data.get("entries"), list):
-            raise ValueError(f"env registry {path.name}: top-level 'entries' list is required")
-        return [e for e in data["entries"] if isinstance(e, dict) and str(e.get("name") or "").strip()]
+        return self._entries_of(json.loads(path.read_text(encoding="utf-8")), path.name)
+
+    def _load_user(self) -> list[dict[str, Any]]:
+        if not resource_files.exists(_USER_REL):
+            return []
+        return self._entries_of(resource_files.read(_USER_REL), _USER_REL)
+
+    @staticmethod
+    def _user_data_for_write() -> dict[str, Any]:
+        """The current user registry (owner's file, else the shipped template) to edit."""
+        data: dict[str, Any] = {"schema_version": 1, "entries": []}
+        if resource_files.exists(_USER_REL):
+            loaded = resource_files.read(_USER_REL)
+            if isinstance(loaded, dict) and isinstance(loaded.get("entries"), list):
+                data = loaded
+        return data
 
     def entries(self) -> list[dict[str, Any]]:
         """Builtins (shipped) merged with user entries. User fields OVERRIDE the
@@ -55,7 +75,7 @@ class EnvRegistryService:
         for e in self._load(_BUILTINS_PATH, required=True):
             n = str(e["name"]); builtin_names.add(n)
             by_name[n] = dict(e)
-        for e in self._load(_USER_PATH, required=False):
+        for e in self._load_user():
             n = str(e["name"])
             by_name[n] = {**by_name.get(n, {}), **e}
         return [{**v, "builtin": (k in builtin_names)} for k, v in by_name.items()]
@@ -433,11 +453,7 @@ class EnvRegistryService:
     def _upsert_user_field(self, name: str, **fields: Any) -> dict[str, Any]:
         """Merge `fields` into the gitignored user-registry entry for `name`
         (create it if absent). Returns the merged entry."""
-        data: dict[str, Any] = {"schema_version": 1, "entries": []}
-        if _USER_PATH.exists():
-            loaded = json.loads(_USER_PATH.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict) and isinstance(loaded.get("entries"), list):
-                data = loaded
+        data = self._user_data_for_write()
         target = None
         for e in data["entries"]:
             if str(e.get("name")) == name:
@@ -445,8 +461,7 @@ class EnvRegistryService:
         if target is None:
             target = {"name": name, **fields}
             data["entries"].append(target)
-        _USER_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _USER_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        resource_files.write(_USER_REL, data)
         return target
 
     def ensure_pod_for(self, name: str, *, owner: str = "user") -> str:
@@ -523,14 +538,9 @@ class EnvRegistryService:
             "label": str(label or name).strip() or name,
             "hint": str(hint or "").strip(),
         }
-        data: dict[str, Any] = {"schema_version": 1, "entries": []}
-        if _USER_PATH.exists():
-            loaded = json.loads(_USER_PATH.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict) and isinstance(loaded.get("entries"), list):
-                data = loaded
+        data = self._user_data_for_write()
         data["entries"].append(entry)
-        _USER_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _USER_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        resource_files.write(_USER_REL, data)
         return entry
 
     # ── account creation (Accounts page) ──────────────────────────────────────

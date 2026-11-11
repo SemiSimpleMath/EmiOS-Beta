@@ -46,7 +46,6 @@ _SEARCH_ROOTS = ("app", "belief_engine", "belief_engine_v2", "work_objects")
 # Shrink this list as they are fixed; never grow it.
 _BASELINE = {
     "app/bootstrap.py",
-    "app/routes/kg_interests.py",
     "app/services/llm_call_logger.py",
     "app/services/llm_factory.py",
     "app/assistant/slack_interface/slack_room_config.py",
@@ -128,3 +127,38 @@ def test_the_four_2026_09_11_regressions_stay_fixed():
     for rel, expected in checks.items():
         text = (REPO / rel).read_text(encoding="utf-8")
         assert expected in text, f"{rel} must resolve state via {expected}"
+
+
+# Resources are stricter than the baseline above: EVERY resource file access goes through
+# app/assistant/utils/resource_files.py (2026-11-11). A module that computes a resources path
+# itself reads the code tree when the owner's data lives in EMI_DATA_DIR, or writes the
+# owner's files into the code tree -- how the data-dir split broke and how personal files
+# ended up tracked. No baseline: nothing else may name the resources roots.
+_RESOURCE_ROOT_ALLOWED = {
+    "app/assistant/utils/path_utils.py",            # defines the roots
+    "app/assistant/utils/resource_files.py",        # the one access path
+    "app/assistant/lib/tools/text_file_access.py",  # maps a tool's "resources/..." name onto resource_files
+}
+_RESOURCE_ROOT_PATTERN = re.compile(
+    r"get_resources_dir\(|get_seed_resources_dir\(|/\s*[\"']resources[\"']|[\"']resources[\"']\s*/|Path\(\s*[\"']resources"
+)
+
+
+def test_no_module_computes_a_resources_path_itself():
+    offenders = []
+    for root in _SEARCH_ROOTS + ("run_flask.py",):
+        base = REPO / root
+        files = [base] if base.is_file() else (base.rglob("*.py") if base.is_dir() else [])
+        for py in files:
+            rel = py.relative_to(REPO).as_posix()
+            if rel in _RESOURCE_ROOT_ALLOWED or "_archived" in rel or "/tests/" in rel or rel.startswith("belief_engine_v2/"):
+                continue
+            for number, line in enumerate(py.read_text(encoding="utf-8", errors="ignore").splitlines(), start=1):
+                if line.lstrip().startswith("#"):
+                    continue
+                if _RESOURCE_ROOT_PATTERN.search(line.split("  #")[0]):
+                    offenders.append(f"{rel}:{number}: {line.strip()}")
+    assert not offenders, (
+        "Use app.assistant.utils.resource_files instead of computing a resources path:\n  "
+        + "\n  ".join(offenders)
+    )

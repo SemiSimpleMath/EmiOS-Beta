@@ -9,7 +9,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_resources_dir, get_configs_dir, setup_complete
+from app.assistant.utils import resource_files
+from app.assistant.utils.path_utils import get_configs_dir, setup_complete
 from app.assistant.utils.time_utils import utc_to_local
 from app.assistant.routine_manager.utils import (
     read_json_file,
@@ -38,7 +39,7 @@ logger = get_logger(__name__)
 
 
 def _resources_dir() -> Path:
-    return get_resources_dir()
+    return resource_files.user_root()
 
 
 def _configs_dir() -> Path:

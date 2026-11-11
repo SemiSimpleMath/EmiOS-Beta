@@ -26,12 +26,12 @@ from app.assistant.subconscious.grocery_inventory import (
     manual_consume,
 )
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_repo_root
+from app.assistant.utils import resource_files
 from app.assistant.utils.pydantic_classes import Message
 
 logger = get_logger(__name__)
 
-_SYNC_STATE_REL = "resources/subconscious/resource_grocery_sync_state.json"
+_SYNC_STATE_REL = "subconscious/resource_grocery_sync_state.json"
 
 
 def run_grocery_sync_pass(
@@ -200,7 +200,7 @@ def _apply_intent(intent: Dict[str, Any]) -> Dict[str, Any]:
 # ── sync state ───────────────────────────────────────────────────────────────
 
 def _load_sync_state() -> Dict[str, Any]:
-    path = get_repo_root() / _SYNC_STATE_REL
+    path = resource_files.user_path(_SYNC_STATE_REL)
     if not path.is_file():
         return {"last_sync_at_utc": None, "scanned_chat_msg_ids": []}
     # Fail LOUD on a corrupt state file — silently resetting scanned_chat_msg_ids would
@@ -209,6 +209,6 @@ def _load_sync_state() -> Dict[str, Any]:
 
 
 def _save_sync_state(state: Dict[str, Any]) -> None:
-    path = get_repo_root() / _SYNC_STATE_REL
+    path = resource_files.user_path(_SYNC_STATE_REL)
     from app.assistant.utils.atomic_write import write_json_atomic
     write_json_atomic(path, state)

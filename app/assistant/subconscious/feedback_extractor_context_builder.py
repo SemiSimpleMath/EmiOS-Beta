@@ -15,7 +15,7 @@ from app.assistant.subconscious.feedback_service import (
     list_recent_unprocessed_comments,
 )
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_resources_dir
+from app.assistant.utils import resource_files
 from app.assistant.utils.time_utils import get_local_time
 
 logger = get_logger(__name__)
@@ -82,7 +82,7 @@ def _build_recent_existing_beliefs() -> str:
     pipeline run; we read from there as a snapshot. v0 reads UP TO ~30
     relevant beliefs so the extractor has key-reuse signal without
     drowning."""
-    path = get_resources_dir() / "kg_derived" / "resource_user_beliefs.json"
+    path = resource_files.user_path("kg_derived/resource_user_beliefs.json")
     if not path.is_file():
         return "(no exported beliefs file yet — extractor may invent new keys freely)"
     try:

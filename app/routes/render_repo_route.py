@@ -26,8 +26,8 @@ def _load_expected_calendar_for_today():
     otherwise None (caller should fall back to Google Calendar events).
     """
     try:
-        from app.assistant.utils.path_utils import get_resources_dir
-        path = get_resources_dir() / "dayflow_pipeline_outputs" / "resource_expected_calendar.json"
+        from app.assistant.utils import resource_files
+        path = resource_files.user_path("dayflow_pipeline_outputs/resource_expected_calendar.json")
         if not path.exists():
             return None
 

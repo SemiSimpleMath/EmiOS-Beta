@@ -35,7 +35,8 @@ from pathlib import Path
 from app.assistant.utils.atomic_write import write_json_atomic
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.monitor_utils import vertical_monitor
-from app.assistant.utils.path_utils import get_data_dir, get_resources_dir
+from app.assistant.utils import resource_files
+from app.assistant.utils.path_utils import get_data_dir
 
 logger = get_logger(__name__)
 
@@ -59,7 +60,7 @@ def _resolve_home_geolocation() -> dict | None:
     than the prompt). Best-effort: never raises into boot.
     """
     try:
-        p = get_resources_dir() / "resource_current_location.json"
+        p = resource_files.user_path("resource_current_location.json")
         if not p.exists():
             return None
         loc = (json.loads(p.read_text(encoding="utf-8")) or {}).get("current_location")

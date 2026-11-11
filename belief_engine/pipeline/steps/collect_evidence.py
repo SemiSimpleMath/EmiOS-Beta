@@ -209,8 +209,8 @@ def _collect_ticket_signals(domain: Optional[str], lookback_days: int) -> List[E
 
 def _collect_weekly_insights() -> List[EvidenceItem]:
     """Weekly interpretations enter reconciliation without independent support weight."""
-    from app.assistant.utils.path_utils import get_resources_dir
-    path = get_resources_dir() / 'weekly_insights_pipeline_outputs' / 'resource_weekly_insights_latest.json'
+    from app.assistant.utils import resource_files
+    path = resource_files.user_path('weekly_insights_pipeline_outputs/resource_weekly_insights_latest.json')
     if not path.exists():
         return []
     data = json.loads(path.read_text(encoding='utf-8'))

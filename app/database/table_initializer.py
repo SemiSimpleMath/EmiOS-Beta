@@ -225,7 +225,6 @@ def _seed_kg_core_nodes():
     from app.assistant.utils.path_utils import setup_complete
     if not setup_complete():
         return
-    import json
     import uuid
     from datetime import datetime, timezone
 
@@ -237,12 +236,11 @@ def _seed_kg_core_nodes():
         if session.query(Node).first() is not None:
             return
 
-        from app.assistant.utils.path_utils import get_resources_dir
+        from app.assistant.utils import resource_files
         from app.assistant.utils.identity_names import get_assistant_name
 
-        user_data_file = get_resources_dir() / "user" / "resource_user_data.json"
-        if user_data_file.exists():
-            data = json.loads(user_data_file.read_text(encoding="utf-8"))
+        if resource_files.exists("user/resource_user_data.json"):
+            data = resource_files.read("user/resource_user_data.json")
             user_label = (
                 data.get("preferred_name")
                 or data.get("first_name")

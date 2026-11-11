@@ -8,7 +8,7 @@ from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
 from app.assistant.lib.tools.get_weather.utils import openmeteo
 from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_resources_dir
+from app.assistant.utils import resource_files
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.event_repository.event_repository import EventRepositoryManager
 
@@ -24,7 +24,7 @@ def _get_user_location() -> Dict:
     1. resource_current_location.json → current_location (dynamic)
     2. resource_user_data.json → home_city (permanent)
     """
-    root = get_resources_dir()
+    root = resource_files.user_root()
 
     # 1. Dynamic current location.
     current_loc_path = root / "resource_current_location.json"
@@ -45,10 +45,9 @@ def _get_user_location() -> Dict:
             logger.error("Error loading current location: %s", e)
 
     # 2. Permanent home_city.
-    user_data_path = root / "user" / "resource_user_data.json"
-    if user_data_path.exists():
+    if resource_files.exists("user/resource_user_data.json"):
         try:
-            user_data = json.loads(user_data_path.read_text(encoding="utf-8"))
+            user_data = resource_files.read("user/resource_user_data.json")
             city = (user_data.get("home_city") or "").strip()
             if city:
                 country = (user_data.get("home_country") or "").strip() or "US"
@@ -257,13 +256,13 @@ class GetWeather(BaseTool):
                 })
 
         # Write to disk.
-        resources_path = get_resources_dir() / "context" / "global" / "resource_weather.json"
+        resources_path = resource_files.user_path("context/global/resource_weather.json")
         resources_path.parent.mkdir(parents=True, exist_ok=True)
         with open(resources_path, "w", encoding="utf-8") as f:
             json.dump(weather_resource, f, indent=2, ensure_ascii=False)
 
         # Remove legacy duplicate if present.
-        legacy_path = get_resources_dir() / "resource_weather.json"
+        legacy_path = resource_files.user_path("resource_weather.json")
         if legacy_path.exists() and legacy_path.resolve() != resources_path.resolve():
             legacy_path.unlink()
 

@@ -93,7 +93,7 @@ create_app()                                   # app/create_app.py
 
 Order is load-bearing — each step depends on what came before:
 
-1. `_seed_config_templates()` then `_seed_personal_resources()` — first-run seeding: copy `configs/templates/*.template.json` and personal `*.json.example` files into the writable data dir *before* any tool/agent/resource/oauth consumer reads them. (These run at the very top of `initialize_services`.)
+1. `_seed_config_templates()` — first-run seeding: copy `configs/templates/*.template.json` into the writable configs dir *before* any tool/agent/oauth consumer reads them. (Runs at the very top of `initialize_services`.) Resources are not copied: `resource_files` reads a shipped `.example` template until the owner has their own file (see 19_RESOURCES §3a).
 2. `_auto_detect_default_llm_provider()` — sets `DEFAULT_LLM_PROVIDER` env var if exactly one provider key is present.
 3. `event_hub` — `EventHub` constructed with `EMI_EVENT_WORKER_THREADS` workers (default 24). Dispatcher thread starts here.
 4. `db_manager` — single-writer coordinator (`app/models/db_manager.py`).
@@ -105,7 +105,7 @@ Order is load-bearing — each step depends on what came before:
 10. `orchestrator_registry.preload_all()`, `orchestrator_instance_handler`, `orchestrator_factory`.
 11. `data_conversion_module`.
 12. `global_blackboard` — empty `GlobalBlackBoard()`. Nothing else can `add_msg` until this exists.
-13. `resource_manager` — `ResourceManager()` then `load_all_from_directory("resources")`. This is a 3-pass loader (JSON → templates → text) and also publishes every value into `global_blackboard.state_dict` as a side effect, so `global_blackboard` must already exist. Dynamic resource *providers* are registered here too (`resource_accounts`, `resource_email_accounts`) along with the `resource_user_email` acting-as lock.
+13. `resource_manager` — `ResourceManager()` then `load_all()`, which loads from both the code root and the user root through `resource_files`. This is a 3-pass loader (JSON → templates → text) and also publishes every value into `global_blackboard.state_dict` as a side effect, so `global_blackboard` must already exist. Dynamic resource *providers* are registered here too (`resource_accounts`, `resource_email_accounts`) along with the `resource_user_email` acting-as lock.
 14. `skill_registry`, `skill_injector` — `SKILL.md` loader + trigger evaluator.
 15. `reply_router`.
 16. `manager_invoker` — wired with explicit `RequestPreprocessor(resource_manager=...)`.
@@ -284,10 +284,10 @@ resources/email_instructions.md            →  resource_id="email_instructions"
 
 JSON files load as Python objects (`dict`/`list`); `.md` / `.txt` / no-extension files load as raw strings (`resource_manager.py:333`).
 
-### Loader passes (`load_all_from_directory`)
+### Loader passes (`load_all`)
 
 1. **JSON pass** — every `.json` is read, cached, and mirrored into `global_blackboard`.
-2. **Template pass** — `compile_templates()` renders Jinja templates under `resources/templates/**` against the JSON resources loaded in pass 1, writing concrete output to the same relative path under `resources/`. `StrictUndefined` is enforced (`resource_manager.py:270`).
+2. **Template pass** — `compile_templates()` renders Jinja templates under `templates/**` (either root) against the JSON resources loaded in pass 1, writing concrete output to the same relative path in the user root. `StrictUndefined` is enforced (`resource_manager.py:270`).
 3. **Text pass** — `.md`/`.txt`/no-extension files are loaded as concrete resources. Templated content (containing `{{` or `{%`) raises — concrete resources must be fully resolved (`resource_manager.py:54`).
 
 Skip rules: hidden files/dirs, `tmp`/`tests`/`__pycache__`/`templates`/`day_context`/`pointers` directories, and `README*`.

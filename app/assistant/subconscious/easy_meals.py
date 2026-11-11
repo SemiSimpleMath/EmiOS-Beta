@@ -21,19 +21,18 @@ Shape:
 """
 from __future__ import annotations
 
-import json
 import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_repo_root
+from app.assistant.utils import resource_files
 
 logger = get_logger(__name__)
 
-_EASY_MEALS_REL = "resources/subconscious/resource_easy_meals.json"
-_REGISTRY_REL = "resources/instructions/resource_household_food_registry.md"
+_EASY_MEALS_REL = "subconscious/resource_easy_meals.json"
+_REGISTRY_REL = "instructions/resource_household_food_registry.md"
 _DEFAULT_MAX_DAYS = 7
 _HISTORY_LOOKBACK_DAYS = 90
 
@@ -53,29 +52,25 @@ def load_easy_meals() -> Dict[str, Any]:
     """Load the easy-meals registry. On first run (file absent), seed it from the
     markdown registry's 'Comfort food subset'. Fails LOUD on a corrupt file — a
     silently-emptied list would hide a real problem and lose the user's data."""
-    path = get_repo_root() / _EASY_MEALS_REL
-    if not path.is_file():
+    if not resource_files.exists(_EASY_MEALS_REL):
         seeded = {"schema_version": 1, "last_updated_utc": None, "meals": _seed_from_registry()}
         save_easy_meals(seeded)
         return seeded
-    return json.loads(path.read_text(encoding="utf-8"))
+    return resource_files.read(_EASY_MEALS_REL)
 
 
 def save_easy_meals(data: Dict[str, Any]) -> None:
     data["last_updated_utc"] = datetime.now(timezone.utc).isoformat()
-    path = get_repo_root() / _EASY_MEALS_REL
-    from app.assistant.utils.atomic_write import write_json_atomic
-    write_json_atomic(path, data)
+    resource_files.write(_EASY_MEALS_REL, data)
 
 
 def _seed_from_registry() -> List[Dict[str, Any]]:
     """Best-effort seed from the markdown registry's 'Comfort food subset' bullets.
     Convenience only — if the section can't be parsed, start empty (logged)."""
-    path = get_repo_root() / _REGISTRY_REL
-    if not path.is_file():
+    if not resource_files.exists(_REGISTRY_REL):
         return []
     try:
-        text = path.read_text(encoding="utf-8")
+        text = resource_files.read(_REGISTRY_REL)
         # Grab bullets under the "Comfort food subset" header until the next header.
         m = re.search(r"Comfort food subset.*?\n(.*?)(?:\n#{2,3}\s|\Z)", text, re.DOTALL)
         if not m:

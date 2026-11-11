@@ -90,16 +90,23 @@ class TestDevFile:
 
 # ── file-tool path traversal ──────────────────────────────────────
 class TestFileToolTraversal:
-    def test_read_tool_refuses_relative_escape(self):
-        from app.assistant.lib.tools.read_text_file.read_text_file import _resolve_path
-        assert _resolve_path("../../etc/passwd") is None
-        assert _resolve_path("/etc/passwd") is None          # absolute outside repo
-        assert _resolve_path("README.md") is not None         # repo-relative resolves
+    # read_text_file, write_text_file and append_text_file share one resolver (2026-11-11).
+    def test_file_tools_refuse_relative_escape(self):
+        from app.assistant.lib.tools.text_file_access import resolve_tool_path
+        assert resolve_tool_path("../../etc/passwd") is None
+        assert resolve_tool_path("/etc/passwd") is None          # absolute outside repo
+        assert resolve_tool_path("README.md") is not None         # repo-relative resolves
+        assert resolve_tool_path("../../tmp/evil.txt") is None
+        assert resolve_tool_path("/tmp/evil.txt") is None
 
-    def test_append_tool_refuses_relative_escape(self):
-        from app.assistant.lib.tools.append_text_file.append_text_file import _resolve_path
-        assert _resolve_path("../../tmp/evil.txt") is None
-        assert _resolve_path("/tmp/evil.txt") is None
+    def test_every_file_tool_uses_the_shared_resolver(self):
+        import inspect
+        from app.assistant.lib.tools.read_text_file import read_text_file
+        from app.assistant.lib.tools.write_text_file import write_text_file
+        from app.assistant.lib.tools.append_text_file import append_text_file
+        for module in (read_text_file, write_text_file, append_text_file):
+            source = inspect.getsource(module)
+            assert "resolve_tool_path(" in source and "_resolve_path" not in source, module.__name__
 
 
 # ── registry-mutation isolation ───────────────────────────────────

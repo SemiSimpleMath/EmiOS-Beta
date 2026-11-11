@@ -4,7 +4,8 @@ First-run setup wizard
 """
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for
 from pathlib import Path
-from app.assistant.utils.path_utils import get_resources_dir, setup_complete, get_env_file
+from app.assistant.utils import resource_files
+from app.assistant.utils.path_utils import setup_complete, get_env_file
 import json
 import uuid
 from datetime import datetime
@@ -22,13 +23,13 @@ def is_setup_complete():
 
 def get_setup_status():
     """Get detailed setup status"""
-    resources_dir = get_resources_dir()
+    # Whether the owner has their own file (a shipped template does not count).
     return {
-        "resource_user_data": (resources_dir / "user" / "resource_user_data.json").exists(),
-        "resource_assistant_data": (resources_dir / "assistant" / "resource_assistant_data.json").exists(),
-        "resource_assistant_personality": (resources_dir / "assistant" / "resource_assistant_personality_data.json").exists(),
-        "resource_relationship_config": (resources_dir / "assistant" / "resource_relationship_config.json").exists(),
-        "resource_chat_guidelines": (resources_dir / "assistant" / "resource_chat_guidelines_data.json").exists(),
+        "resource_user_data": resource_files.user_path("user/resource_user_data.json").exists(),
+        "resource_assistant_data": resource_files.user_path("assistant/resource_assistant_data.json").exists(),
+        "resource_assistant_personality": resource_files.user_path("assistant/resource_assistant_personality_data.json").exists(),
+        "resource_relationship_config": resource_files.user_path("assistant/resource_relationship_config.json").exists(),
+        "resource_chat_guidelines": resource_files.user_path("assistant/resource_chat_guidelines_data.json").exists(),
     }
 
 @setup_bp.route('/setup', methods=['GET'])
@@ -48,8 +49,11 @@ def setup_status():
         'details': get_setup_status()
     })
 
+_DRAFT_REL = "user/.setup_draft.json"
+
+
 def _draft_path() -> Path:
-    return get_resources_dir() / "user" / ".setup_draft.json"
+    return resource_files.user_path(_DRAFT_REL)
 
 
 @setup_bp.route('/api/setup/save-draft', methods=['POST'])
@@ -57,9 +61,7 @@ def save_draft():
     """Persist the wizard form state so progress survives restarts."""
     try:
         data = request.json or {}
-        path = _draft_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        resource_files.write(_DRAFT_REL, data)
         return jsonify({'success': True})
     except Exception as e:
         logger.debug("Failed to save setup draft: %s", e, exc_info=True)
@@ -289,13 +291,6 @@ def complete_setup():
             provider_label = _PROVIDER_LABEL.get(llm_provider, llm_provider.title())
             return jsonify({'success': False, 'error': f'{provider_label} API key is required'}), 400
         
-        # Create resources directory if it doesn't exist
-        resources_root = get_resources_dir()
-        user_resources_dir = resources_root / "user"
-        assistant_resources_dir = resources_root / "assistant"
-        user_resources_dir.mkdir(parents=True, exist_ok=True)
-        assistant_resources_dir.mkdir(parents=True, exist_ok=True)
-        
         # 0. Save API key and settings to .env file
         project_root = Path(__file__).resolve().parents[2]
         env_file = get_env_file()
@@ -384,8 +379,7 @@ def complete_setup():
         if data.get('additional_context'):
             user_data['additional_context'] = data['additional_context']
         
-        with open(user_resources_dir / "resource_user_data.json", "w") as f:
-            json.dump(user_data, f, indent=2)
+        resource_files.write("user/resource_user_data.json", user_data)
 
         # Home city is stored in resource_user_data.json (permanent).
         # Weather and location systems read it directly from there.
@@ -395,8 +389,7 @@ def complete_setup():
             'name': data['assistant_name']
         }
         
-        with open(assistant_resources_dir / "resource_assistant_data.json", "w") as f:
-            json.dump(assistant_data, f, indent=2)
+        resource_files.write("assistant/resource_assistant_data.json", assistant_data)
         
         # 3. Create resource_assistant_personality_data.json (personality & backstory)
         assistant_personality = {}
@@ -407,8 +400,7 @@ def complete_setup():
         if data.get('assistant_backstory'):
             assistant_personality['backstory'] = data['assistant_backstory']
         
-        with open(assistant_resources_dir / "resource_assistant_personality_data.json", "w") as f:
-            json.dump(assistant_personality, f, indent=2)
+        resource_files.write("assistant/resource_assistant_personality_data.json", assistant_personality)
         
         # 4. Create resource_relationship_config.json
         relationship_config = {
@@ -417,8 +409,7 @@ def complete_setup():
             'role': data.get('assistant_role', '')
         }
         
-        with open(assistant_resources_dir / "resource_relationship_config.json", "w") as f:
-            json.dump(relationship_config, f, indent=2)
+        resource_files.write("assistant/resource_relationship_config.json", relationship_config)
         
         # 5. Create resource_chat_guidelines.json
         chat_guidelines = {
@@ -426,13 +417,10 @@ def complete_setup():
             'guidelines': data.get('chat_guidelines', '')
         }
         
-        with open(assistant_resources_dir / "resource_chat_guidelines_data.json", "w") as f:
-            json.dump(chat_guidelines, f, indent=2)
+        resource_files.write("assistant/resource_chat_guidelines_data.json", chat_guidelines)
         
-        # 6. Create user_bio.json from setup bio step. Lives under resources/user/
+        # 6. Create user_bio.json from setup bio step. Lives under user/
         # alongside other user-identity files (resource_user_data.json, etc.).
-        user_resources_dir = resources_root / "user"
-        user_resources_dir.mkdir(parents=True, exist_ok=True)
         raw_bio = data.get("user_bio") or {}
         user_bio = {
             "metadata": {
@@ -451,8 +439,7 @@ def complete_setup():
             else:
                 user_bio[section] = []
 
-        with open(user_resources_dir / "user_bio.json", "w") as f:
-            json.dump(user_bio, f, indent=2, ensure_ascii=False)
+        resource_files.write("user/user_bio.json", user_bio)
 
         # 7. Generate room resource files from setup data
         _generate_master_room_resources(data, pronoun_subjective, pronoun_objective)
@@ -530,16 +517,14 @@ def reset_setup():
     """Reset setup (for testing/reconfiguration)"""
     try:
         import os as _os
-        resources_dir = get_resources_dir()
-
-        # Delete resource files (matching the paths complete_setup writes to)
+        # Delete the owner's resource files (matching the paths complete_setup writes to)
         files_to_delete = [
-            resources_dir / "user" / "resource_user_data.json",
-            resources_dir / "assistant" / "resource_assistant_data.json",
-            resources_dir / "assistant" / "resource_assistant_personality_data.json",
-            resources_dir / "assistant" / "resource_relationship_config.json",
-            resources_dir / "assistant" / "resource_chat_guidelines_data.json",
-            resources_dir / "user" / "user_bio.json",
+            resource_files.user_path("user/resource_user_data.json"),
+            resource_files.user_path("assistant/resource_assistant_data.json"),
+            resource_files.user_path("assistant/resource_assistant_personality_data.json"),
+            resource_files.user_path("assistant/resource_relationship_config.json"),
+            resource_files.user_path("assistant/resource_chat_guidelines_data.json"),
+            resource_files.user_path("user/user_bio.json"),
         ]
 
         deleted = []

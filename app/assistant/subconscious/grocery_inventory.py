@@ -33,21 +33,19 @@ Categories + default decay (days from acquired_at):
 """
 from __future__ import annotations
 
-import json
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from app.assistant.utils.atomic_write import write_json_atomic
+from app.assistant.utils import resource_files
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_repo_root
 
 logger = get_logger(__name__)
 
 
-_INVENTORY_REL = "resources/subconscious/resource_grocery_inventory.json"
+_INVENTORY_REL = "subconscious/resource_grocery_inventory.json"
 
 # History (consumed + decayed items) is append-only; keep the newest slice so
 # the file doesn't grow forever. 300 ≈ months of household turnover.
@@ -114,10 +112,9 @@ def load_inventory() -> Dict[str, Any]:
     permanently discarded every item + the history. Its sibling state loaders
     (grocery sync state, meal-feedback state, easy-meals) already fail loud;
     the atomic save below makes corruption a should-never state."""
-    path = get_repo_root() / _INVENTORY_REL
-    if not path.is_file():
+    if not resource_files.exists(_INVENTORY_REL):
         return _empty_inventory()
-    return json.loads(path.read_text(encoding="utf-8"))
+    return resource_files.read(_INVENTORY_REL)
 
 
 def save_inventory(inv: Dict[str, Any]) -> None:
@@ -125,8 +122,7 @@ def save_inventory(inv: Dict[str, Any]) -> None:
     history = inv.get("history")
     if isinstance(history, list) and len(history) > _HISTORY_KEEP:
         inv["history"] = history[-_HISTORY_KEEP:]
-    path = get_repo_root() / _INVENTORY_REL
-    write_json_atomic(path, inv)
+    resource_files.write(_INVENTORY_REL, inv)
 
 
 def _empty_inventory() -> Dict[str, Any]:

@@ -13,12 +13,11 @@ Resolution order:
 
 from __future__ import annotations
 
-import json
 import os
 from functools import lru_cache
 
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_resources_dir
+from app.assistant.utils import resource_files
 
 logger = get_logger(__name__)
 
@@ -30,9 +29,8 @@ def get_primary_user_name() -> str:
         return env_val
 
     try:
-        resource_path = get_resources_dir() / "user" / "resource_user_data.json"
-        if resource_path.exists():
-            data = json.loads(resource_path.read_text(encoding="utf-8"))
+        if resource_files.exists("user/resource_user_data.json"):
+            data = resource_files.read("user/resource_user_data.json")
             name = (data.get("preferred_name") or data.get("first_name") or "").strip()
             if name:
                 return name
@@ -47,9 +45,8 @@ def get_primary_user_name() -> str:
 
 def get_primary_user_full_name() -> str:
     try:
-        resource_path = get_resources_dir() / "user" / "resource_user_data.json"
-        if resource_path.exists():
-            data = json.loads(resource_path.read_text(encoding="utf-8"))
+        if resource_files.exists("user/resource_user_data.json"):
+            data = resource_files.read("user/resource_user_data.json")
             name = (data.get("full_name") or "").strip()
             if name:
                 return name

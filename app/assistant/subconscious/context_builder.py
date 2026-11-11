@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_resources_dir
+from app.assistant.utils import resource_files
 from app.assistant.utils.identity_names import get_required_primary_user_name
 from app.assistant.utils.time_utils import get_local_time, get_local_time_str, utc_to_local
 
@@ -75,8 +75,7 @@ def _resolve_household_members() -> List[str]:
 
     Future: refine with KG cohabits-with / lives-with / is-family-of edges.
     """
-    user_data_path = get_resources_dir() / "user" / "resource_user_data.json"
-    data = json.loads(user_data_path.read_text(encoding="utf-8"))
+    data = resource_files.read("user/resource_user_data.json")
     members = [get_required_primary_user_name()]
     # important_people: [{name, relationship, birthdate}, ...]
     household_relationships = {
@@ -100,7 +99,7 @@ def _build_diet_log() -> str:
     sidecar `_text.md`. We prefer the markdown sidecar for human-readable
     injection; fall back to the JSON if the .md isn't present.
     """
-    base = get_resources_dir() / "dayflow_pipeline_outputs"
+    base = resource_files.user_path("dayflow_pipeline_outputs")
     md_path = base / "resource_diet_log_today_text.md"
     if md_path.is_file():
         text = md_path.read_text(encoding="utf-8").strip()
@@ -485,7 +484,7 @@ def _build_sleep_log() -> str:
 
 def _build_activity_log() -> str:
     """Read the activity_tracker output if present."""
-    base = get_resources_dir() / "dayflow_pipeline_outputs"
+    base = resource_files.user_path("dayflow_pipeline_outputs")
     md_path = base / "resource_activity_log_today_text.md"
     if md_path.is_file():
         text = md_path.read_text(encoding="utf-8").strip()
@@ -748,11 +747,11 @@ def _build_watchlist_summary() -> str:
 
     Returns the file's content if present, or a clearly-marked fallback
     so Pass B knows nothing's configured."""
-    path = get_resources_dir() / "subconscious" / "resource_subconscious_watchlist.md"
-    if not path.is_file():
+    rel = "subconscious/resource_subconscious_watchlist.md"
+    if not resource_files.exists(rel):
         return "(no watchlist file — Pass B's external scouting has nothing curated to watch)"
     try:
-        text = path.read_text(encoding="utf-8").strip()
+        text = resource_files.read(rel).strip()
     except Exception as e:
         logger.warning("[noticer.context] watchlist read failed: %s", e)
         return "(error reading watchlist)"
@@ -779,10 +778,9 @@ def _build_family_graph_digest() -> str:
     from datetime import date, timedelta as _td
 
     try:
-        user_data_path = get_resources_dir() / "user" / "resource_user_data.json"
-        if not user_data_path.is_file():
+        if not resource_files.exists("user/resource_user_data.json"):
             return "(no resource_user_data.json — no family graph to project)"
-        user_data = json.loads(user_data_path.read_text(encoding="utf-8"))
+        user_data = resource_files.read("user/resource_user_data.json")
     except Exception as e:
         logger.warning("[noticer.context] user_data read failed for family_graph: %s", e)
         return "(error reading user_data)"
@@ -873,11 +871,11 @@ def _build_recurring_obligations() -> str:
     surfaces an anticipated_need when today is within lead_time of next_due.
 
     Returns the file's content if present, or a clearly-marked fallback."""
-    path = get_resources_dir() / "subconscious" / "resource_recurring_obligations.md"
-    if not path.is_file():
+    rel = "subconscious/resource_recurring_obligations.md"
+    if not resource_files.exists(rel):
         return "(no recurring obligations file — Pass B's anticipated_need scanning has nothing curated)"
     try:
-        text = path.read_text(encoding="utf-8").strip()
+        text = resource_files.read(rel).strip()
     except Exception as e:
         logger.warning("[noticer.context] recurring obligations read failed: %s", e)
         return "(error reading recurring obligations)"

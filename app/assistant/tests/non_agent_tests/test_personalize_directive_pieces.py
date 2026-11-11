@@ -1,6 +1,6 @@
 """/api/personalize/directives over the six role pieces of the owner's directives (2026-10-08).
 
-A scratch repo root stands in for the real one, so no resource file is read or written. Pins
+A scratch resources root stands in for both the code and the user root, so no resource file is read or written. Pins
 the allowlist: the list names every piece and who reads it; a GET of a piece returns its shared
 template, its overlay and the combined text the ResourceManager builds; a POST writes only that
 piece's overlay (creating it when absent) and never the template; an unknown piece is a 400."""
@@ -28,7 +28,9 @@ def repo(tmp_path, monkeypatch):
     (instr / "resource_work_shaping.md").write_text("# How to shape work\n- shared line\n", encoding="utf-8")
     (instr / "resource_work_shaping_personal.md").write_text("- my line\n", encoding="utf-8")
     (instr / "resource_task_approach.md").write_text("# How to approach a task\n", encoding="utf-8")
-    monkeypatch.setattr(P, "get_repo_root", lambda: str(tmp_path))
+    from app.assistant.utils import resource_files, path_utils
+    monkeypatch.setattr(path_utils, "get_seed_resources_dir", lambda: tmp_path / "resources")
+    monkeypatch.setattr(path_utils, "get_resources_dir", lambda: tmp_path / "resources")
     return instr
 
 
@@ -65,7 +67,7 @@ def test_get_piece_returns_template_overlay_and_combined(client):
 def test_get_piece_without_overlay_shows_it_empty(client):
     data = client.get("/api/personalize/directives?piece=resource_task_approach").get_json()
     assert data["personal"] == {"filename": "resource_task_approach_personal.md", "content": "", "exists": False}
-    assert data["combined"] == "# How to approach a task"
+    assert data["combined"] == "# How to approach a task\n"  # exactly what the agents receive
 
 
 def test_post_writes_only_the_pieces_overlay(client, repo):

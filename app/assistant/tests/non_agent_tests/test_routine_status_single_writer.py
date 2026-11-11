@@ -25,7 +25,7 @@ from app.assistant.routine_manager.routine_manager import RoutineManager
 @pytest.fixture
 def mgr(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "app.assistant.routine_manager.routine_manager.get_resources_dir",
+        "app.assistant.utils.path_utils.get_resources_dir",
         lambda: tmp_path,
     )
     # Keep test toggles/disables out of the real data/routine_decisions log.

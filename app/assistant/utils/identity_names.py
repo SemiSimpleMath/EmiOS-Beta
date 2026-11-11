@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import json
 import os
 
+from app.assistant.utils import resource_files
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_resources_dir
 
 logger = get_logger(__name__)
 
@@ -28,10 +27,10 @@ def get_assistant_name() -> str:
     env_val = os.environ.get("ASSISTANT_NAME", "").strip()
     if env_val:
         return env_val
-    resource_path = get_resources_dir() / "assistant" / "resource_assistant_data.json"
+    resource_rel = "assistant/resource_assistant_data.json"
     try:
-        if resource_path.exists():
-            payload = json.loads(resource_path.read_text(encoding="utf-8"))
+        if resource_files.exists(resource_rel):
+            payload = resource_files.read(resource_rel)
             if isinstance(payload, dict):
                 name = str(payload.get("name") or "").strip()
                 if name:
@@ -46,10 +45,10 @@ def get_required_assistant_name() -> str:
     if env_val:
         return env_val
 
-    resource_path = get_resources_dir() / "assistant" / "resource_assistant_data.json"
+    resource_rel = "assistant/resource_assistant_data.json"
     try:
-        if resource_path.exists():
-            payload = json.loads(resource_path.read_text(encoding="utf-8"))
+        if resource_files.exists(resource_rel):
+            payload = resource_files.read(resource_rel)
             if isinstance(payload, dict):
                 name = str(payload.get("name") or "").strip()
                 if name:
@@ -76,11 +75,11 @@ def get_assistant_persona_block() -> str:
     voice-grounding context (the consuming prompt's name-neutral first-person
     rules still apply). Use the *_required name resolvers when absence must fail.
     """
-    core_path = get_resources_dir() / "assistant" / "assistant_core.json"
+    core_rel = "assistant/assistant_core.json"
     try:
-        if not core_path.exists():
+        if not resource_files.exists(core_rel):
             return ""
-        data = json.loads(core_path.read_text(encoding="utf-8"))
+        data = resource_files.read(core_rel)
         if not isinstance(data, dict):
             return ""
     except Exception as e:
@@ -116,10 +115,10 @@ def get_required_primary_user_name() -> str:
     if env_val:
         return env_val
 
-    resource_path = get_resources_dir() / "user" / "resource_user_data.json"
+    resource_rel = "user/resource_user_data.json"
     try:
-        if resource_path.exists():
-            payload = json.loads(resource_path.read_text(encoding="utf-8"))
+        if resource_files.exists(resource_rel):
+            payload = resource_files.read(resource_rel)
             if isinstance(payload, dict):
                 name = str(payload.get("preferred_name") or payload.get("first_name") or "").strip()
                 if name:

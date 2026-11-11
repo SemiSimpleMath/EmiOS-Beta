@@ -11,7 +11,6 @@ activity/sleep stubs.
 """
 from __future__ import annotations
 
-import json
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
@@ -23,7 +22,7 @@ from app.assistant.subconscious.context_builder import (
     _NO_DATA_FMT,
 )
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_resources_dir
+from app.assistant.utils import resource_files
 from app.assistant.utils.time_utils import get_local_time
 
 logger = get_logger(__name__)
@@ -220,8 +219,7 @@ def _build_key_dates(*, now_local: datetime) -> str:
     """Anniversary, Katy's birthday, his birthday, kids' birthdays from
     resource_user_data. Renders relative-distance for the next 90 days."""
     try:
-        user_data_path = get_resources_dir() / "user" / "resource_user_data.json"
-        user_data = json.loads(user_data_path.read_text(encoding="utf-8"))
+        user_data = resource_files.read("user/resource_user_data.json")
     except Exception as e:
         logger.warning("[romantic_context] user_data read failed: %s", e)
         return "(no user_data available)"

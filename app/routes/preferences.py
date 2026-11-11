@@ -4,7 +4,7 @@ User and Assistant preferences management
 """
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for
 from pathlib import Path
-from app.assistant.utils.path_utils import get_resources_dir as _get_resources_dir
+from app.assistant.utils import resource_files
 from app.assistant.utils.path_utils import get_configs_dir
 from app.assistant.utils.path_utils import get_env_file
 import json
@@ -126,11 +126,6 @@ _IMPORTANT_RESOURCE_SPECS = {
     },
 }
 
-def get_resources_dir():
-    """Get the resources directory path"""
-    return _get_resources_dir()
-
-
 def _read_env_file(env_file: Path) -> dict:
     """Parse .env file into a key→value dict, preserving all existing keys."""
     content = {}
@@ -208,13 +203,11 @@ def update_resource_data(resource_id, json_data):
     """
     import traceback as _tb
 
-    resources_dir = get_resources_dir()
-
-    def resolve_resource_path(rid: str) -> Path:
+    def resource_rel(rid: str) -> Path:
         # Preferences UI edits are intended for setup/profile-ish resources,
         # which live in organized subfolders.
         if rid == "resource_user_data":
-            return resources_dir / "user" / f"{rid}.json"
+            return Path("user") / f"{rid}.json"
         if rid in {
             "resource_assistant_data",
             "resource_assistant_personality_data",
@@ -222,29 +215,25 @@ def update_resource_data(resource_id, json_data):
             "resource_chat_guidelines_data",
             "assistant_core",
         }:
-            return resources_dir / "assistant" / f"{rid}.json"
-        # Fallback (legacy/unclassified)
-        return resources_dir / f"{rid}.json"
+            return Path("assistant") / f"{rid}.json"
+        # Anything else: the resources root (legacy/unclassified)
+        return Path(f"{rid}.json")
 
-    json_file = resolve_resource_path(resource_id)
+    rel = resource_rel(resource_id)
     logger.info(
         "update_resource_data('%s') -> %s | caller: %s",
         resource_id,
-        json_file,
+        rel,
         "".join(_tb.format_stack(limit=5)).replace("\n", " | "),
     )
-    json_file.parent.mkdir(parents=True, exist_ok=True)
 
-    # Merge: load existing file first so callers that send partial dicts
-    # don't clobber fields they don't manage.
-    existing = {}
-    if json_file.exists():
-        try:
-            existing = json.loads(json_file.read_text(encoding="utf-8"))
-            if not isinstance(existing, dict):
-                existing = {}
-        except Exception:
-            existing = {}
+    # Merge: start from the current value (the owner's file, else the shipped
+    # template) so callers that send partial dicts don't clobber fields they
+    # don't manage. A corrupt file raises rather than being replaced by the
+    # partial dict.
+    existing = resource_files.read(rel) if resource_files.exists(rel) else {}
+    if not isinstance(existing, dict):
+        existing = {}
 
     if isinstance(json_data, dict):
         merged = dict(existing)
@@ -252,8 +241,7 @@ def update_resource_data(resource_id, json_data):
     else:
         merged = json_data
 
-    with open(json_file, "w", encoding="utf-8") as f:
-        json.dump(merged, f, indent=2, ensure_ascii=False)
+    resource_files.write(rel, merged)
     
     # Update global blackboard immediately.
     if hasattr(DI, 'global_blackboard') and DI.global_blackboard:
@@ -262,7 +250,7 @@ def update_resource_data(resource_id, json_data):
     # Recompile template resources now so agents never do runtime composition.
     if hasattr(DI, "resource_manager") and DI.resource_manager:
         try:
-            DI.resource_manager.compile_templates("resources")
+            DI.resource_manager.compile_templates()
         except Exception as e:
             logger.error("Template compile failed after updating '%s': %s", resource_id, e)
             raise
@@ -1212,16 +1200,16 @@ def important_resources_page():
 # the API only reads/writes these specific paths, never an arbitrary file
 # from a request param.
 _EDITABLE_SKILL_PATHS = {
-    "email":          "resources/instructions/resource_email_user_prefs.md",
-    "personal-admin": "resources/instructions/resource_personal_admin_user_prefs.md",
+    "email":          "instructions/resource_email_user_prefs.md",
+    "personal-admin": "instructions/resource_personal_admin_user_prefs.md",
 }
 
 
-def _skill_path(skill_id: str) -> Path:
+def _skill_rel(skill_id: str) -> str:
     rel = _EDITABLE_SKILL_PATHS.get(skill_id)
     if not rel:
         raise ValueError(f"unknown editable skill: {skill_id!r}")
-    return Path(get_project_root()) / rel
+    return rel
 
 
 @preferences_bp.route('/skills', methods=['GET'])
@@ -1450,13 +1438,13 @@ def skills_list_api():
 def skill_get_api(skill_id: str):
     """Read the markdown body of an editable skill (email or personal-admin)."""
     try:
-        path = _skill_path(skill_id)
+        rel = _skill_rel(skill_id)
     except ValueError:
         return jsonify({"error": "unknown skill"}), 404
-    if not path.exists():
+    if not resource_files.exists(rel):
         return jsonify({"skill_id": skill_id, "content": "", "exists": False})
     try:
-        content = path.read_text(encoding="utf-8")
+        content = resource_files.read_base(rel)
     except Exception as e:
         logger.error("Failed reading skill %s: %s", skill_id, e)
         return jsonify({"error": "read failed"}), 500
@@ -1467,48 +1455,43 @@ def skill_get_api(skill_id: str):
 def skill_put_api(skill_id: str):
     """Atomic write of an editable skill's markdown body."""
     try:
-        path = _skill_path(skill_id)
+        rel = _skill_rel(skill_id)
     except ValueError:
         return jsonify({"error": "unknown skill"}), 404
     payload = request.get_json(silent=True) or {}
     content = str(payload.get("content") or "")
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        with tmp.open("w", encoding="utf-8", newline="\n") as f:
-            f.write(content)
-            if not content.endswith("\n"):
-                f.write("\n")
-            f.flush()
-        tmp.replace(path)
+        resource_files.write(rel, content if content.endswith("\n") else content + "\n")
     except Exception as e:
         logger.error("Failed writing skill %s: %s", skill_id, e)
         return jsonify({"error": "write failed"}), 500
     return jsonify({"ok": True, "skill_id": skill_id, "bytes": len(content)})
 
 
-def _important_resource_abs_path(resource_id: str) -> Path:
+def _important_resource_rel(resource_id: str) -> Path:
     spec = _IMPORTANT_RESOURCE_SPECS.get(resource_id)
     if not isinstance(spec, dict):
         raise ValueError(f"Unknown important resource id: {resource_id}")
     rel = spec.get("path")
     if not isinstance(rel, tuple) or not rel:
         raise ValueError(f"Resource path mapping missing for: {resource_id}")
-    return get_resources_dir().joinpath(*rel)
+    return Path(*rel)
 
 
 def _read_important_resource(resource_id: str) -> dict:
     spec = _IMPORTANT_RESOURCE_SPECS.get(resource_id)
     if not isinstance(spec, dict):
         raise ValueError(f"Unknown important resource id: {resource_id}")
-    path = _important_resource_abs_path(resource_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    rel = _important_resource_rel(resource_id)
+    # The file the editor shows: the owner's version, else the shipped one. The
+    # owner's _personal add-on is not part of it (it is edited at /personalize/directives).
+    path = resource_files.base_path(rel) or resource_files.user_path(rel)
 
     kind = str(spec.get("kind") or "").strip()
     if kind not in {"json_content", "json_blob", "markdown"}:
         raise ValueError(f"Unsupported important resource kind for {resource_id}: {kind}")
 
-    if not path.exists():
+    if not resource_files.exists(rel):
         default_content = "" if kind in ("json_content", "markdown") else "{}"
         return {
             "id": resource_id,
@@ -1521,7 +1504,7 @@ def _read_important_resource(resource_id: str) -> dict:
 
     if kind == "markdown":
         try:
-            content = path.read_text(encoding="utf-8")
+            content = resource_files.read_base(rel)
         except Exception as e:
             logger.error("Failed reading markdown resource '%s': %s", resource_id, e)
             raise
@@ -1535,8 +1518,7 @@ def _read_important_resource(resource_id: str) -> dict:
         }
 
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            payload = json.load(f)
+        payload = resource_files.read_base(rel)
     except Exception as e:
         logger.error("Failed reading important resource '%s': %s", resource_id, e)
         logger.debug("important resource read exception details", exc_info=True)
@@ -1564,18 +1546,18 @@ def _write_important_resource(resource_id: str, content: str) -> None:
     if not isinstance(spec, dict):
         raise ValueError(f"Unknown important resource id: {resource_id}")
 
-    path = _important_resource_abs_path(resource_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    rel = _important_resource_rel(resource_id)
     kind = str(spec.get("kind") or "").strip()
     if kind == "markdown":
+        # Saved as the owner's version in their data folder; the shipped file is untouched.
         try:
-            path.write_text(str(content or ""), encoding="utf-8")
+            resource_files.write(rel, str(content or ""))
         except Exception as e:
             logger.error("Failed writing markdown resource '%s': %s", resource_id, e)
             raise
         try:
             if hasattr(DI, "resource_manager") and DI.resource_manager:
-                DI.resource_manager.compile_templates("resources")
+                DI.resource_manager.compile_templates()
         except Exception as e:
             logger.error("Failed refreshing resource manager for markdown '%s': %s", resource_id, e)
         return
@@ -1595,23 +1577,18 @@ def _write_important_resource(resource_id: str, content: str) -> None:
     else:
         raise ValueError(f"Unsupported important resource kind for {resource_id}: {kind}")
 
-    # Merge with existing file to preserve fields the editor doesn't manage.
-    existing = {}
-    if path.exists():
-        try:
-            existing = json.loads(path.read_text(encoding="utf-8"))
-            if not isinstance(existing, dict):
-                existing = {}
-        except Exception:
-            existing = {}
+    # Merge with the current value to preserve fields the editor doesn't manage.
+    # A corrupt file raises rather than being replaced by the partial payload.
+    existing = resource_files.read_base(rel) if resource_files.exists(rel) else {}
+    if not isinstance(existing, dict):
+        existing = {}
     if isinstance(payload, dict):
         merged = dict(existing)
         merged.update(payload)
         payload = merged
 
     try:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2, ensure_ascii=False)
+        resource_files.write(rel, payload)
     except Exception as e:
         logger.error("Failed writing important resource '%s': %s", resource_id, e)
         logger.debug("important resource write exception details", exc_info=True)
@@ -1620,7 +1597,7 @@ def _write_important_resource(resource_id: str, content: str) -> None:
     try:
         if hasattr(DI, "resource_manager") and DI.resource_manager:
             DI.resource_manager.update_resource(resource_id, payload, persist=False)
-            DI.resource_manager.compile_templates("resources")
+            DI.resource_manager.compile_templates()
     except Exception as e:
         logger.error("Failed refreshing resource manager for '%s': %s", resource_id, e)
         logger.debug("important resource manager refresh exception details", exc_info=True)
@@ -1685,14 +1662,11 @@ def update_important_resources():
 def get_user_profile():
     """Get user profile data"""
     try:
-        resources_dir = get_resources_dir()
-        user_data_file = resources_dir / "user" / "resource_user_data.json"
-        
-        if not user_data_file.exists():
+        rel = "user/resource_user_data.json"
+        if not resource_files.exists(rel):
             return jsonify({'success': False, 'error': 'User profile not found'}), 404
-        
-        with open(user_data_file, 'r') as f:
-            user_data = json.load(f)
+
+        user_data = resource_files.read(rel)
         
         return jsonify({'success': True, 'profile': user_data})
         
@@ -1716,14 +1690,8 @@ def update_user_profile():
         pronoun_objective = pronouns[1] if len(pronouns) > 1 else 'them'
         
         # Load existing data to preserve fields the form doesn't manage
-        resources_dir = get_resources_dir()
-        existing_path = resources_dir / "user" / "resource_user_data.json"
-        user_data = {}
-        if existing_path.exists():
-            try:
-                user_data = json.loads(existing_path.read_text(encoding="utf-8"))
-            except Exception:
-                user_data = {}
+        rel = "user/resource_user_data.json"
+        user_data = resource_files.read(rel) if resource_files.exists(rel) else {}
 
         # Update only the fields the form manages
         user_data.update({
@@ -1744,7 +1712,6 @@ def update_user_profile():
         })
 
         # Save to file and reload resources
-        (resources_dir / "user").mkdir(parents=True, exist_ok=True)
         update_resource_data('resource_user_data', user_data)
 
         # Sync PRIMARY_USER env var so all in-process code picks it up immediately
@@ -1775,37 +1742,36 @@ _BIO_SECTIONS = [
     "health_logistics", "entertainment_hobbies", "preferences",
 ]
 
-def _get_bio_path() -> Path:
-    """
-    Canonical location: resources/user/user_bio.json.
+_BIO_REL = "user/user_bio.json"
 
-    One-shot migration from the old resources/memory/user_bio.json: if the
-    new path doesn't exist but the old one does, move it. The old location
-    was misnamed (the "memory" subsystem is gone); user identity belongs
-    alongside other resources/user/* files.
+
+def _migrate_bio() -> None:
     """
-    new_path = get_resources_dir() / "user" / "user_bio.json"
-    old_path = get_resources_dir() / "memory" / "user_bio.json"
+    Canonical location: user/user_bio.json in the resources root.
+
+    One-shot migration from the old memory/user_bio.json: if the new file
+    doesn't exist but the old one does, move it (both in the owner's data
+    folder). The old location was misnamed (the "memory" subsystem is gone);
+    user identity belongs alongside other user/* files.
+    """
+    new_path = resource_files.user_path(_BIO_REL)
+    old_path = resource_files.user_path("memory/user_bio.json")
     if not new_path.exists() and old_path.exists():
         new_path.parent.mkdir(parents=True, exist_ok=True)
         old_path.rename(new_path)
         logger.info("Migrated user_bio.json from %s to %s", old_path, new_path)
-    return new_path
 
 
 def _read_bio() -> dict:
-    path = _get_bio_path()
-    if not path.exists():
+    _migrate_bio()
+    if not resource_files.exists(_BIO_REL):
         return {s: [] for s in _BIO_SECTIONS}
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    return resource_files.read(_BIO_REL)
 
 
 def _write_bio(payload: dict) -> None:
-    path = _get_bio_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2, ensure_ascii=False)
+    _migrate_bio()
+    resource_files.write(_BIO_REL, payload)
     if hasattr(DI, "global_blackboard") and DI.global_blackboard:
         DI.global_blackboard.update_state_value("user_bio", payload)
 
@@ -1886,12 +1852,10 @@ _ASSISTANT_CORE_DEFAULTS = {
 
 
 def _load_assistant_core() -> dict:
-    resources_dir = get_resources_dir()
-    core_file = resources_dir / "assistant" / "assistant_core.json"
-    if not core_file.exists():
+    rel = "assistant/assistant_core.json"
+    if not resource_files.exists(rel):
         return dict(_ASSISTANT_CORE_DEFAULTS)
-    with open(core_file, "r", encoding="utf-8") as f:
-        return json.load(f)
+    return resource_files.read(rel)
 
 
 def _render_identity_content(core: dict) -> str:
@@ -2009,14 +1973,11 @@ def update_assistant_core():
 def get_assistant_personality():
     """Get assistant personality data"""
     try:
-        resources_dir = get_resources_dir()
-        personality_file = resources_dir / "assistant" / "resource_assistant_personality_data.json"
-        
-        if not personality_file.exists():
+        rel = "assistant/resource_assistant_personality_data.json"
+        if not resource_files.exists(rel):
             return jsonify({'success': True, 'data': {}})
-        
-        with open(personality_file, 'r') as f:
-            personality_data = json.load(f)
+
+        personality_data = resource_files.read(rel)
         
         return jsonify({'success': True, 'data': personality_data})
         
@@ -2040,8 +2001,6 @@ def update_assistant_personality():
         }
         
         # Save to file and reload resources
-        resources_dir = get_resources_dir()
-        (resources_dir / "assistant").mkdir(parents=True, exist_ok=True)
         update_resource_data('resource_assistant_personality_data', personality_data)
 
         # Sync ASSISTANT_NAME env var so all in-process code picks it up immediately
@@ -2060,14 +2019,11 @@ def update_assistant_personality():
 def get_assistant_relationship():
     """Get assistant relationship config"""
     try:
-        resources_dir = get_resources_dir()
-        relationship_file = resources_dir / "assistant" / "resource_relationship_config.json"
-        
-        if not relationship_file.exists():
+        rel = "assistant/resource_relationship_config.json"
+        if not resource_files.exists(rel):
             return jsonify({'success': True, 'data': {'type': 'friend', 'description': '', 'role': ''}})
-        
-        with open(relationship_file, 'r') as f:
-            relationship_data = json.load(f)
+
+        relationship_data = resource_files.read(rel)
         
         return jsonify({'success': True, 'data': relationship_data})
         
@@ -2100,14 +2056,11 @@ def update_assistant_relationship():
 def get_chat_guidelines():
     """Get chat guidelines"""
     try:
-        resources_dir = get_resources_dir()
-        guidelines_file = resources_dir / "assistant" / "resource_chat_guidelines_data.json"
-        
-        if not guidelines_file.exists():
+        rel = "assistant/resource_chat_guidelines_data.json"
+        if not resource_files.exists(rel):
             return jsonify({'success': True, 'data': {'style': 'direct', 'guidelines': ''}})
-        
-        with open(guidelines_file, "r", encoding="utf-8") as f:
-            guidelines_data = json.load(f)
+
+        guidelines_data = resource_files.read(rel)
         
         return jsonify({'success': True, 'data': guidelines_data})
         
@@ -2126,8 +2079,6 @@ def update_chat_guidelines():
         }
         
         # Save to file and reload resources
-        resources_dir = get_resources_dir()
-        resources_dir.mkdir(exist_ok=True)
         update_resource_data('resource_chat_guidelines_data', guidelines_data)
         
         return jsonify({'success': True, 'message': 'Chat guidelines updated'})

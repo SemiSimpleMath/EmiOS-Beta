@@ -7,14 +7,14 @@ from typing import Any, Dict, Optional
 
 from app.assistant.utils.atomic_write import write_json_atomic
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_resources_dir
+from app.assistant.utils import resource_files
 from app.assistant.utils.time_utils import get_local_timezone
 
 logger = get_logger(__name__)
 
 
 def resources_dir() -> Path:
-    return get_resources_dir()
+    return resource_files.user_root()
 
 
 def memory_dir() -> Path:

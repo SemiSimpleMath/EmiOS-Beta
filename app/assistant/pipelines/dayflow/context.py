@@ -5,7 +5,8 @@ from datetime import timezone
 from pathlib import Path
 from typing import Any, Dict
 
-from app.assistant.routine_manager.utils import read_json_file, resources_dir, utc_now
+from app.assistant.routine_manager.utils import read_json_file, utc_now
+from app.assistant.utils import resource_files
 from app.assistant.utils.atomic_write import write_json_atomic
 from app.assistant.utils.time_utils import get_local_time
 
@@ -52,7 +53,7 @@ class DayFlowContext:
             boundary_date_local=bdate,
             # Latest pipeline outputs live under resources/dayflow_pipeline_outputs/
             # (resources/ root is reserved for organized subfolders).
-            resources_dir=resources_dir() / "dayflow_pipeline_outputs",
+            resources_dir=resource_files.user_path("dayflow_pipeline_outputs"),
             day_dir=day_dir,
             pipeline_runs_dir=pipeline_runs_dir,
             state={},

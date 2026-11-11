@@ -20,15 +20,15 @@ from app.assistant.utils.atomic_write import write_text_atomic
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.pipelines.dayflow.step_types import BaseStep, StepContext, StepResult, format_belief_line
 from app.assistant.scope.loader import load_scope_for_source
-from app.assistant.utils.path_utils import get_resources_dir as _get_resources_dir
+from app.assistant.utils import resource_files
 
 logger = get_logger(__name__)
 
 _LATEST_FILENAME = "resource_user_health_status.md"
 _POINTER_FILENAME = "resource_user_health_status_latest.json"
-_BELIEFS_PATH = _get_resources_dir() / "kg_derived" / "resource_user_beliefs.json"
-_WEEKLY_INSIGHTS_PATH = (
-    _get_resources_dir() / "weekly_insights_pipeline_outputs" / "resource_weekly_insights_latest.json"
+_BELIEFS_PATH = resource_files.user_path("kg_derived/resource_user_beliefs.json")
+_WEEKLY_INSIGHTS_PATH = resource_files.user_path(
+    "weekly_insights_pipeline_outputs/resource_weekly_insights_latest.json"
 )
 
 def _format_health_beliefs() -> str:

@@ -6,17 +6,17 @@ and building prompt-safe resource context blocks for room agents.
 """
 from __future__ import annotations
 
-import json
 import threading
 from pathlib import Path
 from typing import Any, Dict
 
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_resources_dir
+from app.assistant.utils import resource_files
 from app.assistant.utils.resource_formatting import format_resource_value
 
 logger = get_logger(__name__)
 
+_SUBSCRIPTIONS_REL = "context/global/resource_subscriptions.json"
 _SUBSCRIPTIONS_CACHE: dict[str, Any] = {"mtime": None, "size": None, "subscriptions": None}
 _SUBSCRIPTIONS_LOCK = threading.Lock()
 _TRIGGER_WARNED_IDS: set[str] = set()
@@ -34,8 +34,8 @@ class RoomResourceInjectionService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _subscriptions_path() -> Path:
-        return get_resources_dir() / "context" / "global" / "resource_subscriptions.json"
+    def _subscriptions_path() -> Path | None:
+        return resource_files.base_path(_SUBSCRIPTIONS_REL)
 
     @staticmethod
     def _normalize_subscriptions(raw: Any) -> dict[str, dict[str, Any]]:
@@ -96,8 +96,8 @@ class RoomResourceInjectionService:
 
     def _load_subscriptions(self) -> dict[str, dict[str, Any]]:
         path = self._subscriptions_path()
-        if not path.exists() or not path.is_file():
-            raise FileNotFoundError(f"Missing required resource subscription file: {path}")
+        if path is None:
+            raise FileNotFoundError(f"Missing required resource subscription file: {_SUBSCRIPTIONS_REL}")
         try:
             stat = path.stat()
             mtime = stat.st_mtime
@@ -115,7 +115,7 @@ class RoomResourceInjectionService:
                 return dict(cached_subs)
 
         try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
+            raw = resource_files.read(_SUBSCRIPTIONS_REL)
             normalized = self._normalize_subscriptions(raw)
         except Exception as e:
             logger.error("Failed loading resource subscriptions from %s: %s", path, e)

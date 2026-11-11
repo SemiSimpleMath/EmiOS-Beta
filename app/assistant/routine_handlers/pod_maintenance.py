@@ -47,6 +47,7 @@ def image_reconcile_run(
     disk, flag pods whose backing file is gone, stamp/mint what the user
     dropped into the identity directory."""
     from app.assistant.pod_store.image_reconcile import reconcile_directory
+    from app.assistant.utils import resource_files
     from app.assistant.utils.path_utils import get_repo_root
 
     repo_root = get_repo_root()
@@ -60,7 +61,7 @@ def image_reconcile_run(
             directory=images_root, mint_unstamped=False,
         )
 
-    identity_dir = repo_root / "resources" / "identity"
+    identity_dir = resource_files.user_root() / "identity"
     if identity_dir.is_dir():
         # User-curated photos: new/renamed files get stamped + minted.
         out["identity_dir"] = reconcile_directory(

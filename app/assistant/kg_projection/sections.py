@@ -14,7 +14,6 @@ them in the file — consumer-side selection only.
 """
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -68,11 +67,11 @@ def load_taxonomy(
                 logger.debug("Could not load %s via resource_manager: %s", resource_id, e)
 
     if not raw_sections:
-        from app.assistant.utils.path_utils import get_resources_dir
-        candidate = get_resources_dir() / "user" / f"{resource_id}.json"
-        if candidate.exists():
+        from app.assistant.utils import resource_files
+        candidate = f"user/{resource_id}.json"
+        if resource_files.exists(candidate):
             try:
-                data = json.loads(candidate.read_text(encoding="utf-8"))
+                data = resource_files.read(candidate)
                 if isinstance(data, dict):
                     raw_sections = data.get("sections") or []
             except Exception as e:

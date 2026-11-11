@@ -266,8 +266,8 @@ Source facts (will be joined into a single bullet):
 Style:
 - 1 sentence, <= 20 words.
 - Present tense. "Lives in Irvine" not "is living in Irvine".
-- Anchored to the subject. "Works as data scientist at Seyfarth"
-  not "is currently employed as a data scientist..."
+- Anchored to the subject. "Works as software engineer at Acme"
+  not "is currently employed as a software engineer..."
 - For relationships, first-person framing when subject is a person
   in <user_name>'s life: "my wife", "the kids" — not "the user's wife".
 

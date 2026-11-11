@@ -46,11 +46,10 @@ def _load_conversation_starter_frequency() -> str:
     page since this feature shipped.
     """
     try:
-        from app.assistant.utils.path_utils import get_resources_dir
-        core_path = get_resources_dir() / "assistant" / "assistant_core.json"
-        if not core_path.exists():
+        from app.assistant.utils import resource_files
+        if not resource_files.exists("assistant/assistant_core.json"):
             return _DEFAULT_FREQUENCY
-        data = json.loads(core_path.read_text(encoding="utf-8"))
+        data = resource_files.read("assistant/assistant_core.json")
         cs = data.get("conversation_starter") if isinstance(data, dict) else None
         if not isinstance(cs, dict):
             return _DEFAULT_FREQUENCY

@@ -13,7 +13,6 @@ family roster, KG household digests) and adds meal-specific assembly:
 """
 from __future__ import annotations
 
-import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -28,7 +27,7 @@ from app.assistant.subconscious.context_builder import (
     _NO_DATA_FMT,
 )
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_repo_root
+from app.assistant.utils import resource_files
 from app.assistant.utils.time_utils import get_local_time
 
 logger = get_logger(__name__)
@@ -702,16 +701,15 @@ def _build_fast_food_count() -> str:
 # ── Phase 1c.1: external lists (Ralphs standing + agent's weekly) ─────────
 
 
-_EXTERNAL_LISTS_REL = "resources/subconscious/resource_meal_proposer_external_lists.json"
-_WEEKLY_DOC_STATE_REL = "resources/subconscious/resource_meal_proposer_weekly_doc_state.json"
+_EXTERNAL_LISTS_REL = "subconscious/resource_meal_proposer_external_lists.json"
+_WEEKLY_DOC_STATE_REL = "subconscious/resource_meal_proposer_weekly_doc_state.json"
 
 
 def _load_external_lists() -> Dict[str, Any]:
-    path = get_repo_root() / _EXTERNAL_LISTS_REL
-    if not path.is_file():
+    if not resource_files.exists(_EXTERNAL_LISTS_REL):
         return {"lists": []}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return resource_files.read(_EXTERNAL_LISTS_REL)
     except Exception as e:
         logger.warning("[meal_context] external_lists parse failed: %s", e)
         return {"lists": []}
@@ -719,20 +717,17 @@ def _load_external_lists() -> Dict[str, Any]:
 
 def load_weekly_doc_state() -> Dict[str, Any]:
     """Public — also used by meal_persist."""
-    path = get_repo_root() / _WEEKLY_DOC_STATE_REL
-    if not path.is_file():
+    if not resource_files.exists(_WEEKLY_DOC_STATE_REL):
         return {"doc_id": None, "doc_title": None, "last_built_week_start": None, "last_edit_at_utc": None}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return resource_files.read(_WEEKLY_DOC_STATE_REL)
     except Exception as e:
         logger.warning("[meal_context] weekly_doc_state parse failed: %s", e)
         return {"doc_id": None, "doc_title": None, "last_built_week_start": None, "last_edit_at_utc": None}
 
 
 def save_weekly_doc_state(state: Dict[str, Any]) -> None:
-    path = get_repo_root() / _WEEKLY_DOC_STATE_REL
-    from app.assistant.utils.atomic_write import write_json_atomic
-    write_json_atomic(path, state)
+    resource_files.write(_WEEKLY_DOC_STATE_REL, state)
 
 
 def _build_ralphs_standing_list() -> str:

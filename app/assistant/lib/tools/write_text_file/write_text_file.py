@@ -1,31 +1,9 @@
-from pathlib import Path
-
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
-from app.assistant.lib.tools.text_file_access import is_allowed
-from app.assistant.utils.path_utils import get_repo_root
+from app.assistant.lib.tools.text_file_access import is_allowed, resolve_tool_path
 from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
-
-
-def _repo_root() -> Path:
-    return get_repo_root()
-
-
-def _resolve_path(path_str: str) -> Path | None:
-    try:
-        raw = Path(path_str)
-    except Exception:
-        return None
-    root = _repo_root()
-    if raw.is_absolute():
-        try:
-            raw.relative_to(root)
-        except Exception:
-            return None
-        return raw
-    return (root / raw).resolve()
 
 
 class WriteTextFileTool(BaseTool):
@@ -54,11 +32,12 @@ class WriteTextFileTool(BaseTool):
                 content=("Missing required argument: content" if content is None else
                          f"Argument 'content' must be text, got {type(content).__name__}"))
 
-        resolved = _resolve_path(file_path.strip())
-        if resolved is None:
+        target = resolve_tool_path(file_path.strip())
+        if target is None:
             return ToolResult(result_type="error", content="Invalid or disallowed file_path.")
+        resolved, logical = target
         allowed_write_files = tool_data.get("allowed_write_files")
-        if isinstance(allowed_write_files, list) and not is_allowed(resolved, allowed_write_files):
+        if isinstance(allowed_write_files, list) and not is_allowed(logical, allowed_write_files):
             return ToolResult(result_type="error", content="Write blocked by allowed_write_files policy.")
 
         try:

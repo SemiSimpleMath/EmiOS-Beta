@@ -1,14 +1,11 @@
-import json
 from pathlib import Path
 from typing import Dict, Any, Optional, Callable
 from jinja2 import Template, StrictUndefined
 import threading
-import tempfile
-import os
 
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_repo_root
+from app.assistant.utils import resource_files
 from app.assistant.utils import scope_gate
 
 logger = get_logger(__name__)
@@ -18,21 +15,23 @@ class ResourceManager:
     """
     Manages shared resources backed by files with an in-process cache.
 
-    - Load on startup from config.
+    Files are read, listed and written only through ``resource_files``: the owner's
+    file in the user root wins over the shipped template or text in the code root, and
+    the owner's ``_personal`` add-on is appended.
+
+    - Load on startup.
     - Read through ResourceManager scoped API.
     - Optional persistent updates from agents (learned preferences).
     """
 
-    def __init__(self, base_dir: Optional[Path] = None):
-        # Base directory for relative resource paths
-        self.base_dir = base_dir or get_repo_root()
-        # resource_id -> absolute file path
+    def __init__(self):
+        # resource_id -> path relative to the resources root
         self._resource_files: Dict[str, Path] = {}
         # resource_id -> concrete current value (source of truth for reads)
         self._resource_values: Dict[str, Any] = {}
-        # resource_id -> st_mtime (float) of the backing file at cache-time.
+        # resource_id -> newest mtime of the resource's files at cache-time.
         # Used for staleness detection: get_resource compares this against the
-        # file's current mtime and auto-reloads if newer. Entries with no file
+        # files' current mtime and auto-reloads if newer. Entries with no file
         # backing (synthetic updates) are absent from this map.
         self._cached_mtimes: Dict[str, float] = {}
         # resource_id -> provider fn(scope_dict) -> value (DYNAMIC/computed resources)
@@ -40,15 +39,6 @@ class ResourceManager:
         # resource_id -> requires_scope lock (OPTIONAL; absent = free, shared with skills)
         self._resource_locks: Dict[str, dict] = {}
         self._lock = threading.RLock()
-        self._file_locks: Dict[Path, threading.RLock] = {}
-
-    def _get_file_lock(self, path: Path) -> threading.RLock:
-        with self._lock:
-            lock = self._file_locks.get(path)
-            if lock is None:
-                lock = threading.RLock()
-                self._file_locks[path] = lock
-            return lock
 
     @staticmethod
     def _has_template_tokens(value: Any) -> bool:
@@ -84,60 +74,15 @@ class ResourceManager:
             logger.error("Failed mirroring resource '%s' to global_blackboard: %s", resource_id, e)
             logger.debug("resource mirror to global blackboard exception details", exc_info=True)
 
-    @staticmethod
-    def _personal_overlay_path(path: Path) -> Path:
-        """The `<stem>_personal<suffix>` sibling that overlays this resource, if any."""
-        return path.with_name(f"{path.stem}_personal{path.suffix}")
-
-    def _read_with_overlay(self, path: Path) -> Any:
-        """Read a file-backed resource EXACTLY as the initial load does — base, then the
-        personal overlay appended after it.
-
-        Every path that re-reads a resource from disk must go through here. When the reload
-        paths called `_read_file` directly they produced the PUBLIC template alone, so any
-        touch of the base file silently replaced the user's personal directives — their
-        devices, their emergency contacts, their standing instructions — with the shipped
-        defaults, in every prompt, until the next restart. A resource that reloads must
-        reload into the same thing it was.
-        """
-        content = self._read_file(path)
-        personal_path = self._personal_overlay_path(path)
-        if personal_path.exists() and personal_path.is_file():
-            try:
-                personal = self._read_file(personal_path)
-                if isinstance(content, str) and isinstance(personal, str) and personal.strip():
-                    content = content.rstrip() + "\n\n" + personal.lstrip()
-            except Exception as e:
-                logger.warning("Failed to apply personal overlay %s: %s", personal_path.name, e)
-                logger.debug("personal overlay exception details", exc_info=True)
-        return content
-
-    def _source_mtime(self, path: Path) -> float:
-        """The newest mtime across the resource's base file AND its personal overlay.
-
-        Keyed on both because the overlay is half of the value: editing only the personal
-        file left the base mtime untouched, so the staleness check never fired and the edit
-        stayed invisible to a running process.
-        """
-        newest = path.stat().st_mtime
-        personal_path = self._personal_overlay_path(path)
-        try:
-            if personal_path.exists():
-                newest = max(newest, personal_path.stat().st_mtime)
-        except OSError:
-            pass
-        return newest
-
-    def _set_cached_resource(self, *, resource_id: str, value: Any, source_path: Path | str) -> None:
-        self._assert_concrete_resource(resource_id, value, source_path)
+    def _set_cached_resource(self, *, resource_id: str, value: Any, rel: Optional[Path]) -> None:
+        """Cache a value. ``rel`` names the resource's files for staleness tracking; None
+        for a value with no file behind it (an in-memory update)."""
+        self._assert_concrete_resource(resource_id, value, rel if rel is not None else f"<update:{resource_id}>")
         with self._lock:
             self._resource_values[resource_id] = value
-            # Record the file mtime at cache-time so get_resource can detect
-            # external modifications. Synthetic source_paths (strings like
-            # "<update:X>") are not real files — skip mtime tracking for them.
-            if isinstance(source_path, Path) and source_path.exists():
+            if rel is not None and resource_files.exists(rel):
                 try:
-                    self._cached_mtimes[resource_id] = self._source_mtime(source_path)
+                    self._cached_mtimes[resource_id] = resource_files.mtime(rel)
                 except OSError:
                     self._cached_mtimes.pop(resource_id, None)
             else:
@@ -158,14 +103,14 @@ class ResourceManager:
         """
         with self._lock:
             cached_value = self._resource_values.get(resource_id)
-            path = self._resource_files.get(resource_id)
+            rel = self._resource_files.get(resource_id)
             cached_mtime = self._cached_mtimes.get(resource_id)
 
-        if cached_value is None or path is None or cached_mtime is None:
+        if cached_value is None or rel is None or cached_mtime is None:
             return cached_value
 
         try:
-            current_mtime = self._source_mtime(path)
+            current_mtime = resource_files.mtime(rel)
         except OSError:
             # File vanished or unreadable — fall back to cached value.
             return cached_value
@@ -175,7 +120,7 @@ class ResourceManager:
 
         # File is newer than what we cached: reload.
         try:
-            fresh_value = self._read_with_overlay(path)
+            fresh_value = resource_files.read(rel)
         except Exception as e:
             logger.warning(
                 "Resource '%s' mtime advanced but reload failed; keeping stale cached value. error=%s",
@@ -184,7 +129,7 @@ class ResourceManager:
             logger.debug("resource reload exception details", exc_info=True)
             return cached_value
 
-        self._set_cached_resource(resource_id=resource_id, value=fresh_value, source_path=path)
+        self._set_cached_resource(resource_id=resource_id, value=fresh_value, rel=rel)
         self._publish_to_global_blackboard(resource_id, fresh_value)
         logger.info(
             "Resource '%s' auto-reloaded after file mtime advanced (cached=%.3f current=%.3f)",
@@ -194,14 +139,14 @@ class ResourceManager:
 
     def _read_resource_from_disk_if_known(self, resource_id: str) -> Any:
         with self._lock:
-            path = self._resource_files.get(resource_id)
-        if path is None:
+            rel = self._resource_files.get(resource_id)
+        if rel is None:
             return None
-        if not path.exists():
-            logger.warning("Known resource path is missing for '%s': %s", resource_id, path)
+        if not resource_files.exists(rel):
+            logger.warning("Known resource is missing for '%s': %s", resource_id, rel)
             return None
-        value = self._read_with_overlay(path)
-        self._set_cached_resource(resource_id=resource_id, value=value, source_path=path)
+        value = resource_files.read(rel)
+        self._set_cached_resource(resource_id=resource_id, value=value, rel=rel)
         self._publish_to_global_blackboard(resource_id, value)
         return value
 
@@ -306,21 +251,22 @@ class ResourceManager:
             out[cleaned] = self.get_resource(scope_context=scope_context, resource_id=cleaned, required=required)
         return out
 
-    def compile_templates(self, resources_dir: Optional[str] = "resources") -> int:
+    def compile_templates(self) -> int:
         """
-        Compile Jinja templates from resources/templates into concrete resources.
+        Compile Jinja templates under the resources root's ``templates/`` into concrete
+        resources.
 
-        Source:  resources/templates/**/<name>.<ext>
-        Output:  resources/**/<name>.<ext>   (same relative path without 'templates/')
+        Source:  templates/<rel>    (either root, via resource_files)
+        Output:  <rel>              (written to the user root)
         """
-        resources_path = (self.base_dir / (resources_dir or "resources")).resolve()
-        templates_root = resources_path / "templates"
-        if not templates_root.exists():
-            logger.info("No templates directory found at %s. Skipping template compile.", templates_root)
+        template_rels = [
+            rel for rel in resource_files.list_resources("templates")
+            if not rel.name.startswith(".")
+            and (rel.suffix.lower() in (".md", ".txt") or rel.suffix == "")
+        ]
+        if not template_rels:
+            logger.info("No resource templates found. Skipping template compile.")
             return 0
-        if not templates_root.is_dir():
-            logger.error("Templates root is not a directory: %s", templates_root)
-            raise RuntimeError(f"Templates root is not a directory: {templates_root}")
 
         # Build render context from already-cached concrete resources.
         context: Dict[str, Any] = {}
@@ -332,227 +278,111 @@ class ResourceManager:
                 context[res_id] = val
 
         compiled_count = 0
-        for template_path in templates_root.rglob("*"):
-            if not template_path.is_file():
-                continue
-            if template_path.name.startswith("."):
-                continue
-            if template_path.suffix.lower() not in [".md", ".txt"] and template_path.suffix != "":
-                continue
+        for template_rel in template_rels:
+            output_rel = template_rel.relative_to("templates")
+            resource_id = output_rel.stem
 
-            rel = template_path.relative_to(templates_root)
-            output_path = (resources_path / rel).resolve()
-            resource_id = output_path.stem
-
-            raw_template = self._read_file(template_path)
+            raw_template = resource_files.read_base(template_rel)
             if not isinstance(raw_template, str):
-                logger.error("Template '%s' did not load as text.", template_path)
-                raise TypeError(f"Template '{template_path}' did not load as text.")
+                logger.error("Template '%s' did not load as text.", template_rel)
+                raise TypeError(f"Template '{template_rel}' did not load as text.")
 
             try:
                 rendered = Template(raw_template, undefined=StrictUndefined).render(**context)
             except Exception as e:
                 logger.error(
                     "Template compile failed for '%s' -> '%s': %s",
-                    template_path,
-                    output_path,
+                    template_rel,
+                    output_rel,
                     e,
                 )
                 raise
 
-            self._assert_concrete_resource(resource_id, rendered, output_path)
+            self._assert_concrete_resource(resource_id, rendered, output_rel)
 
             # Persist compiled output and update local cache.
-            self._write_file(output_path, rendered)
-            self._set_cached_resource(resource_id=resource_id, value=rendered, source_path=output_path)
+            resource_files.write(output_rel, rendered)
             with self._lock:
-                self._resource_files[resource_id] = output_path
+                self._resource_files[resource_id] = output_rel
+            self._set_cached_resource(resource_id=resource_id, value=rendered, rel=output_rel)
             self._publish_to_global_blackboard(resource_id, rendered)
             compiled_count += 1
-            logger.info("✅ Compiled template '%s' -> '%s' (%s)", template_path.name, output_path.name, resource_id)
+            logger.info("✅ Compiled template '%s' -> '%s' (%s)", template_rel, output_rel, resource_id)
 
         logger.info("🧩 Template compile complete: %d compiled", compiled_count)
         return compiled_count
 
-    def load_from_config(self, config: Dict[str, Any]) -> None:
+    def load_all(self) -> None:
         """
-        Config shape example:
+        Load every resource from the code and user roots (via resource_files) into the
+        cache and global_blackboard.
 
-        shared_resources:
-          email_instructions: "resources/email_instructions.md"
-          newsletter_prefs: "resources/newsletter_prefs.json"
-        """
-        shared = config.get("shared_resources", {})
-        if not shared:
-            return
-
-        for resource_id, rel_path in shared.items():
-            path = (self.base_dir / rel_path).resolve()
-            with self._lock:
-                self._resource_files[resource_id] = path
-
-            try:
-                if not path.exists():
-                    logger.error(
-                        "Resource file missing for '%s': %s — agents using this resource will receive None.",
-                        resource_id, path,
-                    )
-                    self._set_cached_resource(resource_id=resource_id, value=None, source_path=path)
-                    self._publish_to_global_blackboard(resource_id, None)
-                    continue
-
-                content = self._read_with_overlay(path)
-                self._set_cached_resource(resource_id=resource_id, value=content, source_path=path)
-                self._publish_to_global_blackboard(resource_id, content)
-                logger.info(f"Loaded shared resource '{resource_id}' from {path}")
-            except Exception as e:
-                logger.error(
-                    "Failed to load resource '%s' from %s: %s — agents using this resource will receive None.",
-                    resource_id, path, e, exc_info=True,
-                )
-                self._set_cached_resource(resource_id=resource_id, value=None, source_path=path)
-                self._publish_to_global_blackboard(resource_id, None)
-
-    def _read_file(self, path: Path) -> Any:
-        """Read file and return content - JSON as dict, text files as strings."""
-        if path.suffix.lower() in [".json"]:
-            with path.open("r", encoding="utf-8") as f:
-                return json.load(f)
-        else:
-            with path.open("r", encoding="utf-8") as f:
-                return f.read()
-
-    def _write_file(self, path: Path, value: Any) -> None:
-        # Atomic write + per-file lock to prevent concurrent writers from corrupting files.
-        lock = self._get_file_lock(path)
-        with lock:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    if path.suffix.lower() in [".json"]:
-                        json.dump(value, f, indent=2, ensure_ascii=False)
-                    else:
-                        if not isinstance(value, str):
-                            value = str(value)
-                        f.write(value)
-                    f.flush()
-                    os.fsync(f.fileno())
-                os.replace(tmp_name, str(path))
-            finally:
-                try:
-                    if os.path.exists(tmp_name):
-                        os.remove(tmp_name)
-                except Exception:
-                    pass
-
-    def load_all_from_directory(self, resources_dir: Optional[str] = "resources") -> None:
-        """
-        Automatically load all files from a resources directory into global_blackboard.
-        
         Uses the filename (without extension) as the resource_id.
-        Example: resources/email_instructions.md -> resource_id: "email_instructions"
-        
+        Example: instructions/email_instructions.md -> resource_id: "email_instructions"
+
         Loads in three phases:
         1. Load all JSON files (context/source data)
-        2. Compile resources/templates/* into concrete resources/*
+        2. Compile templates/* into concrete resources
         3. Load concrete text resources (.md/.txt/no-ext)
-        
-        Args:
-            resources_dir: Relative path to resources directory (default: "resources")
         """
-        logger.info(f"🔧 Starting resource loading from '{resources_dir}'...")
-
-        resources_path = (self.base_dir / resources_dir).resolve()
-        logger.info(f"   Resources path: {resources_path}")
-        logger.info(f"   Path exists: {resources_path.exists()}")
-        
-        if not resources_path.exists():
-            logger.error(f"❌ Resources directory does not exist: {resources_path}")
-            return
-        
-        logger.info(f"   Is directory: {resources_path.is_dir()}")
-        if not resources_path.is_dir():
-            logger.error(f"❌ Resources path is not a directory: {resources_path}")
-            return
-
-        logger.info(f"📂 Scanning resources directory (recursive): {resources_path}")
+        logger.info(
+            "🔧 Starting resource loading (code root %s, user root %s)...",
+            resource_files.code_root(), resource_files.user_root(),
+        )
         loaded_count = 0
         skipped_count = 0
-
-        # Collect files by type
-        json_files = []
-        text_files = []
 
         # Avoid noisy collisions (multiple README.md files in subfolders).
         skip_names = {"README", "README.md", "README.txt"}
         skip_dir_names = {"tmp", "tests", "__pycache__", "templates", "day_context", "pointers"}
-        
-        all_files: list[Path] = []
-        for file_path in resources_path.rglob("*"):
-            try:
-                if not file_path.is_file():
-                    continue
-                if file_path.name.startswith("."):
-                    continue
-                # Skip hidden/ignored directories anywhere in the path
-                if any(part.startswith(".") for part in file_path.parts):
-                    continue
-                if any(part in skip_dir_names for part in file_path.parts):
-                    continue
-                if file_path.name in skip_names:
-                    continue
-                # Personal overlays (*_personal.md / *_personal.txt) are NOT
-                # standalone resources — they're appended onto their public
-                # base by the text-resource loader (see PHASE 3 below). The
-                # convention lets users keep personal preferences out of the
-                # public repo (gitignore *_personal.md) while still benefiting
-                # from a shared template as the baseline.
-                if file_path.stem.endswith("_personal"):
-                    continue
-                all_files.append(file_path)
-            except Exception as e:
-                logger.error("Failed while scanning resource file candidate '%s': %s", file_path, e)
-                logger.debug("resource scan exception details", exc_info=True)
+
+        all_rels: list[Path] = []
+        for rel in resource_files.list_resources():
+            if rel.name.startswith("."):
                 continue
+            # Skip hidden/ignored directories anywhere in the path
+            if any(part.startswith(".") for part in rel.parts):
+                continue
+            if any(part in skip_dir_names for part in rel.parts):
+                continue
+            if rel.name in skip_names:
+                continue
+            all_rels.append(rel)
 
-        def _is_root_level(p: Path) -> bool:
-            try:
-                rel = p.relative_to(resources_path)
-                return len(rel.parts) == 1
-            except Exception:
-                return False
+        def _is_root_level(rel: Path) -> bool:
+            return len(rel.parts) == 1
 
-        # Prefer canonical subfolders over resources/ root.
+        json_rels: list[Path] = []
+        text_rels: list[Path] = []
+        # Prefer canonical subfolders over the resources root.
         # This ensures that any regenerated root-level stragglers (old paths) don't win collisions.
-        for file_path in sorted(all_files, key=lambda p: (_is_root_level(p), str(p).lower())):
-            
+        for rel in sorted(all_rels, key=lambda r: (_is_root_level(r), str(r).lower())):
             with self._lock:
-                known_values = set(self._resource_files.values())
-            if file_path in known_values:
+                known_rels = set(self._resource_files.values())
+            if rel in known_rels:
                 skipped_count += 1
                 continue
 
-            if file_path.suffix.lower() == '.json':
-                json_files.append(file_path)
-            elif file_path.suffix.lower() in ['.md', '.txt'] or file_path.suffix == '':
+            if rel.suffix.lower() == '.json':
+                json_rels.append(rel)
+            elif rel.suffix.lower() in ['.md', '.txt'] or rel.suffix == '':
                 # Include .md, .txt, and files with no extension as concrete resources
-                text_files.append(file_path)
+                text_rels.append(rel)
 
         # PASS 1: Load all JSON files first (these provide context)
-        for file_path in json_files:
-            resource_id = file_path.stem
+        for rel in json_rels:
+            resource_id = rel.stem
             try:
                 # Prevent accidental overrides when two subfolders contain same stem.
                 with self._lock:
-                    existing_path = self._resource_files.get(resource_id)
-                if existing_path and existing_path.resolve() != file_path.resolve():
+                    existing_rel = self._resource_files.get(resource_id)
+                if existing_rel and existing_rel != rel:
                     if resource_id == "resource_weather":
                         logger.error(
                             "Duplicate canonical weather resources found: '%s' and '%s'. "
                             "Only one resource_weather.json is allowed.",
-                            existing_path,
-                            file_path,
+                            existing_rel,
+                            rel,
                         )
                         raise ValueError(
                             "Duplicate resource_weather.json files found. "
@@ -560,99 +390,70 @@ class ResourceManager:
                         )
                     # If we previously loaded a root-level straggler, allow the subfolder
                     # canonical file to override it.
-                    if _is_root_level(existing_path) and not _is_root_level(file_path):
+                    if _is_root_level(existing_rel) and not _is_root_level(rel):
                         logger.warning(
                             f"⚠️ Duplicate resource_id '{resource_id}': overriding root-level "
-                            f"{existing_path} with canonical {file_path}"
+                            f"{existing_rel} with canonical {rel}"
                         )
                     else:
                         logger.warning(
-                            f"⚠️ Duplicate resource_id '{resource_id}' from {file_path}; "
-                            f"already loaded from {existing_path}. Skipping duplicate."
+                            f"⚠️ Duplicate resource_id '{resource_id}' from {rel}; "
+                            f"already loaded from {existing_rel}. Skipping duplicate."
                         )
                         skipped_count += 1
                         continue
 
-                content = self._read_with_overlay(file_path)
-                self._set_cached_resource(resource_id=resource_id, value=content, source_path=file_path)
+                content = resource_files.read(rel)
                 with self._lock:
-                    self._resource_files[resource_id] = file_path
+                    self._resource_files[resource_id] = rel
+                self._set_cached_resource(resource_id=resource_id, value=content, rel=rel)
                 self._publish_to_global_blackboard(resource_id, content)
                 loaded_count += 1
-                
-                # Debug: Show what we're storing for user preference files
-                if resource_id.startswith('resource_user_'):
-                    if isinstance(content, str):
-                        preview = content[:150].replace('\n', ' ')
-                        logger.info(f"✅ Loaded JSON resource '{resource_id}' as MARKDOWN ({len(content)} chars): {preview}...")
-                    else:
-                        logger.info(f"✅ Loaded JSON resource '{resource_id}' as DICT with keys: {list(content.keys()) if isinstance(content, dict) else type(content)}")
-                else:
-                    logger.info(f"✅ Loaded JSON resource '{resource_id}' from {file_path.name}")
+                logger.info(f"✅ Loaded JSON resource '{resource_id}' from {resource_files.base_path(rel)}")
             except Exception as e:
-                logger.error(f"Failed to load JSON resource '{resource_id}' from {file_path}: {e}")
+                logger.error(f"Failed to load JSON resource '{resource_id}' from {rel}: {e}")
                 logger.debug("JSON resource load exception details", exc_info=True)
                 skipped_count += 1
 
         # PHASE 2: Compile templates to concrete resources.
-        self.compile_templates(resources_dir=resources_dir)
+        self.compile_templates()
 
         # PHASE 3: Load concrete text resources.
-        for file_path in text_files:
-            resource_id = file_path.stem
+        for rel in text_rels:
+            resource_id = rel.stem
             try:
                 with self._lock:
-                    existing_path = self._resource_files.get(resource_id)
-                if existing_path and existing_path.resolve() != file_path.resolve():
-                    if _is_root_level(existing_path) and not _is_root_level(file_path):
+                    existing_rel = self._resource_files.get(resource_id)
+                if existing_rel and existing_rel != rel:
+                    if _is_root_level(existing_rel) and not _is_root_level(rel):
                         logger.warning(
                             f"⚠️ Duplicate resource_id '{resource_id}': overriding root-level "
-                            f"{existing_path} with canonical {file_path}"
+                            f"{existing_rel} with canonical {rel}"
                         )
                     else:
                         logger.warning(
-                            f"⚠️ Duplicate resource_id '{resource_id}' from {file_path}; "
-                            f"already loaded from {existing_path}. Skipping duplicate."
+                            f"⚠️ Duplicate resource_id '{resource_id}' from {rel}; "
+                            f"already loaded from {existing_rel}. Skipping duplicate."
                         )
                         skipped_count += 1
                         continue
 
-                # Personal overlay: append `<stem>_personal<suffix>` if a
-                # sibling exists. Lets users keep personal preferences out
-                # of the public repo (gitignore *_personal.md) while
-                # preserving the public template as a safe baseline. The
-                # personal content goes AFTER the base — later instructions
-                # win at LLM read time, so personal directives override the
-                # template defaults without having to delete from the
-                # public file. Shared with every reload path via
-                # _read_with_overlay, so a reload cannot drop the overlay.
-                content = self._read_with_overlay(file_path)
-                self._assert_concrete_resource(resource_id, content, file_path)
-
-                personal_path = self._personal_overlay_path(file_path)
-                if personal_path.exists() and personal_path.is_file():
-                    try:
-                        personal = self._read_file(personal_path)
-                        if isinstance(personal, str) and personal.strip():
-                            logger.info(
-                                f"🔧 Applied personal overlay to '{resource_id}' "
-                                f"from {personal_path.name} (+{len(personal)} chars)"
-                            )
-                    except Exception as e:
-                        logger.warning(
-                            "Personal overlay for '%s' could not be applied: %s",
-                            resource_id, e,
-                        )
-                        logger.debug("personal overlay exception details", exc_info=True)
-
-                self._set_cached_resource(resource_id=resource_id, value=content, source_path=file_path)
+                # The owner's `_personal` add-on, if any, is appended by resource_files.read
+                # (later instructions win at LLM read time).
+                content = resource_files.read(rel)
+                self._assert_concrete_resource(resource_id, content, rel)
                 with self._lock:
-                    self._resource_files[resource_id] = file_path
+                    self._resource_files[resource_id] = rel
+                self._set_cached_resource(resource_id=resource_id, value=content, rel=rel)
                 self._publish_to_global_blackboard(resource_id, content)
                 loaded_count += 1
-                logger.info(f"✅ Loaded text resource '{resource_id}' from {file_path.name}")
+                addon = resource_files.addon_path(rel)
+                logger.info(
+                    f"✅ Loaded text resource '{resource_id}' from {resource_files.base_path(rel)}"
+                    + (f" + add-on {addon}" if addon is not None else "")
+                )
             except Exception as e:
-                logger.error(f"Failed to load text resource '{resource_id}' from {file_path}: {e}")
+                logger.error(f"Failed to load text resource '{resource_id}' from {rel}: {e}")
                 logger.debug("Text resource load exception details", exc_info=True)
                 skipped_count += 1
 
@@ -662,7 +463,7 @@ class ResourceManager:
 
     def update_resource(self, resource_id: str, value: Any, persist: bool = True) -> None:
         """
-        Update a shared resource both in memory and on disk.
+        Update a shared resource both in memory and on disk (the user root).
 
         Use case:
           email agent learns "ignore chess.com newsletters" and updates
@@ -671,26 +472,26 @@ class ResourceManager:
         rid = str(resource_id or "").strip()
         if not rid:
             raise ValueError("resource_id must be a non-empty string.")
-        self._set_cached_resource(resource_id=rid, value=value, source_path=f"<update:{rid}>")
+        self._set_cached_resource(resource_id=rid, value=value, rel=None)
         self._publish_to_global_blackboard(rid, value)
 
         with self._lock:
-            path = self._resource_files.get(rid)
-        if persist and path is not None:
+            rel = self._resource_files.get(rid)
+        if persist and rel is not None:
             try:
-                self._write_file(path, value)
-                logger.info(f"Persisted shared resource '{rid}' to {path}")
-                # After writing, re-anchor the cache to the file's new mtime so
+                written = resource_files.write(rel, value)
+                logger.info(f"Persisted shared resource '{rid}' to {written}")
+                # After writing, re-anchor the cache to the files' new mtime so
                 # get_resource's staleness check can detect FUTURE external
                 # overwrites. Without this the cached_mtime stays absent and
                 # subsequent third-party writes are invisible to us.
                 try:
                     with self._lock:
-                        self._cached_mtimes[rid] = path.stat().st_mtime
+                        self._cached_mtimes[rid] = resource_files.mtime(rel)
                 except OSError:
                     pass
             except Exception as e:
-                logger.error(f"Failed to persist resource '{rid}' to {path}: {e}")
+                logger.error(f"Failed to persist resource '{rid}' to {rel}: {e}")
                 logger.debug("update_resource persist exception details", exc_info=True)
 
     def refresh_resource(self, resource_id: str) -> None:
@@ -702,11 +503,11 @@ class ResourceManager:
             raise ValueError("resource_id must be a non-empty string.")
 
         with self._lock:
-            path = self._resource_files.get(rid)
-        if path is None:
-            candidate = (self.base_dir / "resources" / f"{rid}.json").resolve()
-            if candidate.exists():
-                path = candidate
+            rel = self._resource_files.get(rid)
+        if rel is None:
+            candidate = Path(f"{rid}.json")
+            if resource_files.exists(candidate):
+                rel = candidate
                 with self._lock:
                     self._resource_files[rid] = candidate
             else:
@@ -714,9 +515,9 @@ class ResourceManager:
                 return
 
         try:
-            content = self._read_with_overlay(path)
-            self._set_cached_resource(resource_id=rid, value=content, source_path=path)
+            content = resource_files.read(rel)
+            self._set_cached_resource(resource_id=rid, value=content, rel=rel)
             self._publish_to_global_blackboard(rid, content)
         except Exception as e:
-            logger.error(f"Failed to refresh resource '{rid}' from {path}: {e}")
+            logger.error(f"Failed to refresh resource '{rid}' from {rel}: {e}")
             logger.debug("refresh_resource exception details", exc_info=True)

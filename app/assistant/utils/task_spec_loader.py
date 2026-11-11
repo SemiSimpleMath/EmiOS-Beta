@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from app.assistant.ServiceLocator.service_locator import DI
+from app.assistant.utils import resource_files
 from app.assistant.utils.frontmatter import split_frontmatter
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_repo_root, resolve_repo_path
@@ -184,7 +185,7 @@ def _get_afk_snapshot_best_effort(repo_root: Path) -> dict[str, Any]:
     try:
         import json
 
-        afk_path = (repo_root / "resources" / "dayflow_pipeline_outputs" / "resource_afk_statistics_output.json").resolve()
+        afk_path = resource_files.user_path("dayflow_pipeline_outputs/resource_afk_statistics_output.json").resolve()
         if afk_path.exists():
             data = json.loads(afk_path.read_text(encoding="utf-8")) or {}
             return data if isinstance(data, dict) else {}

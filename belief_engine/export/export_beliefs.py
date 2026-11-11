@@ -15,12 +15,12 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-from app.assistant.utils.path_utils import get_resources_dir
+from app.assistant.utils import resource_files
 from app.assistant.kg_core.user_identity import get_primary_user_name
 
 logger = get_logger(__name__)
 
-# get_resources_dir(), NOT get_repo_root()/"resources": the CONSUMER reads
+# resource_files.user_path(), NOT get_repo_root()/"resources": the CONSUMER reads
 # via get_resources_dir(), which honours EMI_DATA_DIR. get_repo_root() does
 # not, so under Docker this wrote the export into the IMAGE
 # (/app/resources/kg_derived) while every reader looked on the volume
@@ -30,7 +30,7 @@ logger = get_logger(__name__)
 # silently ran with no belief context. get_resources_dir() falls back to
 # get_repo_root()/"resources" when EMI_DATA_DIR is unset, so dev is
 # unchanged.
-_OUTPUT_DIR = get_resources_dir() / "kg_derived"
+_OUTPUT_DIR = resource_files.user_path("kg_derived")
 _OUTPUT_FILE = "resource_user_beliefs.json"
 
 

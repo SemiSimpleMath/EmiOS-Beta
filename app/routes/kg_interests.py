@@ -8,12 +8,12 @@ in the graph without ever touching a prompt file.
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from flask import Blueprint, jsonify, render_template, request
 
 from app.assistant.ServiceLocator.service_locator import DI
+from app.assistant.utils import resource_files
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -33,30 +33,16 @@ _CRITIC_PROMPT_PATH = (
 )
 
 
-def _resource_path() -> Path:
-    # Lives alongside other user resources.
-    return Path(__file__).resolve().parents[2] / "resources" / "user" / f"{RESOURCE_ID}.json"
-
-
-def _example_path() -> Path:
-    # Seed defaults shipped in the repo so a fresh checkout has something
-    # meaningful to display + edit before the user has saved their own.
-    return Path(__file__).resolve().parents[2] / "resources" / "user" / f"{RESOURCE_ID}.json.example"
+# The user's saved interests, or the shipped template until they save their own.
+_RESOURCE_REL = Path("user") / f"{RESOURCE_ID}.json"
 
 
 def _load_resource() -> dict:
-    """Read the user's saved kg_interests, falling back to the .example
-    file if no saved version exists. Empty dict only if both are missing."""
-    path = _resource_path()
-    candidates = [path, _example_path()]
-    for candidate in candidates:
-        if not candidate.exists():
-            continue
-        try:
-            return json.loads(candidate.read_text(encoding="utf-8"))
-        except Exception as e:
-            logger.warning("Failed to parse %s: %s", candidate, e)
-    return {"description": "", "categories": []}
+    """Read the kg_interests resource. Empty only if neither the user's file
+    nor the shipped template exists."""
+    if not resource_files.exists(_RESOURCE_REL):
+        return {"description": "", "categories": []}
+    return resource_files.read(_RESOURCE_REL)
 
 
 def _load_critic_prompt() -> str:
@@ -94,21 +80,15 @@ def kg_interests_save():
 
     new_value = {"description": description, "categories": categories}
 
-    # Write the file directly first. resource_manager.update_resource(persist=True)
-    # only persists if the resource was originally loaded from a file (it writes
-    # back to that path); when no file existed at startup, persist silently skips
-    # — the user's prior saves dropped on the floor that way. By writing the
-    # canonical path here ourselves, the next get_resource picks it up via the
-    # mtime staleness check and the in-memory update_resource keeps the running
-    # cache in sync immediately.
-    path = _resource_path()
+    # Write the user's file directly first. resource_manager.update_resource(persist=True)
+    # only persists a resource it knows; writing here ourselves always saves the
+    # user's version, the next get_resource picks it up via the mtime staleness
+    # check, and the in-memory update_resource keeps the running cache in sync
+    # immediately.
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(new_value, indent=2, ensure_ascii=False), encoding="utf-8",
-        )
+        resource_files.write(_RESOURCE_REL, new_value)
     except Exception as e:
-        logger.error("Failed to write %s to disk: %s", path, e)
+        logger.error("Failed to write %s to disk: %s", _RESOURCE_REL, e)
         return jsonify({"ok": False, "error": f"disk write failed: {e}"}), 500
 
     try:

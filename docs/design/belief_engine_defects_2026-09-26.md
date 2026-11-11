@@ -130,7 +130,7 @@ lineage, 109 of them being merge survivors with no link. Different population, s
 The survivor keeps its original key, which may now misname the combined claim.
 
 **2.7 — One user statement counts as many observations after merges. MEASURED 2026-09-26.**
-`routine.work.boundary.no_seyfarth_environment_access` reaches 42 "real" observations through its
+`routine.work.boundary.no_<employer>_environment_access` reaches 42 "real" observations through its
 lineage, but they are two user messages (2026-06-27 and 2026-07-29), each copied onto 14 and 28
 separate beliefs that were later merged into this one — 41 distinct belief ids, weight 3.0 each.
 All 42 rows have `source_ref` NULL, and `context.observation_key` deliberately keys unlinked

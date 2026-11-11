@@ -152,9 +152,9 @@ def status_data():
     
     try:
         # Get raw JSON from resource files
-        from app.assistant.utils.path_utils import get_resources_dir
+        from app.assistant.utils import resource_files
 
-        resources_root = get_resources_dir()
+        resources_root = resource_files.user_root()
         dayflow_dir = resources_root / "dayflow_pipeline_outputs"
         daily_insights_dir = resources_root / "daily_insights_pipeline_outputs"
         status_dir = resources_root / "status"

@@ -27,13 +27,12 @@ Trigger file format (``resource_foo.triggers.json``)::
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_resources_dir
+from app.assistant.utils import resource_files
 
 logger = get_logger(__name__)
 
@@ -90,8 +89,10 @@ class KeywordResourceIndex:
 
     def build(self) -> None:
         self._entries.clear()
-        resources_root = get_resources_dir()
-        trigger_files = sorted(resources_root.rglob("resource_*.triggers.json"))
+        trigger_files = [
+            rel for rel in resource_files.list_resources()
+            if rel.match("resource_*.triggers.json")
+        ]
         for tf in trigger_files:
             try:
                 entry = self._parse_trigger_file(tf)
@@ -110,8 +111,7 @@ class KeywordResourceIndex:
 
     @staticmethod
     def _parse_trigger_file(path: Path) -> _TriggerEntry | None:
-        with path.open("r", encoding="utf-8") as f:
-            data = json.load(f)
+        data = resource_files.read(path)
         if not isinstance(data, dict):
             logger.error("Trigger file '%s' is not a JSON object — skipping.", path)
             return None

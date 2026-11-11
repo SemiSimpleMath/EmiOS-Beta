@@ -105,7 +105,7 @@ def initialize_services():
     from app.resource_manager.resource_manager import ResourceManager
     resource_manager = ResourceManager()
     ServiceLocator.register("resource_manager", resource_manager)
-    resource_manager.load_all_from_directory("resources")
+    resource_manager.load_all()
 
     # Initialize SkillRegistry (agentskills.io SKILL.md loader)
     from app.skill_registry import SkillInjector, SkillRegistry

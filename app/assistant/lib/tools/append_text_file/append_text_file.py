@@ -1,24 +1,9 @@
-from pathlib import Path
-
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
-from app.assistant.lib.tools.text_file_access import is_allowed
+from app.assistant.lib.tools.text_file_access import is_allowed, resolve_tool_path
 from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
-
-
-def _resolve_path(path_str: str) -> Path | None:
-    """Resolve under the repo root and REQUIRE containment — for BOTH relative and absolute inputs.
-
-    The old version only lexically checked absolute paths (``..``-bypassable) and never checked
-    relative ones, so ``../../etc`` escaped (a WRITE primitive, so worse). resolve_repo_child
-    resolves first, then enforces relative_to; returns None on traversal/escape so the tool refuses."""
-    from app.assistant.utils.path_utils import resolve_repo_child
-    try:
-        return resolve_repo_child(path_str)
-    except Exception:
-        return None
 
 
 class AppendTextFileTool(BaseTool):
@@ -41,11 +26,12 @@ class AppendTextFileTool(BaseTool):
         if not isinstance(content, str):
             return ToolResult(result_type="error", content="Missing required argument: content")
 
-        resolved = _resolve_path(file_path.strip())
-        if resolved is None:
+        target = resolve_tool_path(file_path.strip())
+        if target is None:
             return ToolResult(result_type="error", content="Invalid or disallowed file_path.")
+        resolved, logical = target
         allowed_write_files = tool_data.get("allowed_write_files")
-        if isinstance(allowed_write_files, list) and not is_allowed(resolved, allowed_write_files):
+        if isinstance(allowed_write_files, list) and not is_allowed(logical, allowed_write_files):
             return ToolResult(result_type="error", content="Write blocked by allowed_write_files policy.")
 
         try:

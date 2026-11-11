@@ -54,12 +54,12 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_resources_dir as _get_resources_dir
+from app.assistant.utils import resource_files
 from app.assistant.utils.time_utils import get_local_timezone, parse_iso_utc
 
 logger = get_logger(__name__)
 
-_INPUTS_DIR = _get_resources_dir() / "dayflow_pipeline_outputs"
+_INPUTS_DIR = resource_files.user_path("dayflow_pipeline_outputs")
 
 _MIN_REGEN_INTERVAL_SECONDS = 3600
 _BACKDROP_MIN_HOURS = 4  # calendar items longer than this are backdrops, not slots

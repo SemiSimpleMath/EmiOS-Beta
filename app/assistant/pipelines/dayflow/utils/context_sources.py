@@ -8,7 +8,8 @@ from typing import Any, Dict, List, Optional
 
 from app.assistant.pipelines.dayflow.utils.expected_calendar_utils import clock_status
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_app_root, get_resources_dir
+from app.assistant.utils import resource_files
+from app.assistant.utils.path_utils import get_app_root
 from app.assistant.utils.time_utils import parse_time_string, utc_to_local
 
 logger = get_logger(__name__)
@@ -154,8 +155,7 @@ def get_calendar_events_structured_for_day(boundary_date_local: str) -> List[Dic
 
 def _load_sleep_output() -> Dict[str, Any]:
     try:
-        resources_dir = get_resources_dir() / "dayflow_pipeline_outputs"
-        sleep_path = resources_dir / "resource_sleep_output.json"
+        sleep_path = resource_files.user_path("dayflow_pipeline_outputs/resource_sleep_output.json")
         if not sleep_path.exists():
             return {}
         with sleep_path.open("r", encoding="utf-8") as handle:
@@ -336,8 +336,7 @@ def build_time_since() -> Dict[str, Any]:
                 logger.warning("Could not read tracked activities config: %s", e)
 
         # Overlay actual values from output
-        resources_dir = get_resources_dir() / "dayflow_pipeline_outputs"
-        output_path = resources_dir / "resource_tracked_activities_output.json"
+        output_path = resource_files.user_path("dayflow_pipeline_outputs/resource_tracked_activities_output.json")
         output: Dict[str, Any] = {}
         if output_path.exists():
             output = json.loads(output_path.read_text(encoding="utf-8")) or {}
@@ -373,7 +372,7 @@ def get_recent_afk_intervals(
         is_currently_afk = False
         current_afk_minutes: Optional[float] = None
         try:
-            afk_path = get_resources_dir() / "dayflow_pipeline_outputs" / "resource_afk_statistics_output.json"
+            afk_path = resource_files.user_path("dayflow_pipeline_outputs/resource_afk_statistics_output.json")
             if afk_path.exists():
                 afk_data = json.loads(afk_path.read_text(encoding="utf-8")) or {}
                 if isinstance(afk_data, dict):
@@ -506,25 +505,24 @@ def get_desktop_activity_recent() -> str:
     """
     Returns a short text snippet describing what the user was doing on their desktop recently.
 
-    Source files (preferred first):
-    - resources/resource_desktop_activity_recent.md (single latest entry)
-    - resources/resource_activity_log.md (append-only; we tail it)
+    Source resources (preferred first):
+    - dayflow_pipeline_outputs/resource_desktop_activity_recent.md (single latest entry)
+    - instructions/resource_activity_log.md (append-only; we tail it)
     """
-    resources_dir = get_resources_dir()
     candidates = [
-        resources_dir / "dayflow_pipeline_outputs" / "resource_desktop_activity_recent.md",
-        resources_dir / "instructions" / "resource_activity_log.md",
+        "dayflow_pipeline_outputs/resource_desktop_activity_recent.md",
+        "instructions/resource_activity_log.md",
     ]
-    for path in candidates:
+    for rel in candidates:
         try:
-            if not path.exists():
+            if not resource_files.exists(rel):
                 continue
-            text = path.read_text(encoding="utf-8").strip()
+            text = resource_files.read(rel).strip()
             if not text:
                 continue
             return text
         except Exception as e:
-            logger.debug("Could not read desktop activity log from %s: %s", path, e)
+            logger.debug("Could not read desktop activity log from %s: %s", rel, e)
             continue
     return ""
 

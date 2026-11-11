@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-from app.assistant.utils.path_utils import get_repo_root
+from app.assistant.utils import resource_files
 from app.assistant.utils.time_utils import get_local_time
 
 
@@ -172,11 +172,11 @@ def _render_concern_oneliner(c: Dict[str, Any]) -> str:
 
 # ─── state tracking helpers ────────────────────────────────────────────
 
-_DIGEST_STATE_REL = "resources/subconscious/resource_digest_state.json"
+_DIGEST_STATE_REL = "subconscious/resource_digest_state.json"
 
 
 def load_digest_state() -> Dict[str, Any]:
-    path = get_repo_root() / _DIGEST_STATE_REL
+    path = resource_files.user_path(_DIGEST_STATE_REL)
     if not path.is_file():
         return {
             "last_digest_at_utc": None,
@@ -194,6 +194,6 @@ def load_digest_state() -> Dict[str, Any]:
 
 
 def save_digest_state(state: Dict[str, Any]) -> None:
-    path = get_repo_root() / _DIGEST_STATE_REL
+    path = resource_files.user_path(_DIGEST_STATE_REL)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")

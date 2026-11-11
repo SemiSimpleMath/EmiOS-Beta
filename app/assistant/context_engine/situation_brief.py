@@ -65,18 +65,14 @@ class SituationBrief(BaseModel):
 # Storage helpers
 # ---------------------------------------------------------------------------
 
-def _repo_root() -> Path:
-    """Resolve repository root via the canonical resolver."""
-    from app.assistant.utils.path_utils import get_repo_root
-    return get_repo_root()
-
-
 def _briefs_dir(owner_id: str) -> Path:
-    return _repo_root() / "resources" / "context_engine" / owner_id / "situation_briefs"
+    from app.assistant.utils import resource_files
+    return resource_files.user_path(f"context_engine/{owner_id}/situation_briefs")
 
 
 def _latest_pointer_path(owner_id: str) -> Path:
-    return _repo_root() / "resources" / "context_engine" / owner_id / "situation_brief_latest.json"
+    from app.assistant.utils import resource_files
+    return resource_files.user_path(f"context_engine/{owner_id}/situation_brief_latest.json")
 
 
 # ---------------------------------------------------------------------------
@@ -103,7 +99,6 @@ def save_brief(brief: SituationBrief) -> Path:
         "created_at_utc": brief.created_at_utc,
         "user_message": brief.user_message,
         "seeds": brief.seeds,
-        "brief_path": str(brief_path),
     }
     write_text_atomic(_latest_pointer_path(brief.owner_id), json.dumps(pointer, indent=2))
 
@@ -123,7 +118,8 @@ def load_latest_brief(owner_id: str) -> Optional[SituationBrief]:
 
     try:
         pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
-        brief_path = Path(pointer["brief_path"])
+        # Located by id, never by a stored absolute path, so a moved data folder still resolves.
+        brief_path = _briefs_dir(owner_id) / f"{pointer['brief_id']}.json"
         if not brief_path.exists():
             logger.debug("situation_brief: pointer points to missing file %s", brief_path)
             return None

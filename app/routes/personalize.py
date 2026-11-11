@@ -27,6 +27,7 @@ from typing import Any, Dict, List
 from flask import Blueprint, jsonify, redirect, render_template, request
 from sqlalchemy import text as _sql
 
+from app.assistant.utils import resource_files
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_repo_root
 from app.assistant.utils.time_utils import utc_now
@@ -270,20 +271,18 @@ def api_belief_evidence(belief_id: str):
 # ── Directives editor ────────────────────────────────────────────────────────
 #
 # The owner's standing directives are split by role (2026-10-08) into the six
-# pieces below. Each piece is a tracked shared template
-# resources/instructions/<id>.md plus an optional gitignored personal overlay
-# <id>_personal.md, which the ResourceManager appends after the template
-# (ResourceManager._read_with_overlay, joined by a blank line) and reloads on
-# the next prompt build when either file's mtime changes. The template is
-# shown read-only — it is shared and gets reset by sanitization passes; the
-# overlay is the user's edit surface, and many overlays stay empty until the
-# user fills them in here. (The old resource_orchestrator_user_prefs pair now
-# feeds only the retired steward and is not edited here.)
+# pieces below. Each piece is shipped text instructions/<id>.md plus the owner's
+# optional add-on <id>_personal.md in their data folder, which resource_files
+# appends after the shipped text and the ResourceManager reloads on the next
+# prompt build when either file's mtime changes. The shipped text is shown
+# read-only; the add-on is the user's edit surface, and many add-ons stay empty
+# until the user fills them in here. (The old resource_orchestrator_user_prefs
+# pair now feeds only the retired steward and is not edited here.)
 #
 # Write paths are a strict allowlist: the request names a piece id, never a
-# filename, and only that piece's overlay is ever written.
+# filename, and only that piece's add-on is ever written.
 
-_INSTR_DIR = "resources/instructions"
+_INSTR_DIR = "instructions"
 
 _DIRECTIVE_PIECES: tuple = (
     {
@@ -334,14 +333,28 @@ def _piece_summary(piece: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _instr_paths(piece: Dict[str, Any]) -> Dict[str, Path]:
-    """The two files of an allowlisted piece (callers pass an entry of
+def _piece_rel(piece: Dict[str, Any]) -> Path:
+    """The resource path of an allowlisted piece (callers pass an entry of
     _DIRECTIVE_PIECES, never request input)."""
-    root = Path(get_repo_root())
-    summary = _piece_summary(piece)
+    return Path(_INSTR_DIR) / _piece_summary(piece)["base_filename"]
+
+
+def _piece_state(piece: Dict[str, Any]) -> Dict[str, Any]:
+    """The shipped text, the owner's add-on and what the agents receive."""
+    rel = _piece_rel(piece)
+    base_exists = resource_files.exists(rel)
     return {
-        "base": root / _INSTR_DIR / summary["base_filename"],
-        "personal": root / _INSTR_DIR / summary["personal_filename"],
+        "base": {
+            "filename": rel.name,
+            "content": resource_files.read_base(rel) if base_exists else "",
+            "exists": base_exists,
+        },
+        "personal": {
+            "filename": resource_files.addon_rel(rel).name,
+            "content": resource_files.read_addon(rel),
+            "exists": resource_files.addon_path(rel) is not None,
+        },
+        "combined": resource_files.read(rel) if base_exists else resource_files.read_addon(rel),
     }
 
 
@@ -350,18 +363,6 @@ def _requested_piece(piece_id: Any):
     if not isinstance(piece_id, str) or piece_id not in _PIECES_BY_ID:
         return None, (jsonify({"success": False, "error": f"unknown directive piece: {piece_id!r}"}), 400)
     return _PIECES_BY_ID[piece_id], None
-
-
-def _render_combined(base_text: str, personal_text: str) -> str:
-    """Same shape as ResourceManager._read_with_overlay. The shared
-    template comes first; the personal overlay is appended after a blank
-    line so the LLM treats personal lines as later instructions (later
-    wins at LLM read time)."""
-    base = (base_text or "").rstrip()
-    personal = (personal_text or "").lstrip()
-    if not personal:
-        return base
-    return base + "\n\n" + personal
 
 
 @personalize_bp.route("/personalize/directives")
@@ -384,90 +385,48 @@ def api_directives_get():
     piece, error = _requested_piece(request.args.get("piece"))
     if error:
         return error
-    paths = _instr_paths(piece)
     try:
-        base_text = paths["base"].read_text(encoding="utf-8") if paths["base"].exists() else ""
-        personal_text = paths["personal"].read_text(encoding="utf-8") if paths["personal"].exists() else ""
+        state = _piece_state(piece)
     except Exception as e:
         logger.error("[personalize] directives read failed for %s: %s", piece["id"], e, exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
-    return jsonify({
-        "success": True,
-        "piece": _piece_summary(piece),
-        "base": {
-            "filename": paths["base"].name,
-            "content": base_text,
-            "exists": paths["base"].exists(),
-        },
-        "personal": {
-            "filename": paths["personal"].name,
-            "content": personal_text,
-            "exists": paths["personal"].exists(),
-        },
-        "combined": _render_combined(base_text, personal_text),
-    })
+    return jsonify({"success": True, "piece": _piece_summary(piece), **state})
 
 
 @personalize_bp.route("/api/personalize/directives", methods=["POST"])
 def api_directives_post():
-    """Atomic write of one piece's personal overlay. Body: {piece: str, content: str}.
+    """Atomic write of one piece's add-on. Body: {piece: str, content: str}.
 
     The piece id is checked against the allowlist and the path derived from
-    it server-side — the editor only ever writes a piece's personal overlay,
-    never its shared template (which would be reverted by the next
-    public-repo cleanup pass). An absent overlay is created. After writing,
-    the resource_manager picks up the change via mtime-based reload on the
-    next prompt build.
+    it server-side — the editor only ever writes a piece's add-on, into the
+    owner's data folder, never the shipped text. An absent add-on is created.
+    After writing, the resource_manager picks up the change via mtime-based
+    reload on the next prompt build.
     """
     body = request.get_json(silent=True) or {}
     piece, error = _requested_piece(body.get("piece"))
     if error:
         return error
-    paths = _instr_paths(piece)
     try:
         content = body.get("content")
         if not isinstance(content, str):
             return jsonify({"success": False, "error": "content must be a string"}), 400
 
-        target = paths["personal"]
-        target.parent.mkdir(parents=True, exist_ok=True)
-
-        # Atomic write: tempfile in same dir → os.replace. A crash mid-write
-        # leaves the previous good file in place rather than a half-written
-        # personal overlay (which would corrupt the system prompt).
-        fd, tmp_path = tempfile.mkstemp(dir=str(target.parent), suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(content)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp_path, str(target))
-        except BaseException:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
-
+        target = resource_files.write_addon(_piece_rel(piece), content)
         logger.info(
-            "[personalize] saved personal directives overlay for %s (%d chars) to %s",
+            "[personalize] saved personal directives add-on for %s (%d chars) to %s",
             piece["id"], len(content), target,
         )
 
         # Read back so client gets the canonical state plus the rendered
         # combined preview.
-        base_text = paths["base"].read_text(encoding="utf-8") if paths["base"].exists() else ""
-        personal_text = target.read_text(encoding="utf-8")
+        state = _piece_state(piece)
         return jsonify({
             "success": True,
             "piece": _piece_summary(piece),
-            "personal": {
-                "filename": target.name,
-                "content": personal_text,
-                "exists": True,
-            },
-            "combined": _render_combined(base_text, personal_text),
+            "personal": state["personal"],
+            "combined": state["combined"],
         })
     except Exception as e:
         logger.error("[personalize] directives write failed for %s: %s", piece["id"], e, exc_info=True)

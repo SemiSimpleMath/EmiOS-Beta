@@ -8,8 +8,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
+from app.assistant.utils import resource_files
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_resources_dir
 from app.assistant.music_manager import get_music_manager
 
 logger = get_logger(__name__)
@@ -20,7 +20,7 @@ DEFAULT_TTL_SECONDS = 60 * 60 * 24 * 7  # 7 days
 
 
 def _cache_path() -> Path:
-    return get_resources_dir() / "status" / "apple_music_related_artists_cache.json"
+    return resource_files.user_path("status/apple_music_related_artists_cache.json")
 
 
 def _now() -> float:

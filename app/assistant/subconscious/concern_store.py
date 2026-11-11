@@ -53,8 +53,8 @@ _META_KEYS = ("schema_version", "last_updated_utc", "last_noticer_tick_utc")
 
 
 def _legacy_file() -> Path:
-    from app.assistant.utils.path_utils import get_resources_dir
-    return get_resources_dir() / "subconscious" / "resource_concerns_register.json"
+    from app.assistant.utils import resource_files
+    return resource_files.user_path("subconscious/resource_concerns_register.json")
 
 
 def ensure_schema(connect=None) -> None:

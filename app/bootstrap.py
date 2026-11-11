@@ -27,51 +27,6 @@ from app.assistant.event_hub.event_hub import EventHub
 import os
 
 
-def _seed_personal_resources() -> None:
-    """Copy .example -> .json for any personal resource files that don't exist yet.
-
-    Tracked .example files ship with the repo as sanitized templates.
-    Real .json files are gitignored and created here on first run
-    (or by the setup wizard later with real user data).
-    """
-    from pathlib import Path
-    from app.assistant.utils.path_utils import get_resources_dir, get_seed_resources_dir
-    import shutil
-
-    # SEED templates (.example) are read from the code layer (read-only / bundled);
-    # the live files are written into the writable resources dir. These are the same
-    # directory in dev (EMI_DATA_DIR unset) and split apart in the packaged layout.
-    live_dir = get_resources_dir()
-    seed_dir = get_seed_resources_dir()
-    rel_paths = [
-        Path("user") / "resource_user_data.json",
-        Path("user") / "resource_wiki_sections.json",
-        Path("assistant") / "resource_assistant_data.json",
-        Path("assistant") / "resource_assistant_personality_data.json",
-        Path("assistant") / "resource_chat_guidelines_data.json",
-        Path("assistant") / "resource_relationship_config.json",
-        Path("assistant") / "assistant_core.json",
-        Path("env_registry_user.json"),
-        Path("instructions") / "resource_orchestrator_user_prefs.md",
-    ]
-
-    for rel in rel_paths:
-        real_path = live_dir / rel
-        if real_path.exists():
-            continue
-        seed_path = seed_dir / rel
-        example_path = seed_path.with_suffix(seed_path.suffix + ".example")
-        if not example_path.exists():
-            logger.warning(
-                "Personal resource missing and no .example template found: %s",
-                real_path,
-            )
-            continue
-        real_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(example_path, real_path)
-        logger.info("Seeded personal resource from template: %s", real_path.name)
-
-
 def _seed_config_templates() -> None:
     """Copy configs/templates/*.template.json -> <configs_dir>/*.json on first run.
 
@@ -147,11 +102,11 @@ def initialize_services(app):
     Initializes core services like event bus, agent managers, data conversion, and scheduler.
     """
 
-    # First-run seeding (esp. a packaged install with no setup.py): copy config +
-    # personal-resource templates into the writable data dir BEFORE any consumer —
-    # tool/agent loading, google_auth, env registry — tries to read them.
+    # First-run seeding (esp. a packaged install with no setup.py): copy config
+    # templates into the writable data dir BEFORE any consumer — tool/agent loading,
+    # google_auth — tries to read them. Resources are not copied: resource_files reads
+    # a shipped template until the owner has their own file.
     _seed_config_templates()
-    _seed_personal_resources()
 
     # Auto-detect default LLM provider before any agents are loaded.
     _auto_detect_default_llm_provider()
@@ -231,13 +186,10 @@ def initialize_services(app):
     global_blackboard = GlobalBlackBoard()
     ServiceLocator.register("global_blackboard", global_blackboard)
 
-    # (personal resources were seeded at the top of initialize_services, before any
-    #  tool/agent/resource consumer — see _seed_config_templates/_seed_personal_resources)
-
     # Initialize ResourceManager and auto-load all resources
     resource_manager = ResourceManager()
     ServiceLocator.register("resource_manager", resource_manager)
-    resource_manager.load_all_from_directory("resources")
+    resource_manager.load_all()
     # Dynamic resource: accounts — value COMPUTED per scope (principal + authority
     # filtered), gated by the standard resource path. Replaces the old
     # available_accounts auto-inject. See docs/architecture/SECRETS_ACCOUNTS.md.

@@ -171,7 +171,6 @@ def _build_addressable_concerns() -> str:
     """Concerns_register filtered to concerns where addressable_by
     includes wellness_proposer."""
     import json
-    from app.assistant.utils.path_utils import get_resources_dir
 
     from app.assistant.subconscious.concern_store import load_register
     register = load_register()

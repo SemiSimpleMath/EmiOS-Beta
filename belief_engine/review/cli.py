@@ -48,7 +48,7 @@ def main():
     with patch.object(ToolRegistry, 'load_tools'), \
          patch.object(ToolRegistry, 'load_mcp_servers'), \
          patch.object(ToolRegistry, 'load_mcp_tool_cache'), \
-         patch.object(ResourceManager, 'load_all_from_directory'):
+         patch.object(ResourceManager, 'load_all'):
         import app.assistant.tests.test_setup  # noqa: F401
     from app.models.base import get_session
     from app.models.llm_call_log import LLMCallLog

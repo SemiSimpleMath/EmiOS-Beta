@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, List
 
-from app.assistant.utils.path_utils import get_resources_dir as _get_resources_dir
+from app.assistant.utils import resource_files
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.scope.loader import load_scope_for_source
@@ -13,7 +13,7 @@ from app.assistant.utils.pydantic_classes import Message
 
 logger = get_logger(__name__)
 
-_WEEKLY_OUTPUTS_DIR = _get_resources_dir() / "weekly_insights_pipeline_outputs"
+_WEEKLY_OUTPUTS_DIR = resource_files.user_path("weekly_insights_pipeline_outputs")
 _AGENT_NAME = "weekly_synthesizer"
 
 

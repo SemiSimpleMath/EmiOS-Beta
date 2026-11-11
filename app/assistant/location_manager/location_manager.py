@@ -15,6 +15,7 @@ import os
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
 
+from app.assistant.utils import resource_files
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.time_utils import utc_to_local, get_local_timezone, local_to_utc
 from app.assistant.event_repository.event_repository import EventRepositoryManager
@@ -40,22 +41,15 @@ def _parse_datetime(dt_str: str) -> datetime:
 
 # Dynamic location file — current location + timeline only.
 # Home address lives permanently in resource_user_data.json.
-RESOURCE_FILE = os.path.join(
-    os.path.dirname(__file__),
-    "..", "..", "..",
-    "resources",
-    "resource_current_location.json"
-)
+RESOURCE_FILE = str(resource_files.user_path("resource_current_location.json"))
 
 
 def _load_home_from_user_data() -> Dict[str, Any]:
     """Read permanent home address from resource_user_data.json."""
-    from app.assistant.utils.path_utils import get_resources_dir
-    path = get_resources_dir() / "user" / "resource_user_data.json"
-    if not path.exists():
+    if not resource_files.exists("user/resource_user_data.json"):
         return {}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = resource_files.read("user/resource_user_data.json")
         city = (data.get("home_city") or "").strip()
         if not city:
             return {}

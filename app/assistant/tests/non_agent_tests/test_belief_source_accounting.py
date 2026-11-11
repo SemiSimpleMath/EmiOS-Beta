@@ -107,9 +107,10 @@ def test_unusable_evidence_does_not_leave_stale_high_confidence(store,kwargs):
 
 
 def test_weekly_candidate_is_complete_stable_zero_weight_context(tmp_path,monkeypatch):
-    from app.assistant.utils import path_utils
+    from app.assistant.utils import resource_files, path_utils
     from belief_engine.pipeline.steps.collect_evidence import _collect_weekly_insights
     monkeypatch.setattr(path_utils,'get_resources_dir',lambda:tmp_path)
+    monkeypatch.setattr(path_utils,'get_seed_resources_dir',lambda:tmp_path)
     folder=tmp_path/'weekly_insights_pipeline_outputs'; folder.mkdir()
     candidate={'statement':'Full nuance '*100,'conditions':{'except':'Full condition '*100},'evidence':['full quote '*100]}
     data={'week_start':'2026-09-01','week_end':'2026-09-07','insights':{'belief_candidates':[candidate]}}

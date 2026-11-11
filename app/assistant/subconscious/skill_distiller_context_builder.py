@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_resources_dir
+from app.assistant.utils import resource_files
 from app.assistant.utils.time_utils import get_local_time
 
 logger = get_logger(__name__)
@@ -197,11 +197,11 @@ def _build_recent_outcome_chat() -> str:
 
 
 def _build_current_priority_rules() -> str:
-    path = get_resources_dir() / "instructions" / "resource_scheduler_priority_rules.md"
-    if not path.is_file():
+    rel = "instructions/resource_scheduler_priority_rules.md"
+    if not resource_files.exists(rel):
         return "(no priority_rules file — distiller can propose new priority rules freely)"
     try:
-        return path.read_text(encoding="utf-8").strip()
+        return resource_files.read(rel).strip()
     except Exception as e:
         logger.warning("[skill_distiller_context] priority_rules read failed: %s", e)
         return "(error reading priority_rules)"
@@ -219,13 +219,13 @@ def _build_house_rules_index() -> str:
     ]
     lines: List[str] = []
     for fname in files:
-        path = get_resources_dir() / "instructions" / fname
-        if not path.is_file():
+        rel = f"instructions/{fname}"
+        if not resource_files.exists(rel):
             lines.append(f"## {fname} — (not present)")
             continue
         lines.append(f"## {fname}")
         try:
-            text = path.read_text(encoding="utf-8")
+            text = resource_files.read(rel)
             for line in text.splitlines():
                 stripped = line.strip()
                 if stripped.startswith("##") and not stripped.startswith("###"):
@@ -236,11 +236,11 @@ def _build_house_rules_index() -> str:
 
 
 def _build_prior_distillations() -> str:
-    path = get_resources_dir() / "subconscious" / "resource_learned_skills_proposed.md"
-    if not path.is_file():
+    rel = "subconscious/resource_learned_skills_proposed.md"
+    if not resource_files.exists(rel):
         return "(no prior distillations — this is the first run)"
     try:
-        text = path.read_text(encoding="utf-8").strip()
+        text = resource_files.read(rel).strip()
     except Exception as e:
         logger.warning("[skill_distiller_context] prior distillations read failed: %s", e)
         return "(error reading prior distillations)"

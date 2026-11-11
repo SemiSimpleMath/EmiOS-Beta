@@ -18,14 +18,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from app.assistant.pipelines.dayflow.step_types import BaseStep, StepContext, StepResult
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_resources_dir as _get_resources_dir
+from app.assistant.utils import resource_files
 from app.assistant.utils.time_utils import utc_to_local
 
 logger = get_logger(__name__)
 
 _OUTPUT_FILENAME = "resource_entertainment_advisor_output.json"
-_BELIEFS_PATH = _get_resources_dir() / "kg_derived" / "resource_user_beliefs.json"
-_BIO_PATH = _get_resources_dir() / "user_bio.json"
+_BELIEFS_PATH = resource_files.user_path("kg_derived/resource_user_beliefs.json")
+_BIO_REL = "user/user_bio.json"
 
 
 class EntertainmentAdvisorStep(BaseStep):
@@ -82,9 +82,9 @@ class EntertainmentAdvisorStep(BaseStep):
     def _load_entertainment_bio(self) -> str:
         """Load the entertainment_hobbies section from user bio."""
         try:
-            if not _BIO_PATH.exists():
+            if not resource_files.exists(_BIO_REL):
                 return ""
-            raw = json.loads(_BIO_PATH.read_text(encoding="utf-8"))
+            raw = resource_files.read(_BIO_REL)
             if not isinstance(raw, dict):
                 return ""
             sections = raw.get("sections", raw)

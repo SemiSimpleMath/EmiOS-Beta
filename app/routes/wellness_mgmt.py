@@ -4,7 +4,7 @@ Wellness Management Route - View wellness tracking status.
 from flask import Blueprint, jsonify
 import json
 from pathlib import Path
-from app.assistant.utils.path_utils import get_resources_dir
+from app.assistant.utils import resource_files
 
 wellness_mgmt_bp = Blueprint('wellness_mgmt', __name__)
 
@@ -13,7 +13,7 @@ wellness_mgmt_bp = Blueprint('wellness_mgmt', __name__)
 def wellness_status():
     """Get current wellness tracking status."""
     try:
-        resources_root = get_resources_dir()
+        resources_root = resource_files.user_root()
         dayflow_dir = resources_root / "dayflow_pipeline_outputs"
         status_dir = resources_root / "status"
 

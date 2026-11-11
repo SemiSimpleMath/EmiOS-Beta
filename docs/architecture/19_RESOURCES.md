@@ -118,13 +118,31 @@ resources/
   env_registry_user.json             [flat at root: account/secret registry; gitignored]
 ```
 
-The loader (`load_all_from_directory`) skips a fixed set of directory names anywhere in the path — `skip_dir_names = {tmp, tests, __pycache__, templates, day_context, pointers}` — plus dotfiles and `README*`. `templates/` is excluded here because it's compiled in a separate phase; `day_context/`/`pointers/` because they're indirection, not directly-injectable values.
+The loader (`ResourceManager.load_all`, which lists files through `resource_files.list_resources`) skips a fixed set of directory names anywhere in the path — `skip_dir_names = {tmp, tests, __pycache__, templates, day_context, pointers}` — plus dotfiles and `README*`. `templates/` is excluded here because it's compiled in a separate phase; `day_context/`/`pointers/` because they're indirection, not directly-injectable values.
 
 **Special cases:**
 - **`templates/`** is not a normal resource directory. Files there contain Jinja template tokens (`{{ ... }}` / `{% ... %}`) and **must be compiled to concrete values before injection** — `ResourceManager._assert_concrete_resource()` raises `ValueError` if a resource with template tokens is offered for injection. Compiled outputs land in `instructions/` or other consumer directories.
 - **`pointers/`** is an indirection layer: `resource_X_latest.json` typically contains a path or id pointing at a versioned artifact elsewhere. Useful when the latest version's filename changes but consumers want a stable pointer.
 - **`memory/`** previously held the output of the dead `memory_apply_fact` subsystem; removed 2026-04-28. The one surviving live file (`user_bio.json`) migrated to `resources/user/`.
-- **Personal overlays.** For any text resource `<stem><suffix>`, a sibling `<stem>_personal<suffix>` (e.g. `resource_assistant_guidelines_personal.md`) is auto-appended onto the public base at load time (PHASE 3 of `load_all_from_directory`). The personal content goes *after* the base, so later instructions win at LLM read time and personal directives override the template defaults without editing the public file. `_personal` siblings are not standalone resources (the scan skips any stem ending in `_personal`) and are gitignored — the convention keeps personal preferences out of the public repo while shipping a shared template as the baseline.
+- **Personal add-ons.** For any text resource `<stem><suffix>`, the owner's `<stem>_personal<suffix>` (e.g. `resource_owner_escalation_personal.md`) in the user root is appended after the resource's text by `resource_files.read`, on every read and reload. The personal content goes *after* the base, so later instructions win at LLM read time and personal directives override the shipped defaults without editing the shipped file. Add-ons are not standalone resources (`list_resources` leaves out any stem ending in `_personal`) and are gitignored. The Directives page (`/personalize/directives`) edits them.
+
+## 3a. Code root and user root: `resource_files`
+
+All resource file access goes through `app/assistant/utils/resource_files.py` (2026-11-11). It knows two roots:
+
+- the **code root**, `get_seed_resources_dir()` = `<repo>/resources`: what ships. Never written.
+- the **user root**, `get_resources_dir()` = `<EMI_DATA_DIR>/resources` (the repo's `resources/` when `EMI_DATA_DIR` is unset): the owner's files and everything the assistant writes.
+
+A resource is named by its path relative to a root. Four kinds share one rule set:
+
+| Kind | Files | Example |
+|---|---|---|
+| Shipped text | `<code>/<rel>` | `instructions/resource_kg_node_reading.md` |
+| Template the owner may replace | `<code>/<rel>.example`, replaced by `<user>/<rel>` | `user/resource_user_data.json` |
+| Shipped text plus the owner's add-on | `<code>/<rel>` + `<user>/<stem>_personal<suffix>` | `instructions/resource_owner_escalation.md` |
+| Written by the assistant | `<user>/<rel>` | `dayflow_pipeline_outputs/*` |
+
+`read(rel)` returns the user root's file if it exists, else the `.example` template, else the shipped file, then appends the add-on; it raises `FileNotFoundError` when none exists. `write(rel, value)` and `write_addon(rel, text)` write atomically into the user root only. Nothing in the module deletes a file. Templates are read in place until the owner saves their own version; they are never copied (the first-boot copy in `bootstrap.py` was removed 2026-11-11). Because a user-root file wins over the shipped one at the same path, moving an install's data into a data folder copies only the owner's files, never shipped ones.
 
 ## 4. The metadata envelope (emerging convention, not universal)
 

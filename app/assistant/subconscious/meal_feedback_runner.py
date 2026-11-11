@@ -29,11 +29,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_repo_root
+from app.assistant.utils import resource_files
 
 logger = get_logger(__name__)
 
-_STATE_REL = "resources/subconscious/resource_meal_feedback_state.json"
+_STATE_REL = "subconscious/resource_meal_feedback_state.json"
 ANSWER_WINDOW_HOURS = 6      # how long after asking we'll attribute a reply as the answer
 MAX_NEW_PER_PASS = 4        # don't flood the queue in one pass
 PAST_DAYS = 2               # ask about meals from yesterday + the day before
@@ -394,7 +394,7 @@ def _confirm_meal_served(meal_pod_id: str) -> None:
 # ── state ────────────────────────────────────────────────────────────────────
 
 def _load_state() -> Dict[str, Any]:
-    path = get_repo_root() / _STATE_REL
+    path = resource_files.user_path(_STATE_REL)
     if not path.is_file():
         return {"schema_version": 1, "last_run_utc": None, "active": {}}
     # Fail LOUD on corruption — silently resetting would re-ask about every meal.
@@ -402,6 +402,6 @@ def _load_state() -> Dict[str, Any]:
 
 
 def _save_state(state: Dict[str, Any]) -> None:
-    path = get_repo_root() / _STATE_REL
+    path = resource_files.user_path(_STATE_REL)
     from app.assistant.utils.atomic_write import write_json_atomic
     write_json_atomic(path, state)

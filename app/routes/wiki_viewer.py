@@ -36,13 +36,10 @@ def _get_assistant_name() -> str:
     resources/assistant/assistant_core.json. Falls back to "Emi" if the
     file is missing or unreadable."""
     try:
-        from app.assistant.utils.path_utils import get_resources_dir
-        import json as _json
-        path = get_resources_dir() / "assistant" / "assistant_core.json"
-        if not path.exists():
+        from app.assistant.utils import resource_files
+        if not resource_files.exists("assistant/assistant_core.json"):
             return "Emi"
-        with open(path, "r", encoding="utf-8") as f:
-            data = _json.load(f)
+        data = resource_files.read("assistant/assistant_core.json")
         if isinstance(data, dict):
             n = str(data.get("name") or data.get("assistant_name") or "").strip()
             if n:
