@@ -67,7 +67,7 @@ def test_sends_are_recorded_against_the_work_object_not_the_node(store):
                                  "parent_id": wo.goal_node_id}, actor="architect")
         store.apply("record_action", {
             "work_id": wo.id, "node_id": f"node_generation_{i}", "channel": "email",
-            "target": "ksuttorp@example.com", "summary": f"Confirm flea meds (attempt {i})",
+            "target": "partner@example.com", "summary": f"Confirm flea meds (attempt {i})",
         }, actor="send_email")
 
     back = store.load(wo.id)
@@ -80,7 +80,7 @@ def test_the_projection_shows_what_was_sent_and_flags_the_repeats(store):
     wo = _goal(store)
     for i in range(4):
         store.apply("record_action", {
-            "work_id": wo.id, "channel": "email", "target": "ksuttorp@example.com",
+            "work_id": wo.id, "channel": "email", "target": "partner@example.com",
             "summary": ["Quick: flea medication and supply",
                         "Reminder: details needed by Sep 20",
                         "Urgent: details needed by Sep 18",
@@ -94,12 +94,12 @@ def test_the_projection_shows_what_was_sent_and_flags_the_repeats(store):
     rendered = render_work_portfolio(store.load(wo.id))
 
     assert "ACTIONS TAKEN (5)" in rendered
-    assert "ksuttorp@example.com" in rendered
+    assert "partner@example.com" in rendered
     assert "Final request: confirm product" in rendered
     # An expired ask must still be visible; it is the one you must not silently repeat.
     assert "[expired]" in rendered
     # And the burst is called out rather than reading as five ordinary rows.
-    assert "4 separate email messages to ksuttorp@example.com" in rendered
+    assert "4 separate email messages to partner@example.com" in rendered
 
 
 def test_a_goal_with_no_actions_says_nothing_about_actions(store):
@@ -117,7 +117,7 @@ def test_the_ledger_can_be_read_back_for_one_recipient(store, monkeypatch):
     from app.assistant.dayflow_orchestrator import action_ledger
 
     wo = _goal(store)
-    for target in ("ksuttorp@example.com", "ksuttorp@example.com", "vet@example.com"):
+    for target in ("partner@example.com", "partner@example.com", "vet@example.com"):
         store.apply("record_action", {"work_id": wo.id, "channel": "email",
                                       "target": target, "summary": "confirm"}, actor="send_email")
     monkeypatch.setattr(action_ledger, "get_dayflow_work_store", lambda: store, raising=False)
@@ -126,7 +126,7 @@ def test_the_ledger_can_be_read_back_for_one_recipient(store, monkeypatch):
         "app.assistant.dayflow_orchestrator.work_store",
         type("M", (), {"get_dayflow_work_store": staticmethod(lambda: store)}),
     )
-    hits = action_ledger.recent_outbound(wo.id, channel="email", target="ksuttorp@example.com")
+    hits = action_ledger.recent_outbound(wo.id, channel="email", target="partner@example.com")
     assert len(hits) == 2
 
 

@@ -110,7 +110,7 @@ Property is used to describe an enduring property or quality of another node. Ex
 
 Sentences need to be self-contained, meaning that they have all names in them and if someone reads the sentence they understand it without looking at node labels. It should be a sentence that by itself could be used to generate the node.
 
-**Preserve resolver parenthetical annotations verbatim** in your sentence. If the source reads `he (Peter)` or `Jukka's son (Peter)`, keep that exact form in the sentence you write — do not strip the parenthetical and do not collapse to just the name. The downstream canonicalizer uses the annotations to produce the final present-tense node sentence.
+**Preserve resolver parenthetical annotations verbatim** in your sentence. If the source reads `he (Noah)` or `Jukka's son (Noah)`, keep that exact form in the sentence you write — do not strip the parenthetical and do not collapse to just the name. The downstream canonicalizer uses the annotations to produce the final present-tense node sentence.
 
 Write the sentence as a natural claim, not as a description of a node. Do not name the node type in the sentence. Avoid formulations like "X has the state that ...", "X has a preference that ...", "X has a belief that ...", "X has a political leaning state ...", or "X has a state of ...". The label already encodes the category. The sentence should express only the underlying content in normal language. Instead of prefacing with "Jukka has a state of ...", write the obvious human meaning directly: "Jukka loves dogs."
 
@@ -229,7 +229,7 @@ node for the pod; you are referencing an existing node by id.
 | email | `mentioned_in` | `invoiced_via`, `replied_to` |
 | chat_cluster | `discussed_in` | (rare; mostly historical reference) |
 
-**Direction: KG-node → Pod**, always. Edge runs FROM the entity / event / state node TO the pod URI. Reads as "Jukka is depicted in this pod" / "Peter's Birth has this video."
+**Direction: KG-node → Pod**, always. Edge runs FROM the entity / event / state node TO the pod URI. Reads as "Jukka is depicted in this pod" / "Noah's Birth has this video."
 
 **Default-safe rule:** when the user's framing is ambiguous, emit the kind's default edge. When the framing is clearly possessive/canonical ("here is my profile picture", "use this as my photo"), ALSO emit the intent-flavored edge alongside the default. One canonical (`has_profile_image`) edge per entity is the convention; many `depicted_in` edges from anywhere is fine.
 
@@ -248,15 +248,15 @@ node for the pod; you are referencing an existing node by id.
     * source: "entity_1", target: "datapod:image:def67890...", label: "depicted_in", sentence: "{{ resource_user_data.preferred_name }} is depicted in this image."
     * source: "entity_1", target: "datapod:image:def67890...", label: "has_profile_image", sentence: "{{ resource_user_data.preferred_name }}'s profile image is this image."
 
-**"Video of Peter's birthday party datapod:video:abc..."**
+**"Video of Noah's birthday party datapod:video:abc..."**
 - An event-anchored video; the event itself is the natural source of the `has_video` edge.
 - Nodes:
-    * temp_id: "entity_1", label: "Peter", node_type: "Entity"
-    * temp_id: "event_1", label: "Birthday Party", node_type: "Event", sentence: "Peter's birthday party."
+    * temp_id: "entity_1", label: "Noah", node_type: "Entity"
+    * temp_id: "event_1", label: "Birthday Party", node_type: "Event", sentence: "Noah's birthday party."
 - Edges:
-    * source: "entity_1", target: "event_1", label: "honoree", sentence: "Peter is the honoree of the birthday party."
+    * source: "entity_1", target: "event_1", label: "honoree", sentence: "Noah is the honoree of the birthday party."
     * source: "event_1", target: "datapod:video:abc...", label: "has_video", sentence: "The birthday party has a video."
-    * source: "entity_1", target: "datapod:video:abc...", label: "depicted_in", sentence: "Peter is depicted in this video."
+    * source: "entity_1", target: "datapod:video:abc...", label: "depicted_in", sentence: "Noah is depicted in this video."
 
 **"Receipt from Chipotle datapod:image:ghi..."**
 - Receipt → `has_receipt` is the intent-flavored upgrade; the underlying transaction is the anchor.

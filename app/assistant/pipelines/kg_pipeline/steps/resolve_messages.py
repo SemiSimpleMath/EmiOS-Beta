@@ -181,7 +181,7 @@ class ResolveMessagesStep:
             # placeholder here, which meant the LLM saw zero entity mappings
             # from prior batches and re-guessed every cross-batch pronoun
             # (manufacturing ghost entities like "Jukka Virtanen's Son" when
-            # Peter had been named just 30 seconds earlier).
+            # Noah had been named just 30 seconds earlier).
             existing_map = dict(
                 session.query(
                     KGResolvedMessage.unified_log_id,

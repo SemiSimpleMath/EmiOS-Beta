@@ -192,7 +192,7 @@ class PodStoreTool(BaseTool):
         task text, and the observed slip is a dropped ``datapod:<kind>:`` prefix —
         ``6f7f901e...`` instead of ``datapod:email:6f7f901e...``. ``store.get()`` is
         exact-match, so the bare id read as "missing" for a pod the store held, and
-        the worker walked away from reachable information (the 2026-09-01 SLMS
+        the worker walked away from reachable information (the 2026-09-01 PLMS
         syllabus episode).
 
         Rule (ids only, never wording): an id that misses exactly is matched against

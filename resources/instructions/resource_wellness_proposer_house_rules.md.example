@@ -1,4 +1,4 @@
-# Wellness proposer house rules — Jukka's household
+# Wellness proposer house rules
 
 Household-specific calibration for wellness_proposer: equipment
 available, time windows, recurring routines, dietary/health constraints
@@ -15,45 +15,43 @@ append learned patterns here over time.
 (Fill in as you confirm what's at home — the proposer references this
 for equipment_used and won't propose anything not on the list.)
 
-- Road bike (outdoor)
-- (TBD) — add as discovered: indoor trainer? treadmill? rowing machine?
-  dumbbells? kettlebells? yoga mat? resistance bands? pull-up bar?
+- (equipment item, e.g. bike, indoor trainer, dumbbells, yoga mat)
 
 ## Time windows that work
 
 (Constraints that shape proposed_start_local.)
 
-- Jukka works from home, full remote. Morning (6-8am) and early evening
-  (5-7pm) are the natural workout windows.
-- Lunch break (12-1pm) is short — only good for a quick walk or mobility
-  break, not a full workout.
-- Friday Night Meats is the family tradition; don't propose a hard
-  workout for Friday evening.
+<!-- Describe the user's work pattern and the windows that suit a workout,
+which windows are only long enough for a short walk or mobility break, and
+any recurring evenings that should not get a hard workout. -->
+
+- (time window): (what fits there)
 
 ## Sleep target + bedtime preferences
 
-- Target sleep: 7-8 hours
-- Default bedtime: 10:30pm-ish — wind-down should start ~9:30pm
-- IF (intermittent fasting) — usually skips breakfast, but this means
-  morning workouts should be EASY/MODERATE, not hard fasted sessions
-  unless explicitly trained for that
+<!-- Fill in the user's sleep target, usual bedtime and when wind-down starts. -->
+
+- Target sleep: (hours)
+- Default bedtime: (time) — wind-down should start about an hour earlier
+- If the user fasts in the morning, morning workouts should be
+  EASY/MODERATE, not hard fasted sessions unless explicitly trained
+  for that
 
 ## Recurring wellness routines (proposer should preserve these)
 
-- (TBD — fill in as patterns become clear)
-  Examples to consider:
-  - Tuesday morning bike ride?
-  - Saturday family walk?
-  - Sunday recovery / mobility day?
+- (TBD — fill in as patterns become clear, e.g. a weekly ride, a
+  weekend family walk, a recovery / mobility day)
 
 ## Health constraints relevant to training
 
-- Jukka has GERD — avoid hard cardio within 90 min of meals
-- Jukka is prediabetic — moderate cardio after dinner is beneficial
-- No known joint issues currently — confirm before proposing impact
+<!-- List health conditions that change what training is appropriate and how
+(timing around meals, intensity limits, joint issues). -->
+
+- (condition): (what it means for training)
+- If no joint issues are known, confirm before proposing impact
   activity (running on pavement, plyometrics)
-- Heat sensitivity: California sun gets brutal — outdoor cardio in
-  summer should be morning only, with hydration proposal alongside
+- In hot weather, outdoor cardio should be morning only, with a
+  hydration proposal alongside
 
 ## Recovery preferences
 
@@ -63,31 +61,31 @@ for equipment_used and won't propose anything not on the list.)
 - Sleep < 6h average for last 3 nights → MANDATORY recovery; do not
   propose any moderate or hard intensity.
 
-## Worked example — proposal addressing the Jukka-fatigue concern
+## Worked example — proposal addressing a fatigue concern
 
-If addressable_concerns contains "Jukka's sleep/fatigue has been
+If addressable_concerns contains "the user's sleep/fatigue has been
 recurring", a proposal addressing it might look like:
 
 ```
 kind: "sleep_routine"
-actors: ["Jukka"]
-date: "2026-05-20"
-proposed_start_local: "2026-05-20T21:30:00-07:00"
+actors: ["<the user>"]
+date: "YYYY-MM-DD"
+proposed_start_local: "YYYY-MM-DDT21:30:00"
 duration_minutes: 30
 summary: "Wind down 9:30pm: screens off, dim lights, read."
 source: "concern_addressing"
 confidence: "high"
 novelty: "familiar"
 reasoning: "Fatigue concern + late screen exposure pattern. Sleep is the
-  dominant lever; a wind-down routine before the 10:30 bedtime helps."
+  dominant lever; a wind-down routine before bedtime helps."
 ```
 
 Paired with a movement proposal for the same day:
 
 ```
 kind: "workout"
-actors: ["Jukka"]
-date: "2026-05-20"
+actors: ["<the user>"]
+date: "YYYY-MM-DD"
 workout_type: "walk"
 intensity: "low"
 duration_minutes: 30
@@ -108,21 +106,18 @@ Notice:
 
 ## Family-roster awareness
 
-- When Katy is home and willing, a family bike ride or walk is high-
-  value novelty (the kids benefit from active outdoor time too).
-- When Jukka is solo (family away), workout windows expand — propose
+- When the partner is home and willing, a family bike ride or walk is
+  high-value novelty (the kids benefit from active outdoor time too).
+- When the user is solo (family away), workout windows expand — propose
   longer or more focused sessions.
-- Annika has been skipping breakfast — flag as a meal_proposer concern
-  in free_form_thinking; not a wellness_proposer action.
+- Meal concerns (e.g. someone skipping breakfast) belong to
+  meal_proposer — note them in free_form_thinking; not a
+  wellness_proposer action.
 
 ## Novel things worth trying
 
-(TBD — add as Jukka mentions interest. Examples to consider:
-- Yoga class at local studio?
-- Group fitness?
-- Specific running goals (5K, 10K)?
-- Cycling event signup?
-- Strength program (StrongLifts, Starting Strength, etc.)?)
+(TBD — add as the user mentions interest, e.g. a class, group fitness,
+a running goal, an event signup, a strength program.)
 
 When proposing something novel, set novelty="novel" and provide a
 novelty_rationale explaining why now (concern + opportunity, not just

@@ -23,7 +23,7 @@ def _concern(cid, evidence=()):
 @pytest.fixture
 def links(monkeypatch):
     seen = {"sources": [], "linked": []}
-    monkeypatch.setattr(kg_links, "find_entities", lambda texts: [{"label": "Woodbridge"}])
+    monkeypatch.setattr(kg_links, "find_entities", lambda texts: [{"label": "Westfield"}])
 
     def linked(refs, threads):
         seen["linked"].append(refs)
@@ -59,7 +59,7 @@ def test_dayflow_ticket_gathers_work_concerns_and_their_sources(monkeypatch, lin
     # past work excludes the ticket's own work and appears once across concerns
     assert out["related_work"] == [{"work_id": "work_old"}]
     assert out["ticket"]["choices"] == ["OK"] and out["ticket"]["state"] == "pending"
-    assert out["entities"] == [{"label": "Woodbridge"}]
+    assert out["entities"] == [{"label": "Westfield"}]
 
 
 def test_question_ticket_reaches_its_concern(monkeypatch, links):

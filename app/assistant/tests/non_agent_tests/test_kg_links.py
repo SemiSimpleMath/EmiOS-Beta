@@ -4,7 +4,7 @@ Pins: any Entity node is found by its label or alias as whole words, case-insens
 possessive, including one without a card (the Karjalohja miss); a single-word name only where the
 text capitalizes it unless the text is all lowercase (so "water" is not the entity Water); the
 longest name at a position wins,
-so "South Lake Middle School" does not also match "Lake"; the owner's own nodes are left out; what
+so "Pine Lake Middle School" does not also match "Lake"; the owner's own nodes are left out; what
 joins two entities is the Event/State nodes linked to both and the entities reached from both
 through one; each entity found carries its ties to the household's people (the sentences of its links
 through a node that also links to one of them); facts by meaning are the closest link sentences, read
@@ -23,7 +23,7 @@ NODES = [("n-owner", "Sam", "Entity", '["user", "Sam"]', "The owner.", 10),
          ("n-bro", "Olli", "Entity", "[]", "The owner's brother.", 10),
          ("n-kar", "Karjalohja", "Entity", "[]", "A place the family travels to.", 8),
          ("n-dad", "Aarne", "Entity", "[]", "The owner's father.", 9),
-         ("n-sls", "South Lake Middle School", "Entity", "[]", "A school.", 7),
+         ("n-sls", "Pine Lake Middle School", "Entity", "[]", "A school.", 7),
          ("n-lake", "Lake", "Entity", "[]", "A lake.", 1),
          ("n-wife", "Leena", "Entity", '["my wife"]', "The owner's wife.", 10),
          ("n-water", "Water", "Entity", "[]", "Water.", 7),
@@ -63,8 +63,8 @@ def test_entities_are_found_by_name_whatever_the_case_and_possessive():
 
 
 def test_the_longest_name_wins_and_the_owner_is_left_out():
-    found = kg_links.find_entities(["Sam got a note from South Lake Middle School."])
-    assert _labels(found) == ["South Lake Middle School"]
+    found = kg_links.find_entities(["Sam got a note from Pine Lake Middle School."])
+    assert _labels(found) == ["Pine Lake Middle School"]
 
 
 def test_what_joins_two_entities():
@@ -87,7 +87,7 @@ def test_case_decides_a_single_word_name_unless_the_text_is_all_lowercase():
 def test_an_entity_found_carries_its_ties_to_the_household():
     [kar] = kg_links.find_entities(["The cottage at Karjalohja needs a new roof."])
     assert kar["ties"] == ["The cottage at Karjalohja is owned.", "The summer trip was at Karjalohja."]
-    [school] = kg_links.find_entities(["South Lake Middle School sent a note."])
+    [school] = kg_links.find_entities(["Pine Lake Middle School sent a note."])
     assert school["ties"] == [], "no link reaches the household"
 
 

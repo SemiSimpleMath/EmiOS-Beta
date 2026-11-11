@@ -9,7 +9,7 @@ user cares about. These are **named by entity**, not by content hash.
 resources/identity/
   jukka.jpg              ← profile photo of Jukka (the user)
   katy.jpg               ← profile photo of Katy
-  peter.jpg, annika.jpg  ← children
+  noah.jpg, mia.jpg  ← children
   bonnie.jpg, waldo.jpg  ← pets
   jukkas_house.jpg       ← representative photo of the house
   ...

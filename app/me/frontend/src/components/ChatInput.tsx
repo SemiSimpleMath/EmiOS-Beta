@@ -24,7 +24,7 @@ export function ChatInput({ onSubmit }: Props) {
           type="text"
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          placeholder="Ask anything… e.g. 'Annika's family' or 'between 2022 and 2024'"
+          placeholder="Ask anything… e.g. 'Mia's family' or 'between 2022 and 2024'"
           className="w-full px-4 py-3 text-sm border border-gray-200 rounded-full shadow-sm focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent bg-white"
           autoFocus
         />

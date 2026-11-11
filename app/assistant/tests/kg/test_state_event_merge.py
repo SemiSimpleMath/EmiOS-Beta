@@ -14,7 +14,7 @@ Why this file exists
 On 2026-05-03 we discovered that the ``Performance`` Event hub
 (``0b4416dd-...``) had absorbed at least three distinct productions:
 
-  - Annika's Beetlejuice performance at South Lake Middle School (Dec 2025)
+  - Mia's Beetlejuice performance at Pine Lake Middle School (Dec 2025)
   - A "musical theater" performance attended by Jorma + Seija (Apr 2026)
   - The Drowsy Chaperone production (May 2026, March 21 dated)
 
@@ -245,8 +245,8 @@ class TestCandidatePipelineComposition:
         drowsy_proposal_date = _ts(2026, 3, 21)
 
         scored = _score_candidates_by_participant_overlap(
-            [(beetlejuice_cand, {"annika", "peter"})],
-            new_participant_ids={"annika", "peter"},
+            [(beetlejuice_cand, {"mia", "noah"})],
+            new_participant_ids={"mia", "noah"},
         )
         # Stage 1: perfect overlap, kept.
         assert len(scored) == 1 and scored[0]["jaccard"] == pytest.approx(1.0)
@@ -268,8 +268,8 @@ class TestCandidatePipelineComposition:
         new_proposal_date = _ts(2026, 3, 21)
 
         scored = _score_candidates_by_participant_overlap(
-            [(dateless_hub, {"annika", "peter"})],
-            new_participant_ids={"annika", "peter"},
+            [(dateless_hub, {"mia", "noah"})],
+            new_participant_ids={"mia", "noah"},
         )
         out = _filter_event_candidates_by_date(scored, new_valid_from=new_proposal_date)
         assert len(out) == 1
@@ -599,7 +599,7 @@ class TestDesiredDecisionTree:
 
     def test_actual_performance_case_via_jaccard_threshold(self):
         """The exact 2026-05-03 over-merge data, run through a 0.5 Jaccard
-        threshold. Existing Performance hub: {children, SLMS, Annika, Jorma,
+        threshold. Existing Performance hub: {children, PLMS, Mia, Jorma,
         Seija}. New Drowsy Chaperone proposal: {children, Drowsy Chaperone}.
         Overlap = {children}, union = 6 → 0.167. Threshold drops it."""
         try:
@@ -612,8 +612,8 @@ class TestDesiredDecisionTree:
         beetlejuice_hub = _StubNode(id="0b4416dd", label="Performance")
         existing_participants = {
             "467c96e6",  # Jukka's children
-            "08eb7b81",  # South Lake Middle School
-            "5397189b",  # Annika
+            "08eb7b81",  # Pine Lake Middle School
+            "5397189b",  # Mia
             "41fb3423",  # Jorma
             "495f38f8",  # Seija
         }
@@ -701,8 +701,8 @@ class TestDesiredDecisionTree:
         cand = _StubNode(id="match-me", label="Performance",
                          start_date=_ts(2026, 5, 2))
         scored = _score_candidates_by_participant_overlap(
-            [(cand, {"annika", "peter"})],
-            new_participant_ids={"annika", "peter"},
+            [(cand, {"mia", "noah"})],
+            new_participant_ids={"mia", "noah"},
         )
         out = _filter_event_candidates_by_date(scored, new_valid_from=new_date)
         assert len(out) == 1 and out[0]["node"].id == "match-me"

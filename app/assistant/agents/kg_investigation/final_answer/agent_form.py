@@ -123,7 +123,7 @@ class AgentForm(BaseModel):
         default=None,
         description=(
             "Required when disposition='needs_user_review'. The specific "
-            "question the user needs to answer. Example: 'Did Annika stop "
+            "question the user needs to answer. Example: 'Did Mia stop "
             "art lessons before or after the cabin trip Nov 5-12?'"
         ),
     )

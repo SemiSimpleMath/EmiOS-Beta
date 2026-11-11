@@ -12,7 +12,7 @@ class RenderedBullet(BaseModel):
             "subject. Plain prose — no markdown bullet markers, no quotes, no "
             "emojis. For relationships involving the user (Jukka), use third-"
             "person framing that names the user ('Jukka's wife', 'Jukka's "
-            "daughter Annika'). Card prose is read by agents — 'my wife' "
+            "daughter Mia'). Card prose is read by agents — 'my wife' "
             "leaves them guessing whose wife."
         ),
     )

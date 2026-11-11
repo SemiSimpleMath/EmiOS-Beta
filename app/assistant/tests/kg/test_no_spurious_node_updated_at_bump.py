@@ -19,8 +19,8 @@ trick that suppresses the column's onupdate=func.now() hook (same pattern as
 persist_description). These tests guard against regression by exercising each
 writer and asserting updated_at is preserved.
 
-Adding a new node tagged early_childhood near Annika should only touch the
-sections that actually changed — NOT bump Annika herself, and NOT cascade into
+Adding a new node tagged early_childhood near Mia should only touch the
+sections that actually changed — NOT bump Mia herself, and NOT cascade into
 unrelated wikis. These tests prove the underlying invariant.
 """
 from __future__ import annotations
@@ -157,7 +157,7 @@ class TestPagerankWriterDoesNotBump:
 
 # ============================================================================
 # 3. _refresh_on_reobservation — proposal match must not bump matched-node's
-#    updated_at. Adding a new connected node to Annika should not mark Annika
+#    updated_at. Adding a new connected node to Mia should not mark Mia
 #    as "changed" for downstream cascades.
 # ============================================================================
 
@@ -169,7 +169,7 @@ class TestRefreshOnReobservationDoesNotBumpMatchedNode:
             # first_observed + observation_count are first-class columns since
             # 2026-05-11; the seed helper should set them directly on the Node.
             existing = _seed_node(
-                s, label="Annika_Test", node_type="Entity",
+                s, label="Mia_Test", node_type="Entity",
                 first_observed=datetime(2025, 1, 1, tzinfo=timezone.utc),
                 observation_count=1,
             )
@@ -181,7 +181,7 @@ class TestRefreshOnReobservationDoesNotBumpMatchedNode:
         before = _read_updated_at(existing_id)
         time.sleep(0.05)
 
-        # Simulate a proposal that matches existing Annika as a participant.
+        # Simulate a proposal that matches existing Mia as a participant.
         observed_at = datetime.now(timezone.utc)
         s = get_session()
         try:
@@ -195,7 +195,7 @@ class TestRefreshOnReobservationDoesNotBumpMatchedNode:
                 id=str(uuid.uuid4()), proposal_id=proposal.id,
                 source_type="chat", room_id="master_room",
                 window_id=str(uuid.uuid4()), unified_log_id=str(uuid.uuid4()),
-                raw_text="Annika did something new", observed_at=observed_at,
+                raw_text="Mia did something new", observed_at=observed_at,
             ))
             s.commit()
             proposal_id = proposal.id
@@ -235,20 +235,20 @@ class TestRefreshOnReobservationDoesNotBumpMatchedNode:
         )
 
     def test_full_match_path_via_evaluate_and_apply_preserves_updated_at(self):
-        """End-to-end: proposal with Annika as matched participant goes
+        """End-to-end: proposal with Mia as matched participant goes
         through _evaluate_and_apply (commit=True). Matched-existing node's
         updated_at must not change. Newly-created node's updated_at is
         naturally fresh — we don't assert on that, just on the existing one.
         """
         s = get_session()
         try:
-            annika = _seed_node(s, label="Annika_E2E", node_type="Entity")
+            mia = _seed_node(s, label="Mia_E2E", node_type="Entity")
             s.commit()
-            annika_id = annika.id
+            mia_id = mia.id
         finally:
             s.close()
 
-        before = _read_updated_at(annika_id)
+        before = _read_updated_at(mia_id)
         time.sleep(0.05)
 
         observed_at = datetime.now(timezone.utc)
@@ -264,26 +264,26 @@ class TestRefreshOnReobservationDoesNotBumpMatchedNode:
                 id=str(uuid.uuid4()), proposal_id=proposal.id,
                 source_type="chat", room_id="master_room",
                 window_id=str(uuid.uuid4()), unified_log_id=str(uuid.uuid4()),
-                raw_text="Annika played in a school recital", observed_at=observed_at,
+                raw_text="Mia played in a school recital", observed_at=observed_at,
             ))
-            pn_annika = ClaimProposalNode(
+            pn_mia = ClaimProposalNode(
                 id=str(uuid.uuid4()), proposal_id=proposal.id,
-                extractor_temp_id="n_annika",
-                label="Annika_E2E", node_type="Entity",
-                sentence="Annika played in a school recital.",
+                extractor_temp_id="n_mia",
+                label="Mia_E2E", node_type="Entity",
+                sentence="Mia played in a school recital.",
             )
-            s.add(pn_annika)
+            s.add(pn_mia)
             s.commit()
-            proposal_id, pn_annika_id = proposal.id, pn_annika.id
+            proposal_id, pn_mia_id = proposal.id, pn_mia.id
         finally:
             s.close()
 
         plan = _PromoterPlan(
             proposal_id=proposal_id, placeholder_labels=[],
             nodes={
-                pn_annika_id: _PreparedNode(
-                    pn_id=pn_annika_id, pn_label="Annika_E2E", pn_node_type="Entity",
-                    decision="match", matched_node_id=annika_id,
+                pn_mia_id: _PreparedNode(
+                    pn_id=pn_mia_id, pn_label="Mia_E2E", pn_node_type="Entity",
+                    decision="match", matched_node_id=mia_id,
                 ),
             },
         )
@@ -298,7 +298,7 @@ class TestRefreshOnReobservationDoesNotBumpMatchedNode:
         finally:
             s.close()
 
-        after = _read_updated_at(annika_id)
+        after = _read_updated_at(mia_id)
         assert after == before, (
-            f"end-to-end match bumped Annika's updated_at: {before} -> {after}"
+            f"end-to-end match bumped Mia's updated_at: {before} -> {after}"
         )

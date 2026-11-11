@@ -237,7 +237,7 @@ def _build_dietary_context(household_members: List[str]) -> str:
 
     Previously (Phase 1a): single-person, Jukka-only, prose-keyword filter
     over his entity card description. That ignored 31 food-relevant State
-    edges on Annika (vegetable avoidance etc.), 19 on Peter, 35 on Katy.
+    edges on Mia (vegetable avoidance etc.), 19 on Noah, 35 on Katy.
 
     If any one member's signal count exceeds RUNAWAY_THRESHOLD, surface a
     count warning rather than silently truncating (no-list-caps-in-auditor

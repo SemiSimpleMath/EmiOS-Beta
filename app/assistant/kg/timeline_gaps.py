@@ -9,7 +9,7 @@ structured set of question candidates the conversation_starter can use:
   - year_gaps: multi-year stretches with no dated facts — worth probing
     ("I have nothing between 1990 and 2001 — what were you up to then?").
   - prose_only: facts that only have prose anchors, no ISO — worth pinning
-    ("you mentioned moving to Irvine after Peter was born — when exactly?").
+    ("you mentioned moving to Irvine after Noah was born — when exactly?").
 
 Pure SQL + arithmetic. Zero LLM cost. Cheap enough to recompute per call.
 """

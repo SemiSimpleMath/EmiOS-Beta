@@ -16,15 +16,15 @@ For the brain and the brief writer:
   Each found entity carries its `ties`: the sentences of its links through an Event or State node
   that also links to one of the household's people (the central entities, the owner included), the
   TIES_K most important. An entity named alone otherwise says nothing of whose it is: on 2026-10-02 a
-  Woodbridge High announcement became concerns about "the student", the school's own node having no
-  description, while "their son's school is Woodbridge High School." sat on its links.
+  Westfield High announcement became concerns about "the student", the school's own node having no
+  description, while "their son's school is Westfield High School." sat on its links.
 - `shared(entity_ids)`: for two or more entities, what joins them, in one set-based query: the
   Event and State nodes linked to two or more of them (the graph links entities through those,
   not directly), and the other entities reachable from two or more of them through one such node.
   The SHARED_K most important of each.
 - `facts_by_meaning(texts)`: the link sentences closest in meaning to each text (the edge collection
   in Chroma, each text embedded whole), the FACTS_K closest overall, read back from SQLite. Names miss
-  what a text calls by another name ("WHS", "Woodbridge students"); the meaning finds it. Probe on that
+  what a text calls by another name ("WFHS", "Westfield students"); the meaning finds it. Probe on that
   announcement (2026-10-02, 13,790 sentences): their son's school facts ranked 1st to 5th by the whole
   text; by its subject line alone, 309th and lower.
 
@@ -126,7 +126,7 @@ def find_entities(texts: List[str]) -> List[Dict[str, Any]]:
         caseless = text == text.lower()
         i = 0
         while i < len(toks):
-            # The longest name at each position wins and consumes its words, so "South Lake Middle
+            # The longest name at each position wins and consumes its words, so "Pine Lake Middle
             # School" does not also match the generic "Lake" and "School" entities.
             for n in lengths:
                 key = tuple(toks[i:i + n])

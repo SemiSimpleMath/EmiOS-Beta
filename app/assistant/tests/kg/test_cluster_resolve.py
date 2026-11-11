@@ -63,7 +63,7 @@ def _seed_node(kg_clean_db):
     try:
         session.add(Node(
             id="anniaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-            label="Annika",
+            label="Mia",
             node_type="Person",
             description="Test node",
         ))
@@ -193,7 +193,7 @@ def test_multi_finding_cluster_with_same_root_sets_superseded_by():
         "is_same_root": True,
         "lead_finding_id": fid_a,
         "member_finding_ids": [fid_a, fid_b, fid_c],
-        "root_question": "Did Annika stop taking art lessons? When?",
+        "root_question": "Did Mia stop taking art lessons? When?",
         "reason": "all three reference the same fact about art lessons",
     }
     ctx = PipelineContext.for_date(pipeline_id="test_cluster")
@@ -217,7 +217,7 @@ def test_multi_finding_cluster_with_same_root_sets_superseded_by():
     assert isinstance(rows[fid_a].evidence_json, dict)
     assert "cluster" in rows[fid_a].evidence_json
     cluster = rows[fid_a].evidence_json["cluster"]
-    assert cluster["root_question"] == "Did Annika stop taking art lessons? When?"
+    assert cluster["root_question"] == "Did Mia stop taking art lessons? When?"
     assert sorted(cluster["sibling_ids"]) == sorted([fid_b, fid_c])
 
 
@@ -267,7 +267,7 @@ def test_agent_can_exclude_some_candidates_from_cluster():
         "is_same_root": True,
         "lead_finding_id": fid_a,
         "member_finding_ids": [fid_a, fid_b],  # excludes fid_c
-        "root_question": "Did Annika stop art?",
+        "root_question": "Did Mia stop art?",
         "reason": "a and b share root; c is unrelated",
     }
     ctx = PipelineContext.for_date(pipeline_id="test_cluster")
@@ -436,7 +436,7 @@ def test_apply_verdict_persists_cluster_block_via_flag_modified():
     of evidence_json doesn't dirty-track without flag_modified, so the
     cluster block silently drops on commit while the scalar superseded_by
     writes succeed. Symptom: cluster_size > 1 but evidence_json.cluster={}.
-    Caught on live data 2026-05-07 (Annika + Friday Night Meats leads
+    Caught on live data 2026-05-07 (Mia + Friday Night Meats leads
     had empty cluster blocks).
     """
     _wipe_findings()

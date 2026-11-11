@@ -670,7 +670,7 @@ def test_quality_bs_real_content_returns_good():
     real_text = "\n\n".join([
         "Meadow Park Elementary School is located at 50 Blue Lake South, Irvine CA 92614.",
         "The school offers programs from Pre-K through sixth grade including enrichment activities.",
-        "Attendance line: 949-936-5901. Office hours are 7:30 AM to 4:00 PM Monday through Friday.",
+        "Attendance line: 555-010-5901. Office hours are 7:30 AM to 4:00 PM Monday through Friday.",
         "Bell schedule: First bell at 8:00 AM, dismissal at 2:45 PM for regular days.",
         "Principal's message: We are committed to academic excellence and a safe learning environment.",
     ] * 5)

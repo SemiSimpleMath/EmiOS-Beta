@@ -101,7 +101,7 @@ def test_a_missing_interval_stays_periodic():
 
 # ── a wall-clock reminder keeps its start and end (2026-10-07) ──────────────
 # APScheduler ignores add_job's trigger arguments when handed a trigger object, and the cron
-# trigger was built without start or end: South Lake's registration reminder (ended 2025-08-13),
+# trigger was built without start or end: Pine Lake's registration reminder (ended 2025-08-13),
 # omeprazole (ended 2025-08-21) and two more fired every day for months.
 
 def test_an_ended_daily_reminder_never_fires_again():

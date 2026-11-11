@@ -92,7 +92,7 @@ const SCROLL_PER_PIXEL = 0.25;
 // Hierarchy of items in the column (page 0 first, then later pages):
 //   1. Direct shared State/Event/Goal nodes (connected to ALL seeds)
 //      — the literal one-hop relationships BETWEEN the anchors
-//      (Marriage, Family Time, Parent of Annika ...).
+//      (Marriage, Family Time, Parent of Mia ...).
 //   2. Shared entities (in every seed's 1-hop neighborhood) — people /
 //      places / things both anchors connect to.
 const ISEC_ANCHOR_X = 320;            // |x| of L/R anchors
@@ -1381,7 +1381,7 @@ export function GraphCanvas({
               zIndex: 100,
               boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
             }}
-            title="0-hop: State/Event nodes connected directly to BOTH anchors (Marriage, Family Time, Parent of Annika, ...)."
+            title="0-hop: State/Event nodes connected directly to BOTH anchors (Marriage, Family Time, Parent of Mia, ...)."
           >
             {showZeroHop ? "Hide 0-hop" : "Show 0-hop"}
           </button>

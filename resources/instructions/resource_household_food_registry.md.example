@@ -1,0 +1,126 @@
+# Household food registry
+
+The canonical list of what this household actually eats. Every weekly
+meal plan should LEAN HEAVILY on this list — these are the dishes,
+fast food, takeout, and restaurants the family knows and accepts.
+
+The planner can occasionally propose something new (novelty slot,
+~1 per week max) but the bulk of every week comes from here.
+
+This file is hand-edited by the user. Future work: a "Promote to baseline"
+button on `/meals` that adds an accepted novelty dish/venue here after
+positive feedback.
+
+---
+
+## 1. Home-cooked dishes
+
+This is the COMPLETE list of dishes the household cooks — the planner
+should pick `home_cook` slots from here ONLY. If a desired dish isn't
+on this list, use `slot_type=novelty` instead.
+
+<!-- One dish per bullet. Add a short note in parentheses for supply needs
+or frequency, e.g. "(needs a specific store run)" or "(rarely)". -->
+
+- (dish name)
+
+### Comfort food subset (always reliable)
+
+The home-cook items that always work — pick these on fatigue weeks,
+busy weeks, or when kids are picky.
+
+<!-- One dish per bullet, named exactly as in the list above. -->
+
+- (dish name from the list above)
+
+### Recurring events that are not meals
+
+<!-- If the household has a recurring event whose name sounds like food but
+is not a meal, name it here. The planner should NOT treat such an event as a
+meal slot, an anchor, or a dish. -->
+
+### Notes on cook variety
+
+<!-- Note who does the cooking. -->
+
+- Dishes that share ingredients but are different dishes are distinct —
+  don't treat them as duplicates.
+- Heat-up items (frozen or store-bought ready meals) are not real
+  cooks — easy weeknight fallbacks.
+
+---
+
+## 2. Fast food
+
+<!-- One venue per bullet. -->
+
+- (venue)
+
+---
+
+## 3. Takeout / delivery
+
+Sit-down restaurant pickup AND fast-food-chain pickup both live here —
+the household orders from all of these rather than dining in. The
+planner uses `slot_type=takeout` for everything in this section.
+
+<!-- One venue per bullet. Note favorites, cadence pins ("about once a
+month"), venues whose orders leave several days of leftovers, and venues
+that are a drink, snack or dessert rather than a meal slot. -->
+
+- (venue)
+
+---
+
+## 4. Dine-out restaurants
+
+<!-- One restaurant per bullet, with when it fits (weekend breakfast, family
+dinner, special occasions only). -->
+
+- (restaurant)
+
+---
+
+## 5. Weekly patterns (recurring)
+
+These are the rhythms the planner should respect WITHOUT being told
+each week:
+
+<!-- Describe the household's recurring rhythms, e.g. a fixed dish on a
+given night, a regular weekend breakfast out, how often the household eats
+out per week, and leftover cascades after a large takeout order. -->
+
+- (pattern)
+
+---
+
+## 6. What NOT to propose
+
+Things tried and rejected, OR outside the household's diet patterns.
+
+<!-- Add ingredients or dishes a household member won't eat or must avoid,
+and why. -->
+
+- (ingredient or dish) for (household member)
+- Inventing a home-cooked dish that's not on the section-1 list
+  (use `novelty` instead and own that it's experimental)
+- Naming a restaurant that's not on sections 2-4 (use `novelty` for
+  trying a new place)
+
+---
+
+## 7. Health + variety notes
+
+- **Spread eating-out across the week.** Don't bunch ordering-out
+  slots on consecutive nights.
+- **Avoid repeating any specific dish or venue within 14 days** when
+  possible. If a dish was last Tuesday, pick something else this week.
+- **Healthier nudge when warranted.** If the past 4 weeks show well
+  more fast-food/takeout/dine-out slots than the household's usual
+  cadence, bias this week to the home-cook end and call it out in the
+  theme.
+- **Fatigue pattern**: when concerns flag fatigue, lean into the
+  comfort-food subset (section 1) — these are the no-friction picks.
+
+<!-- Add the household's own health notes here, e.g. portion or calorie
+goals, and making sure kids get protein on lighter nights. -->

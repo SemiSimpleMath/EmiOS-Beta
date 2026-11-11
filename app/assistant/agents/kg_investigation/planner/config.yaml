@@ -11,7 +11,7 @@ allowed_tools:
 except_tools: []
 allowed_nodes: [return_control]
 entity_scan_keys: [incoming_message, task, information, recent_history]
-# L0 = one-liner identity only (e.g. "Annika: oldest daughter of Jukka").
+# L0 = one-liner identity only (e.g. "Mia: oldest daughter of Jukka").
 # Avoids injecting the entity card's `key_facts` — those are often the
 # very claims under investigation, and including them would prime the
 # investigator with the disputed content. L0 gives just enough context

@@ -78,7 +78,7 @@ Picture day is the case that prompted this. Five concerns, same child, same even
 
 | date | concern | what happened |
 |---|---|---|
-| 09-14 | `3a9f2c71` | "South Lake makeup Picture Day needs clothing and packet preparation" |
+| 09-14 | `3a9f2c71` | "Pine Lake makeup Picture Day needs clothing and packet preparation" |
 | 09-17 | `3a9f2c71` | **declined**, journalled with the owner's words, parked dormant |
 | 09-18 | `3e9b1f52` | **new concern, same event**: "makeup Picture Day is today and prep details need to be confirmed" |
 | 09-19 | `3e9b1f52` | owner declines again; the event has passed anyway |

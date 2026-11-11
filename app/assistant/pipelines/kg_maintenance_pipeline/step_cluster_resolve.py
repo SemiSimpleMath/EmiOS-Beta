@@ -9,7 +9,7 @@ Two-stage: candidate-then-verify.
   Stage 1 (mechanical): group pending, non-superseded findings by
   primary_node_id. Any group of size >= 2 is a CANDIDATE CLUSTER —
   these findings might share one root question (e.g. 8 wiki_contradiction
-  findings on Annika all pointing at "did she stop art lessons?", or 5
+  findings on Mia all pointing at "did she stop art lessons?", or 5
   duplicate_node findings on Friday Night Meats listing 5 candidate
   twins).
 

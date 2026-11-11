@@ -50,10 +50,10 @@ been minted, and most filesystem files have not.
 | Tool | Sweet spot | Avoid for |
 |---|---|---|
 | `pod_search` | Indexed, single-hop, opinionated. Filters: `kind`, `tags`, `since`, `query` (substring on body+one_liner), `linked_to_entity` (single-hop KG join), `linked_via` (edge-type list). Returns hydrated `PodHeader` objects. **Default tool** — start here. | Multi-hop graph walks, edge-type-precise structural queries. |
-| `kg_query` | Read-only SQL over `kg_node_metadata` + `kg_edge_metadata`. Pods are KG citizens (every pod has a `node_type='Pod'` row mirrored automatically), so you can write `WHERE source_id IN (SELECT id FROM kg_node_metadata WHERE label='Peter') AND relationship_type='participant'` -style joins. | Anything `pod_search` already covers — kg_query is verbose to write and easy to compose wrong. |
+| `kg_query` | Read-only SQL over `kg_node_metadata` + `kg_edge_metadata`. Pods are KG citizens (every pod has a `node_type='Pod'` row mirrored automatically), so you can write `WHERE source_id IN (SELECT id FROM kg_node_metadata WHERE label='Noah') AND relationship_type='participant'` -style joins. | Anything `pod_search` already covers — kg_query is verbose to write and easy to compose wrong. |
 
 **Fallthrough rule:** try `pod_search` first. If the question requires
-multi-hop traversal (e.g., "photos at events Peter attended" needs
+multi-hop traversal (e.g., "photos at events Noah attended" needs
 Event → participant → has_photo, two hops), fall through to `kg_query`.
 
 ## pod_search filter compositions
@@ -76,8 +76,8 @@ Event → participant → has_photo, two hops), fall through to `kg_query`.
 "recent invoice emails"
   → pod_search(kind="email", query="invoice", since="2w")
 
-"video of Peter's birthday"
-  → pod_search(kind="video", linked_to_entity="Peter", query="birthday")
+"video of Noah's birthday"
+  → pod_search(kind="video", linked_to_entity="Noah", query="birthday")
 
 "food pods since Tuesday"
   → pod_search(tags=["food"], since="<date>")
@@ -89,7 +89,7 @@ Event → participant → has_photo, two hops), fall through to `kg_query`.
 ## kg_query escalations
 
 ```
-"photos at events Peter attended"
+"photos at events Noah attended"
   → kg_query("""
       SELECT n.id AS pod_id, n.label
       FROM kg_node_metadata n
@@ -101,7 +101,7 @@ Event → participant → has_photo, two hops), fall through to `kg_query`.
        AND participant_e.relationship_type = 'participant'
       JOIN kg_node_metadata p
         ON p.id = participant_e.target_id
-      WHERE n.node_type = 'Pod' AND p.label = 'Peter'
+      WHERE n.node_type = 'Pod' AND p.label = 'Noah'
     """)
 ```
 

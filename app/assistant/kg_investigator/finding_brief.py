@@ -734,7 +734,7 @@ def _brief_state_missing_dates(
         "date), the disagreement IS the finding — escalate it rather than "
         "anchoring on either. If the data genuinely doesn't "
         "answer, propose op='escalate_user' with a specific question for the "
-        "user (e.g. 'When did Annika start middle school?'). Never invent dates."
+        "user (e.g. 'When did Mia start middle school?'). Never invent dates."
     )
     return task, "\n".join(parts)
 

@@ -6,7 +6,7 @@
       "name": "entity_label",
       "type": "string",
       "required": true,
-      "description": "Exact label of the entity (e.g. 'Annika'). Must match an existing wiki page or KG node eligible for one."
+      "description": "Exact label of the entity (e.g. 'Mia'). Must match an existing wiki page or KG node eligible for one."
     },
     {
       "name": "run_critic",

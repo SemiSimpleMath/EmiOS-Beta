@@ -27,7 +27,7 @@ EMAIL = {
     "uid": "1a09b83febc5961f",
     "account_id": "google_user_primary",
     "subject": "The Warrior Way",
-    "sender": "Woodbridge High School via ParentSquare",
+    "sender": "Westfield High School via ParentSquare",
     "summary": "Newsletter with Reflections deadline and Club Drive.",
     "body": "PTSA Reflections submissions are due October 9, 2026.",
     "importance": 8,

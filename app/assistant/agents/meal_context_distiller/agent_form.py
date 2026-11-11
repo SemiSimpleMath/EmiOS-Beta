@@ -33,7 +33,7 @@ class DayContext(BaseModel):
         description=(
             "Who is eating which meals that day. Default household unless "
             "calendar / chat shows otherwise. Note deviations explicitly: "
-            "'Peter at BAS — not at dinner', 'Marika arriving 3pm Sat — "
+            "'Noah at BAS — not at dinner', 'Marika arriving 3pm Sat — "
             "joining dinner', 'Katy traveling — solo Jukka meals'. "
             "Empty string when default audience applies for all windows."
         ),
@@ -43,7 +43,7 @@ class DayContext(BaseModel):
         default="",
         description=(
             "Calendar events or situational constraints that affect meals "
-            "this day. e.g. 'Annika has school choir 6-8 PM — late "
+            "this day. e.g. 'Mia has school choir 6-8 PM — late "
             "dinner', 'Wed Friday Night Meats Zoom — usual social slot', "
             "'Day trip to Palm Desert — eat out / quick lunch'. "
             "Empty string if nothing day-specific."

@@ -516,7 +516,7 @@ def _build_candidate_pairs(
     #       help. Ratio gates noise like "Jukka" inside "Jukka's CPAP machine".
     #   (b) **whole-word token subset** — the shorter label's tokens are ALL
     #       present in the longer label's tokens. Catches "Joe" / "Joe Booth",
-    #       "Katy" / "Katy Bowen", "Peter" / "Peter Virtanen" — first-name vs
+    #       "Katy" / "Katy Bowen", "Noah" / "Noah Virtanen" — first-name vs
     #       full-name pairs that the % ratio rejects. Word boundaries make this
     #       safe: "joes" doesn't match "joe" as a token, so we don't accidentally
     #       pair "Joe" with "Joes Pizza".
@@ -572,7 +572,7 @@ def _build_candidate_pairs(
     # Structural: when a single Entity anchor relates to two endpoints via
     # the same predicate path through structurally-similar state nodes, those
     # endpoints are merge candidates. Catches kinship/role placeholders
-    # (Jukka's son <-> Peter, Phil's mother <-> Pam) and label variants that
+    # (Jukka's son <-> Noah, Phil's mother <-> Pam) and label variants that
     # share a workplace/school/family relation but whose strings don't match.
     prop_data = _load_anchor_propagation_data(descriptors)
     for a, b, anchor_ctx in _anchor_propagation_pairs(descriptors, prop_data):

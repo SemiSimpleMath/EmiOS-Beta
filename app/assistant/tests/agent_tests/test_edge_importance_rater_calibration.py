@@ -101,9 +101,9 @@ CALIBRATION_CASES = [
             "edge label: is_parent_in\n"
             "target label: Parenthood\n"
             "source sentence: Jukka is the user, software engineer, family-centered.\n"
-            "target sentence: Parenthood relating Jukka to his son Peter.\n"
+            "target sentence: Parenthood relating Jukka to his son Noah.\n"
             "EDGE SENTENCE — THIS IS THE ONE WHOSE IMPORTANCE TO THE SOURCE YOU ARE EVALUATING: "
-            "Jukka Virtanen is Peter's father."
+            "Jukka Virtanen is Noah's father."
         ),
         "expected_min": 8.5,
         "expected_max": 10.0,
@@ -188,7 +188,7 @@ CALIBRATION_CASES = [
             "source label: Jukka Virtanen\n"
             "edge label: has_goal\n"
             "target label: Raise Good Children\n"
-            "source sentence: Jukka is a father of Peter and Annika.\n"
+            "source sentence: Jukka is a father of Noah and Mia.\n"
             "target sentence: Long-term life goal of raising children to become good adults.\n"
             "EDGE SENTENCE — THIS IS THE ONE WHOSE IMPORTANCE TO THE SOURCE YOU ARE EVALUATING: "
             "Jukka's goal is to raise his children to become good adults."

@@ -32,20 +32,20 @@ def _seed(kg_clean_db):
 
     session = get_session()
     try:
-        # Subject: a Residence state on Annika with no dates.
+        # Subject: a Residence state on Mia with no dates.
         session.add(Node(
             id="11111111-1111-1111-1111-111111111111",
             label="Residence at Cabin",
             node_type="State",
             category="residence",
-            description="Annika living at the cabin",
+            description="Mia living at the cabin",
             start_date=None,
             end_date=None,
         ))
-        # Annika herself
+        # Mia herself
         session.add(Node(
             id="22222222-2222-2222-2222-222222222222",
-            label="Annika",
+            label="Mia",
             node_type="Person",
         ))
         # A dated neighbor — gives the investigator a temporal anchor.
@@ -62,7 +62,7 @@ def _seed(kg_clean_db):
             source_id="22222222-2222-2222-2222-222222222222",
             target_id="11111111-1111-1111-1111-111111111111",
             relationship_type="lives_in",
-            sentence="Annika is residing at the cabin.",
+            sentence="Mia is residing at the cabin.",
         ))
         session.add(Edge(
             id="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",

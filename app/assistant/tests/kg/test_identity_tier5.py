@@ -74,7 +74,7 @@ class _FakeIdentityCollection:
 def test_identity_similarity_respects_date_separation(monkeypatch):
     descs = {
         "dup1": _desc("dup1", "Sibling Rel", "State",
-                      "the sibling relationship", start="2013-08-12"),
+                      "the sibling relationship", start="2012-04-03"),
         "dup2": _desc("dup2", "Sibling Rel", "State",
                       "the sibling relationship since 2013", start=None),
         "rec1": _desc("rec1", "Greeting", "Event",

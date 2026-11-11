@@ -37,8 +37,8 @@ class AgentForm(BaseModel):
         description=(
             "When is_same_root=True: the single canonical question the user "
             "would answer to resolve the whole cluster. Phrased as a direct "
-            "question to the user — e.g. 'Did Annika stop taking art "
-            "lessons? When?', not 'There is a contradiction about Annika...'. "
+            "question to the user — e.g. 'Did Mia stop taking art "
+            "lessons? When?', not 'There is a contradiction about Mia...'. "
             "Leave null when is_same_root=False."
         ),
     )

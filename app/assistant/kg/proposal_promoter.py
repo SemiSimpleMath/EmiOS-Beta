@@ -626,7 +626,7 @@ def _filter_candidates_by_min_jaccard(
     The 2026-05-03 Performance over-merge had jaccard 1/6 ≈ 0.17 — a
     single hub overlap with a totally different specific participant
     ("Drowsy Chaperone") on the new side and four unrelated participants
-    ("South Lake Middle School", "Annika", "Jorma", "Seija" from
+    ("Pine Lake Middle School", "Mia", "Jorma", "Seija" from
     Beetlejuice context) on the existing side. A 0.5 threshold drops it.
 
     Args:
@@ -879,7 +879,7 @@ def _node_window_text(session, node_id: str) -> Optional[str]:
     """Entity-resolved chat context for the node's earliest evidence window.
 
     Gives the node_data_merger the actual disambiguated chat the node was
-    extracted from. With entity references expanded ("(Peter)" inline
+    extracted from. With entity references expanded ("(Noah)" inline
     instead of "he"), the merger no longer has to redo coreference and
     can judge same-label vs different-target with the same information
     the resolver already produced.

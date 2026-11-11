@@ -232,7 +232,7 @@ earlier attempts to get the owner's choice expired unanswered.
 list). Owner: search the entity nodes directly.
 
 - `find_entities`: every Entity node (1,561) whose label or alias appears as whole words, the card
-  detector's rules (possessive allowed), longest name first so "South Lake Middle School" does not
+  detector's rules (possessive allowed), longest name first so "Pine Lake Middle School" does not
   also match "Lake". Multi-word names in any case; a single-word name only where the text
   capitalizes it, unless the text is all lowercase or the entity is central (PageRank >= 0.005: 39
   entities, the household's people, dogs and places). Without the case rule, a concern's long chat

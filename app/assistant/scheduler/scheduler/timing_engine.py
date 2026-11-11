@@ -133,7 +133,7 @@ class TimingEngine:
         The trigger itself carries the event's start (the anchor), end and jitter:
         APScheduler ignores add_job's trigger arguments when it is handed a trigger
         object. Until 2026-10-07 they were passed beside it, so an ended daily or weekly
-        reminder fired every day (South Lake registration, ended 2025-08-13, still sent).
+        reminder fired every day (Pine Lake registration, ended 2025-08-13, still sent).
 
         Sub-daily intervals (a 5-minute poll, an hourly monitor) are genuinely periodic:
         DST does not apply to them and they stay interval triggers.

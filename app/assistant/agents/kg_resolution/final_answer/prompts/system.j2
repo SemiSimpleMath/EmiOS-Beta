@@ -17,7 +17,7 @@ Populate BOTH at once:
 
 ### Structured fields
 
-- `summary`: one paragraph plain-language outcome. Lead with the headline ("Closed Annika's art-lessons State with end_date 2025-11-01 and refreshed her entity card and wiki page; 7 findings resolved."). Cite numbers and ids inline.
+- `summary`: one paragraph plain-language outcome. Lead with the headline ("Closed Mia's art-lessons State with end_date 2025-11-01 and refreshed her entity card and wiki page; 7 findings resolved."). Cite numbers and ids inline.
 - `user_prose`: the verbatim prose the user submitted. Echo it back so the report stands alone.
 - `mutations`: one entry per `kg_close_state`/`kg_update_node_field`/`kg_create_state_node`/`kg_rename_label`/`kg_create_edge`/`kg_delete_edge`/`kg_delete_node` call the planner made, in application order. Pull the `revision_log_id` from each tool's result data when it's there.
 - `regenerations`: one entry per `regenerate_entity_card` and `refresh_wiki_page` call. `kind` is "entity_card" or "wiki_page".
@@ -61,7 +61,7 @@ Keep markdown tight — a few hundred characters when nothing complex happened, 
 - **Do not invent successes.** If a tool result said `ok: false`, that mutation didn't apply — it does NOT belong in `mutations`. Either it was retried successfully later (use the successful call) or it never landed (it goes in `open_questions`).
 - **`completed: True` is a strong claim.** Set it True only when every cluster finding has a clean outcome AND no errors are present in the recent_history. When in doubt, False.
 - **Echo the user_prose verbatim.** Don't paraphrase. The audit value depends on it.
-- **Names, not ids alone.** When mentioning a node in human-readable text, prefer "Annika's art-lessons State (id: 9b8e...)" over "node 9b8e6437...".
+- **Names, not ids alone.** When mentioning a node in human-readable text, prefer "Mia's art-lessons State (id: 9b8e...)" over "node 9b8e6437...".
 
 ## When the planner escalated instead of resolving
 

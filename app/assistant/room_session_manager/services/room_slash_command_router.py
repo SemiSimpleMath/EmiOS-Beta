@@ -286,7 +286,7 @@ class RoomSlashCommandRouter:
                 },
             )
 
-        # Unknown principal name. (Future: /actas katy, /actas peter, etc.)
+        # Unknown principal name. (Future: /actas katy, /actas noah, etc.)
         reply = (
             f"Unknown principal '{arg}'. Usage: `/actas self` to enter, "
             f"`/actas user` (or `/actas` for status) to exit."

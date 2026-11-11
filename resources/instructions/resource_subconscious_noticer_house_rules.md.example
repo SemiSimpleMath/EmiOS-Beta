@@ -4,8 +4,8 @@ This file holds the **household-specific** parts of the noticer's prompt (worked
 friction patterns, inference patterns). It is separate from `system.j2` so the stable scaffold can stay generic while
 the calibration material accumulates here.
 
-The noticer raises issues; the brain decides what becomes a concern and who acts (2026-10-09). Nothing here routes
-work or sets a severity: say what you see and why it matters now.
+The noticer raises issues; the brain decides what becomes a concern and who acts. Nothing here routes work or sets a
+severity: say what you see and why it matters now.
 
 ---
 
@@ -15,12 +15,12 @@ Input aggregate snippet (paraphrased):
 
 ```
 - subject='Sam' kind=fatigue_loading count=6 max_intensity=medium
-    • "Fragmented sleep is a total drain"
+    • "Bad sleep is a total drain"
     • "rough night with sleep"
     • "I am tired"
-    • "After that fragmented sleep and the wine headache"
+    • "Slept badly again"
     • "had a bit of a rough night"
-    • "doesn't make me feel sluggish"
+    • "feeling sluggish today"
 ```
 
 Expected output (one entry in `issues`):
@@ -29,9 +29,8 @@ Expected output (one entry in `issues`):
 title    "Sam's fatigue and sleep quality have been a recurring theme"
 kind     "pattern_drift"
 subject  "Sam"
-what     "Six fatigue mentions in 14 days, low to medium intensity: "Fragmented sleep is a total drain",
-          "rough night with sleep", "I am tired", "After that fragmented sleep and the wine headache",
-          "had a bit of a rough night"."
+what     "Six fatigue mentions in 14 days, low to medium intensity: "Bad sleep is a total drain",
+          "rough night with sleep", "I am tired", "Slept badly again", "had a bit of a rough night"."
 why_now  "The count passed three this week and the mentions keep coming."
 ```
 
@@ -42,9 +41,9 @@ count=1, intensity=low                     → noise
 count=2 across 14 days, both low           → emerging but below threshold
 count=5 but subject='unspecified'          → too diffuse to act on
 count=5 'self/complaint' where the quotes  → noise summed under a shared
-   are about 5 different things (Twitter,    aggregation key. SKIP.
-   the Keurig, work bug, timesheets,         Not a pattern of any one thing.
-   headache)
+   are about 5 different things (social      aggregation key. SKIP.
+   media, the coffee maker, a work bug,      Not a pattern of any one thing.
+   timesheets, a headache)
 ```
 
 The last case is important: aggregate buckets can be misleading. ALWAYS inspect the quotes when count ≥ 3 — if the
@@ -62,12 +61,14 @@ Friction is what the family wears on but often can't see themselves:
   off" → one issue, even though each signal alone is low. Cross-domain accumulation beats single-domain spikes.
 
 - **Friction in casual language, not formal complaints.** Watch for repeated passing remarks: "I'm so tired again",
-  "the dogs were a pain", "we never have time for X", "work has been brutal." Friction often hides in
+  "the house is a mess again", "we never have time for X", "work has been brutal." Friction often hides in
   `recent_passing_mentions`.
 
 - **Workarounds the family has normalized.** Eating in the car, skipping breakfast routinely, outsourcing things they
   used to enjoy. These LOOK stable but are friction-as-default. Raise them even if no one is complaining — that no one
   is complaining is the point.
+
+<!-- Add friction patterns specific to this household as they prove meaningful (or false-positive). -->
 
 ## Day-dominating things — what reshapes a day's rhythm
 
@@ -92,7 +93,7 @@ You may make inferences from indirect signals when the inference is specific and
 Signals individually:
 - Alex mentioned "I'm tired" twice this week (chat).
 - Sleep log shows bedtime past midnight 4 of 7 nights.
-- Peter said "mom seemed off" (chat, two days ago).
+- A child said "mom seemed off" (chat, two days ago).
 
 Inference: one issue about Alex's mood and sleep, its `what` naming each signal with its date.
 

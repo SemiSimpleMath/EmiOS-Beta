@@ -50,7 +50,7 @@ PROCESSED_SENTINEL = "none"
 
 CARD_SECTION_VOCAB = [
     ("contact", "phone numbers, emails, mailing/home addresses, social handles. Anything actionable as contact info."),
-    ("connection_to_user", "Relationships that define this entity's place in the user's life: spouse, parent of the user, child of the user, sibling of the user, close friend/mentor — AND relationships within the user's family circle (parent of the user's kids, sibling of the user's spouse, etc.). 'Katy is Peter's mother' goes here when Peter is the user's son, because that relationship is core to Katy's identity in the user's life. Pets of the household also belong here."),
+    ("connection_to_user", "Relationships that define this entity's place in the user's life: spouse, parent of the user, child of the user, sibling of the user, close friend/mentor — AND relationships within the user's family circle (parent of the user's kids, sibling of the user's spouse, etc.). 'Katy is Noah's mother' goes here when Noah is the user's son, because that relationship is core to Katy's identity in the user's life. Pets of the household also belong here."),
     ("where_they_are", "active residence, current workplace, current city/country"),
     ("what_they_do", "active occupation, ongoing projects, ongoing responsibilities"),
     ("notes", "active preferences, traits, ongoing context that doesn't fit elsewhere"),

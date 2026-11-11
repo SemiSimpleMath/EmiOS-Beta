@@ -32,7 +32,7 @@ def test_anchor_is_the_per_instance_event_id():
 def test_calendar_lines_are_prefixed_with_their_anchor():
     content = (
         "Found 2 calendar events from A to B.\n"
-        "- Makeup Picture Day @ 2026-09-18T15:00:00+00:00  location=South Lake\n"
+        "- Makeup Picture Day @ 2026-09-18T15:00:00+00:00  location=Pine Lake\n"
         "- Dentist @ 2026-09-19T17:00:00+00:00"
     )
     events = [
@@ -46,7 +46,7 @@ def test_calendar_lines_are_prefixed_with_their_anchor():
     assert out.split("\n")[0] == "Found 2 calendar events from A to B."
     # Everything the tool put on the line survives — location et al are why this rewrites
     # the tool's output instead of rendering its own.
-    assert "location=South Lake" in out
+    assert "location=Pine Lake" in out
 
 
 def test_an_event_line_with_no_start_still_gets_its_anchor():

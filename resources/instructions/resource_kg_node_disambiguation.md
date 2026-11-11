@@ -14,8 +14,8 @@ genuine growth into the same instance — the anchor (couple + date +
 place) didn't change, only the participant list.
 
 Examples: a specific Wedding, "Espoo–Karjalohja Bike Ride", "School
-drop-off (Annika at Foothill, 8am)", "Trip to Palm Desert 2024-03",
-"Performance at South Lake Middle School 2025".
+drop-off (Mia at Maple, 8am)", "Trip to Palm Desert 2024-03",
+"Performance at Pine Lake Middle School 2025".
 
 ### Category-shaped: a generic label with no instance anchor
 

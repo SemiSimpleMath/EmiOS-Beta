@@ -329,7 +329,7 @@ The URI then flows through unified_log → entity_resolver (which preserves `dat
 
 There are also **two image surfaces** with asymmetric needs:
 
-- **Curated identity** — `resources/identity/<entity>.<ext>` (`jukka.jpg`, `peter.jpg`). Filename IS semantic. Replacing a photo keeps the same name. Profile/avatar use case. Personal photos gitignored except `README`.
+- **Curated identity** — `resources/identity/<entity>.<ext>` (`jukka.jpg`, `noah.jpg`). Filename IS semantic. Replacing a photo keeps the same name. Profile/avatar use case. Personal photos gitignored except `README`.
 - **Content-addressed flow** — `data/images/<hash>` (above). Hashed by content. Auto-populated by ingest paths.
 
 Both surfaces produce the same kind of pod. KG edges express role: `has_profile_image` (one canonical, from `resources/identity/`) vs `depicted_in` (many, from any flow image). The `image_reconcile.reconcile_directory` routine walks either surface and uses sidecar stamps + content-hash lookup to handle file moves without breaking pod-store ↔ filesystem links — sidecar JSON over xattr/EXIF for v1 because portable. See `project_image_storage_and_stamping` memo.

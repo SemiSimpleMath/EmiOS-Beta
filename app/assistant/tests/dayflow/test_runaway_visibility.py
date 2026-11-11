@@ -1,6 +1,6 @@
 """A goal that is eating itself says so, and a finished node's subtree stops with it.
 
-2026-09-13. A goal reading "record the October 9 Woodbridge PTSA Reflections deadline"
+2026-09-13. A goal reading "record the October 9 Westfield PTSA Reflections deadline"
 answered itself at 16:27 with a source URL and delivered that to the user by ticket at
 16:58. It then grew to 117 nodes and ten levels of recursion by 17:40, burning about $4 an
 hour against a $9.54 daily average, until it was stopped by hand.

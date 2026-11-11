@@ -1,7 +1,7 @@
 """pod_fetch id canonicalization: a transcribed pod id must not read as "missing".
 
 Agents copy pod ids between prompts and tool calls, and the observed slip is a
-dropped ``datapod:<kind>:`` prefix — the 2026-09-01 SLMS syllabus episode: the
+dropped ``datapod:<kind>:`` prefix — the 2026-09-01 PLMS syllabus episode: the
 worker fetched ``6f7f901e...`` bare, the exact-match store said "missing" for a
 pod it held, and the deliverable shipped without the one document that mattered.
 
@@ -67,7 +67,7 @@ def test_exact_id_is_untouched():
 
 
 def test_bare_suffix_is_repaired_and_fetches():
-    """The SLMS regression: the bare hash must hydrate, loudly."""
+    """The PLMS regression: the bare hash must hydrate, loudly."""
     tool = _tool(_StubStore(CANON))
     data, content = _fetch(tool, ["6f7f901ec26cb4adf53413c8"])
     assert len(data["pods"]) == 1, "bare suffix must repair to the canonical id"

@@ -203,7 +203,7 @@ class ScopeContext(ScopeBaseModel):
     # scope? Default "user" = the primary human user (Jukka); Emi reads his
     # email, sends from his address, etc. "emi" = Emi acts on her own behalf
     # (her own Gmail, her own social accounts, signups for her own tooling).
-    # Future principals are anticipated — Katy, Peter, an external client —
+    # Future principals are anticipated — Katy, Noah, an external client —
     # each with their own accounts / voice / skill bundle / memory scope /
     # authority gates. Hence string-typed; validation happens at runtime
     # against a principals registry rather than at the schema level, so a

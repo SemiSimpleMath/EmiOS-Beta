@@ -46,7 +46,7 @@ class FrictionSignal(BaseModel):
         default=None,
         description=(
             "Who or what the friction is about. Family member name "
-            "('Annika', 'Katy'), object/topic ('the dogs', 'work'), or "
+            "('Mia', 'Katy'), object/topic ('the dogs', 'work'), or "
             "'self' when the speaker is talking about themselves. Null "
             "if genuinely ambiguous."
         ),

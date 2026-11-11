@@ -313,7 +313,7 @@ def api_fill_dates(finding_id):
 def api_resolve_with_prose(finding_id):
     """Resolve a CLUSTER LEAD by writing one line of user prose.
 
-    Body: {"prose": "Annika stopped taking art lessons in November 2025."}
+    Body: {"prose": "Mia stopped taking art lessons in November 2025."}
 
     Synchronous flow (the user is waiting on the response):
       1. Persist the prose onto the lead's evidence_json.cluster.

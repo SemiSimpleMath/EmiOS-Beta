@@ -1,4 +1,4 @@
-# Meal proposer house rules — Jukka's household
+# Meal proposer house rules
 
 This file holds the household-specific calibration for meal_proposer:
 worked examples, the recipe vocabulary this family actually cooks,
@@ -19,57 +19,55 @@ outside the registry except via a `novelty` slot (capped at 1/week).
 
 ## Dietary constraints to respect (from KG, mirrored here for visibility)
 
-- Jukka has GERD — avoid heavy tomato in evening meals
-- Jukka is prediabetic — limit refined carbs, especially evening
-- Jukka uses intermittent fasting — typically skip breakfast OR delay
-  it to ~10am (check today's diet_log to see)
-- Kids (Peter, Annika) are generally not picky but Annika has been
-  skipping breakfast lately — portable options preferred for school
-  mornings
+<!-- List each household member's dietary constraints that should shape meal
+proposals: health conditions that rule out ingredients, eating patterns
+(skipped or delayed meals), and practical needs such as portable breakfasts. -->
 
-## Worked example — meal proposal addressing the Jukka-fatigue concern
+- (household member): (constraint — what to avoid or prefer, and when)
 
-If the addressable_concerns list contains "Jukka's sleep/fatigue has
+## Worked example — meal proposal addressing a fatigue concern
+
+If the addressable_concerns list contains "the user's sleep/fatigue has
 been recurring", a proposal that addresses it might look like:
 
 ```
-actors: ["Jukka", "Katy", "Peter", "Annika"]
+actors: ["<the user>", "<the partner>", "<child>"]
 meal_window: "dinner"
-date: "2026-05-20"
-proposed_start_local: "2026-05-20T18:00:00-07:00"
+date: "YYYY-MM-DD"
+proposed_start_local: "YYYY-MM-DDT18:00:00"
 dish: "Grilled chicken + roasted broccoli + brown rice"
 source: "home_cooked"
 primary_ingredients: ["chicken", "broccoli", "brown rice"]
 needs_shopping: []
 estimated_calories_per_person: 550
 recipe_ref: "Roast chicken + roasted veg"
-reasoning: "Lighter than usual + earlier serving time to support Jukka's
-  sleep concern. Familiar recipe, all ingredients in inventory."
+reasoning: "Lighter than usual + earlier serving time to support the
+  user's sleep concern. Familiar recipe, all ingredients in inventory."
 confidence: "high"
 novelty: "familiar"
 ```
 
 Notice:
-- proposed_start_local is EARLIER than the default 18:30 family dinner
-- dish is lighter than carbonara or tacos
+- proposed_start_local is EARLIER than the household's usual dinner time
+- dish is lighter than the household's heavier regulars
 - reasoning explicitly names the concern in prose ("supports the
-  fatigue pattern" / "responds to Jukka's recurring tiredness")
+  fatigue pattern" / "responds to the user's recurring tiredness")
 
 ## Family-roster awareness
 
-If Katy is traveling, propose simpler solo meals for Jukka + leftovers
-for the kids. If Jukka is solo (e.g., family on a weekend trip), propose
-minimal one-person meals.
+If one adult is traveling, propose simpler meals for whoever is home
+plus leftovers for the kids. If the user is solo (e.g., family on a
+weekend trip), propose minimal one-person meals.
 
 If date night is in `addressable_concerns` (from romantic_proposer's
-intentions in the pod store), DON'T propose a family dinner for Jukka+Katy
-that night. Propose a smaller family meal for Peter+Annika only.
+intentions in the pod store), DON'T propose a family dinner for the
+couple that night. Propose a smaller family meal for the kids only.
 
 ## Local restaurants worth considering (when novelty="novel")
 
-Phase 1c will add real web research for new places. For 1a, these are
-known options:
-- (TBD — add as we discover what Jukka and Katy enjoy)
+<!-- List restaurants the household would consider trying or returning to. -->
+
+- (TBD — add as you discover what the household enjoys)
 
 When proposing a restaurant, set:
 - source = "restaurant"
