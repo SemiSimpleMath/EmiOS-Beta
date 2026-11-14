@@ -1,0 +1,4 @@
+{
+  "_doc": "Weekly grocery order settings. default_order: when an approved weekly grocery list is ordered unless the owner picks another time on /meals; weekday is a day name, time is local HH:MM.",
+  "default_order": {"weekday": "Monday", "time": "10:00"}
+}

@@ -55,6 +55,22 @@ WHAT YOU PRODUCE
    slot has a concrete `dish` (or venue, for fast_food/takeout/
    dine_out).
 
+3. **grocery_list** — the week's whole Ralphs order, delivered through
+   DoorDash after the owner reviews and approves it. It holds:
+   - the ingredients for every home_cook and novelty slot that are not
+     already in the inventory;
+   - each standing staple that is due this week. Judge every staple on
+     its own: it is due when the inventory does not have it and it was
+     not bought recently enough to still be in the house, given how
+     fast the household goes through it. A staple bought every week for
+     weeks running with no sign it ran out is a candidate to skip;
+   - every item with a quantity, a store section and a reason in words;
+   - one line per product: when a meal and a staple call for the same thing, it is a single item whose
+     quantity covers both and whose reason names both.
+   Every staple left off goes in `skipped_staples` with why. An item the
+   owner removed from a recent list stays off unless something changed;
+   an item he added is a sign of a need the list missed.
+
 ============================================================
 CADENCE + VARIETY RULES
 ============================================================
@@ -110,9 +126,11 @@ INPUTS (in user message)
 - `recent_planned_meals` — compact summary of dishes + venues from
   the past 4 weeks' plan pods. Drives variety + cadence checks.
 - `inventory_snapshot` — current kitchen items with decay state.
-- `ralphs_standing_list` — staples always bought (READ-ONLY; exclude
-  from shopping list).
-- `agent_weekly_list_state` — current state of the Google Doc.
+- `ralphs_standing_list` — the household's standing staples (read-only);
+  each is a candidate for this week's order, judged as above.
+- `recent_purchases` — what arrived in the past 4 weeks, with dates.
+- `recent_grocery_lists` — the past weeks' lists, with every change the
+  owner made to them.
 
 ============================================================
 WORKED EXAMPLES
@@ -187,10 +205,10 @@ HARD RULES
    hasn't filled it in yet), prefer `home_cook` over inventing a
    venue.
 
-7. weekly_shopping_list MUST cover ingredients for ALL home_cook +
-   novelty slots across the week, MINUS items in inventory and MINUS
-   items on the Ralphs standing list. Fast food / takeout / dine_out
-   / leftover slots contribute nothing to the shopping list.
+7. grocery_list MUST cover ingredients for ALL home_cook + novelty
+   slots across the week, minus items in the inventory, plus the
+   standing staples due this week. Fast food / takeout / dine_out /
+   leftover slots contribute nothing to it.
 
 8. Respect the registry's "What NOT to propose" section. If a
    constraint there conflicts with a dish you'd otherwise pick, pick

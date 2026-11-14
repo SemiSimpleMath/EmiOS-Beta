@@ -5,8 +5,10 @@ Strategic planning of the week's meal rhythm. Outputs:
   a concrete dish, categorized by where the meal comes from (home cook,
   fast food, takeout, dine-out, leftover, novelty). Breakfast stays
   free-choice or skipped (IF).
-- WeeklyShoppingList: ingredients for the home-cook + novelty slots
-  across the week, minus inventory and minus the Ralphs standing list.
+- GroceryList: the week's whole Ralphs order (2026-11-14) — ingredients for
+  the home-cook + novelty slots plus the standing staples needed this week,
+  minus what is in the inventory; each item with its reason, and the staples
+  left off with why. The owner reviews and approves it on /meals.
 
 The planner draws dishes/venues from the household_food_registry
 (`resource_household_food_registry`). Most slots reuse known items
@@ -35,7 +37,6 @@ SlotType = Literal[
     "flex",        # BREAKFAST ONLY — household eats cereal/fruit/whatever ad hoc
     "skip",        # BREAKFAST ONLY — intentionally skipped (IF window)
 ]
-WeeklyListAction = Literal["none", "create", "replace"]
 
 
 class SlotPlan(BaseModel):
@@ -102,30 +103,40 @@ class WeeklyMealPlan(BaseModel):
     )
 
 
-class WeeklyShoppingList(BaseModel):
-    """The agent's per-week shopping list — separate from Jukka's standing
-    Ralphs list. Persist step calls create_google_doc or edit_google_doc."""
+class GroceryItem(BaseModel):
+    """One thing to order from Ralphs this week."""
     model_config = ConfigDict(extra="forbid")
-    action: WeeklyListAction = Field(
-        description=(
-            "'create' if state has no doc_id; 'replace' if it does; "
-            "'none' to skip the doc write this run."
-        ),
+    name: str = Field(max_length=120, description="The product, as you would search for it at Ralphs.")
+    quantity: str = Field(max_length=60, description="How much, e.g. '2 lb', '1 dozen', '2 boxes'.")
+    category: str = Field(
+        max_length=40,
+        description="Store section: Produce, Meat & Seafood, Dairy & Eggs, Bakery, Frozen, Pantry, Snacks, "
+                    "Drinks, Household, or Other.",
     )
-    body_markdown: str = Field(
+    reason: str = Field(
+        max_length=200,
+        description="Why it is on the list, in words: the meal(s) it is for, or the staple and why it is due.",
+    )
+
+
+class SkippedStaple(BaseModel):
+    """A standing staple left off this week's order."""
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(max_length=120)
+    reason: str = Field(max_length=200, description="Why not this week, in words.")
+
+
+class GroceryList(BaseModel):
+    """The week's whole Ralphs order, for the owner to review and approve on /meals."""
+    model_config = ConfigDict(extra="forbid")
+    items: List[GroceryItem]
+    skipped_staples: List[SkippedStaple] = Field(
+        description="Every standing staple you left off this week, each with why.",
+    )
+    note: str = Field(
         default="",
-        max_length=8000,
-        description=(
-            "Full markdown body. Required when action != 'none'. Organize "
-            "by category (## Produce / ## Meat & Seafood / ## Dairy / "
-            "## Pantry / ## Other). EXCLUDE items already on the Ralphs "
-            "standing list (staples coming anyway) and items currently in "
-            "inventory."
-        ),
-    )
-    week_start_date: Optional[str] = Field(
-        default=None,
-        description="ISO date for the Monday this list covers. Required when action != 'none'.",
+        max_length=600,
+        description="Anything the owner should know when reviewing the list (1-3 sentences), or empty.",
     )
 
 
@@ -133,7 +144,7 @@ class AgentForm(BaseModel):
     """Top-level weekly_meal_planner output."""
     model_config = ConfigDict(extra="forbid")
     weekly_plan: WeeklyMealPlan
-    weekly_shopping_list: WeeklyShoppingList
+    grocery_list: GroceryList
     free_form_thinking: str = Field(
         max_length=1000,
         description=(

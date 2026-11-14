@@ -80,6 +80,9 @@ _DOMAIN_KEYWORDS: dict[str, tuple[str, ...]] = {
         "check out", "go to ", "on that page", "in the browser",
         "modal", "scroll down", "scroll up", "snapshot",
     ),
+    "groceries": (
+        "grocery", "groceries", "ralphs", "kitchen inventory",
+    ),
     "filesystem": (
         "documents folder", "documents directory", "my documents",
         "downloads folder", "downloads directory", "desktop folder",

@@ -52,8 +52,8 @@ def main():
         slots = plan.get("slots") or []
         print(f"theme: {plan.get('week_theme', '')[:200]}")
         print(f"slots ({len(slots)}): {dict(Counter(s.get('slot_type') for s in slots))}")
-        wl = out.get("weekly_shopping_list") or {}
-        print(f"weekly_shopping_list: action={wl.get('action')}")
+        gl = out.get("grocery_list") or {}
+        print(f"grocery_list: {len(gl.get('items') or [])} items, {len(gl.get('skipped_staples') or [])} staples skipped")
         print("\n(--no-persist set; nothing minted)")
     else:
         for k, v in summary.items():

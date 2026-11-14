@@ -7,7 +7,7 @@ llm_params:
 
 # Single-shot strategic planner. Pre-fetched context (inventory + Ralphs +
 # concerns + recipes_house + family roster) is enough; the persist layer
-# handles google_docs side effects (create/replace the weekly shopping doc).
+# stores the week's grocery list (subconscious/grocery_lists.py).
 allowed_tools: []
 except_tools: []
 allowed_nodes: []
@@ -30,7 +30,8 @@ user_context_items:
   # Shopping-list mechanics (raw data — not LLM-distillable)
   - inventory_snapshot
   - ralphs_standing_list
-  - agent_weekly_list_state
+  - recent_purchases
+  - recent_grocery_lists
   # Go-to rotation with DUE/RESTING cadence markers (built alongside
   # inventory_snapshot in meal_context_builder; the template references it).
   - easy_meals_rotation

@@ -19,6 +19,7 @@ from app.assistant.subconscious.easy_meals import (
     remove_easy_meal,
     update_easy_meal,
 )
+from app.assistant.subconscious import grocery_lists
 from app.assistant.subconscious.grocery_inventory import manual_acquire, remove_item
 from app.assistant.subconscious.meal_page_service import (
     build_easy_meals_view_model,
@@ -27,6 +28,7 @@ from app.assistant.subconscious.meal_page_service import (
     generate_plan_for_week,
 )
 from app.assistant.utils.logging_config import get_logger
+from app.assistant.utils.time_utils import local_to_utc
 
 logger = get_logger(__name__)
 
@@ -76,6 +78,37 @@ def inventory_remove():
     if item_id:
         remove_item(item_id, reason="meals_ui")
     return redirect(url_for("meals.inventory_page"))
+
+
+@meals_bp.route("/meals/grocery/<action>", methods=["POST"])
+def grocery_change(action):
+    """The weekly grocery list editor's form posts: add / remove / quantity / approve / skip / reopen. Each
+    redirects back to the week; a change the list's state refuses (e.g. editing an approved list) is a 400 with
+    the reason."""
+    form = request.form
+    week = (form.get("week_start") or "").strip()
+    if not week:
+        return "week_start required", 400
+    try:
+        if action == "add":
+            grocery_lists.add_item(week, name=form.get("name") or "", quantity=form.get("quantity") or "",
+                                   category=form.get("category") or "", reason=form.get("reason") or "")
+        elif action == "remove":
+            grocery_lists.remove_item(week, form.get("item_id") or "")
+        elif action == "quantity":
+            grocery_lists.set_quantity(week, form.get("item_id") or "", form.get("quantity") or "")
+        elif action == "approve":
+            grocery_lists.approve(week, local_to_utc(form.get("order_at") or ""))
+        elif action == "skip":
+            grocery_lists.skip(week)
+        elif action == "reopen":
+            grocery_lists.reopen(week)
+        else:
+            return f"unknown grocery action {action!r}", 404
+    except ValueError as e:
+        logger.warning("[meals] grocery %s refused for %s: %s", action, week, e)
+        return str(e), 400
+    return redirect(url_for("meals.meals_page", week=week, _anchor="grocery"))
 
 
 @meals_bp.route("/meals/easy-meals")

@@ -405,3 +405,120 @@ body {
     overflow-x: auto;
     font-size: 13px;
 }
+
+/* Weekly grocery list editor (2026-11-14) */
+.grocery-status {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 2px 10px;
+    border-radius: 999px;
+    text-transform: capitalize;
+    background: #e2e8f0;
+    color: #2d3748;
+}
+.grocery-status-draft     { background: #fef3c7; color: #92400e; }
+.grocery-status-approved  { background: #dcfce7; color: #166534; }
+.grocery-status-ordered,
+.grocery-status-delivered { background: #e0e7ff; color: #3730a3; }
+.grocery-status-skipped   { background: #f1f5f9; color: #64748b; }
+
+.grocery-note,
+.grocery-state-line {
+    margin: 0 0 12px 0;
+    font-size: 14px;
+    color: #4a5568;
+}
+
+.grocery-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    margin-bottom: 14px;
+}
+.grocery-table th {
+    text-align: left;
+    font-size: 12px;
+    font-weight: 600;
+    color: #718096;
+    border-bottom: 1px solid #e2e8f0;
+    padding: 6px 8px;
+}
+.grocery-table td {
+    border-bottom: 1px solid #f1f5f9;
+    padding: 6px 8px;
+    vertical-align: middle;
+}
+.grocery-name { font-weight: 600; color: #1f2330; }
+.grocery-reason { color: #4a5568; }
+.grocery-have {
+    font-size: 11px;
+    font-weight: 600;
+    color: #166534;
+    background: #dcfce7;
+    border-radius: 999px;
+    padding: 1px 8px;
+    margin-left: 4px;
+}
+
+.grocery-inline-form {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    margin: 0;
+}
+.grocery-qty-input {
+    width: 90px;
+    padding: 4px 6px;
+    border: 1px solid #cbd5e0;
+    border-radius: 6px;
+    font-size: 13px;
+}
+
+.grocery-add-form,
+.grocery-approve-form,
+.grocery-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 14px;
+}
+.grocery-add-form input,
+.grocery-approve-form input {
+    padding: 6px 8px;
+    border: 1px solid #cbd5e0;
+    border-radius: 6px;
+    font-size: 14px;
+}
+.grocery-actions form { margin: 0; }
+
+.grocery-btn {
+    background: #d97706;
+    color: #ffffff;
+    border: none;
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+}
+.grocery-btn:hover { background: #b45309; }
+.grocery-btn-small { padding: 4px 10px; font-size: 12px; }
+.grocery-btn-approve { background: #16a34a; }
+.grocery-btn-approve:hover { background: #15803d; }
+.grocery-btn-secondary { background: #e2e8f0; color: #2d3748; }
+.grocery-btn-secondary:hover { background: #cbd5e0; }
+.grocery-btn-remove { background: transparent; color: #a0aec0; padding: 4px 8px; }
+.grocery-btn-remove:hover { background: #fee2e2; color: #b91c1c; }
+
+.grocery-skipped {
+    margin-bottom: 14px;
+    font-size: 14px;
+    color: #4a5568;
+}
+.grocery-skipped ul { margin: 6px 0 0 0; padding-left: 18px; }
+.grocery-skipped li { margin-bottom: 4px; }
+
+@media (max-width: 640px) {
+    .grocery-table th:nth-child(3),
+    .grocery-table td:nth-child(3) { display: none; }
+}

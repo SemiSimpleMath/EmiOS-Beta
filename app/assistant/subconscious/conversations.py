@@ -310,6 +310,18 @@ def _noticer_group(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
              "conversations": [{"label": "Raised", "turns": _render_turns(turns)}]}]
 
 
+def _grocery_group(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not events:
+        return []
+    turns = sorted((_event_turn(e) for e in events), key=lambda t: t["at"])
+    return [{"heading": "The weekly grocery list",
+             "description": "Each step of a week's grocery order: the weekly meal planner's list ready for the owner "
+                            "to review on the meals page, and the owner approving it with the time it is ordered, "
+                            "skipping the week or reopening the list there.",
+             "first_at": turns[0]["at"],
+             "conversations": [{"label": "Steps", "turns": _render_turns(turns)}]}]
+
+
 def build(events: List[Dict[str, Any]], *, now_utc: Optional[datetime] = None,
           work_labels: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
     """Group events (brain_events rows, each with a `mark` and optionally a `note`) into chat rooms,
@@ -320,7 +332,8 @@ def build(events: List[Dict[str, Any]], *, now_utc: Optional[datetime] = None,
     reader must know where something was said and to whom."""
     now = now_utc or datetime.now(timezone.utc)
     by_source: Dict[str, List[Dict[str, Any]]] = {"chat": [], "email": [], "work": [], "camera": [], "presence": [],
-                                                  "time": [], "calendar": [], "ticket": [], "noticer": []}
+                                                  "time": [], "calendar": [], "ticket": [], "noticer": [],
+                                                  "grocery": []}
     for e in events:
         if e["source"] not in by_source:
             raise ValueError(f"brain event {e['source_ref']} has unknown source {e['source']!r}")
@@ -329,7 +342,7 @@ def build(events: List[Dict[str, Any]], *, now_utc: Optional[datetime] = None,
               + _work_groups(by_source["work"], work_labels or {}) + _camera_groups(by_source["camera"])
               + _presence_group(by_source["presence"]) + _time_group(by_source["time"])
               + _calendar_group(by_source["calendar"]) + _ticket_group(by_source["ticket"])
-              + _noticer_group(by_source["noticer"]))
+              + _noticer_group(by_source["noticer"]) + _grocery_group(by_source["grocery"]))
     groups.sort(key=lambda g: g["first_at"])
     for g in groups:
         del g["first_at"]

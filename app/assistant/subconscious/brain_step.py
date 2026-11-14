@@ -121,6 +121,8 @@ def group_matters(events: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
             key = ("tickets",)
         elif e["source"] == "noticer":
             key = ("noticer", e["id"])          # each issue its own matter
+        elif e["source"] == "grocery":
+            key = ("grocery", e["source_ref"].split(":")[1])   # one week's list
         else:
             key = ("room", e.get("room_id"))
         groups.setdefault(key, []).append(e)
@@ -222,7 +224,7 @@ def _concern_view(label: str, c: Dict[str, Any]) -> Dict[str, Any]:
 _ATTACHABLE = ("brain_event",)
 # Where a concern raised from an event came from (rule 6): the owner, in chat or a ticket reply, or the event's sense.
 _SOURCE_KIND = {"chat": "user", "ticket": "user", "email": "email", "calendar": "calendar", "camera": "camera",
-                "presence": "presence", "work": "work", "noticer": "noticer"}
+                "presence": "presence", "work": "work", "noticer": "noticer", "grocery": "grocery"}
 
 
 def _source(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -458,6 +460,8 @@ def _evidence(e: Dict[str, Any]) -> Dict[str, Any]:
         return {"kind": "ticket_reply", "ref": e["source_ref"], "snippet": e["text"]}
     if e["source"] == "noticer":
         return {"kind": "noticer_issue", "ref": e["source_ref"], "snippet": e["text"]}
+    if e["source"] == "grocery":
+        return {"kind": "grocery_list", "ref": e["source_ref"], "snippet": e["text"]}
     return {"kind": "chat_msg", "ref": e["source_ref"], "snippet": e["text"]}
 
 

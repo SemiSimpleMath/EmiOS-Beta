@@ -33,8 +33,9 @@ from app.assistant.utils.time_utils import get_local_time
 logger = get_logger(__name__)
 
 
-def build_weekly_meal_planner_context() -> Dict[str, str]:
-    """Context for weekly_meal_planner (strategic, full-week).
+def build_weekly_meal_planner_context(week_start: Optional[str] = None) -> Dict[str, str]:
+    """Context for weekly_meal_planner (strategic, full-week) for the week starting `week_start` (ISO Monday;
+    None plans the current week).
 
     Note on the calendar slot: `general_calendar_week` covers the next
     7 days from non-Food calendars (travel, visitors, work, family
@@ -44,13 +45,16 @@ def build_weekly_meal_planner_context() -> Dict[str, str]:
     against. Audience signals (e.g. "Marika visits Tuesday") come
     from general_calendar_week.
     """
+    from app.assistant.subconscious import grocery_inventory, grocery_lists
+
     now_local = get_local_time()
     household_members = _resolve_household_members()
+    week_iso = week_start or _compute_week_start_date(now_local)
 
     return {
         "date_time": now_local.strftime("%Y-%m-%d %H:%M %Z"),
         "day_of_week": now_local.strftime("%A"),
-        "week_start_date": _compute_week_start_date(now_local),
+        "week_start_date": week_iso,
         "diet_log_7d": _build_diet_log(),
         "inventory_snapshot": _build_inventory_snapshot(),
         "recipes_house": _build_recipes_house_reference(),
@@ -63,7 +67,8 @@ def build_weekly_meal_planner_context() -> Dict[str, str]:
         "fast_food_count_7d": _build_fast_food_count(),
         "recent_planned_meals": _build_recent_planned_meals(),
         "ralphs_standing_list": _build_ralphs_standing_list(),
-        "agent_weekly_list_state": _build_agent_weekly_list_state(),
+        "recent_purchases": grocery_inventory.render_recent_purchases(days=28),
+        "recent_grocery_lists": grocery_lists.render_recent_for_planner(before_week=week_iso),
     }
 
 
@@ -698,11 +703,10 @@ def _build_fast_food_count() -> str:
     return "\n".join(lines)
 
 
-# ── Phase 1c.1: external lists (Ralphs standing + agent's weekly) ─────────
+# ── Phase 1c.1: external lists (the Ralphs standing list) ────────────────
 
 
 _EXTERNAL_LISTS_REL = "subconscious/resource_meal_proposer_external_lists.json"
-_WEEKLY_DOC_STATE_REL = "subconscious/resource_meal_proposer_weekly_doc_state.json"
 
 
 def _load_external_lists() -> Dict[str, Any]:
@@ -715,24 +719,9 @@ def _load_external_lists() -> Dict[str, Any]:
         return {"lists": []}
 
 
-def load_weekly_doc_state() -> Dict[str, Any]:
-    """Public — also used by meal_persist."""
-    if not resource_files.exists(_WEEKLY_DOC_STATE_REL):
-        return {"doc_id": None, "doc_title": None, "last_built_week_start": None, "last_edit_at_utc": None}
-    try:
-        return resource_files.read(_WEEKLY_DOC_STATE_REL)
-    except Exception as e:
-        logger.warning("[meal_context] weekly_doc_state parse failed: %s", e)
-        return {"doc_id": None, "doc_title": None, "last_built_week_start": None, "last_edit_at_utc": None}
-
-
-def save_weekly_doc_state(state: Dict[str, Any]) -> None:
-    resource_files.write(_WEEKLY_DOC_STATE_REL, state)
-
-
 def _build_ralphs_standing_list() -> str:
-    """Read the Ralphs doc (Jukka's standing list of staples) via
-    get_google_doc tool. Read-only — the proposer never edits this list."""
+    """Read the Ralphs doc (the household's standing list of staples) via the
+    get_google_doc tool. Read-only; each agent's prompt says how to use it."""
     lists = _load_external_lists().get("lists") or []
     ralphs = next((l for l in lists if (l.get("name") or "").lower() == "ralphs"), None)
     if not ralphs:
@@ -745,38 +734,7 @@ def _build_ralphs_standing_list() -> str:
     if body is None:
         return f"(Ralphs doc {doc_id} could not be read — google auth issue?)"
 
-    return (
-        "Jukka's standing Ralphs list (READ-ONLY, these items are staples he "
-        "always buys — treat them as 'about to be acquired' and DON'T include "
-        "them in your weekly shopping list or shopping_run):\n\n"
-        f"{body.strip() or '(doc is empty)'}"
-    )
-
-
-def _build_agent_weekly_list_state() -> str:
-    """Read the agent's own per-week shopping list (if it exists) via
-    get_google_doc tool. Used so weekly_plan ticks can see the current state
-    before replacing it, and daily ticks can read what's already there."""
-    state = load_weekly_doc_state()
-    doc_id = state.get("doc_id")
-    last_built = state.get("last_built_week_start")
-    if not doc_id:
-        return (
-            "(No agent weekly list doc yet — this is bootstrap. On the next "
-            "weekly_plan tick, set weekly_shopping_list.action='create' and "
-            "provide body_markdown + week_start_date; persist will create the "
-            "doc and store its id.)"
-        )
-
-    body = _fetch_google_doc_body(doc_id)
-    if body is None:
-        return f"(agent weekly list doc {doc_id} could not be read)"
-
-    return (
-        f"Agent's current weekly shopping list doc (doc_id={doc_id}, "
-        f"last_built_week_start={last_built}):\n\n"
-        f"{body.strip() or '(doc is empty)'}"
-    )
+    return body.strip() or "(doc is empty)"
 
 
 def _fetch_google_doc_body(doc_id: str, *, max_chars: int = 8000) -> Optional[str]:

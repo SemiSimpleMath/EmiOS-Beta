@@ -1,0 +1,79 @@
+{
+  "name": "grocery_order",
+  "description": "The weekly grocery order's record. get returns the grocery list the owner approved: the exact items to order from Ralphs through DoorDash, and when. ordered records that the order was placed, with what the store confirmed. delivered records what the receipt says arrived, substitutions included, and adds those items to the kitchen inventory.",
+  "inputs": [
+    {
+      "name": "action",
+      "type": "string",
+      "required": true,
+      "description": "get (the approved list), ordered (the order was placed) or delivered (the receipt came)."
+    },
+    {
+      "name": "week_start",
+      "type": "string",
+      "required": false,
+      "description": "ISO date of the Monday the list is for; leave empty for the open approved or ordered order."
+    },
+    {
+      "name": "note",
+      "type": "string",
+      "required": false,
+      "description": "For ordered: what the store confirmed (order number, total, delivery time), in words. For delivered: anything about the delivery worth keeping."
+    },
+    {
+      "name": "items",
+      "type": "array",
+      "required": false,
+      "description": "For delivered: each item the receipt says arrived, as the receipt names it, substitutions included."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "The list and its state, in words."
+    },
+    {
+      "path": "data.status",
+      "type": "string",
+      "description": "draft, approved, ordered, delivered or skipped."
+    },
+    {
+      "path": "data.items",
+      "type": "array",
+      "description": "The list's items (name, quantity, category, reason)."
+    }
+  ],
+  "arguments_prompt": "action (required): get to read the approved list before building the cart; ordered after the order is placed, with note = what the store confirmed (order number, total, delivery time); delivered after the receipt email arrives, with items = every item the receipt lists as delivered, as it names them, substitutions included (leave out what it lists as unavailable or refunded). week_start: leave empty unless the task names the week.",
+  "metadata": {
+    "min_authority": 50,
+    "approval_min_authority": 50,
+    "planner_description": "The weekly grocery order: get the owner-approved list to order; record the order as placed; record the receipt's delivered items into the kitchen inventory.",
+    "domain": "groceries",
+    "actions": [
+      "get",
+      "read",
+      "record",
+      "order",
+      "update"
+    ],
+    "selectors": [
+      "grocery",
+      "groceries",
+      "grocery list",
+      "inventory",
+      "receipt",
+      "doordash",
+      "ralphs"
+    ],
+    "risk_level": "low",
+    "side_effects": "write",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

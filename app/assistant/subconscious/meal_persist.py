@@ -39,7 +39,7 @@ def _apply_meal_proposer_output(output: Dict[str, Any], *, agent_name: str) -> D
     """Shared persistence for the per-meal proposer (today, daily). Mints
     intention.meal pods + optional intention.shopping pod + summary set pod.
 
-    NOTE: This does NOT handle weekly_shopping_list — that's part of the
+    NOTE: This does NOT handle the weekly grocery list — that's part of the
     weekly_meal_planner pipeline; see apply_weekly_meal_planner_output.
     """
     store = PodStore()
@@ -90,13 +90,15 @@ def _apply_meal_proposer_output(output: Dict[str, Any], *, agent_name: str) -> D
 
 def apply_weekly_meal_planner_output(output: Dict[str, Any]) -> Dict[str, Any]:
     """Persist a weekly_meal_planner run: mint a plan.weekly_meals pod
-    (the strategic 7-day skeleton) + create/replace the agent's weekly
-    shopping list Google Doc."""
+    (the strategic 7-day skeleton) and store the week's grocery list as a
+    draft for the owner to review on /meals (subconscious/grocery_lists.py)."""
+    from app.assistant.subconscious import grocery_lists
+
     store = PodStore()
     now_utc_iso = datetime.now(timezone.utc).isoformat()
 
     weekly_plan = output.get("weekly_plan") or {}
-    weekly_list = output.get("weekly_shopping_list") or {}
+    grocery_list = output.get("grocery_list") or {}
     free_form_thinking = (output.get("free_form_thinking") or "").strip()
 
     _coerce_invalid_slot_types(weekly_plan)
@@ -108,17 +110,21 @@ def apply_weekly_meal_planner_output(output: Dict[str, Any]) -> Dict[str, Any]:
         now_utc_iso=now_utc_iso,
     )
 
-    weekly_action = (weekly_list.get("action") or "none").lower()
-    weekly_result = (
-        _apply_weekly_shopping_list(weekly_list)
-        if weekly_action in {"create", "replace"}
-        else {"action": "none"}
+    week_start = weekly_plan.get("week_start_date")
+    if not week_start:
+        raise ValueError("weekly_meal_planner output has no weekly_plan.week_start_date; the grocery list needs its week")
+    list_result = grocery_lists.save_planned(
+        week_start,
+        items=grocery_list.get("items") or [],
+        skipped_staples=grocery_list.get("skipped_staples") or [],
+        planner_note=grocery_list.get("note") or "",
+        plan_pod_id=plan_pod_id,
     )
 
     return {
         "plan_pod_id": plan_pod_id,
         "slot_count": len((weekly_plan.get("slots") or [])),
-        "weekly_list": weekly_result,
+        "grocery_list": list_result,
     }
 
 
@@ -153,135 +159,6 @@ def _coerce_invalid_slot_types(weekly_plan: Dict[str, Any]) -> None:
             "[meal_persist] coerced %d lunch/dinner slot(s) from flex/skip → home_cook",
             promoted,
         )
-
-
-def _apply_weekly_shopping_list(weekly_list: Dict[str, Any]) -> Dict[str, Any]:
-    """Materialize the agent's weekly shopping list: create_google_doc on
-    first run (bootstraps state), edit_google_doc thereafter. Updates the
-    weekly_doc_state on success.
-    """
-    from app.assistant.ServiceLocator.service_locator import DI
-    from app.assistant.subconscious.meal_context_builder import (
-        load_weekly_doc_state,
-        save_weekly_doc_state,
-    )
-    from app.assistant.utils.pydantic_classes import ToolMessage
-
-    action = (weekly_list.get("action") or "").lower()
-    body = (weekly_list.get("body_markdown") or "").strip()
-    week_start = weekly_list.get("week_start_date")
-    if action not in {"create", "replace"} or not body:
-        return {"action": "none", "reason": "empty_body_or_invalid_action"}
-
-    state = load_weekly_doc_state()
-    now_utc_iso = datetime.now(timezone.utc).isoformat()
-
-    if action == "create":
-        if state.get("doc_id"):
-            logger.warning(
-                "[meal_persist] weekly_list action=create but state already has doc_id=%s — "
-                "treating as replace instead.", state["doc_id"],
-            )
-            action = "replace"
-
-    if action == "create":
-        title = f"Emi weekly shopping list (started {week_start or now_utc_iso[:10]})"
-        try:
-            cls = DI.tool_registry.get_tool_class("create_google_doc")
-            if cls is None:
-                return {"action": action, "status": "tool_unavailable", "tool": "create_google_doc"}
-            tool = cls()
-            tm = ToolMessage(
-                tool_name="create_google_doc",
-                tool_data={"arguments": {"title": title, "body": body}},
-            )
-            result = tool.execute(tm)
-            data = getattr(result, "data", None) or {}
-            doc_id = data.get("document_id") or data.get("doc_id")
-            if not doc_id:
-                return {"action": action, "status": "create_returned_no_doc_id", "raw": str(data)[:240]}
-            state.update({
-                "doc_id": doc_id,
-                "doc_title": title,
-                "last_built_week_start": week_start,
-                "last_edit_at_utc": now_utc_iso,
-            })
-            save_weekly_doc_state(state)
-            return {"action": "create", "status": "ok", "doc_id": doc_id, "title": title}
-        except Exception as e:
-            logger.exception("[meal_persist] create_google_doc failed")
-            return {"action": action, "status": "exception", "error": str(e)[:240]}
-
-    # action == "replace"
-    # edit_google_doc is diff-based: find/replace. To overwrite the whole
-    # body, we first read the current body, then diff-replace the entire
-    # current body with the new body.
-    doc_id = state.get("doc_id")
-    if not doc_id:
-        return {"action": action, "status": "no_doc_id_in_state"}
-    try:
-        # 1. Read current body
-        get_cls = DI.tool_registry.get_tool_class("get_google_doc")
-        if get_cls is None:
-            return {"action": action, "status": "get_tool_unavailable"}
-        get_tool = get_cls()
-        get_tm = ToolMessage(
-            tool_name="get_google_doc",
-            tool_data={
-                "arguments": {"document_id": doc_id, "include_body": True, "max_chars": 100000},
-            },
-        )
-        get_result = get_tool.execute(get_tm)
-        get_data = getattr(get_result, "data", None) or {}
-        current_body = (get_data.get("body") or "").rstrip()
-        if not current_body:
-            # Empty doc — append the new body instead of diff (find="" is ambiguous)
-            edit_cls = DI.tool_registry.get_tool_class("edit_google_doc")
-            edit_tool = edit_cls()
-            edit_tm = ToolMessage(
-                tool_name="edit_google_doc",
-                tool_data={
-                    "arguments": {"document_id": doc_id, "operation": "append", "text": body},
-                },
-            )
-            edit_result = edit_tool.execute(edit_tm)
-            edit_data = getattr(edit_result, "data", None) or {}
-            status = "ok_via_append" if not edit_data.get("error_code") else "edit_failed"
-        else:
-            # 2. Diff-replace current body with new body
-            edit_cls = DI.tool_registry.get_tool_class("edit_google_doc")
-            edit_tool = edit_cls()
-            edit_tm = ToolMessage(
-                tool_name="edit_google_doc",
-                tool_data={
-                    "arguments": {
-                        "document_id": doc_id,
-                        "operation": "diff",
-                        "find": current_body,
-                        "replace_with": body,
-                    },
-                },
-            )
-            edit_result = edit_tool.execute(edit_tm)
-            edit_data = getattr(edit_result, "data", None) or {}
-            status = "ok" if not edit_data.get("error_code") else "edit_failed"
-
-        ok = status.startswith("ok")
-        if ok:
-            state.update({
-                "last_built_week_start": week_start or state.get("last_built_week_start"),
-                "last_edit_at_utc": now_utc_iso,
-            })
-            save_weekly_doc_state(state)
-        return {
-            "action": "replace",
-            "status": status,
-            "doc_id": doc_id,
-            "edit_data_preview": str(edit_data)[:200],
-        }
-    except Exception as e:
-        logger.exception("[meal_persist] edit_google_doc failed")
-        return {"action": action, "status": "exception", "error": str(e)[:240]}
 
 
 def _mint_intention_meal_pod(

@@ -66,16 +66,14 @@ def run_weekly_meal_planning_chain(
     week_start: Optional[str] = None, *, persist: bool = True
 ) -> Dict[str, Any]:
     """Run the full weekly chain for ``week_start`` (ISO Monday; ``None`` uses the current
-    week's Monday from the seed) and optionally persist the plan pod + weekly shopping doc.
+    week's Monday from the seed) and optionally persist the plan pod + the week's grocery list.
 
     Returns the persist summary (incl. ``plan_pod_id``) plus ``week_start_date`` and
     ``meal_context_days``. Fails LOUD — any stage failure raises (callers that need a
     graceful response, e.g. the /meals route, catch it).
     """
-    seed = build_weekly_meal_planner_context()
-    if week_start:
-        # Align the distiller's days[] AND the resulting plan to the target week.
-        seed["week_start_date"] = week_start
+    # The seed is built for the target week: the distiller's days[], the plan and the grocery-list history align.
+    seed = build_weekly_meal_planner_context(week_start)
     week_iso = seed["week_start_date"]
     seed["horizon_days"] = "7"
 
@@ -116,7 +114,8 @@ def run_weekly_meal_planning_chain(
         "easy_meals_rotation": seed.get("easy_meals_rotation"),
         "inventory_snapshot": seed.get("inventory_snapshot"),
         "ralphs_standing_list": seed.get("ralphs_standing_list"),
-        "agent_weekly_list_state": seed.get("agent_weekly_list_state"),
+        "recent_purchases": seed.get("recent_purchases"),
+        "recent_grocery_lists": seed.get("recent_grocery_lists"),
     }
     bb = manager.blackboard
     for k, v in manager_context.items():

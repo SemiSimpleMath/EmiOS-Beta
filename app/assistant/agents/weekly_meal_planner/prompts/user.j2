@@ -66,13 +66,16 @@ around an ingredient the family won't eat just to use up inventory.
 Current kitchen inventory (with category and decay):
 {{ inventory_snapshot }}
 
-Jukka's standing Ralphs list (read-only; EXCLUDE from your shopping list):
+Standing Ralphs staples (each judged for this week's order):
 {{ ralphs_standing_list }}
 
-Agent's own weekly shopping list (current state — you may create/replace):
-{{ agent_weekly_list_state }}
+Groceries that arrived in the past 4 weeks:
+{{ recent_purchases }}
+
+Recent weekly grocery lists and the owner's changes to them:
+{{ recent_grocery_lists }}
 
 ---
 
 Set the week's rhythm per your system prompt. Output an AgentForm with
-weekly_plan + weekly_shopping_list + free_form_thinking.
+weekly_plan + grocery_list + free_form_thinking.

@@ -49,5 +49,13 @@ For text boxes always prefer the `web_fill_xy` tool. This writes your text into 
 - You may go to the cart to verify the order.
 - Once the final order is ready, ask the user to approve that exact order (see web-interaction: stop before the irreversible); place it only on their approval.
 
+## Grocery store orders (a store such as Ralphs, item by item)
+- Open the store through search, then add each item on the list through the store's own search box.
+- Pick the product closest to the list's name and quantity. An item the store does not have stays off the cart; note
+  it rather than choosing something else on your own.
+- When the task is to build the cart, stop at the cart and report every line (product, quantity, price), anything
+  unavailable, the substitution setting, and the total with fees and tip. Placing the order is a separate task that
+  comes after the user's go on that exact cart.
+
 ## Common pitfalls
 - DoorDash is a heavy React SPA — refs in snapshots can become stale quickly. Prefer `web_page_coords` for visual targets when refs are unreliable. Your first try should be refs, but you should quickly realize if something is not working and use visual tools.

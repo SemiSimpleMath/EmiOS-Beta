@@ -73,61 +73,36 @@ def load_recent_intention_shopping_pods(*, days: int = 14) -> List[Pod]:
     return store.query(kind="intention", tags=["shopping"], since=f"{days}d", limit=50)
 
 
-def fetch_weekly_shopping_doc_body() -> Optional[str]:
-    """Fetch the agent's weekly shopping list Google Doc body, if it
-    exists. Returns None when there's no doc state or the fetch fails."""
-    from app.assistant.subconscious.meal_context_builder import load_weekly_doc_state
+def build_grocery_view(week_start: str) -> Optional[Dict[str, Any]]:
+    """The week's grocery list for the /meals editor (subconscious/grocery_lists.py), or None when the week has
+    none: its rows with whether the inventory already has each, its status, and the order time (the one set at
+    approval, else the owner's default) as local text and as a datetime-local value."""
+    from app.assistant.subconscious import grocery_inventory, grocery_lists
+    from app.assistant.utils.time_utils import local_time_text, utc_to_local
 
-    state = load_weekly_doc_state()
-    doc_id = state.get("doc_id")
-    if not doc_id:
+    gl = grocery_lists.get(week_start)
+    if gl is None:
         return None
-
-    try:
-        from app.assistant.ServiceLocator.service_locator import DI
-        from app.assistant.utils.pydantic_classes import ToolMessage
-
-        cls = DI.tool_registry.get_tool_class("get_google_doc")
-        if cls is None:
-            logger.warning("[meal_page_service] get_google_doc tool unavailable")
-            return None
-        tool = cls()
-        tm = ToolMessage(
-            tool_name="get_google_doc",
-            tool_data={
-                "arguments": {
-                    "document_id": doc_id,
-                    "include_body": True,
-                    "max_chars": 50000,
-                },
-            },
-        )
-        result = tool.execute(tm)
-        data = getattr(result, "data", None) or {}
-        body = data.get("body")
-        return str(body).strip() if body else None
-    except Exception as e:
-        logger.warning("[meal_page_service] fetch weekly doc failed: %s", e)
-        return None
+    order_at = gl["order_at"] or grocery_lists.default_order_at(week_start).isoformat()
+    return {
+        "week_start": week_start,
+        "status": gl["status"],
+        # "rows", not "items": Jinja resolves grocery.items to the dict's items() method.
+        "rows": [it | {"have_it": grocery_inventory.has_item(it["name"])} for it in gl["items"]],
+        "skipped_staples": gl["skipped_staples"],
+        "planner_note": gl["planner_note"],
+        "edit_count": len(gl["edits"]),
+        "order_at_text": local_time_text(order_at),
+        "order_at_input": utc_to_local(order_at).strftime("%Y-%m-%dT%H:%M"),
+    }
 
 
-def build_shopping_text(*, doc_body: Optional[str], ad_hoc_pods: List[Pod]) -> str:
-    """Compose the shopping section: weekly doc body (canonical) plus any
-    ad-hoc items added by daily proposer since the doc was last refreshed."""
-    sections: List[str] = []
-    if doc_body:
-        sections.append("From this week's planned list:")
-        sections.append(doc_body)
-
+def build_shopping_text(*, ad_hoc_pods: List[Pod]) -> str:
+    """The ad-hoc shopping items the daily proposer added (the weekly grocery list has its own editor)."""
     ad_hoc_items = consolidate_intention_shopping(ad_hoc_pods)
-    if ad_hoc_items:
-        if sections:
-            sections.append("")
-        sections.append("Ad-hoc additions (added by daily proposer):")
-        for it in ad_hoc_items:
-            sections.append(f"- {it}")
-
-    return "\n".join(sections).strip()
+    if not ad_hoc_items:
+        return ""
+    return "\n".join(["Ad-hoc additions (added by daily proposer):"] + [f"- {it}" for it in ad_hoc_items])
 
 
 def build_page_view_model(week_start: Optional[str] = None) -> Dict[str, Any]:
@@ -157,9 +132,9 @@ def build_page_view_model(week_start: Optional[str] = None) -> Dict[str, Any]:
     viewing_week_iso = viewing_week.isoformat()
     plan_pod = load_plan_pod_for_week(viewing_week_iso)
 
-    doc_body = fetch_weekly_shopping_doc_body()
+    grocery = build_grocery_view(viewing_week_iso)
     ad_hoc_pods = load_recent_intention_shopping_pods()
-    shopping_text = build_shopping_text(doc_body=doc_body, ad_hoc_pods=ad_hoc_pods)
+    shopping_text = build_shopping_text(ad_hoc_pods=ad_hoc_pods)
 
     plan_view: Optional[Dict[str, Any]] = None
     plan_comments: list = []
@@ -190,7 +165,7 @@ def build_page_view_model(week_start: Optional[str] = None) -> Dict[str, Any]:
         "plan_comments_by_scope": plan_comments_by_scope,
         "plan_comments_section": plan_comments_section,
         "shopping_text": shopping_text,
-        "weekly_doc_present": bool(doc_body),
+        "grocery": grocery,
         "ad_hoc_count": len(consolidate_intention_shopping(ad_hoc_pods)),
         "viewing_week": viewing_week_iso,
         "nav": nav,

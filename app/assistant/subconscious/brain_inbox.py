@@ -20,7 +20,9 @@ notice, a question, a dayflow task's ask) (2026-10-09), except a reply to a task
 work reports to the brain (concern_feedback.reports_to_brain) and its report carries the reply. Until then a reply
 such as "you do this every night" to a question, or "stop reminding me" to a reminder, reached no decider. Noticer:
 each issue the daily noticer raises about the long term (a pattern across weeks, a need a date ahead brings), as the
-noticer worded it (2026-10-09; until then the noticer wrote concerns itself). The gate
+noticer worded it (2026-10-09; until then the noticer wrote concerns itself). Grocery: the weekly grocery list (subconscious/grocery_lists.py) reports each step of
+its week: the planner's list ready for the owner's review, and the owner approving it with an order time, skipping
+the week or reopening it on /meals (2026-11-14). The gate
 (subconscious/gate.py) routes each row against the open concerns once it is ready (`ready`): an
 email or camera event at once, a chat room's messages once the room has been quiet for QUIET — `concern` (bears
 on named concerns), `new_matter`, or `none`. Work: dayflow's judgments and endings of work attached
@@ -458,6 +460,41 @@ def add_noticer_issues(issues: List[Dict[str, Any]], *, run_at: datetime, connec
     return added
 
 
+def add_grocery_event(*, week_start: str, change: str, text: str, at: datetime, speaker: str,
+                      connect=None) -> bool:
+    """One step of a week's grocery list (subconscious/grocery_lists.py): `change` is ready (the planner's list awaits
+    the owner's review), approved, skipped or reopened (the owner's acts on /meals). `speaker` is who acted: the
+    planner or the owner. Ref `grocery:<week>:<change>:<at>`, so each step lands once. Returns True when the row is
+    new.
+
+    Routed by code, never gated: the week names its concern. A step goes to the open concern raised from an earlier
+    step of the same week (its source ref starts `grocery:<week>:`), else it is a new matter. (2026-11-14: the gate
+    sent the first list ready to "Decide whether and how to prepare for Thanksgiving", the brain only noted it there,
+    and nothing told the owner the list was ready.)"""
+    from app.assistant.subconscious.concern_store import load_register
+    if change not in ("ready", "approved", "skipped", "reopened"):
+        raise ValueError(f"unknown grocery list change {change!r}")
+    connect = connect or _connect
+    ensure_schema(connect)
+    week_ref = f"grocery:{week_start}:"
+    register = load_register(connect=connect)
+    concern_ids = [c["concern_id"] for b in ("active", "addressing") for c in register.get(b) or []
+                   if str((c.get("source") or {}).get("ref") or "").startswith(week_ref)]
+    route = "concern" if concern_ids else "new_matter"
+    reasoning = ("routed by code: the concern raised from this week's grocery list" if concern_ids
+                 else "routed by code: the first step of this week's grocery list with an open concern")
+    when, now = _iso(at), _iso(datetime.now(timezone.utc))
+    with connect(True) as c:
+        cur = c.execute(
+            "INSERT OR IGNORE INTO brain_events (source, source_ref, occurred_at, room_id, speaker, text, "
+            "received_at, gate_status, route, concern_ids, gate_reasoning, gated_at) "
+            "VALUES ('grocery', ?, ?, NULL, ?, ?, ?, 'routed', ?, ?, ?, ?)",
+            (f"{week_ref}{change}:{when}", when, speaker, text, now, route, json.dumps(concern_ids), reasoning, now))
+    if cur.rowcount:
+        logger.info("[brain_inbox] grocery list for %s: %s", week_start, change)
+    return cur.rowcount == 1
+
+
 def _fetch_answered_tickets(since_utc: datetime) -> List[Dict[str, Any]]:
     """Tickets answered after `since_utc`, oldest first. responded_at is stored as naive UTC."""
     since = since_utc.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
@@ -526,7 +563,7 @@ def pending(connect=None) -> List[Dict[str, Any]]:
 
 
 def ready(events: List[Dict[str, Any]], now_utc: datetime) -> List[Dict[str, Any]]:
-    """The events whose matter is complete: every email, camera, presence, calendar, ticket, noticer and work event, and the chat of every room whose latest
+    """The events whose matter is complete: every email, camera, presence, calendar, ticket, noticer, grocery and work event, and the chat of every room whose latest
     message is at least QUIET old. Messages of a room still talking wait, all of them together."""
     last = _last_message_by_room(events)
     return [e for e in events

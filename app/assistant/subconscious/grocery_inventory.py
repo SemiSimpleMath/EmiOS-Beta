@@ -398,7 +398,32 @@ def _find_item_matching(items: List[Dict[str, Any]], needle: str) -> Optional[Di
     return matches[0]
 
 
+def has_item(name: str) -> bool:
+    """True when an active inventory item matches `name` (the same token match consumption uses)."""
+    return _find_item_matching(load_inventory().get("items") or [], _normalize_item_name(name)) is not None
+
+
 # ── readable summary for context_builder ─────────────────────────────────
+
+
+def render_recent_purchases(*, days: int) -> str:
+    """What arrived in the last `days` days (active and history items alike), newest first, one line each with
+    its date — the weekly planner reads it to see how often a staple is bought."""
+    inv = load_inventory()
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    bought = []
+    for item in list(inv.get("items") or []) + list(inv.get("history") or []):
+        acquired = item.get("acquired_at_utc")
+        if not acquired:
+            continue
+        at = datetime.fromisoformat(acquired.replace("Z", "+00:00"))
+        if at >= cutoff:
+            bought.append((at, item.get("name") or "?"))
+    if not bought:
+        return f"(nothing recorded as bought in the last {days} days)"
+    from app.assistant.utils.time_utils import utc_to_local
+    bought.sort(reverse=True)
+    return "\n".join(f"- {utc_to_local(at).strftime('%a %Y-%m-%d')}: {name}" for at, name in bought)
 
 
 def render_inventory_summary() -> str:

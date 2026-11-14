@@ -83,9 +83,14 @@ def test_daily_proposer_mints_meal_shopping_and_set_pods(monkeypatch):
     assert all(p.created_by == "daily_meal_proposer" for p in store.pods)
 
 
-def test_weekly_planner_mints_plan_pod(monkeypatch):
+def test_weekly_planner_mints_plan_pod(monkeypatch, tmp_path):
+    from app.assistant.subconscious import grocery_lists
+    from belief_engine.intake.store import sqlite_file
+
     store = _FakePodStore()
     monkeypatch.setattr(meal_persist, "PodStore", lambda: store)
+    scratch = sqlite_file(tmp_path / "grocery.db")
+    monkeypatch.setattr(grocery_lists, "_connect", scratch)
 
     output = {
         "weekly_plan": {
@@ -101,8 +106,10 @@ def test_weekly_planner_mints_plan_pod(monkeypatch):
                 }
             ],
         },
-        # action=none keeps the Google-Doc shopping-list write out of the test.
-        "weekly_shopping_list": {"action": "none"},
+        "grocery_list": {
+            "items": [{"name": "capers", "quantity": "1 jar", "category": "Pantry", "reason": "puttanesca"}],
+            "skipped_staples": [],
+        },
         "free_form_thinking": "",
     }
 
@@ -112,3 +119,6 @@ def test_weekly_planner_mints_plan_pod(monkeypatch):
     assert _kinds(store) == ["plan"]
     assert "weekly_meals" in store.pods[0].tags
     assert store.pods[0].created_by == "weekly_meal_planner"
+    assert summary["grocery_list"]["item_count"] == 1
+    gl = grocery_lists.get("2026-06-08", connect=scratch)
+    assert gl["status"] == "draft" and gl["plan_pod_id"] == summary["plan_pod_id"]

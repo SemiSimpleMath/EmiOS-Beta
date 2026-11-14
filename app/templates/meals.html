@@ -124,23 +124,125 @@
             </div>
         </section>
 
-        <section class="meals-shopping-section">
-            <h2>Shopping needs</h2>
-            {% if shopping_text %}
-                <pre class="meals-shopping-text">{{ shopping_text }}</pre>
-                <div class="meals-shopping-meta">
-                    {% if weekly_doc_present %}<span class="meals-pill meals-pill-doc">weekly list from doc</span>{% endif %}
-                    {% if ad_hoc_count %}<span class="meals-pill meals-pill-adhoc">{{ ad_hoc_count }} ad-hoc</span>{% endif %}
-                </div>
+        <section class="meals-shopping-section" id="grocery">
+            <div class="meals-section-head">
+                <h2>Grocery list</h2>
+                {% if grocery %}<span class="grocery-status grocery-status-{{ grocery.status }}">{{ grocery.status }}</span>{% endif %}
+            </div>
+            {% if grocery %}
+                {% set editable = grocery.status == 'draft' %}
+                {% if grocery.planner_note %}<p class="grocery-note">{{ grocery.planner_note }}</p>{% endif %}
 
-                <div class="meals-day-comment-form" data-pod-id="{{ plan.pod_id }}" data-scope="shopping">
-                    <textarea class="meals-comment-input" placeholder="Comment on the shopping list — 'we already have eggs', 'try thai ingredients next week', etc." rows="2"></textarea>
-                    <button class="meals-comment-submit">Submit</button>
-                    <div class="meals-comment-status" hidden></div>
+                {% if grocery.status == 'approved' %}
+                <p class="grocery-state-line">Approved. Ordered from Ralphs through DoorDash at <strong>{{ grocery.order_at_text }}</strong>; you confirm the cart before checkout.</p>
+                {% elif grocery.status == 'skipped' %}
+                <p class="grocery-state-line">Skipped: nothing is ordered this week.</p>
+                {% elif grocery.status in ('ordered', 'delivered') %}
+                <p class="grocery-state-line">{{ grocery.status|capitalize }}.</p>
+                {% endif %}
+
+                <table class="grocery-table">
+                    <thead><tr><th>Item</th><th>Quantity</th><th>Section</th><th>Why</th><th></th></tr></thead>
+                    <tbody>
+                    {% for it in grocery.rows %}
+                    <tr>
+                        <td class="grocery-name">{{ it.name }}{% if it.have_it %} <span class="grocery-have" title="The inventory has this">have it</span>{% endif %}</td>
+                        <td>
+                            {% if editable %}
+                            <form method="post" action="/meals/grocery/quantity" class="grocery-inline-form">
+                                <input type="hidden" name="week_start" value="{{ grocery.week_start }}">
+                                <input type="hidden" name="item_id" value="{{ it.id }}">
+                                <input type="text" name="quantity" value="{{ it.quantity }}" class="grocery-qty-input" aria-label="Quantity of {{ it.name }}">
+                                <button type="submit" class="grocery-btn grocery-btn-small">Save</button>
+                            </form>
+                            {% else %}{{ it.quantity }}{% endif %}
+                        </td>
+                        <td>{{ it.category }}</td>
+                        <td class="grocery-reason">{{ it.reason }}</td>
+                        <td>
+                            {% if editable %}
+                            <form method="post" action="/meals/grocery/remove">
+                                <input type="hidden" name="week_start" value="{{ grocery.week_start }}">
+                                <input type="hidden" name="item_id" value="{{ it.id }}">
+                                <button type="submit" class="grocery-btn grocery-btn-remove" title="Remove {{ it.name }}"><i class="fas fa-xmark"></i></button>
+                            </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="5" class="meals-empty">No items.</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+
+                {% if editable %}
+                <form method="post" action="/meals/grocery/add" class="grocery-add-form">
+                    <input type="hidden" name="week_start" value="{{ grocery.week_start }}">
+                    <input type="text" name="name" placeholder="Add an item" required aria-label="Item to add">
+                    <input type="text" name="quantity" placeholder="Quantity" aria-label="Quantity">
+                    <input type="text" name="category" placeholder="Section" aria-label="Store section">
+                    <button type="submit" class="grocery-btn"><i class="fas fa-plus"></i> Add</button>
+                </form>
+                {% endif %}
+
+                {% if grocery.skipped_staples %}
+                <div class="grocery-skipped">
+                    <span class="meals-label">Staples left off this week</span>
+                    <ul>
+                    {% for s in grocery.skipped_staples %}
+                        <li>
+                            <span class="grocery-name">{{ s.name }}</span>: {{ s.reason }}
+                            {% if editable %}
+                            <form method="post" action="/meals/grocery/add" class="grocery-inline-form">
+                                <input type="hidden" name="week_start" value="{{ grocery.week_start }}">
+                                <input type="hidden" name="name" value="{{ s.name }}">
+                                <input type="hidden" name="reason" value="added back by the owner">
+                                <button type="submit" class="grocery-btn grocery-btn-small"><i class="fas fa-plus"></i> Add back</button>
+                            </form>
+                            {% endif %}
+                        </li>
+                    {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+
+                <div class="grocery-actions">
+                    {% if editable %}
+                    <form method="post" action="/meals/grocery/approve" class="grocery-approve-form">
+                        <input type="hidden" name="week_start" value="{{ grocery.week_start }}">
+                        <label>Order at <input type="datetime-local" name="order_at" value="{{ grocery.order_at_input }}" required></label>
+                        <button type="submit" class="grocery-btn grocery-btn-approve"><i class="fas fa-check"></i> Approve</button>
+                    </form>
+                    {% endif %}
+                    {% if grocery.status in ('draft', 'approved') %}
+                    <form method="post" action="/meals/grocery/skip">
+                        <input type="hidden" name="week_start" value="{{ grocery.week_start }}">
+                        <button type="submit" class="grocery-btn grocery-btn-secondary">Skip this week</button>
+                    </form>
+                    {% endif %}
+                    {% if grocery.status in ('approved', 'skipped') %}
+                    <form method="post" action="/meals/grocery/reopen">
+                        <input type="hidden" name="week_start" value="{{ grocery.week_start }}">
+                        <button type="submit" class="grocery-btn grocery-btn-secondary">Reopen for edits</button>
+                    </form>
+                    {% endif %}
                 </div>
             {% else %}
-                <p class="meals-empty">No shopping list yet — the weekly planner builds this when it runs.</p>
+                <p class="meals-empty">No grocery list for this week yet. The weekly planner builds it on Sunday evening.</p>
             {% endif %}
+
+            {% if shopping_text %}
+            <pre class="meals-shopping-text">{{ shopping_text }}</pre>
+            <div class="meals-shopping-meta">
+                <span class="meals-pill meals-pill-adhoc">{{ ad_hoc_count }} ad-hoc</span>
+            </div>
+            {% endif %}
+
+            <div class="meals-day-comment-form" data-pod-id="{{ plan.pod_id }}" data-scope="shopping">
+                <textarea class="meals-comment-input" placeholder="Comment on the shopping list — 'we already have eggs', 'try thai ingredients next week', etc." rows="2"></textarea>
+                <button class="meals-comment-submit">Submit</button>
+                <div class="meals-comment-status" hidden></div>
+            </div>
         </section>
 
         {% else %}
