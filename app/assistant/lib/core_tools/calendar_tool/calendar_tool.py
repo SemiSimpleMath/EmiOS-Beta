@@ -639,8 +639,10 @@ class CalendarTool(BaseTool):
                     event_data=parsed_event,
                     data_type="calendar",
                 )
-            # Enforce stable 7 day window: repo will match current fetch set
-            self.repo_manager.sync_events_with_server(list(server_ids), "calendar")
+            # Within the fetched window the repo matches the fetch; rows starting after it (e.g. an event the
+            # assistant created weeks ahead) were not covered by this fetch and are kept.
+            window_end = datetime.fromisoformat(str(end_iso).replace("Z", "+00:00"))
+            self.repo_manager.sync_events_with_server(list(server_ids), "calendar", window_end=window_end)
 
         # Create human-readable summary. Agents only see `content`, not
         # `data_list`, so the summary must include enough per-event detail

@@ -223,7 +223,19 @@ class EventRepositoryManager:
         finally:
             session.close()
 
-    def sync_events_with_server(self, server_events: List[str], data_type: str) -> None:
+    @staticmethod
+    def _starts_at_or_after(data: Any, moment: datetime) -> bool:
+        """True when a stored event's `start` (UTC ISO) is at or after `moment`. A row with no start is False."""
+        if isinstance(data, str):
+            data = json.loads(data)
+        start = (data or {}).get("start")
+        if not start:
+            return False
+        return datetime.fromisoformat(str(start).replace("Z", "+00:00")) >= moment
+
+    def sync_events_with_server(
+        self, server_events: List[str], data_type: str, window_end: Optional[datetime] = None,
+    ) -> None:
         """Reconcile local events against server state and notify UI.
 
         For calendar/todo: delete local events whose IDs are not in server_events.
@@ -234,6 +246,10 @@ class EventRepositoryManager:
         Args:
             server_events: List of event IDs currently on the server.
             data_type: Event category to sync.
+            window_end: End of the time window the server fetch covered (aware datetime). A row whose
+                `start` is at or after it was not covered by the fetch, so its absence is not a deletion and the
+                row is kept (2026-11-14: an event created for three weeks out was pruned by the 7-day sync each
+                cycle, and the brain read each prune as the owner removing it).
         """
         changed = False
         session = self.session_factory()
@@ -243,6 +259,8 @@ class EventRepositoryManager:
                 db_events = session.query(EventRepository).filter(
                     EventRepository.data_type == data_type,
                 ).all()
+                if window_end is not None:
+                    db_events = [e for e in db_events if not self._starts_at_or_after(e.data, window_end)]
                 db_ids = {event.id for event in db_events}
                 missing_ids = db_ids - server_ids
 
