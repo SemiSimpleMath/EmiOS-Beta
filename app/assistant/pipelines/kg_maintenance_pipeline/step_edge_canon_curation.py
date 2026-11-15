@@ -94,8 +94,9 @@ def run(ctx: PipelineContext = None) -> dict:
 
     # --- Phase 2: call curator agent (no DB session held) ---
     # Every batch is judged before anything is applied: a failed call stops
-    # the run with nothing written, and an answer that leaves a predicate
-    # without a valid verdict gets one correction, then raises.
+    # the run with nothing written. The curator's verdicts are checked by its
+    # validate.py and a refused answer is corrected once by the agent, raising
+    # when still refused (agent_runtime/correction.py, 2026-11-15).
     agent = DI.agent_factory.create_agent("me::edge_canon_curator")
     if agent is None:
         raise RuntimeError("[edge_canon_curation] could not create me::edge_canon_curator")
@@ -107,10 +108,14 @@ def run(ctx: PipelineContext = None) -> dict:
         actor_id="edge_canon_curation",
     )
 
-    def ask(batch_text: str, information: str) -> Dict:
+    all_verdicts: List[Dict] = []
+    for i in range(0, len(candidates), BATCH_SIZE):
+        batch = candidates[i:i+BATCH_SIZE]
+        batch_text = _format_batch_for_agent(batch)
         result = agent.action_handler(Message(
-            agent_input={"task": batch_text, "information": information},
-            task=batch_text, information=information,
+            agent_input={"task": batch_text, "predicates": sorted(c["predicate"] for c in batch),
+                         "canons": canon_labels},
+            task=batch_text,
             scope_context=scope,
         ))
         data = getattr(result, "data", None)
@@ -118,25 +123,8 @@ def run(ctx: PipelineContext = None) -> dict:
             data = data.model_dump()
         if not isinstance(data, dict) or not isinstance(data.get("verdicts"), list):
             raise RuntimeError("[edge_canon_curation] curator returned no verdicts list")
-        return data
-
-    all_verdicts: List[Dict] = []
-    for i in range(0, len(candidates), BATCH_SIZE):
-        batch = candidates[i:i+BATCH_SIZE]
-        batch_text = _format_batch_for_agent(batch)
-        predicates = {c["predicate"] for c in batch}
-        verdicts, problems = _check_verdicts(ask(batch_text, ""), predicates, set(canon_labels))
-        if problems:
-            verdicts, problems = _check_verdicts(
-                ask(batch_text, "Correct your previous answer: " + "; ".join(problems) + "."),
-                predicates, set(canon_labels),
-            )
-            if problems:
-                raise RuntimeError(
-                    f"[edge_canon_curation] batch {i // BATCH_SIZE + 1} still incomplete after one "
-                    f"correction: {'; '.join(problems)}"
-                )
-        all_verdicts.extend(verdicts)
+        # One verdict per predicate; a predicate judged twice keeps its last verdict.
+        all_verdicts.extend({v["predicate"].strip(): v for v in data["verdicts"]}.values())
 
     logger.info("[edge_canon_curation] got %d verdicts", len(all_verdicts))
 
@@ -151,34 +139,6 @@ def run(ctx: PipelineContext = None) -> dict:
     stats["verdicts"] = len(all_verdicts)
     logger.info("[edge_canon_curation] done: %s", stats)
     return stats
-
-
-VERDICTS = {"variant_of", "new_canon", "not_yet"}
-
-
-def _check_verdicts(data: Dict, predicates: set, canons: set) -> tuple[List[Dict], List[str]]:
-    """The batch's verdicts and the problems in them: every predicate needs one
-    verdict, and a variant_of must name an existing canon."""
-    verdicts: Dict[str, Dict] = {}
-    problems: List[str] = []
-    for v in data["verdicts"]:
-        predicate = (v.get("predicate") or "").strip() if isinstance(v, dict) else ""
-        if predicate not in predicates:
-            problems.append(f"predicate {predicate!r} is not one of the input predicates")
-            continue
-        verdict = (v.get("verdict") or "").strip().lower()
-        if verdict not in VERDICTS:
-            problems.append(f"{predicate!r}: verdict {verdict!r} is not one of {sorted(VERDICTS)}")
-            continue
-        if verdict == "variant_of" and (v.get("canonical_target") or "").strip() not in canons:
-            problems.append(f"{predicate!r}: variant_of target {v.get('canonical_target')!r} is not an "
-                            f"existing canonical edge type")
-            continue
-        verdicts[predicate] = v
-    missing = sorted(predicates - set(verdicts))
-    if missing:
-        problems.append(f"no verdict for predicates {missing}")
-    return list(verdicts.values()), problems
 
 
 def _load_canon_labels() -> List[str]:

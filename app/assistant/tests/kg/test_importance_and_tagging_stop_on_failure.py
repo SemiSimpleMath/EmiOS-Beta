@@ -1,9 +1,10 @@
 """The importance rater and section tagger stop at a failed call (owner, 2026-10-05).
 
-Edge rater: a score of 0 is a 0; an edge left unrated or given a non-numeric score gets ONE
-correction listing exactly those ids, and is never written as a default; a failed call stops the
-run with nothing of the batch written. Section tagger: an omitted node gets one correction and is
-never marked processed; a failed call or write stops the run. Every failure is counted in the
+Edge rater: a score of 0 is a 0; the rater is asked once per batch, and its validate.py refuses
+an edge left unrated or given a non-numeric score (agent_runtime/correction.py, 2026-11-15), which
+is never written as a default; a failed call stops the run with nothing of the batch written.
+Section tagger: its validate.py refuses an omitted node, which is never marked processed; a failed
+call or write stops the run. Every failure is counted in the
 failure ledger against the items it concerns, and set-aside items are skipped. The
 kg_importance_rater routine lets each failure escape, so the runner records it.
 
@@ -17,6 +18,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.assistant.agent_registry.agent_registry import AgentRegistry
+from app.assistant.agent_runtime.correction import AgentOutputInvalid, Problem
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.importance import scoring
 from app.assistant.kg import failure_ledger, section_tagging
@@ -100,6 +103,24 @@ def _use(monkeypatch, agent):
     monkeypatch.setattr(DI.agent_factory, "create_agent", lambda name: agent)
 
 
+def _rules(*parts):
+    from app.assistant.utils.path_utils import get_app_root
+    return AgentRegistry()._load_validator(get_app_root().joinpath("assistant", "agents", *parts, "validate.py"))
+
+
+class _Refused:
+    """A fake agent whose answer is still refused after the correction: AgentOutputInvalid naming these items."""
+
+    def __init__(self, name, field, items):
+        self.name, self.field, self.items = name, field, items
+        self.calls = []
+
+    def action_handler(self, msg):
+        self.calls.append(dict(msg.agent_input))
+        raise AgentOutputInvalid(self.name, [Problem(why="no answer", field=self.field, item=i, structural=True)
+                                             for i in self.items])
+
+
 def _rate(**kw):
     return scoring.regenerate_edge_importance(only_unrated=True, scope_context=None, **kw)
 
@@ -114,45 +135,38 @@ def test_a_zero_score_is_written_as_zero(monkeypatch):
     assert set(_importance(eids).values()) == {0.0}
 
 
-def test_an_unrated_edge_gets_one_correction_for_exactly_it(monkeypatch):
+def test_the_rater_is_asked_once_with_the_batch_s_edge_ids(monkeypatch):
     eids = _mk_edges(3)
-    left_out = eids[1]
-
-    def answer(ids, n):
-        return [{"id": i, "score": 6.0, "reason": "r"} for i in ids if n > 1 or i != left_out]
-
-    rater = _Rater(answer)
+    rater = _Rater(lambda ids, n: [{"id": i, "score": 6.0, "reason": "r"} for i in ids])
     _use(monkeypatch, rater)
     assert _rate() == 3
-    assert len(rater.calls) == 2
-    assert rater.calls[0]["correction_ids"] == []
-    assert rater.calls[1]["correction_ids"] == [left_out]
-    assert _ids_in(rater.calls[1]["task"]) == [left_out]
+    (call,) = rater.calls
+    assert sorted(call["edge_ids"]) == sorted(eids) and _ids_in(call["task"]) == call["edge_ids"]
+    assert "correction_ids" not in call
     assert set(_importance(eids).values()) == {6.0}
-    assert _failures(scoring.EDGE_IMPORTANCE_KIND) == {}
 
 
-def test_a_non_numeric_score_is_corrected_not_defaulted(monkeypatch):
-    eids = _mk_edges(2)
+def test_the_edge_rater_rules():
+    """Moved from scoring.regenerate_edge_importance to the rater's validate.py (2026-11-15)."""
+    rules = _rules("me", "edge_importance_rater")
+    given = {"edge_ids": ["e1", "e2", "e3", "e4"]}
+    found = [(p.item, p.at, p.structural) for p in rules.validate({"ratings": [
+        {"id": "e1", "score": 0.0}, {"id": "e2", "score": "high"}, {"id": "e3", "score": True},
+        {"id": "other", "score": 5.0}]}, given)]
+    assert found == [("e2", "score", False), ("e3", "score", False), ("e4", "", True)]
+    assert rules.validate({"ratings": [{"id": " e1 ", "score": 0}, {"id": "e2", "score": "x"},
+                                       {"id": "e2", "score": 9.5}]}, {"edge_ids": ["e1", "e2"]}) == []
+    assert rules.ITEM_KEYS == {"ratings": "id"}
 
-    def answer(ids, n):
-        return [{"id": i, "score": "high" if (n == 1 and i == eids[0]) else 3.0, "reason": "r"} for i in ids]
 
-    rater = _Rater(answer)
-    _use(monkeypatch, rater)
-    _rate()
-    assert rater.calls[1]["correction_ids"] == [eids[0]]
-    assert set(_importance(eids).values()) == {3.0}
-
-
-def test_still_unrated_after_the_correction_raises_and_writes_nothing(monkeypatch):
+def test_still_refused_after_the_correction_raises_and_writes_nothing(monkeypatch):
     eids = _mk_edges(3)
     left_out = eids[2]
-    rater = _Rater(lambda ids, n: [{"id": i, "score": 7.0, "reason": "r"} for i in ids if i != left_out])
+    rater = _Refused("me::edge_importance_rater", "ratings", [left_out])
     _use(monkeypatch, rater)
     with pytest.raises(ValueError, match=left_out):
         _rate()
-    assert len(rater.calls) == 2, "one correction, no more"
+    assert len(rater.calls) == 1
     assert set(_importance(eids).values()) == {None}, "nothing of the batch is written"
     assert _failures(scoring.EDGE_IMPORTANCE_KIND) == {left_out: 1}, "counted against the unrated edge only"
 
@@ -262,26 +276,34 @@ def _tag_rows(node_ids):
         s.close()
 
 
-def test_an_omitted_node_gets_one_correction_under_its_number(monkeypatch):
+def test_the_tagger_is_asked_once_with_the_batch_s_numbers(monkeypatch):
     nids = _mk_states(3)
-    tagger = _Tagger(lambda nums, n: [_tagged(i) for i in nums if n > 1 or i != 2])
+    tagger = _Tagger(lambda nums, n: [_tagged(i) for i in nums])
     _use(monkeypatch, tagger)
     stats = section_tagging.backfill_untagged_nodes(scope_context=None)
-    assert len(tagger.calls) == 2
-    assert tagger.calls[0]["correction_numbers"] == []
-    assert tagger.calls[1]["correction_numbers"] == [2]
-    assert tagger.calls[1]["nodes_block"].startswith("[2] ")
+    (call,) = tagger.calls
+    assert call["numbers"] == [1, 2, 3] and "correction_numbers" not in call
     assert stats["tagged"] == 3 and stats["marked_processed"] == 0
     assert _tag_rows(nids) == {(nid, "card", "notes") for nid in nids}
 
 
+def test_the_section_tagger_rules():
+    """Moved from section_tagging.tag_nodes_by_id to the tagger's validate.py (2026-11-15)."""
+    rules = _rules("kg_node_section_tagger")
+    found = [(p.item, p.structural) for p in rules.validate(
+        {"results": [_tagged(1), _tagged(3), _tagged(9)], "reason": "r"}, {"numbers": [1, 2, 3]})]
+    assert found == [("2", True)]
+    assert rules.validate({"results": [_tagged(2), _tagged(1)], "reason": "r"}, {"numbers": [1, 2]}) == []
+    assert rules.ITEM_KEYS == {"results": "number"}
+
+
 def test_still_omitted_raises_and_marks_nothing_processed(monkeypatch):
     nids = _mk_states(3)
-    tagger = _Tagger(lambda nums, n: [_tagged(i) for i in nums if i != 3])
+    tagger = _Refused("kg_node_section_tagger", "results", ["3"])
     _use(monkeypatch, tagger)
-    with pytest.raises(ValueError, match="after one correction"):
+    with pytest.raises(ValueError, match="still invalid after one correction"):
         section_tagging.backfill_untagged_nodes(scope_context=None)
-    assert len(tagger.calls) == 2
+    assert len(tagger.calls) == 1
     assert _tag_rows(nids) == set(), "nothing of the batch is written, and no sentinel for the omitted node"
     assert len(_failures(section_tagging.SECTION_TAG_KIND)) == 1
 

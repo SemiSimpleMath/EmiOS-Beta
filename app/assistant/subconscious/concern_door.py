@@ -13,8 +13,8 @@ Two phases, so the model call never runs under the register lock:
    dormant one (dormant concerns carry the owner's rulings), and decides for each candidate: a new
    matter, the same matter as an open concern, the same as a closed one, or the same as another
    candidate in this batch. Labels are request-local (N1… candidates, C1… concerns) and mapped back
-   by code. One correction round; still invalid raises, so nothing is written and the source's
-   inputs stay available for its next run.
+   by code. The rules are the agent's validate.py, corrected once by the agent (agent_runtime/correction.py); still
+   invalid raises, so nothing is written and the source's inputs stay available for its next run.
 2. `apply_admission` (under the lock). Code assigns every new concern's id and records its origin
    and time. A duplicate is folded into the concern it matches: its evidence appended and its note added
    there as a note of its writer, never a second concern. A candidate matching a closed concern is not
@@ -45,7 +45,6 @@ logger = get_logger(__name__)
 
 _AGENT = "subconscious::concern_door"
 CLOSED_WINDOW = timedelta(days=14)
-_DECISIONS = ("new", "same_open", "same_closed", "same_candidate")
 
 
 def _parse(value: Any) -> Optional[datetime]:
@@ -73,7 +72,8 @@ def _local_date(value: Any) -> str:
 
 
 def build_payload(candidates: List[Dict[str, Any]], existing: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """The judge's input: labelled candidates and labelled concerns, every field it compares on."""
+    """The judge's input: labelled candidates and labelled concerns, every field it compares on, and the labels of
+    the candidates from the owner's own words (its validate.py refuses same_closed for those)."""
     def closed_because(c: Dict[str, Any]) -> str:
         if c.get("user_declined_at_utc"):
             return "the owner declined it"
@@ -102,45 +102,8 @@ def build_payload(candidates: List[Dict[str, Any]], existing: List[Dict[str, Any
             "closed_because": closed_because(c) if c["_status"] in ("resolved", "dormant") else "",
             "history": history_for_prompt(c),
         } for i, c in enumerate(existing, 1)],
+        "owner_labels": [f"N{i}" for i, c in enumerate(candidates, 1) if (c.get("source") or {}).get("kind") == "user"],
     }
-
-
-def _problems(data: Any, cand_labels: List[str], open_labels: List[str], closed_labels: List[str],
-              owner_labels: List[str] = ()) -> List[str]:
-    if not isinstance(data, dict) or not isinstance(data.get("decisions"), list):
-        return ["no decisions list"]
-    out, seen, by_label = [], [], {}
-    for d in data["decisions"]:
-        label = str((d or {}).get("candidate") or "").strip()
-        if label not in cand_labels:
-            out.append(f"candidate {label!r} is not one of the candidates given")
-            continue
-        seen.append(label)
-        by_label[label] = d
-    for label, d in by_label.items():
-        decision, target = d.get("decision"), str(d.get("same_as") or "").strip()
-        if decision not in _DECISIONS:
-            out.append(f"{label}: decision {decision!r} is not one of {list(_DECISIONS)}")
-        elif decision == "new" and target:
-            out.append(f"{label}: a new matter names no same_as")
-        elif decision == "same_open" and target not in open_labels:
-            out.append(f"{label}: same_open must name an open concern label, got {target!r}")
-        elif decision == "same_closed" and target not in closed_labels:
-            out.append(f"{label}: same_closed must name a closed concern label, got {target!r}")
-        elif decision == "same_closed" and label in owner_labels:
-            out.append(f"{label}: it comes from the owner's own words, so it is live: it cannot be same_closed")
-        elif decision == "same_candidate":
-            if target == label or target not in cand_labels:
-                out.append(f"{label}: same_candidate must name another candidate, got {target!r}")
-            elif (by_label.get(target) or {}).get("decision") != "new":
-                out.append(f"{label}: same_candidate must name a candidate decided new, {target} is not")
-    dup = sorted({x for x in seen if seen.count(x) > 1})
-    if dup:
-        out.append(f"answered more than once: {dup}")
-    missing = [x for x in cand_labels if x not in seen]
-    if missing:
-        out.append(f"not answered: {missing}")
-    return out
 
 
 def _agent_call(payload: Dict[str, Any]) -> Any:
@@ -158,7 +121,7 @@ def plan_admission(candidates: List[Dict[str, Any]], register: Dict[str, Any], *
     {candidate, action: create | merge_open | suppress_closed | merge_candidate, target, reason}.
     `target` is the concern_id matched (merge_open, suppress_closed) or the index of the candidate
     it joins (merge_candidate). Raises on a candidate without title or done_when, and when the
-    judge's answer is still invalid after one correction."""
+    judge's answer is still invalid after its one correction (agent_runtime/correction.py)."""
     for c in candidates:
         if not str(c.get("title") or "").strip() or not str(c.get("done_when") or "").strip():
             raise ValueError(f"a concern candidate needs a title and done_when: {c.get('label')!r}")
@@ -174,21 +137,7 @@ def plan_admission(candidates: List[Dict[str, Any]], register: Dict[str, Any], *
         batch = [candidates[i] for i in judged]
         cand_labels = [f"N{k}" for k in range(1, len(batch) + 1)]
         ex_labels = [f"C{k}" for k in range(1, len(existing) + 1)]
-        open_labels = [lab for lab, c in zip(ex_labels, existing) if c["_status"] in ("active", "addressing")]
-        closed_labels = [lab for lab in ex_labels if lab not in open_labels]
-        owner_labels = [lab for lab, c in zip(cand_labels, batch) if (c.get("source") or {}).get("kind") == "user"]
-        payload = build_payload(batch, existing)
-        call = judge or _agent_call
-        data = call(payload)
-        problems = _problems(data, cand_labels, open_labels, closed_labels, owner_labels)
-        if problems:
-            from app.assistant.subconscious.brain_trace import step
-            logger.warning("[concern_door] invalid decisions, one correction: %s", problems)
-            step("door", "answer refused, one correction", problems=problems, answer=data)
-            data = call({**payload, "correction": "; ".join(problems)})
-            problems = _problems(data, cand_labels, open_labels, closed_labels, owner_labels)
-            if problems:
-                raise ValueError(f"concern_door decisions still invalid after one correction: {problems}")
+        data = (judge or _agent_call)(build_payload(batch, existing))
         by_ex = dict(zip(ex_labels, existing))
         by_cand = dict(zip(cand_labels, judged))
         for d in data["decisions"]:

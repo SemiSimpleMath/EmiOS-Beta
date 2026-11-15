@@ -12,9 +12,10 @@ Code proposes, the model decides:
   embeddings, cosine similarity PROPOSAL_SIMILARITY);
 - `belief_engine::belief_clusterer` places every belief exactly once, into an existing topic (its label
   copied) or a new one, splitting and merging the proposal as the meaning requires;
-- code keeps every belief the answer placed exactly once (two entries with the same label are one
-  topic) and asks once more for the rest, the beliefs missed or placed twice; a belief still unplaced
-  after that fails the run.
+- the clusterer's rules (its validate.py) refuse a belief missed or placed twice, and the answer is
+  corrected once in conversation (agent_runtime/correction.py); still refused, the run fails. Until
+  2026-11-15 code kept what was placed once and asked again for the rest, re-rendering the prompt with
+  a correction string. Two entries with the same label are one topic.
 
 `place_beliefs` places the active beliefs that belong to no topic yet: all of them the first time, then
 the new ones (nightly, belief_tag_v1). The beliefs to place go in pages; each page's topics are
@@ -106,37 +107,16 @@ def _pages(groups: List[List[Dict[str, Any]]], max_chars: int) -> List[List[List
     return pages
 
 
-def _settle(data: Any, wanted: List[str]) -> tuple[List[Dict[str, Any]], List[str], List[str]]:
-    """(topics with every belief placed exactly once, grouped by label; the beliefs left to place;
-    what was wrong). Entries sharing a label, in any case, are one topic. An id not given is ignored."""
-    if not isinstance(data, dict) or not isinstance(data.get("clusters"), list):
-        return [], list(wanted), ["the answer had no clusters list"]
-    placements = [(str((c or {}).get("label") or "").strip(), bid)
-                  for c in data["clusters"] for bid in (c or {}).get("belief_ids") or []]
-    notes = []
-    unknown = sorted({bid for _, bid in placements if bid not in wanted})
-    if unknown:
-        notes.append(f"{unknown} are not beliefs to place")
-    counts: Dict[str, int] = {}
-    for label, bid in placements:
-        if bid in wanted:
-            counts[bid] = counts.get(bid, 0) + 1
+def _topics(data: Dict[str, Any], wanted: List[str]) -> List[Dict[str, Any]]:
+    """The answer's topics, grouped by label: entries sharing a label, in any case, are one topic. An id not given is
+    ignored. The clusterer's validate.py has refused an answer that does not place every belief exactly once."""
     topics: Dict[str, Dict[str, Any]] = {}
-    for label, bid in placements:
-        if bid in wanted and counts[bid] == 1 and label:
-            topics.setdefault(label.lower(), {"label": label, "belief_ids": []})["belief_ids"].append(bid)
-    twice = sorted(b for b, n in counts.items() if n > 1)
-    if twice:
-        notes.append(f"placed more than once: {twice}")
-    unlabelled = sorted(bid for label, bid in placements if bid in wanted and counts[bid] == 1 and not label)
-    if unlabelled:
-        notes.append(f"placed in a cluster with no label: {unlabelled}")
-    placed = {bid for t in topics.values() for bid in t["belief_ids"]}
-    left = [b for b in wanted if b not in placed]
-    missing = [b for b in left if b not in counts]
-    if missing:
-        notes.append(f"not placed: {missing}")
-    return list(topics.values()), left, notes
+    for c in data["clusters"]:
+        label = c["label"].strip()
+        for bid in c["belief_ids"]:
+            if bid in wanted:
+                topics.setdefault(label.lower(), {"label": label, "belief_ids": []})["belief_ids"].append(bid)
+    return list(topics.values())
 
 
 def _agent_call(payload: Dict[str, Any]) -> Any:
@@ -183,8 +163,8 @@ def _write(connect, clusters: List[Dict[str, Any]]) -> int:
 
 
 def place_beliefs(*, connect=None, call: Optional[Callable[[Dict[str, Any]], Any]] = None) -> Dict[str, int]:
-    """Place every active belief that belongs to no topic. Free when there is none. Raises when a page's
-    answer is still invalid after one correction; the pages before it stay written."""
+    """Place every active belief that belongs to no topic. Free when there is none. Raises (AgentOutputInvalid) when
+    a page's answer is still invalid after one correction; the pages before it stay written."""
     connect = connect or _connect()
     call = call or _agent_call
     ensure_schema(connect)
@@ -195,22 +175,10 @@ def place_beliefs(*, connect=None, call: Optional[Callable[[Dict[str, Any]], Any
         return {"placed": 0, "clusters_created": 0}
     active_ids = {b["id"] for b in active}
     created = 0
-    statement = {b["id"]: b["statement"] for b in todo}
     for page in _pages(propose_groups(todo), _PAGE_CHARS):
         wanted = [b["id"] for g in page for b in g]
-        topics, left, notes = _settle(call({
+        created += _write(connect, _topics(call({
             "existing_clusters": _existing_view(connect, active_ids),
-            "beliefs_to_place": [[{"id": b["id"], "statement": b["statement"]} for b in g] for g in page],
-            "correction": ""}), wanted)
-        created += _write(connect, topics)
-        if left:
-            logger.warning("[clusters] %d belief(s) to place again: %s", len(left), notes)
-            topics, still, notes = _settle(call({
-                "existing_clusters": _existing_view(connect, active_ids),
-                "beliefs_to_place": [[{"id": bid, "statement": statement[bid]} for bid in left]],
-                "correction": "; ".join(notes)}), left)
-            created += _write(connect, topics)
-            if still:
-                raise ValueError(f"belief clustering: {still} still unplaced after one correction: {notes}")
+            "beliefs_to_place": [[{"id": b["id"], "statement": b["statement"]} for b in g] for g in page]}), wanted))
     logger.info("[clusters] placed %d belief(s); %d new topic(s)", len(todo), created)
     return {"placed": len(todo), "clusters_created": created}

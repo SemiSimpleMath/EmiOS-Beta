@@ -18,6 +18,7 @@ from typing import Iterable, List, Optional, Sequence
 
 from sqlalchemy.orm import Session
 
+from app.assistant.agent_runtime.correction import AgentOutputInvalid
 from app.assistant.kg import failure_ledger
 from app.assistant.kg.db.knowledge_graph_db_sqlite import Node, NodeSectionTag
 from app.assistant.utils.logging_config import get_logger
@@ -282,7 +283,7 @@ def _format_namespaces_block() -> str:
 
 
 def _format_nodes_block(numbered: Sequence[tuple[int, Node]]) -> str:
-    """Nodes under their batch numbers; a correction re-sends a subset under the same numbers."""
+    """Nodes under their batch numbers."""
     lines: list[str] = []
     for i, n in numbered:
         sentence = (n.original_sentence or "").strip()
@@ -297,19 +298,21 @@ def _format_nodes_block(numbered: Sequence[tuple[int, Node]]) -> str:
 
 
 def _call_tagger(
-    agent, numbered: Sequence[tuple[int, Node]], correction_numbers: list[int],
-    namespaces_block: str, scope_context,
+    agent, numbered: Sequence[tuple[int, Node]], namespaces_block: str, scope_context,
 ) -> dict[int, dict]:
-    """One tagger call over these numbered nodes. Returns each answered number's result."""
+    """One tagger call over these numbered nodes. Returns each answered number's result.
+
+    The tagger's validate.py refuses an answer leaving a node out, and a refused answer is
+    corrected once by the agent, raising AgentOutputInvalid when still refused
+    (agent_runtime/correction.py, 2026-11-15).
+    """
     from app.assistant.utils.pydantic_classes import Message
 
-    # correction_numbers always travels (empty on a first call) so a previous call's list on
-    # the agent's blackboard is overwritten, never inherited.
     resp = agent.action_handler(Message(
         agent_input={
             "nodes_block": _format_nodes_block(numbered),
             "namespaces_block": namespaces_block,
-            "correction_numbers": correction_numbers,
+            "numbers": [i for i, _ in numbered],
         },
         scope_context=scope_context,
     ))
@@ -350,10 +353,11 @@ def tag_nodes_by_id(
 
     A failed call stops the run (owner, 2026-10-05): the batch in hand is not written, later
     batches stay untagged for the next run, and the exception propagates. An answer that leaves
-    nodes out gets ONE correction call listing exactly their numbers; still incomplete, it
-    raises. Each failure is counted in the failure ledger against the nodes it concerns (the
-    whole batch for a failed call or write, the omitted nodes for an incomplete answer); a node
-    failing in three runs is set aside and backfill_untagged_nodes skips it.
+    nodes out is refused by the tagger's validate.py and corrected once by the agent; still
+    refused, it raises AgentOutputInvalid. Each failure is counted in the failure ledger against
+    the nodes it concerns (the whole batch for a failed call or write, the nodes the refusal
+    names for an answer still refused); a node failing in three runs is set aside and
+    backfill_untagged_nodes skips it.
 
     Returns stats dict: {tagged, skipped_type, skipped_empty, skipped_low_importance,
     contact_bypassed, marked_processed, card_tags_written, wiki_tags_written}.
@@ -427,32 +431,15 @@ def tag_nodes_by_id(
                 failure_ledger.record_failure(SECTION_TAG_KIND, n.id, exc, label=n.label)
 
         try:
-            answered = _call_tagger(agent, numbered, [], namespaces_block, scope_context)
+            answered = _call_tagger(agent, numbered, namespaces_block, scope_context)
+        except AgentOutputInvalid as exc:
+            # Counted against the nodes the refusal names (the ones still left out).
+            named = {p.item for p in exc.problems}
+            _record([n for i, n in numbered if str(i) in named] or batch, exc)
+            raise
         except Exception as exc:
             _record(batch, exc)
             raise
-
-        omitted = [(i, n) for i, n in numbered if i not in answered]
-        if omitted:
-            logger.warning(
-                "[section_tagging] batch %d/%d left out %d node(s); one correction for them",
-                batch_idx, total_batches, len(omitted),
-            )
-            try:
-                answered.update(_call_tagger(
-                    agent, omitted, [i for i, _ in omitted], namespaces_block, scope_context,
-                ))
-            except Exception as exc:
-                _record([n for _, n in omitted], exc)
-                raise
-            still_omitted = [(i, n) for i, n in omitted if i not in answered]
-            if still_omitted:
-                exc = ValueError(
-                    f"[section_tagging] no result after one correction for {len(still_omitted)} "
-                    f"node(s): {', '.join(n.id for _, n in still_omitted)}"
-                )
-                _record([n for _, n in still_omitted], exc)
-                raise exc
 
         # APPLY: one short write transaction per batch — the next batch's
         # LLM call starts with no session held.
@@ -506,7 +493,7 @@ def tag_nodes_by_id(
                 # row. backfill_untagged_nodes selects nodes with no tag row, so
                 # without this rejected nodes are re-sent to the LLM on every 30-min
                 # routine run forever. Every node here was answered: an omission
-                # raised above and is never recorded as done.
+                # was refused above and is never recorded as done.
                 for node in batch:
                     if node.id in tagged_ids or node.id in gate_skipped_ids:
                         continue

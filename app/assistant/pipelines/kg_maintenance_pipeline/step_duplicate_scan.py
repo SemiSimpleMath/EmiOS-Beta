@@ -88,8 +88,6 @@ TIER4_MAX_PAIRS = 80       # safety cap on pairs Tier 4 emits per run
 # Failure-ledger kind for a candidate pair whose detector call failed.
 PAIR_FAILURE_KIND = "kg_duplicate_pair"
 
-TRIAGE_VERDICTS = {"distinct", "uncertain", "defective_sentences"}
-
 
 def _pair_item_id(a: str, b: str) -> str:
     return f"{min(a, b)}|{max(a, b)}"
@@ -877,8 +875,9 @@ def _triage_filter_pairs(
 
     Pairs are processed in batches of TRIAGE_BATCH_SIZE so the per-call prompt
     stays under nano's context limit. A failed batch call stops the run
-    (raise; no node is stamped). A batch answer that leaves pairs without a
-    valid verdict gets one correction naming them, then raises.
+    (raise; no node is stamped). The triage's rules are its validate.py: a
+    batch answer that leaves pairs without a valid verdict is corrected once
+    by the agent and raises when still refused (agent_runtime/correction.py).
     """
     if not pairs:
         return pairs, set()
@@ -904,18 +903,7 @@ def _triage_filter_pairs(
         ]
 
         pairs_batch = json.dumps(batch_briefs, ensure_ascii=False)
-        verdicts, problems = _triage_batch(pairs_batch, len(batch), scope_context, correction=None)
-        if problems:
-            verdicts, problems = _triage_batch(
-                pairs_batch, len(batch), scope_context,
-                correction="Your previous answer was incomplete: " + "; ".join(problems)
-                + ". Return one verdict for every pair_index.",
-            )
-            if problems:
-                raise RuntimeError(
-                    f"[duplicate_scan] triage batch {batch_start + 1}-{batch_start + len(batch)} "
-                    f"still incomplete after one correction: {'; '.join(problems)}"
-                )
+        verdicts = _triage_batch(pairs_batch, len(batch), scope_context)
         for local_idx_1based, (verdict, reason) in verdicts.items():
             global_idx = batch_start + (local_idx_1based - 1)
             if verdict == "distinct":
@@ -978,43 +966,22 @@ def _triage_filter_pairs(
     return survivors, defective_node_ids
 
 
-def _triage_batch(
-    pairs_batch: str, batch_len: int, scope_context, *, correction: str | None,
-) -> tuple[dict[int, tuple[str, str]], list[str]]:
-    """One triage call on one batch. Returns ({pair_index: (verdict, reason)},
-    problems); problems name every pair_index without a valid verdict. A
-    failed call raises."""
+def _triage_batch(pairs_batch: str, batch_len: int, scope_context) -> dict[int, tuple[str, str]]:
+    """One triage call on one batch. Returns {pair_index: (verdict, reason)},
+    one for every pair: the triage's validate.py (it reads `pair_count`)
+    refuses an answer that leaves a pair without a valid verdict. A failed
+    call raises."""
     # Fresh agent instance per call so blackboard state doesn't carry over.
     agent = DI.agent_factory.create_agent("kg_maintenance::duplicate_triage")
     if agent is None:
         raise RuntimeError("[duplicate_scan] could not create kg_maintenance::duplicate_triage")
-    agent_input = {"pairs_batch": pairs_batch}
-    if correction:
-        agent_input["correction"] = correction
+    agent_input = {"pairs_batch": pairs_batch, "pair_count": batch_len}
     response = agent.action_handler(Message(agent_input=agent_input, scope_context=scope_context))
     data = getattr(response, "data", None)
     if not isinstance(data, dict) or not isinstance(data.get("pairs"), list):
         raise RuntimeError("[duplicate_scan] triage returned no pairs list")
-
-    verdicts: dict[int, tuple[str, str]] = {}
-    problems: list[str] = []
-    for v in data["pairs"]:
-        idx = v.get("pair_index") if isinstance(v, dict) else None
-        if not isinstance(idx, int) or not 1 <= idx <= batch_len:
-            problems.append(f"pair_index {idx!r} is not one of 1-{batch_len}")
-            continue
-        verdict = str(v.get("verdict") or "").strip().lower()
-        if verdict not in TRIAGE_VERDICTS:
-            problems.append(f"pair_index {idx} verdict {verdict!r} is not one of {sorted(TRIAGE_VERDICTS)}")
-            continue
-        if idx in verdicts and verdicts[idx][0] != verdict:
-            problems.append(f"pair_index {idx} has conflicting verdicts")
-            continue
-        verdicts[idx] = (verdict, str(v.get("reason") or "").strip())
-    missing = [i for i in range(1, batch_len + 1) if i not in verdicts]
-    if missing:
-        problems.append(f"no verdict for pair_index {missing}")
-    return verdicts, problems
+    return {v["pair_index"]: (str(v["verdict"]).strip().lower(), str(v.get("reason") or "").strip())
+            for v in data["pairs"]}
 
 
 def _null_identity_sentences(node_ids: set[str]) -> None:

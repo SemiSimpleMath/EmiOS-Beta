@@ -211,26 +211,6 @@ def matter_input(matter: Dict[str, Any], register: Dict[str, Any], now_utc: date
             "new_concerns": new}
 
 
-def matter_problems(data: Any, labels: List[str]) -> List[str]:
-    if not isinstance(data, dict):
-        return ["no story"]
-    out = [] if str(data.get("headline") or "").strip() else ["headline is empty"]
-    given = [str((x or {}).get("event") or "").strip() for x in data.get("lines") or []]
-    for x in data.get("lines") or []:
-        if not str((x or {}).get("line") or "").strip():
-            out.append(f"the line for {(x or {}).get('event')!r} is empty")
-    unknown = [g for g in given if g not in labels]
-    if unknown:
-        out.append(f"{unknown} are not event labels given")
-    repeated = sorted({g for g in given if given.count(g) > 1})
-    if repeated:
-        out.append(f"more than one line for {repeated}")
-    missing = [lab for lab in labels if lab not in given]
-    if missing:
-        out.append(f"no line for {missing}")
-    return out
-
-
 # ── a concern ───────────────────────────────────────────────────────────────
 
 def concern_input(concern: Dict[str, Any], bucket: str, now_utc: datetime) -> Dict[str, Any]:
@@ -245,21 +225,6 @@ def concern_input(concern: Dict[str, Any], bucket: str, now_utc: datetime) -> Di
         "plan": {k: (concern.get("plan") or {}).get(k) for k in ("decision", "todo", "why", "hold_until")}
         if concern.get("plan") else None,
     }}
-
-
-def _decision(inp: Dict[str, Any]) -> Optional[str]:
-    c = inp["concern"]
-    return (c["plan"] or {}).get("decision")
-
-
-def concern_problems(data: Any, decision: Optional[str]) -> List[str]:
-    if not isinstance(data, dict):
-        return ["no story"]
-    out = [f"{f} is empty" for f in ("state", "story", "fate") if not str(data.get(f) or "").strip()]
-    proposed = [p for p in data.get("proposed") or [] if str(p).strip()]
-    if decision != "act_now" and proposed:
-        out.append(f"the decision is {decision or 'not made'}: nothing is proposed now, so proposed stays empty")
-    return out
 
 
 # ── a day ───────────────────────────────────────────────────────────────────
@@ -286,12 +251,6 @@ def day_input(day: str, now_utc: datetime, *, connect, register: Dict[str, Any],
             "handed_on": handed_on}
 
 
-def day_problems(data: Any) -> List[str]:
-    if not isinstance(data, dict):
-        return ["no story"]
-    return [f"{f} is empty" for f in ("headline", "overview") if not str(data.get(f) or "").strip()]
-
-
 # ── writing ─────────────────────────────────────────────────────────────────
 
 def _agent_call(kind: str) -> Callable[[Dict[str, Any]], Any]:
@@ -302,24 +261,10 @@ def _agent_call(kind: str) -> Callable[[Dict[str, Any]], Any]:
     return call
 
 
-def _tell(kind: str, key: str, payload: Dict[str, Any], check: Callable[[Any], List[str]], call) -> Dict[str, Any]:
-    """One story: the agent's answer, checked, with one correction; raises when still invalid."""
-    from app.assistant.subconscious.brain_trace import step
-    data = call(payload)
-    problems = check(data)
-    if problems:
-        logger.warning("[stories] invalid %s story for %s, one correction: %s", kind, key, problems)
-        step("stories", "answer refused, one correction", subject=key, kind=kind, problems=problems)
-        data = call({**payload, "correction": "; ".join(problems)})
-        problems = check(data)
-        if problems:
-            raise ValueError(f"{kind} story still invalid after one correction: {problems}")
-    return data
-
-
-def _write(kind: str, key: str, inp: Dict[str, Any], check, call, stored, now_utc: datetime, connect) -> Optional[bool]:
+def _write(kind: str, key: str, inp: Dict[str, Any], call, stored, now_utc: datetime, connect) -> Optional[bool]:
     """Write one story when its input changed (a matter's conversation aside). True: written; False:
-    failed; None: already current."""
+    failed; None: already current. Each story agent's rules are its validate.py; a refused answer is corrected once by
+    the agent and raises when still refused (agent_runtime/correction.py)."""
     from app.assistant.subconscious.brain_trace import step, trace
     basis = _basis({k: v for k, v in inp.items() if k != "conversation"})
     prior = stored.get(key)
@@ -329,7 +274,7 @@ def _write(kind: str, key: str, inp: Dict[str, Any], check, call, stored, now_ut
     payload = {"now": utc_to_local(now_utc.isoformat()).strftime("%a %Y-%m-%d %H:%M"), **inp}
     try:
         with trace(stage="stories", story=f"{kind}:{key}"):
-            data = _tell(kind, key, payload, check, call)
+            data = call(payload)
     except Exception as exc:
         logger.error("[stories] could not write the %s story for %s; not retried until it changes: %s",
                      kind, key, exc, exc_info=True)
@@ -369,18 +314,13 @@ def run_stories(*, call: Optional[Callable[[str], Callable]] = None, connect=Non
     for m in _matters(start, end, connect):
         if m["status"] != "applied":
             continue
-        inp = matter_input(m, register, now)
-        labels = [e["label"] for e in inp["events"]]
-        count(_write("matter", str(m["id"]), inp, lambda d, labels=labels: matter_problems(d, labels),
-                     call("matter"), stored, now, connect))
+        count(_write("matter", str(m["id"]), matter_input(m, register, now), call("matter"), stored, now, connect))
 
     concerns = load("concern", connect)
     for bucket in ("active", "addressing"):
         for c in register.get(bucket) or []:
-            inp = concern_input(c, bucket, now)
-            decision = _decision(inp)
-            count(_write("concern", c["concern_id"], inp, lambda d, decision=decision: concern_problems(d, decision),
-                         call("concern"), concerns, now, connect))
+            count(_write("concern", c["concern_id"], concern_input(c, bucket, now), call("concern"), concerns, now,
+                         connect))
 
     day_stories = load("day", connect)
     for day in days:
@@ -389,7 +329,7 @@ def run_stories(*, call: Optional[Callable[[str], Callable]] = None, connect=Non
                         handed_on=handed_on(d_start, d_end))
         if not inp["counts"] and not inp["matters"]:
             continue
-        count(_write("day", day, inp, day_problems, call("day"), day_stories, now, connect))
+        count(_write("day", day, inp, call("day"), day_stories, now, connect))
     if written or failed:
         logger.info("[stories] written=%d failed=%d", written, failed)
     return {"stories_written": written, "stories_failed": failed}

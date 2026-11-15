@@ -1,17 +1,14 @@
-"""Reliability spine R2: transient classification + bounded retry + one re-ask on bad output.
+"""Reliability spine R2: transient classification + bounded retry.
 
-Covers the SSOT classifier (is_transient), the retry helper (transient retries then fails loud;
-non-transient and success do not retry), and the re-ask gate on LLMClient (valid output passes
-through with no re-ask; an invalid Pydantic-model output triggers exactly one corrective re-ask;
-non-model formats and already-validated model instances pass through untouched).
+Covers the SSOT classifier (is_transient) and the retry helper (transient retries then fails loud;
+non-transient and success do not retry). The re-ask on a refused answer moved to
+agent_runtime/correction.py on 2026-11-15 (tests: agent_tests/test_agent_output_correction.py).
 """
 from __future__ import annotations
 
 import pytest
-from pydantic import BaseModel
 
 from app.services.llm_resilience import is_transient, retry_transient
-from app.assistant.agent_runtime.services.llm_client import LLMClient
 
 
 # ── classifier ────────────────────────────────────────────────────
@@ -85,60 +82,3 @@ class TestRetryTransient:
             return "recovered"
         assert retry_transient(_f, attempts=3, base_delay=0.0) == "recovered"
         assert calls["n"] == 2
-
-
-# ── re-ask gate ───────────────────────────────────────────────────
-class _Form(BaseModel):
-    x: int
-
-
-class _Agent:
-    name = "tester"
-
-
-def _client():
-    return LLMClient.__new__(LLMClient)   # _revalidate_or_reask uses no instance state
-
-
-class TestReask:
-    def test_valid_dict_passes_through_no_reask(self):
-        calls = []
-        out = _client()._revalidate_or_reask(
-            agent=_Agent(), response={"x": 5}, response_format=_Form,
-            invoke=lambda m: calls.append(m), messages=[{"role": "user", "content": "hi"}], engine="e",
-        )
-        assert out == {"x": 5}
-        assert calls == []   # valid → no re-ask
-
-    def test_invalid_dict_reasks_once(self):
-        original = [{"role": "user", "content": "hi"}]
-        seen = []
-        def invoke(msgs):
-            seen.append(msgs)
-            return {"x": 7}
-        out = _client()._revalidate_or_reask(
-            agent=_Agent(), response={"nope": 1}, response_format=_Form,
-            invoke=invoke, messages=original, engine="e",
-        )
-        assert out == {"x": 7}           # returned the re-ask result
-        assert len(seen) == 1            # exactly one re-ask
-        appended = seen[0][-1]
-        assert appended["role"] == "user" and "schema" in appended["content"].lower()
-        assert original == [{"role": "user", "content": "hi"}]   # original not mutated
-
-    def test_non_model_format_passes_through(self):
-        calls = []
-        out = _client()._revalidate_or_reask(
-            agent=_Agent(), response={"anything": 1}, response_format=None,
-            invoke=lambda m: calls.append(m), messages=[], engine="e",
-        )
-        assert out == {"anything": 1} and calls == []
-
-    def test_model_instance_passes_through(self):
-        calls = []
-        inst = _Form(x=3)
-        out = _client()._revalidate_or_reask(
-            agent=_Agent(), response=inst, response_format=_Form,
-            invoke=lambda m: calls.append(m), messages=[], engine="e",
-        )
-        assert out is inst and calls == []

@@ -330,26 +330,44 @@ def test_failed_triage_batch_stops_the_run(monkeypatch):
         _confirm_pairs_with_llm([(a, b, "tier1")], _descs(a, b), None)
 
 
-def test_incomplete_triage_gets_one_correction_then_raises(monkeypatch):
+def test_a_triage_batch_still_refused_after_the_correction_records_nothing(monkeypatch):
+    from app.assistant.agent_runtime.correction import AgentOutputInvalid, Problem
     from app.assistant.pipelines.kg_maintenance_pipeline.step_duplicate_scan import (
         _confirm_pairs_with_llm,
     )
 
     seen = []
 
-    class _HalfTriage:
+    class _RefusedTriage:
         def action_handler(self, msg):
             seen.append(dict(msg.agent_input))
-            return SimpleNamespace(data={"pairs": [
-                {"pair_index": 1, "verdict": "distinct", "reason": "different"}]})
+            raise AgentOutputInvalid("kg_maintenance::duplicate_triage",
+                                     [Problem(why="no verdict", field="pairs", item="2", structural=True)])
 
     a, b, c, d = (_mk_node(x) for x in "ABCD")
-    _fake_factories(monkeypatch, detector_agent=None, triage_agent=_HalfTriage())
-    with pytest.raises(RuntimeError, match="after one correction"):
+    _fake_factories(monkeypatch, detector_agent=None, triage_agent=_RefusedTriage())
+    with pytest.raises(AgentOutputInvalid):
         _confirm_pairs_with_llm([(a, b, "tier1"), (c, d, "tier1")], _descs(a, b, c, d), None)
-    assert "correction" not in seen[0]
-    assert "no verdict for pair_index [2]" in seen[1]["correction"]
+    assert len(seen) == 1 and seen[0]["pair_count"] == 2 and "correction" not in seen[0]
     assert load_distinct_pairs() == set()         # nothing recorded from the broken batch
+
+
+def test_the_triage_rules():
+    """Moved from _triage_batch to the triage's validate.py (2026-11-15); the agent corrects once and raises."""
+    from app.assistant.agent_registry.agent_registry import AgentRegistry
+    from app.assistant.utils.path_utils import get_app_root
+
+    rules = AgentRegistry()._load_validator(
+        get_app_root() / "assistant" / "agents" / "kg_maintenance" / "duplicate_triage" / "validate.py")
+    answer = {"pairs": [{"pair_index": 1, "verdict": "Merge", "reason": ""},
+                        {"pair_index": 2, "verdict": "distinct", "reason": ""},
+                        {"pair_index": 2, "verdict": "uncertain", "reason": ""},
+                        {"pair_index": 7, "verdict": "distinct", "reason": ""}]}
+    found = [(p.item, p.at, p.value, p.structural) for p in rules.validate(answer, {"pair_count": 3})]
+    assert found == [("1", "verdict", "Merge", False), ("2", "", None, True), ("", "", 7, True),
+                     ("3", "", None, True)]
+    good = {"pairs": [{"pair_index": i, "verdict": "Distinct ", "reason": ""} for i in (1, 2)]}
+    assert rules.validate(good, {"pair_count": 2}) == [] and rules.ITEM_KEYS == {"pairs": "pair_index"}
 
 
 def test_set_aside_pair_is_skipped_and_its_nodes_stay_unstamped(monkeypatch):

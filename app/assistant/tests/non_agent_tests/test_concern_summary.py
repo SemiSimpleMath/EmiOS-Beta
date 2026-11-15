@@ -6,7 +6,8 @@ does not have to run on every concern every time. only when the record gets long
 Pins: a concern whose notes are short is not summarized and is read whole; once the notes no summary covers pass
 SUMMARY_AFTER_CHARS they are folded into a summary, once; every reader then gets the summary and the notes written
 since, whole; a note written while the summary was being written stays after it; the writer sees the previous summary
-and the notes since; a summary that fails is recorded and not tried again until a note is written; the record's
+and the notes since; an answer with no summary is refused by the agent's validate.py (corrected once by the agent,
+agent_runtime/correction.py); a summary that fails is recorded and not tried again until a note is written; the record's
 fingerprint ignores the summary and the plan; work citing a concern carries its record, and an unresolvable ref is
 shown, not raised. Scratch register; the writer is a fake. Invented data only.
 """
@@ -17,6 +18,12 @@ import pytest
 import app.assistant.tests.test_setup  # noqa: F401
 from app.assistant.subconscious import concern_summary, concern_view, persist
 from app.assistant.tests.concern_store_helpers import ScratchRegister
+from app.assistant.agent_registry.agent_registry import AgentRegistry
+from app.assistant.agent_runtime.correction import AgentOutputInvalid, Problem
+from app.assistant.utils.path_utils import get_app_root
+
+RULES = AgentRegistry()._load_validator(get_app_root() / "assistant" / "agents" / "subconscious" / "concern_summary"
+                                        / "validate.py")
 
 EMPTY = {"active": [], "addressing": [], "resolved": [], "dormant": []}
 
@@ -91,16 +98,27 @@ def test_a_note_written_while_summarizing_stays_after_the_summary(tmp_path):
         persist.set_concern_summary("c-flea", 30, text="s", connect=reg.connect)
 
 
+def test_an_answer_with_no_summary_is_refused():
+    assert RULES.validate({"summary": "The dose is monthly."}, {}) == []
+    [problem] = RULES.validate({"summary": " "}, {})
+    assert (problem.field, problem.why) == ("summary", "the answer had no summary")
+
+
 def test_a_failed_summary_is_recorded_and_waits_for_a_new_note(tmp_path):
     reg = ScratchRegister(tmp_path).write({**EMPTY, "active": [_concern(notes=20)]})
-    writer = _writer({"summary": ""}, {"summary": " "})
+    seen = []
+
+    def writer(payload):
+        seen.append(payload)
+        raise AgentOutputInvalid("subconscious::concern_summary", [Problem(why="the answer had no summary",
+                                                                           field="summary")])
     assert concern_summary.run_summaries(call=writer, register_connect=reg.connect) == \
         {"summaries_written": 0, "summaries_failed": 1}
-    assert writer.seen[1]["correction"] == "the answer had no summary"
     [c] = reg.read()["active"]
     assert "summary" not in c and c["summary_error"]["lines"] == 20
+    assert "the answer had no summary" in c["summary_error"]["error"]
     concern_summary.run_summaries(call=writer, register_connect=reg.connect)
-    assert len(writer.seen) == 2, "not tried again until a note is written"
+    assert len(seen) == 1, "not tried again until a note is written"
     register = reg.read()
     register["active"][0]["reinforcement_notes"] += "\n" + _note(21)
     reg.write(register)

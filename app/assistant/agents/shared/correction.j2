@@ -1,0 +1,11 @@
+Your answer above has these problems:
+{% for p in problems %}
+- {% if p.field %}{{ p.field }}{% if p.item %} {{ p.item }}{% endif %}{% if p.at %}, {{ p.at }}{% endif %}{% else %}the answer{% endif %}{% if p.value is not none %}: you wrote {{ p.value }}{% endif %}. {{ p.why }}
+{%- endfor %}
+
+{% if field -%}
+Answer with only the {{ field }} items named above, each one whole and corrected. Each takes the place of the item with
+the same key in your answer; the rest of your answer stands.
+{%- else -%}
+Answer again, with the whole answer corrected.
+{%- endif %}

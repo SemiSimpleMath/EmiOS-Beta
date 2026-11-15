@@ -1,8 +1,9 @@
 """The stories behind the owner's /mind page: the brain's work told in plain words.
 
 Pins: a matter is told once, with a line for every event, from the events, the decisions and where a new
-concern landed; an answer missing a line gets one correction, and one still invalid is stored as failed
-and not retried until its record changes. An open concern with a brief is told again when its plan or
+concern landed; each story agent's rules are its validate.py (a matter's line for every event, nothing proposed for a
+hold, no empty field; corrected once by the agent, agent_runtime/correction.py), and an answer still refused is stored
+as failed and not retried until its record changes. An open concern with a brief is told again when its plan or
 work changes; nothing is proposed for a hold. The day is told from its matter stories. The page's view
 of a day gives its ribbon, each event's line and tag, what was set aside without a concern, a card per open
 concern, and the day's calendar. Scratch store; fake agent calls;
@@ -18,6 +19,13 @@ import pytest
 import app.assistant.tests.test_setup  # noqa: F401
 from app.assistant.subconscious import brain_inbox, brain_step, brain_stories
 from app.assistant.tests.concern_store_helpers import ScratchRegister
+from app.assistant.agent_registry.agent_registry import AgentRegistry
+from app.assistant.agent_runtime.correction import AgentOutputInvalid, Problem
+from app.assistant.utils.path_utils import get_app_root
+
+AGENTS = get_app_root() / "assistant" / "agents" / "subconscious"
+RULES = {kind: AgentRegistry()._load_validator(AGENTS / f"story_{kind}" / "validate.py")
+         for kind in ("matter", "concern", "day")}
 
 NOW = datetime.now(timezone.utc)
 HOUR_AGO = (NOW - timedelta(hours=1)).isoformat()
@@ -113,12 +121,33 @@ def test_a_matter_a_concern_and_the_day_are_told_once(reg):
     assert _run(reg, agents) == {"stories_written": 0, "stories_failed": 0}
 
 
-def test_a_missing_line_is_corrected_once_then_stored_as_failed(reg):
+def test_a_matter_story_needs_one_line_for_every_event():
+    rules, given = RULES["matter"], {"events": [{"label": "E1"}, {"label": "E2"}]}
+    assert rules.ITEM_KEYS == {"lines": "event"}
+    assert rules.validate({"headline": "h", "lines": [{"event": "E1", "line": "a"}, {"event": "E2", "line": "b"}]},
+                          given) == []
+    found = rules.validate({"headline": " ", "lines": [{"event": "E1", "line": ""}, {"event": "E1", "line": "a"},
+                                                       {"event": "E9", "line": "c"}]}, given)
+    assert {(p.field, p.item, p.value, p.structural) for p in found} == {
+        ("headline", "", None, False), ("lines", "E1", None, False), ("lines", "", "E9", True),
+        ("lines", "E1", None, True), ("lines", "E2", None, True)}
+    assert [p.why for p in found if p.item == "E2"] == ["no line for it; one line for every event"]
+
+
+def test_a_day_story_needs_a_headline_and_an_overview():
+    assert RULES["day"].validate(DAY_STORY, {}) == []
+    assert [p.field for p in RULES["day"].validate({"headline": "", "overview": " "}, {})] == ["headline", "overview"]
+
+
+def test_a_refused_story_is_stored_as_failed_and_not_retried(reg):
     _seed_matter(reg)
-    agents = Agents(matter={"headline": "h", "lines": []}, concern=CONCERN_STORY, day=DAY_STORY)
+
+    def refused(payload):
+        raise AgentOutputInvalid("subconscious::story_matter", [Problem(
+            why="no line for it; one line for every event", field="lines", item="E1", structural=True)])
+    agents = Agents(matter=refused, concern=CONCERN_STORY, day=DAY_STORY)
     assert _run(reg, agents)["stories_failed"] == 1
-    matters = [p for k, p in agents.seen if k == "matter"]
-    assert len(matters) == 2 and "no line for ['E1']" in matters[1]["correction"]
+    assert len([p for k, p in agents.seen if k == "matter"]) == 1
     assert "no line" in brain_stories.load("matter", reg.connect)["1"]["error"]
     agents.seen.clear()
     _run(reg, agents)
@@ -127,10 +156,15 @@ def test_a_missing_line_is_corrected_once_then_stored_as_failed(reg):
 
 def test_nothing_is_proposed_for_a_hold_and_a_new_plan_retells_the_concern(reg):
     _seed_matter(reg)
-    agents = Agents(matter=_lines, concern={**CONCERN_STORY, "proposed": ["Pay it"]}, day=DAY_STORY)
+    agents = Agents(matter=_lines, concern=CONCERN_STORY, day=DAY_STORY)
     _run(reg, agents)
-    told = [p for k, p in agents.seen if k == "concern"]
-    assert "nothing is proposed now" in told[1]["correction"]
+    [told] = [p for k, p in agents.seen if k == "concern"]
+    [problem] = RULES["concern"].validate({**CONCERN_STORY, "proposed": ["Pay it"]}, told)
+    assert problem.field == "proposed" and "the decision is hold: nothing is proposed now" in problem.why
+    assert RULES["concern"].validate({**CONCERN_STORY, "proposed": ["Pay it"]},
+                                     {"concern": {"plan": {"decision": "act_now"}}}) == []
+    assert [p.field for p in RULES["concern"].validate({**CONCERN_STORY, "state": ""}, {"concern": {"plan": None}})] \
+        == ["state"]
     register = reg.read()
     register["active"][0]["plan"] = {"decision": "act_now", "todo": ["Pay the fine"], "why": "due", "basis": "b1"}
     reg.write(register)

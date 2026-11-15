@@ -44,7 +44,8 @@ situation, every open concern in full as the brain's agents read it (its summary
 attached to it, concern_planner.concern_text) with the concern's own entries on the list, and what the brain read and decided today
 (brain_matters: each event with the brain's decision and reason, the notes it wrote, the concerns it raised). A
 concern's entry is a fact a change can cite: the concern side runs first in the brain's pass, so an entry it makes
-("we're eating out tonight") reaches the day's tasks in the same pass. Code checks the answer (one correction round) and records the run in `brain_day_decisions` (the
+("we're eating out tonight") reaches the day's tasks in the same pass. The agent's validate.py checks the answer,
+corrected once by the agent (agent_runtime/correction.py); code records the run in `brain_day_decisions` (the
 table keeps the name it was created with). Until 2026-10-09 `compare(day)` set the brain's shadow decisions beside
 what the steward did with the same beliefs.
 """
@@ -329,59 +330,13 @@ def describe(kind: str, obj_id: str, *, connect=None) -> Dict[str, Any]:
 
 def changeable(own: List[Dict[str, Any]], concerns: List[Dict[str, Any]]) -> Dict[str, Optional[str]]:
     """The entries an answer may modify or cancel by label: its own (O) and every open concern's (E). Label -> the
-    label of the concern a concern's own entry belongs to (it stays with it), or None for a day's entry."""
+    label of the concern a concern's own entry belongs to (it stays with it), or None for a day's entry. Given to the
+    agent as `changeable`, which its validate.py checks the answer against."""
     out: Dict[str, Optional[str]] = {e["ref"]: None for e in own}
     for c in concerns:
         for e in c.get("entries") or []:
             if e["ref"] not in out:
                 out[e["ref"]] = c["ref"] if e["kind"] == "concern" else None
-    return out
-
-
-def entries_problems(data: Dict[str, Any], entries: Dict[str, Optional[str]], labels: Dict[str, Any]) -> List[str]:
-    """The entries beyond the calendar: a new one is entry "new"; a modify or cancel names one of the entries given
-    (`changeable`) by its label; new and modify name the outcome, the assistant's part and when; every one says why,
-    in words, and lists in relies_on the labels of what prompted it; the concern an entry serves is an open concern's
-    C label, and a concern's own entry stays with its concern."""
-    changes = data.get("entries")
-    if changes is None:
-        return []
-    if not isinstance(changes, list):
-        return ["entries is not a list"]
-    out, seen = [], []
-    for c in changes:
-        entry, action = str((c or {}).get("entry") or "").strip(), (c or {}).get("action")
-        if action not in ("new", "modify", "cancel"):
-            out.append(f"entry {entry!r}: action {action!r} is not new, modify or cancel")
-            continue
-        if action == "new" and entry != "new":
-            out.append(f'a new entry is written as entry "new", got {entry!r}')
-        if action != "new":
-            if entry not in entries:
-                out.append(f"{entry!r} is not one of the entries given (your own O, a concern's E)")
-                continue
-            seen.append(entry)
-        if action in ("new", "modify"):
-            missing = [f for f in ("what", "assistant_part", "when") if not str(c.get(f) or "").strip()]
-            if missing:
-                out.append(f"entry {entry}: {action} names {', '.join(missing)}")
-        if not str(c.get("why") or "").strip():
-            out.append(f"entry {entry}: why is empty")
-        relied = [str(x).strip() for x in c.get("relies_on") or []]
-        unknown = [x for x in relied if x not in labels]
-        if not relied:
-            out.append(f"entry {entry}: relies_on names nothing; name what prompted it")
-        elif unknown:
-            out.append(f"entry {entry}: relies_on {unknown}, which are not labels given")
-        concern = str(c.get("concern") or "").strip()
-        if concern and (labels.get(concern) or [None])[0] != "concern":
-            out.append(f"entry {entry}: concern {concern!r} is not an open concern given (its C label)")
-        owner = entries.get(entry) if action == "modify" else None
-        if owner and concern and concern != owner:
-            out.append(f"entry {entry}: it is {owner}'s entry and stays with it; leave concern empty or name {owner}")
-    twice = sorted({x for x in seen if seen.count(x) > 1})
-    if twice:
-        out.append(f"entries changed more than once: {twice}")
     return out
 
 
@@ -443,7 +398,7 @@ def gather(now_utc: datetime, *, plan_connect=None) -> Dict[str, Any]:
     # which would have ended that work: work names the entry it was made from (project, `from_list`).
     return {"day": day, "now": now_utc.isoformat(), "own": own, "situation": s, "matters": matters,
             "beliefs": concern_beliefs(s["concerns"]), "ended_relied_on": ended_relied_on(own, s["concerns"]),
-            **project(day, s, matters, own), "correction": None}
+            **project(day, s, matters, own), "changeable": changeable(own, s["concerns"])}
 
 
 def ended_relied_on(own: List[Dict[str, Any]], concerns: List[Dict[str, Any]], *, connect=None) -> List[str]:
@@ -476,7 +431,7 @@ def run_day_tasks(*, now_utc: Optional[datetime] = None, connect=None,
                   call: Callable[[Dict[str, Any]], Any] = None) -> Dict[str, Any]:
     """Decide the list (every open concern's entries, the day's own) when a stage before it changed since the last run
     (fingerprint); record the run. The keyword arguments are test seams. Raises when the answer is still invalid after
-    one correction."""
+    the agent's one correction (its validate.py, agent_runtime/correction.py)."""
     from app.assistant.subconscious.brain_trace import step
     now = now_utc or datetime.now(timezone.utc)
     connect = connect or _connect
@@ -487,21 +442,7 @@ def run_day_tasks(*, now_utc: Optional[datetime] = None, connect=None,
     fp = fingerprint(inputs)
     if fp == _last_fingerprint(inputs["day"], connect):
         return {"day_tasks": "unchanged"}
-    call = call or _agent_call
-    entries = changeable(inputs.get("own") or [], inputs["situation"]["concerns"])
-
-    def check(answer):
-        if not isinstance(answer, dict) or not isinstance(answer.get("entries"), list):
-            return ["no entries list"]
-        return entries_problems(answer, entries, inputs["labels"])
-    data = call(inputs)
-    found = check(data)
-    if found:
-        step("day_tasks", "answer refused, one correction", subject=inputs["day"], problems=found)
-        data = call({**inputs, "correction": "; ".join(found)})
-        found = check(data)
-        if found:
-            raise ValueError(f"day_tasks answer still invalid after one correction: {found}")
+    data = (call or _agent_call)(inputs)
     # The list changes land before the run (its fingerprint) is recorded: a run counts as done only once its entries
     # are on the list. Until 2026-10-05 the run was recorded first, and a failure applying the entries left the
     # next pass "unchanged" with the decisions lost; now it decides again, reading the entries that did land.

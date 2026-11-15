@@ -199,39 +199,13 @@ def _serialize_cluster(node_ids: List[str], node_data: Dict[str, Dict[str, Any]]
 
 # ── Resolution ────────────────────────────────────────────────────────────────
 
-def _coverage_problems(data: Dict[str, Any], node_ids: List[str]) -> List[str]:
-    """Where an answer breaks the coverage contract: every node id shown appears
-    exactly once across the merge groups and distinct_node_ids, only those ids,
-    and every merge group names at least one duplicate. Empty when complete."""
-    node_set = set(node_ids)
-    named: List[str] = []
-    problems: List[str] = []
-    for g in (data.get("merge_groups") or []):
-        canon = g.get("canonical_node_id")
-        dups = list(g.get("duplicate_node_ids") or [])
-        if not dups:
-            problems.append(f"the merge group for {canon} names no duplicate_node_ids")
-        named.append(canon)
-        named.extend(dups)
-    named.extend(data.get("distinct_node_ids") or [])
-    unknown = sorted({str(n) for n in named if n not in node_set})
-    if unknown:
-        problems.append(f"not ids of this cluster: {unknown}")
-    repeated = sorted({n for n in named if n in node_set and named.count(n) > 1})
-    if repeated:
-        problems.append(f"placed more than once: {repeated}")
-    missing = [n for n in node_ids if n not in named]
-    if missing:
-        problems.append(f"not placed: {missing}")
-    return problems
-
-
 def resolve_one_cluster(cluster: Dict[str, Any], *, scope_context, dry_run: bool) -> Dict[str, Any]:
-    """Adjudicate one cluster with the LLM; validate coverage; apply unless dry_run.
+    """Adjudicate one cluster with the LLM; apply unless dry_run.
 
-    A node the answer leaves out is never taken as 'distinct': an incomplete
-    answer gets one correction naming what is missing, and raises if it is
-    still incomplete."""
+    A node the answer leaves out is never taken as 'distinct'. The coverage
+    contract is the resolver's validate.py (it reads `node_ids`): an
+    incomplete answer is corrected once by the agent and raises when still
+    incomplete (agent_runtime/correction.py)."""
     node_ids: List[str] = cluster["node_ids"]
     node_data = _load_node_brief_data(node_ids)
     brief = _serialize_cluster(node_ids, node_data)
@@ -240,23 +214,10 @@ def resolve_one_cluster(cluster: Dict[str, Any], *, scope_context, dry_run: bool
     if agent is None:
         raise RuntimeError(f"could not create agent {AGENT_NAME}")
 
-    def call(agent_input: Dict[str, Any]) -> Dict[str, Any]:
-        response = agent.action_handler(
-            Message(agent_input=agent_input, scope_context=scope_context)
-        )
-        return getattr(response, "data", None) or {}
-
-    payload = {"cluster_brief": brief}
-    data = call(payload)
-    problems = _coverage_problems(data, node_ids)
-    if problems:
-        logger.warning("[dup_cluster] incomplete answer, one correction: %s", problems)
-        data = call({**payload, "correction": "; ".join(problems)})
-        problems = _coverage_problems(data, node_ids)
-        if problems:
-            raise ValueError(
-                f"duplicate cluster answer still incomplete after one correction: {problems}"
-            )
+    response = agent.action_handler(
+        Message(agent_input={"cluster_brief": brief, "node_ids": node_ids}, scope_context=scope_context)
+    )
+    data = getattr(response, "data", None) or {}
 
     merge_groups: List[Tuple[str, List[str], str]] = [
         (g["canonical_node_id"], list(g["duplicate_node_ids"]), str(g.get("reason") or ""))

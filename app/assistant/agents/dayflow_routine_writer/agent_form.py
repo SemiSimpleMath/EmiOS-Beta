@@ -7,7 +7,7 @@ class Placement(BaseModel):
     time: str = Field(description="When it applies: a clock time such as '9:00 PM' or '7:30 AM', or 'all day'.")
     until: str = Field(description="For a clock time: the clock time after which this no longer matters today, at "
                                    "most about two hours after its time unless what it asks plainly needs longer, "
-                                   "such as '11:00 PM'. Empty for 'all day', which matters until midnight.")
+                                   "such as '11:00 PM'; midnight is written '12:00 AM'. Empty for 'all day'.")
 
 
 class Judgment(BaseModel):

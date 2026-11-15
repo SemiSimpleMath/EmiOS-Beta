@@ -2,10 +2,10 @@
 
 The selector picked "timesheets weekly, 3–4 PM" for a Wednesday without seeing "weekly timesheets are
 due on Mondays", which was on another page of its catalog. Pins: code proposes groups by meaning; the
-clusterer's answer places every belief once, joining existing topics by label; an invalid answer gets
-one correction, then fails loudly; the export carries each belief's topic; the selector's pages never
-split a topic; the writer gets a selected belief's topic-mates. Scratch store; the model is a fake;
-invented data only.
+clusterer's answer places every belief once, joining existing topics by label; its validate.py refuses
+a belief missed or placed twice and a blank label (corrected once by agent_runtime/correction.py since
+2026-11-15); the export carries each belief's topic. Scratch store; the model is a fake; invented data
+only.
 """
 from __future__ import annotations
 
@@ -13,6 +13,9 @@ import json
 
 import pytest
 
+import app.assistant.tests.test_setup  # noqa: F401
+from app.assistant.agent_registry.agent_registry import AgentRegistry
+from app.assistant.utils.path_utils import get_app_root
 from belief_engine import clusters
 from belief_engine.intake.catalog import active_entries
 from belief_engine.intake.store import IntakeStore, sqlite_file
@@ -69,24 +72,30 @@ def test_a_first_placement_names_topics_and_a_later_one_joins_them(connect):
     assert topics["B5"] == topics["B1"] == {"cluster_id": "K1", "cluster": "Reports"}
 
 
-def test_what_was_placed_once_is_kept_and_only_the_rest_is_asked_again(connect):
-    answers = iter([
-        {"clusters": [{"label": "Reports", "belief_ids": ["B1", "B2", "B3"]},
-                      {"label": "reports", "belief_ids": ["B3", "B9"]}], "reasoning": "r"},   # B3 twice, B4 missed
-        {"clusters": [{"label": "Meals", "belief_ids": ["B3", "B4"]}], "reasoning": "r"}])
-    seen = []
-    assert clusters.place_beliefs(connect=connect, call=lambda p: seen.append(p) or next(answers))["placed"] == 4
-    assert [[b["id"] for b in g] for g in seen[1]["beliefs_to_place"]] == [["B3", "B4"]]
-    assert "placed more than once: ['B3']" in seen[1]["correction"] and "not placed: ['B4']" in seen[1]["correction"]
-    assert "['B9'] are not beliefs to place" in seen[1]["correction"]
-    assert {c["label"] for c in seen[1]["existing_clusters"]} == {"Reports"}   # the first answer is kept
+RULES = AgentRegistry()._load_validator(
+    get_app_root() / "assistant" / "agents" / "belief_engine" / "belief_clusterer" / "validate.py")
+PAGE = {"existing_clusters": [], "beliefs_to_place": [[{"id": "B1", "statement": "s"}, {"id": "B2", "statement": "s"}],
+                                                      [{"id": "B3", "statement": "s"}, {"id": "B4", "statement": "s"}]]}
+
+
+def test_the_clusterer_refuses_a_belief_missed_or_placed_twice_and_a_blank_label():
+    ok = {"clusters": [{"label": "Reports", "belief_ids": ["B1", "B2"]},
+                       {"label": "reports", "belief_ids": ["B3", "B9"]},          # same topic; B9 is ignored
+                       {"label": "Meals", "belief_ids": ["B4"]}], "reasoning": "r"}
+    assert RULES.validate(ok, PAGE) == []
+    bad = RULES.validate({"clusters": [{"label": "Reports", "belief_ids": ["B1", "B2", "B3"]},
+                                       {"label": "  ", "belief_ids": ["B3"]}], "reasoning": "r"}, PAGE)
+    assert [(p.at, p.value, p.structural) for p in bad] == [
+        ("[1].label", "  ", False), ("", "B3", True), ("", "B4", True)]
+    assert "more than once" in bad[1].why and "not placed" in bad[2].why
+
+
+def test_labels_join_in_any_case_and_an_id_not_given_is_not_written(connect):
+    assert clusters.place_beliefs(connect=connect, call=lambda p: {"clusters": [
+        {"label": "Reports", "belief_ids": ["B1", "B2", "B9"]}, {"label": "reports", "belief_ids": ["B3"]},
+        {"label": "Meals", "belief_ids": ["B4"]}], "reasoning": "r"}) == {"placed": 4, "clusters_created": 2}
     assert {b: t["cluster"] for b, t in clusters.memberships(connect).items()} == {
-        "B1": "Reports", "B2": "Reports", "B3": "Meals", "B4": "Meals"}
-
-
-def test_a_belief_still_unplaced_after_the_correction_fails_the_run(connect):
-    with pytest.raises(ValueError, match="still unplaced"):
-        clusters.place_beliefs(connect=connect, call=lambda p: {"clusters": [], "reasoning": "r"})
+        "B1": "Reports", "B2": "Reports", "B3": "Reports", "B4": "Meals"}
 
 
 def test_the_export_carries_each_beliefs_topic(connect):

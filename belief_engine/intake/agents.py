@@ -1,17 +1,15 @@
-"""The two model calls of the new intake, with the checks code enforces on their output.
+"""The model calls of the new intake.
 
-The models decide; nothing here writes. A call whose output fails its checks gets exactly one
-correction attempt naming the problems, then raises.
+The models decide; nothing here writes. Each agent's rules for its answer live in its validate.py and a refused answer
+is corrected once in conversation, then raises AgentOutputInvalid (agent_runtime/correction.py; until 2026-11-15 these
+calls re-rendered the prompt with the problems tucked into the date or the new belief).
 """
 from __future__ import annotations
 
-from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message
 
 from belief_engine.intake.day_items import item_text
 from belief_engine.intake.redact import redact
-
-logger = get_logger(__name__)
 
 EXTRACTOR = "belief_engine::belief_extractor"
 _SCOPE = {"durable_fact": "chronic", "stable_relationship": "chronic", "stable_preference": "chronic",
@@ -39,40 +37,12 @@ def _call(name: str, payload: dict, scope_ctx) -> dict:
     return data
 
 
-def _extraction_problems(result: dict, sources_of: dict[int, set]) -> list[str]:
-    """A belief cites an insight given, and only entries from that insight's own sources."""
-    problems = []
-    for b in result.get("beliefs") or []:
-        allowed = sources_of.get(b["insight_ref"])
-        if allowed is None:
-            problems.append(f"belief cites insight {b['insight_ref']}, not one of {sorted(sources_of)}")
-            continue
-        refs = b.get("sources") or []
-        bad = [r for r in refs if r not in allowed]
-        if bad:
-            problems.append(f"a belief from insight {b['insight_ref']} cites entries {bad}, which are not among "
-                            f"that insight's sources {sorted(allowed)}")
-        if len(set(refs)) != len(refs):
-            problems.append("a belief cites the same entry twice")
-    return problems
-
-
 def extract_day(day: str, insights: list, provenance: dict, scope_ctx) -> list[dict]:
     """The day's beliefs, each resting on entries from its insight's sources, restored to their source refs
     (day_items.insights gives each insight with its sources, and the provenance of every source)."""
     if not insights:
         return []
-    sources_of = {i["n"]: {s["n"] for s in i["sources"]} for i in insights}
-    payload = {"date": day, "insights": insights}
-    result = _call(EXTRACTOR, payload, scope_ctx)
-    problems = _extraction_problems(result, sources_of)
-    if problems:
-        logger.warning("[intake] %s extraction invalid, one correction: %s", day, problems)
-        result = _call(EXTRACTOR, {**payload, "date": f"{day} (correct these problems in your previous "
-                                   f"answer: {'; '.join(problems)})"}, scope_ctx)
-        problems = _extraction_problems(result, sources_of)
-        if problems:
-            raise ValueError(f"{day} extraction still invalid after one correction: {problems}")
+    result = _call(EXTRACTOR, {"date": day, "insights": insights}, scope_ctx)
     beliefs = []
     for b in result["beliefs"]:
         sources = []
@@ -106,32 +76,7 @@ def dedup(atom: dict, day: str, candidates: list[dict], scope_ctx) -> dict:
     new = {"statement": atom["statement"], "kind": atom["kind"],
            "sources": [{"n": n, "day": day, **{k: s[k] for k in ("time", "kind", "text", "in_reply_to") if s.get(k)}}
                        for n, s in enumerate(atom["sources"], 1)]}
-    payload = {"new_belief": new, "existing_beliefs": [view(b) for b in candidates]}
-
-    def problems(result: dict) -> list[str]:
-        v, target, srcs = result.get("verdict"), (result.get("target") or "").strip(), result.get("sources") or []
-        out = []
-        if v not in ("same", "refines", "contradicts", "new"):
-            out.append(f"verdict {v!r} is not one of same, refines, contradicts, new")
-        elif v != "new" and target not in by_id:
-            out.append(f"target {target!r} is not one of the listed ids")
-        if v in ("same", "contradicts"):
-            if not srcs:
-                out.append(f"{v} names no bearing sources; give the numbers of the new belief's sources that bear on the target")
-            bad = [n for n in srcs if not 1 <= n <= len(atom["sources"])]
-            if bad:
-                out.append(f"sources {bad} are outside 1..{len(atom['sources'])}")
-        return out
-
-    result = _call(DEDUP, payload, scope_ctx)
-    found = problems(result)
-    if found:
-        logger.warning("[intake] dedup output invalid, one correction: %s", found)
-        result = _call(DEDUP, {**payload, "new_belief": {**new, "note": (
-            "Correct these problems in your previous answer: " + "; ".join(found))}}, scope_ctx)
-        found = problems(result)
-        if found:
-            raise ValueError(f"dedup output still invalid after one correction: {found}")
+    result = _call(DEDUP, {"new_belief": new, "existing_beliefs": [view(b) for b in candidates]}, scope_ctx)
     v = result["verdict"]
     return {"verdict": v, "target": (result.get("target") or "").strip() if v != "new" else None,
             "sources": sorted(set(result.get("sources") or [])) if v in ("same", "contradicts") else [],

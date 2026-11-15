@@ -12,10 +12,5 @@ Proposed group {{ loop.index }}:
 {% for b in g %}- [{{ b.id }}] {{ b.statement }}
 {% endfor %}
 {% endfor %}
-{%- if correction %}
-## Correct your previous answer
-It did not satisfy the contract: {{ correction }}
-Answer again, placing every belief above exactly once, using only the ids given.
-{% endif %}
 ---
 Place every belief to place into a topic.

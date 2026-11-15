@@ -1,12 +1,16 @@
 """Calendar candidates (owner, 2026-10-03): after the intake, every belief not yet looked at is proposed as calendar
 material or not; only the owner approves. Pins: undecided beliefs are read in pages and each decided once, a
-candidate carries when it would appear, an invalid answer gets one correction and then raises, a decided belief is
-not read again, and a retired one is never read. Scratch store; fake agent; invented data only.
+candidate carries when it would appear (the agent's validate.py refuses an answer that breaks either; corrected once by
+agent_runtime/correction.py since 2026-11-15), a decided belief is not read again, and a retired one is never read.
+Scratch store; fake agent; invented data only.
 """
 from __future__ import annotations
 
 import pytest
 
+import app.assistant.tests.test_setup  # noqa: F401
+from app.assistant.agent_registry.agent_registry import AgentRegistry
+from app.assistant.utils.path_utils import get_app_root
 from belief_engine.intake import calendar
 from belief_engine.intake.store import IntakeStore, sqlite_file
 
@@ -54,19 +58,24 @@ def test_each_undecided_belief_is_proposed_or_not_once(tmp_path, monkeypatch):
     assert _rows(store)["B4"] == ("not_proposed", "because")
 
 
-def test_an_invalid_answer_gets_one_correction_then_raises(tmp_path):
-    store = _store(tmp_path, ["The owner's household trash day is Wednesday.", "The owner likes potato balls."])
-    answers = iter([{"decisions": [{"belief_key": "B1", "candidate": True, "when": "", "reason": "r"},
-                                   {"belief_key": "B9", "candidate": False, "reason": "r"}]},
-                    {"decisions": [{"belief_key": "B1", "candidate": True, "when": "Wednesday night", "reason": "r"},
-                                   {"belief_key": "B2", "candidate": False, "reason": "r"}]}])
-    seen = []
-    calendar.tag_calendar_candidates(store, call=lambda p: (seen.append(p), next(answers))[1])
-    assert seen[1]["correction"] == "B1: a candidate needs `when`; 'B9' is not one of the beliefs given; not decided: ['B2']"
-    assert _rows(store)["B1"][0] == "proposed"
-    with pytest.raises(ValueError, match="still invalid"):
-        store2 = _store(tmp_path / "b", ["The owner likes potato balls."])
-        calendar.tag_calendar_candidates(store2, call=lambda p: {"decisions": []})
+RULES = AgentRegistry()._load_validator(
+    get_app_root() / "assistant" / "agents" / "belief_engine" / "calendar_candidate" / "validate.py")
+
+
+def test_the_rules_refuse_an_unknown_or_repeated_key_a_belief_not_decided_and_a_candidate_without_when():
+    given = {"beliefs": [{"id": "B1", "statement": "s"}, {"id": "B2", "statement": "s"}, {"id": "B3", "statement": "s"}]}
+    ok = {"decisions": [{"belief_key": "B1", "candidate": True, "when": "Wednesday night", "reason": "r"},
+                        {"belief_key": "B2", "candidate": False, "when": "", "reason": "r"},
+                        {"belief_key": "B3", "candidate": False, "when": "", "reason": "r"}]}
+    assert RULES.validate(ok, given) == []
+    bad = RULES.validate({"decisions": [{"belief_key": "B1", "candidate": True, "when": " ", "reason": "r"},
+                                        {"belief_key": "B9", "candidate": False, "reason": "r"},
+                                        {"belief_key": "B2", "candidate": False, "reason": "r"},
+                                        {"belief_key": "B2", "candidate": False, "reason": "r"}]}, given)
+    assert [(p.item, p.at, p.value, p.structural) for p in bad] == [
+        ("B1", "when", " ", False), ("", "", "B9", True), ("B2", "", None, True), ("B3", "", None, True)]
+    assert "more than once" in bad[2].why and "not decided" in bad[3].why
+    assert RULES.ITEM_KEYS == {"decisions": "belief_key"}
 
 
 def test_an_unknown_calendar_status_is_refused(tmp_path):

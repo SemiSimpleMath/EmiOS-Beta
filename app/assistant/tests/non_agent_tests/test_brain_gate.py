@@ -91,16 +91,12 @@ def _decisions(*rows):
     return {"decisions": [{"event": e, "route": r, "concern": c, "reasoning": "r"} for e, r, c in rows]}
 
 
-def test_routes_are_validated_and_mapped_back_by_code(connect):
+def test_routes_are_mapped_back_by_code(connect):
     inbox.ingest_chat(now_utc=NOW, connect=connect, fetch=lambda since: [
         msg(1, 30, "Gave the cat the worm tablet."), msg(2, 20, "School trip form is due Friday."),
         msg(3, 10, "haha nice")])
-    answers = iter([
-        _decisions(("E1", "concern", "C9"), ("E2", "new_matter", "C1")),      # bad label, a concern on new_matter,
-                                                                              # a missing event
-        _decisions(("E1", "concern", "C1"), ("E2", "new_matter", None), ("E3", "none", None)),
-    ])
-    out = gate.run_gate(ingest=False, call=lambda payload: next(answers), register=REGISTER, connect=connect)
+    answer = _decisions(("E1", "concern", "C1"), ("E2", "new_matter", None), ("E3", "none", None))
+    out = gate.run_gate(ingest=False, call=lambda payload: answer, register=REGISTER, connect=connect)
     assert out == {"ingested": 0, "routed": 3, "passed_on": 2, "failed": 0, "waiting": 0, "next_ready_at": None}
     reports = brain_step.pending_events(connect)
     assert [(r["text"], r["route"], r["concern_ids"]) for r in reports] == [
@@ -108,9 +104,30 @@ def test_routes_are_validated_and_mapped_back_by_code(connect):
         ("School trip form is due Friday.", "new_matter", [])]
 
 
+def test_the_gate_s_rules_refuse_bad_labels_misnamed_concerns_and_unanswered_events():
+    """Moved from gate._problems onto the agent's validate.py (2026-11-15; agent_runtime/correction.py)."""
+    from app.assistant.agent_registry.agent_registry import AgentRegistry
+    from app.assistant.utils.path_utils import get_app_root
+    rules = AgentRegistry()._load_validator(get_app_root() / "assistant" / "agents" / "subconscious" / "gate"
+                                            / "validate.py")
+    assert rules.ITEM_KEYS == {"decisions": "event"}
+    given = {"event_labels": ["E1", "E2", "E3"], "open_concerns": [{"label": "C1"}, {"label": "C2"}]}
+    good = _decisions(("E1", "concern", "C1"), ("E2", "new_matter", None), ("E3", "none", None))
+    assert rules.validate(good, given) == []
+    bad = _decisions(("E1", "concern", "C9"), ("E2", "new_matter", "C1"), ("E2", "none", None), ("E7", "none", None))
+    found = {(p.item, p.at, p.value, p.structural) for p in rules.validate(bad, given)}
+    assert found == {("E1", "concern", "C9", False), ("E2", "concern", "C1", False), ("", "", "E7", True),
+                     ("E2", "", None, True), ("E3", "", None, True)}
+
+
 def test_a_routing_failure_still_reaches_the_brain(connect):
+    from app.assistant.agent_runtime.correction import AgentOutputInvalid, Problem
     inbox.ingest_chat(now_utc=NOW, connect=connect, fetch=lambda since: [msg(1, 5, "Car booked for Tuesday.")])
-    out = gate.run_gate(ingest=False, call=lambda payload: {"decisions": []}, register=REGISTER, connect=connect)
+
+    def refused(payload):
+        raise AgentOutputInvalid("subconscious::gate", [Problem(why="not answered; answer every event",
+                                                                field="decisions", item="E1", structural=True)])
+    out = gate.run_gate(ingest=False, call=refused, register=REGISTER, connect=connect)
     assert out["failed"] == 1
     [r] = brain_step.pending_events(connect)
     assert r["gate_status"] == "failed" and "not answered" in r["gate_error"]
@@ -127,12 +144,13 @@ def test_gate_prompts_render_with_every_event_and_concern():
     LOG.extend([turn("a1", 12, "assistant", "Did the cat get the tablet?")])
     event = {"source_ref": "message:m1", "occurred_at": (NOW - timedelta(minutes=5)).isoformat(),
              "room_id": "master_room", "speaker": "Owner", "text": "done!", "source": "chat"}
-    payload = {**gate.build_payload([event], gate.open_concerns(REGISTER)), "correction": "not answered: ['E1']"}
+    payload = gate.build_payload([event], gate.open_concerns(REGISTER))
+    assert payload["event_labels"] == ["E1"]
     user = work_context._ENV.get_template("subconscious/gate/prompts/user.j2").render(agent_input=payload)
     assert "[C1] The cat's worm tablet is due soon" in user
     assert "### Chat room\nAbout master_room." in user and "master_room\n" not in user.split("About")[0]
     assert user.index("assistant: Did the cat get the tablet?") < user.index("[E1] Owner: done!")
-    assert "not answered: ['E1']" in user and "Route every labelled event." in user
+    assert "Route every labelled event." in user
     system = work_context._ENV.get_template("subconscious/gate/prompts/system.j2").render(
         resource_assistant_data={"name": "the assistant"})
     assert "You route; the brain judges." in system and "Name that one concern" in system

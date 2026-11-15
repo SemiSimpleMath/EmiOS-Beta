@@ -115,8 +115,9 @@ def generate_identity_sentence(
     Deterministic proposes (the facts), LLM decides (selection + phrasing
     — or the honest verdict that no coherent referent exists).
     Returns {"sentence": Optional[str], "definable": bool, "basis": str}.
-    A failed call raises; an answer that says definable but gives no
-    sentence gets one correction, then raises.
+    A failed call raises. The writer's rule is its validate.py: an answer
+    that says definable but gives no sentence is corrected once by the
+    agent and raises when still refused (agent_runtime/correction.py).
     """
     from app.assistant.routine_handlers.subconscious import _run_subconscious_agent
 
@@ -124,28 +125,17 @@ def generate_identity_sentence(
         raise ValueError("identity inputs missing label — refusing to invoke writer")
 
     agent_input = {k: v for k, v in inputs.items() if not k.startswith("_")}
-    # Always present: the template tests these keys and strict_template
+    # Always present: the template tests this key and strict_template
     # raises on undefined variables (prompt guards layer 3).
     agent_input["source_window"] = source_window or None
-    agent_input["correction"] = None
 
-    def ask() -> Dict[str, Any]:
-        return _run_subconscious_agent(
-            handler_label="identity_sentence_writer",
-            agent_name=AGENT_NAME,
-            context=agent_input,
-            scope_id=AGENT_NAME,
-            actor_id="identity_sentence_refresh",
-        )
-
-    result = ask()
-    if result.get("definable") and not str(result.get("identity_sentence") or "").strip():
-        agent_input["correction"] = ("Your previous answer said definable=true but gave no identity_sentence: "
-                                     "write the sentence, or answer definable=false.")
-        result = ask()
-        if result.get("definable") and not str(result.get("identity_sentence") or "").strip():
-            raise RuntimeError(f"identity_sentence_writer: definable without a sentence for "
-                               f"{inputs.get('label')!r} after one correction")
+    result = _run_subconscious_agent(
+        handler_label="identity_sentence_writer",
+        agent_name=AGENT_NAME,
+        context=agent_input,
+        scope_id=AGENT_NAME,
+        actor_id="identity_sentence_refresh",
+    )
     sentence = str(result.get("identity_sentence") or "").strip()
     definable = bool(result.get("definable")) and bool(sentence)
     return {

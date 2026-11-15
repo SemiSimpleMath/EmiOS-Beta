@@ -2,7 +2,7 @@
 # beliefs that qualify it (owner, 2026-09-30: "Really relevant beliefs should cluster. If you read the
 # beliefs in that cluster we would not have picked it as relevant for today"). Code proposes groups
 # from the embeddings; this agent decides the clusters and names them (belief_engine/clusters.py).
-# It DECIDES only; code validates and writes.
+# It DECIDES only; its validate.py checks every belief is placed once, and code writes.
 name: belief_engine::belief_clusterer
 class_name: Agent
 llm_params:
@@ -10,5 +10,5 @@ llm_params:
   model_tier: "mini"
 allowed_tools: []
 except_tools: []
-user_context_items: [existing_clusters, beliefs_to_place, correction]
+user_context_items: [existing_clusters, beliefs_to_place]
 system_context_items: [resource_user_data]

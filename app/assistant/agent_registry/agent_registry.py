@@ -132,6 +132,7 @@ class AgentRegistry:
                         f"preferring agent_form.py."
                     )
             input_schema = self._load_agent_args(agent_folder / "input_schema.py")
+            validator = self._load_validator(agent_folder / "validate.py")
             if canonical_name in self.configs:
                 import traceback
                 logger.warning(f"Duplicate agent name {canonical_name} in folder {agent_folder.name}")
@@ -146,6 +147,7 @@ class AgentRegistry:
                 "structured_output": structured_output,
                 "type": "agent",
                 "input_schema": input_schema,
+                "validator": validator,
                 "_loaded_from": str(agent_folder)
             }
 
@@ -291,6 +293,25 @@ class AgentRegistry:
             ) from e
 
 
+
+    def _load_validator(self, validate_path: Path):
+        """The agent's own rules for its answer (validate.py beside agent_form.py): its validate(answer, agent_input)
+        and ITEM_KEYS (empty when it defines none), agent_runtime/correction.py. None when absent. Kept as a plain
+        namespace, not the module: managers deep-copy the registry, and a module cannot be copied."""
+        if not validate_path.exists():
+            return None
+        raw = str(validate_path.resolve())
+        h = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+        module_name = f"app.assistant.agents._dynamic.validate_{validate_path.parent.name}_{h}"
+        spec = importlib.util.spec_from_file_location(module_name, validate_path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+        if not callable(getattr(module, "validate", None)):
+            raise RuntimeError(f"{validate_path} defines no validate(answer, agent_input)")
+        logger.info(f"Loaded validator from {validate_path}")
+        from types import SimpleNamespace
+        return SimpleNamespace(validate=module.validate, ITEM_KEYS=dict(getattr(module, "ITEM_KEYS", {})))
 
     def register_agent_class(self, agent_name, agent_class_reference):
         """Assigns the agent class reference to its config."""

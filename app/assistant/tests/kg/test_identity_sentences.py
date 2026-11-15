@@ -435,22 +435,32 @@ def test_missing_primary_user_name_raises(monkeypatch):
         mod.run_identity_sentence_refresh(max_per_run=5)
 
 
-def test_definable_without_sentence_gets_one_correction(monkeypatch):
+def test_the_writer_refuses_definable_without_a_sentence():
+    """The rule moved to the agent's validate.py (2026-11-15); the agent corrects once and raises."""
+    from app.assistant.agent_registry.agent_registry import AgentRegistry
+    from app.assistant.utils.path_utils import get_app_root
+
+    rules = AgentRegistry()._load_validator(
+        get_app_root() / "assistant" / "agents" / "kg_maintenance" / "identity_sentence_writer" / "validate.py")
+    refused = rules.validate({"definable": True, "identity_sentence": " ", "basis": "x"}, {})
+    assert [p.field for p in refused] == ["identity_sentence"]
+    assert rules.validate({"definable": False, "identity_sentence": None, "basis": "x"}, {}) == []
+    assert rules.validate({"definable": True, "identity_sentence": "Tom's house.", "basis": "x"}, {}) == []
+
+
+def test_the_writer_is_called_once_without_a_correction_slot(monkeypatch):
     import app.assistant.kg_core.kg_utils.identity_sentence as mod
     import app.assistant.routine_handlers.subconscious as sub
 
-    answers = [{"definable": True, "identity_sentence": "", "basis": "x"},
-               {"definable": True, "identity_sentence": "", "basis": "x"}]
     seen = []
 
     def fake_agent(**kwargs):
         seen.append(dict(kwargs["context"]))
-        return answers.pop(0)
+        return {"definable": True, "identity_sentence": "The thing.", "basis": "x"}
 
     monkeypatch.setattr(sub, "_run_subconscious_agent", fake_agent)
-    with pytest.raises(RuntimeError, match="after one correction"):
-        mod.generate_identity_sentence({"label": "Thing", "edges": []})
-    assert seen[0]["correction"] is None and "no identity_sentence" in seen[1]["correction"]
+    assert mod.generate_identity_sentence({"label": "Thing", "edges": []})["sentence"] == "The thing."
+    assert len(seen) == 1 and "correction" not in seen[0]
 
 
 def test_long_sentence_and_basis_are_kept_whole(monkeypatch):

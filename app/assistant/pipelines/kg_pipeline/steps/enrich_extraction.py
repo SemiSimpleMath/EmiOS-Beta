@@ -17,7 +17,8 @@ extraction is enriched before any row is written, and all its rows are
 written in one transaction, so a failure leaves the extraction pending
 whole (until then rows were written per component, and a later failure
 left the extraction half enriched and no longer pending). A State/Event the
-enricher leaves out gets one targeted correction, then the run stops.
+enricher leaves out is refused by its validate.py and corrected once by the
+agent (agent_runtime/correction.py, 2026-11-15), then the run stops.
 """
 from __future__ import annotations
 
@@ -148,7 +149,7 @@ class EnrichExtractionStep:
         pass through unchanged — they don't need this enrichment. Goals get
         valid_currently from goal_status deterministically (no LLM call).
         Returns enriched nodes merged with originals. Any failure raises; a
-        State/Event the enricher leaves out gets one targeted correction.
+        State/Event the enricher leaves out is refused by its validate.py.
         """
         if not nodes:
             return nodes
@@ -184,47 +185,35 @@ class EnrichExtractionStep:
                 kind="pipeline", source_id="kg_pipeline", actor_id="enrich_extraction",
             )
 
-            def ask(targets: List[Dict]) -> None:
-                node_payloads = [
-                    {
-                        "temp_id": n.get("temp_id"),
-                        "node_type": n.get("node_type"),
-                        "label": n.get("label"),
-                        "category": n.get("category"),
-                        "sentence": n.get("sentence"),
-                    }
-                    for n in targets
-                ]
-                sentences = [n.get("sentence") or "" for n in targets]
-                combined_sentence = " | ".join(dict.fromkeys(s for s in sentences if s))
-                if not combined_sentence:
-                    edge_sents = [e.get("sentence") or "" for e in (edges or [])]
-                    combined_sentence = " | ".join(dict.fromkeys(s for s in edge_sents if s))
-                agent_input = {
-                    "nodes": _json.dumps(node_payloads, ensure_ascii=True),
-                    "resolved_sentence": combined_sentence,
-                    "resolved_window": resolved_window,
-                    "message_timestamp": message_timestamp,
+            node_payloads = [
+                {
+                    "temp_id": n.get("temp_id"),
+                    "node_type": n.get("node_type"),
+                    "label": n.get("label"),
+                    "category": n.get("category"),
+                    "sentence": n.get("sentence"),
                 }
-                resp = agent.action_handler(Message(agent_input=agent_input, scope_context=scope))
-                data = resp.data if resp and hasattr(resp, "data") else None
-                if not isinstance(data, dict):
-                    raise RuntimeError(f"[kg_pipeline.enrich] the enricher returned no answer: {data!r}")
-                for mn in data.get("Nodes") or []:
-                    if isinstance(mn, dict) and mn.get("temp_id"):
-                        meta_by_temp[str(mn["temp_id"])] = mn
-
-            ask(agent_targets)
-            missing = [n for n in agent_targets if str(n["temp_id"]) not in meta_by_temp]
-            if missing:
-                # One targeted correction: ask again for exactly the nodes left out.
-                ask(missing)
-                missing = [n for n in agent_targets if str(n["temp_id"]) not in meta_by_temp]
-                if missing:
-                    raise ValueError(
-                        f"[kg_pipeline.enrich] the enricher left out {[n['temp_id'] for n in missing]} "
-                        f"after one correction"
-                    )
+                for n in agent_targets
+            ]
+            sentences = [n.get("sentence") or "" for n in agent_targets]
+            combined_sentence = " | ".join(dict.fromkeys(s for s in sentences if s))
+            if not combined_sentence:
+                edge_sents = [e.get("sentence") or "" for e in (edges or [])]
+                combined_sentence = " | ".join(dict.fromkeys(s for s in edge_sents if s))
+            agent_input = {
+                "nodes": _json.dumps(node_payloads, ensure_ascii=True),
+                "resolved_sentence": combined_sentence,
+                "resolved_window": resolved_window,
+                "message_timestamp": message_timestamp,
+                "temp_ids": [str(n["temp_id"]) for n in agent_targets],
+            }
+            resp = agent.action_handler(Message(agent_input=agent_input, scope_context=scope))
+            data = resp.data if resp and hasattr(resp, "data") else None
+            if not isinstance(data, dict):
+                raise RuntimeError(f"[kg_pipeline.enrich] the enricher returned no answer: {data!r}")
+            for mn in data.get("Nodes") or []:
+                if isinstance(mn, dict) and mn.get("temp_id"):
+                    meta_by_temp[str(mn["temp_id"])] = mn
 
         # Goal nodes: deterministic valid_currently from goal_status. No LLM.
         # Goals carry their lifecycle on goal_status (active|completed|abandoned|dormant).

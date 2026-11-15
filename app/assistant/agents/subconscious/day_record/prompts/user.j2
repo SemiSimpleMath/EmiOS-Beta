@@ -1,7 +1,7 @@
 {#- The day's record input (subconscious/day_record.py), a projection: every object shows its label of this call and
     its data, never its id; times local. Expects agent_input: day, now, events [{ref, title, start_utc, end_utc, state,
     basis, note, shown_by}], milestones [{at_utc, description, basis, origin, shown_by}], concerns [{ref, title,
-    subject, history}] (persist.history_for_prompt), matters (day_tasks.matters_today, each with ref), correction. -#}
+    subject, history}] (persist.history_for_prompt), matters (day_tasks.matters_today, each with ref). -#}
 {%- set A = agent_input -%}
 Now: {{ A.now | local_time }}{% if A.current %}; {{ A.current.words }}{% endif %}
 
@@ -29,8 +29,5 @@ Each with its record, oldest first: a summary of the older notes, then every not
 (none)
 {% endfor %}
 {% with matters = A.matters %}{% include 'shared/brain/matters_today.j2' %}{% endwith %}
-{% if A.correction %}
-## Your previous answer was refused
-{{ A.correction }}
-{% endif %}
+
 Record what the day as now known changes, and what happened that is not yet recorded.

@@ -2,7 +2,8 @@
 
 "If any call fails in KG, we should treat that as a stop processing." Each
 test drives one maintenance site into a failed LLM / embedding / Chroma / DB
-call (or an answer still incomplete after one correction) and pins that the
+call (or an answer its agent's validate.py still refuses after the agent's
+one correction, agent_runtime/correction.py) and pins that the
 run raises, writes no degraded result, leaves the remaining work pending,
 and counts the item in the failure ledger where the queue has one.
 
@@ -146,7 +147,7 @@ def test_execute_approved_stops_at_the_first_failure(monkeypatch):
     assert statuses == {"f1": "executed", "f2": "execute_error"}
 
 
-# ── role_succession_scan: a malformed verdict gets one correction ────────
+# ── role_succession_scan: a malformed verdict stops the run ──────────────
 
 
 def _possessive_with_evidence(label="Kid's School"):
@@ -162,33 +163,44 @@ def _possessive_with_evidence(label="Kid's School"):
     return nid
 
 
-def test_malformed_succession_verdict_is_corrected_once_then_raises(monkeypatch):
+def _rules(*parts):
+    from app.assistant.agent_registry.agent_registry import AgentRegistry
+    from app.assistant.utils.path_utils import get_app_root
+    return AgentRegistry()._load_validator(get_app_root().joinpath("assistant", "agents", *parts, "validate.py"))
+
+
+def test_a_succession_verdict_still_refused_after_the_correction_stops_the_run(monkeypatch):
     import app.assistant.pipelines.kg_maintenance_pipeline.step_role_succession_scan as mod
+    from app.assistant.agent_runtime.correction import AgentOutputInvalid, Problem
 
     nid = _possessive_with_evidence()
     seen = []
 
     def judge(agent_input):
         seen.append(dict(agent_input))
-        return {"verdict": "succession", "confidence": "high", "reasoning": "changed"}  # no split_date
+        raise AgentOutputInvalid("kg_maintenance::succession_judge",
+                                 [Problem(why="the split_date is not an ISO date", field="split_date")])
 
     monkeypatch.setattr(mod, "_run_judge", judge)
-    with pytest.raises(ValueError, match="after one correction"):
+    with pytest.raises(ValueError, match="split_date"):
         mod.run(_ctx())
-    assert len(seen) == 2 and "split_date" in seen[1]["correction"]
+    assert len(seen) == 1 and "correction" not in seen[0]
     assert _findings("referent_succession") == []     # no cooldown stamp
     assert _failures(mod.FAILURE_KIND, nid) == 1
 
 
-def test_corrected_succession_verdict_is_used(monkeypatch):
-    import app.assistant.pipelines.kg_maintenance_pipeline.step_role_succession_scan as mod
-
-    _possessive_with_evidence()
-    answers = [{"verdict": "maybe", "confidence": "high", "reasoning": "?"},
-               {"verdict": "stable", "confidence": "medium", "reasoning": "one school"}]
-    monkeypatch.setattr(mod, "_run_judge", lambda agent_input: answers.pop(0))
-    result = mod.run(_ctx())
-    assert result["stable"] == 1 and answers == []
+def test_the_succession_judge_rules():
+    """Moved from step_role_succession_scan._problems to the judge's validate.py (2026-11-15)."""
+    rules = _rules("kg_maintenance", "succession_judge")
+    found = {(p.field, p.value) for p in rules.validate(
+        {"verdict": "maybe", "confidence": "sure", "reasoning": "?"}, {})}
+    assert found == {("verdict", "maybe"), ("confidence", "sure")}
+    found = {p.field for p in rules.validate(
+        {"verdict": "succession", "confidence": "high", "split_date": "fall 2024", "reasoning": "changed"}, {})}
+    assert found == {"split_date", "split_basis"}
+    assert rules.validate({"verdict": "succession", "confidence": "High", "split_date": "2024-09-01",
+                           "split_basis": "new school named", "reasoning": "changed"}, {}) == []
+    assert rules.validate({"verdict": "stable", "confidence": "medium", "reasoning": "one school"}, {}) == []
 
 
 # ── wiki_inference: a failed finding write leaves the page unexamined ────
@@ -256,7 +268,8 @@ def test_curator_agent_missing_raises(monkeypatch):
         mod.run(_ctx())
 
 
-def test_incomplete_curator_answer_is_corrected_once_then_raises(monkeypatch):
+def test_a_curator_answer_still_refused_after_the_correction_applies_nothing(monkeypatch):
+    from app.assistant.agent_runtime.correction import AgentOutputInvalid, Problem
     from app.assistant.pipelines.kg_maintenance_pipeline import step_edge_canon_curation as mod
 
     _seed_raw_predicate()
@@ -264,17 +277,34 @@ def test_incomplete_curator_answer_is_corrected_once_then_raises(monkeypatch):
 
     class _Curator:
         def action_handler(self, msg):
-            seen.append(msg.agent_input["information"])
-            return SimpleNamespace(data={"verdicts": [
-                {"predicate": "hangs_out_with", "verdict": "variant_of", "canonical_target": "no_such_canon",
-                 "reason": "x"}]})
+            seen.append(dict(msg.agent_input))
+            raise AgentOutputInvalid("me::edge_canon_curator", [Problem(
+                why="a variant_of names an existing canonical edge type", field="verdicts", item="hangs_out_with",
+                at="canonical_target", value="no_such_canon")])
 
     monkeypatch.setattr(DI.agent_factory, "create_agent", lambda name: _Curator())
     monkeypatch.setattr("app.assistant.scope.loader.load_scope_for_source", lambda **k: None)
-    with pytest.raises(RuntimeError, match="after one correction"):
+    with pytest.raises(ValueError, match="no_such_canon|canonical_target"):
         mod.run(_ctx())
-    assert seen[0] == "" and "no_such_canon" in seen[1]
+    assert len(seen) == 1 and seen[0]["predicates"] == ["hangs_out_with"] and "information" not in seen[0]
     assert "hangs_out_with" in _edge_types()          # nothing applied
+
+
+def test_the_edge_canon_curator_rules():
+    """Moved from step_edge_canon_curation._check_verdicts to the curator's validate.py (2026-11-15)."""
+    rules = _rules("me", "edge_canon_curator")
+    given = {"predicates": ["hangs_out_with", "works_at", "likes"], "canons": ["employed_by"]}
+    found = {(p.item, p.at, p.structural) for p in rules.validate({"verdicts": [
+        {"predicate": "hangs_out_with", "verdict": "variant_of", "canonical_target": "no_such_canon"},
+        {"predicate": "works_at", "verdict": "maybe"},
+        {"predicate": "invented", "verdict": "not_yet"}]}, given)}
+    assert found == {("hangs_out_with", "canonical_target", False), ("works_at", "verdict", False),
+                     ("", "", True), ("likes", "", True)}
+    assert rules.validate({"verdicts": [
+        {"predicate": " hangs_out_with ", "verdict": "Not_Yet"},
+        {"predicate": "works_at", "verdict": "variant_of", "canonical_target": "employed_by"},
+        {"predicate": "likes", "verdict": "new_canon", "canonical_target": "likes"}]}, given) == []
+    assert rules.ITEM_KEYS == {"verdicts": "predicate"}
 
 
 # ── cluster_resolve ──────────────────────────────────────────────────────
@@ -311,27 +341,39 @@ def test_cluster_call_failure_stops_and_counts(monkeypatch):
     assert _failures(mod.FAILURE_KIND, nid) == 1
 
 
-def test_same_root_without_question_is_corrected_once(monkeypatch):
+def test_the_cluster_resolver_is_asked_once_with_the_chunk_s_finding_ids(monkeypatch):
     from app.assistant.pipelines.kg_maintenance_pipeline import step_cluster_resolve as mod
 
     nid = _mk_node("Clustered")
     fa, fb = _two_findings_on(nid)
-    answers = [
-        {"is_same_root": True, "lead_finding_id": fa, "member_finding_ids": [fa, fb], "root_question": ""},
-        {"is_same_root": True, "lead_finding_id": fa, "member_finding_ids": [fa, fb],
-         "root_question": "Which is right?", "reason": "same fact"},
-    ]
     seen = []
 
     class _Resolver:
         def action_handler(self, msg):
-            seen.append(msg.agent_input.get("correction"))
-            return SimpleNamespace(data=answers.pop(0))
+            seen.append(dict(msg.agent_input))
+            return SimpleNamespace(data={"is_same_root": True, "lead_finding_id": fa, "member_finding_ids": [fa, fb],
+                                         "root_question": "Which is right?", "reason": "same fact"})
 
     monkeypatch.setattr(mod.DI.agent_factory, "create_agent", lambda name: _Resolver())
     result = mod.run(_ctx())
     assert result["clusters_confirmed"] == 1
-    assert seen[0] is None and "root_question is empty" in seen[1]
+    assert len(seen) == 1 and seen[0]["finding_ids"] == sorted([fa, fb]) and "correction" not in seen[0]
+
+
+def test_the_cluster_resolver_rules():
+    """Moved from step_cluster_resolve._problems to the resolver's validate.py (2026-11-15)."""
+    rules = _rules("kg_finding_cluster_resolver")
+    ids = {"finding_ids": ["fa", "fb"]}
+    found = {(p.field, str(p.value)) for p in rules.validate(
+        {"is_same_root": True, "lead_finding_id": "fx", "member_finding_ids": ["fa", "fz"], "root_question": " "},
+        ids)}
+    assert found == {("lead_finding_id", "fx"), ("member_finding_ids", "['fz']"), ("root_question", "None")}
+    assert [p.field for p in rules.validate({"is_same_root": True, "lead_finding_id": "fa",
+                                             "member_finding_ids": [], "root_question": "Q?"}, ids)] == [
+        "member_finding_ids"]
+    assert rules.validate({"is_same_root": False, "member_finding_ids": []}, ids) == []
+    assert rules.validate({"is_same_root": True, "lead_finding_id": "fa", "member_finding_ids": ["fa", "fb"],
+                           "root_question": "Which is right?"}, ids) == []
 
 
 # ── context_embedding_backfill ───────────────────────────────────────────

@@ -111,7 +111,7 @@ def _inputs(conn):
                 "concerns": [{"ref": "C1", "concern_id": "c-sick", "title": "The daughter is home sick",
                               "subject": "the daughter", "history": "[Mon 03-09 07:40 AM] She has a cold.\n"
                                                                     "[Tue 03-10 11:30 AM] Still sick today; staying home."}],
-                "matters": [], "labels": labels, "correction": None}
+                "matters": [], "labels": labels}
     return gather
 
 
@@ -139,22 +139,43 @@ def test_a_concern_changes_the_day_and_every_change_keeps_what_showed_it(tmp_pat
                             call=lambda p: pytest.fail("nothing read changed")) == {"day_record": "unchanged"}
 
 
-@pytest.mark.parametrize("change,problem", [
-    (lambda a: a["changes"][0].update(relies_on=[]), "relies_on names nothing"),
-    (lambda a: a["changes"][0].update(relies_on=["C9"]), "['C9'] are not labels given"),
-    (lambda a: a["changes"][0].update(event="C1"), "not an event given"),
-    (lambda a: a["changes"][0].update(state="completed"), "state 'completed'"),
-    (lambda a: a["changes"][0].update(basis="guess"), "basis 'guess'"),
-    (lambda a: a["changes"][1].update(start=""), "a new event names its title and its start"),
-    (lambda a: a["milestones"][0].update(relies_on=[]), "milestone 1: relies_on names nothing"),
+def _rules():
+    from app.assistant.agent_registry.agent_registry import AgentRegistry
+    from app.assistant.utils.path_utils import get_app_root
+    return AgentRegistry()._load_validator(get_app_root() / "assistant" / "agents" / "subconscious" / "day_record"
+                                           / "validate.py")
+
+
+@pytest.mark.parametrize("change,where,problem", [
+    (lambda a: a["changes"][0].update(relies_on=[]), ("changes", "[0].relies_on"), "relies_on names nothing"),
+    (lambda a: a["changes"][0].update(relies_on=["C9"]), ("changes", "[0].relies_on"), "not labels given"),
+    (lambda a: a["changes"][0].update(event="C1"), ("changes", "[0].event"), "not an event given"),
+    (lambda a: a["changes"][1].update(start=""), ("changes", "[1]"), "a new event names its title and its start"),
+    (lambda a: a["changes"][0].update(state="moved"), ("changes", "[0].start"), "moved names the new start"),
+    (lambda a: a["milestones"][0].update(relies_on=[]), ("milestones", "[0].relies_on"), "relies_on names nothing"),
+    (lambda a: a["milestones"][0].update(time=""), ("milestones", "[0]"), "a milestone names its time"),
 ])
-def test_a_claim_with_nothing_to_show_for_it_is_malformed(change, problem):
+def test_a_claim_with_nothing_to_show_for_it_is_malformed(change, where, problem):
+    """The agent's validate.py (moved from day_record.problems, 2026-11-15; agent_runtime/correction.py)."""
     import copy
+    rules = _rules()
     labels = {"K1": ["day_event", "a"], "K2": ["day_event", "b"], "C1": ["concern", "c"]}
     answer = copy.deepcopy(ANSWER)
     change(answer)
-    assert any(problem in p for p in R.problems(answer, labels))
-    assert R.problems(ANSWER, labels) == []
+    assert any((p.field, p.at) == where and problem in p.why for p in rules.validate(answer, {"labels": labels}))
+    assert rules.validate(ANSWER, {"labels": labels}) == []
+
+
+@pytest.mark.parametrize("field,value", [("state", "completed"), ("basis", "guess")])
+def test_a_state_or_basis_the_model_may_not_set_is_refused_by_the_form(field, value):
+    import copy
+    from pydantic import ValidationError
+    from app.assistant.agents.subconscious.day_record.agent_form import AgentForm
+    answer = copy.deepcopy(ANSWER)
+    answer["changes"][0][field] = value
+    AgentForm.model_validate(ANSWER)
+    with pytest.raises(ValidationError, match=field):
+        AgentForm.model_validate(answer)
 
 
 def test_the_prompt_shows_labels_and_no_id(tmp_path):

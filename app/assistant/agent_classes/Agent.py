@@ -123,24 +123,24 @@ class Agent:
         # default no-op; override in subclasses if needed
         pass
 
-    def _run_llm_with_schema(self, messages, schema: Union[dict, str, None]):
+    def _run_llm_with_schema(self, messages, schema: Union[dict, str, None], agent_input: Optional[dict] = None):
         """
-        Run the LLM with an optional structured output schema.
+        Run the LLM with an optional structured output schema; the answer is checked against the agent's form and
+        its validate.py, and corrected once when refused (agent_runtime/correction.py).
 
         schema:
           - dict: JSON schema, use_json = True
           - str: model specific format hint, use_json = False
           - None: no structured output
         """
-        use_json = isinstance(schema, dict)
+        from app.assistant.agent_runtime import correction
+
+        def call(msgs, response_format):
+            return self.call_llm(messages=msgs, response_format=response_format,
+                                 use_json=isinstance(response_format, dict))
 
         try:
-            result = self.call_llm(
-                messages=messages,
-                response_format=schema,
-                use_json=use_json,
-            )
-            return result
+            return correction.run(self, messages, schema, agent_input, call)
         except Exception as e:
             logger.error(f"[{self.name}] LLM execution failed: {e}")
             raise
@@ -153,7 +153,7 @@ class Agent:
         try:
             self._prepare_execution_context(message)
             messages = self._build_messages(message)
-            raw_result = self._execute_model(messages)
+            raw_result = self._execute_model(messages, message.agent_input)
             from app.assistant.manager_runtime.execution import REGISTRY
             REGISTRY.check()
             result = self._finalize_execution(raw_result, message)
@@ -187,10 +187,10 @@ class Agent:
             logger.error("[%s] Error during prompt construction: %s, %s", self.name, e, message)
             raise PromptRenderError(f"[{self.name}] Prompt construction failed: {e}") from e
 
-    def _execute_model(self, messages: List[Dict[str, str]]) -> Any:
+    def _execute_model(self, messages: List[Dict[str, str]], agent_input: Optional[dict] = None) -> Any:
         """Phase 3: Call the LLM."""
         schema = self.config.get("structured_output")
-        return self._run_llm_with_schema(messages, schema)
+        return self._run_llm_with_schema(messages, schema, agent_input)
 
     def _finalize_execution(self, raw_result: Any, message: Message) -> Any:
         """Phase 4: Validate, apply to state, create audit message, route."""

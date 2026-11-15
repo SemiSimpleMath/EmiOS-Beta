@@ -1,8 +1,8 @@
 """A failed call in the KG investigator's helpers stops processing (owner, 2026-10-05).
 
 - duplicate cluster drain: a node the resolver leaves out is never taken as
-  'distinct'; an incomplete answer gets one correction naming what is
-  missing and raises if still incomplete; the first failing cluster stops
+  'distinct' (the resolver's validate.py; the agent corrects once and
+  raises if still incomplete); the first failing cluster stops
   the drain and is counted in the failure ledger; a cluster's merges commit
   together or not at all
 - finding brief: a failed read raises instead of a thinner brief
@@ -114,42 +114,63 @@ def resolver(monkeypatch):
 # ── duplicate cluster drain ──────────────────────────────────────────────
 
 
-def test_an_omitted_node_gets_one_correction_not_a_distinct_verdict(resolver):
+def _coverage_rules():
+    from app.assistant.agent_registry.agent_registry import AgentRegistry
+    from app.assistant.utils.path_utils import get_app_root
+    return AgentRegistry()._load_validator(
+        get_app_root() / "assistant" / "agents" / "kg_maintenance" / "duplicate_cluster_resolver" / "validate.py")
+
+
+def test_the_resolver_is_asked_once_with_the_cluster_s_node_ids(resolver):
     a, b, c = _mk_node("Walk"), _mk_node("Walk"), _mk_node("Walk")
     _dup_finding(a, b)
     _dup_finding(b, c)
     [cluster] = drain.build_duplicate_clusters()
     ids = cluster["node_ids"]
 
-    resolver.agent = _Resolver([
-        {"merge_groups": [], "distinct_node_ids": ids[:2]},
-        {"merge_groups": [], "distinct_node_ids": ids},
-    ])
+    resolver.agent = _Resolver([{"merge_groups": [], "distinct_node_ids": ids}])
     report = drain.resolve_one_cluster(cluster, scope_context=None, dry_run=True)
 
-    assert len(resolver.agent.inputs) == 2
-    assert "correction" not in resolver.agent.inputs[0]
-    assert ids[2] in resolver.agent.inputs[1]["correction"]
-    assert "not placed" in resolver.agent.inputs[1]["correction"]
+    assert len(resolver.agent.inputs) == 1
+    assert resolver.agent.inputs[0]["node_ids"] == ids and "correction" not in resolver.agent.inputs[0]
     assert report["distinct_count"] == 3
 
 
-@pytest.mark.parametrize("bad_answer, problem", [
-    ({"merge_groups": [], "distinct_node_ids": []}, "not placed"),
-    ({"merge_groups": [], "distinct_node_ids": ["invented-id"]}, "not ids of this cluster"),
-])
-def test_still_incomplete_after_one_correction_stops_the_drain(resolver, bad_answer, problem):
+def test_the_coverage_contract_never_takes_an_omitted_node_as_distinct():
+    """The contract moved to the resolver's validate.py (2026-11-15); the agent corrects once and raises."""
+    rules = _coverage_rules()
+    ids = {"node_ids": ["n1", "n2", "n3"]}
+    found = {(p.value, p.why, p.structural) for p in rules.validate(
+        {"merge_groups": [], "distinct_node_ids": ["n1", "n2", "n2", "invented-id"]}, ids)}
+    assert ("n3", "not placed; place every node exactly once, in a merge group or in distinct_node_ids",
+            True) in found
+    assert ("n2", "placed more than once; place each node exactly once", True) in found
+    assert ("invented-id", "it is not an id of this cluster; use only the ids shown", True) in found
+    no_dup = rules.validate({"merge_groups": [{"canonical_node_id": "n1", "duplicate_node_ids": []}],
+                             "distinct_node_ids": ["n2", "n3"]}, ids)
+    assert [(p.item, p.at, p.structural) for p in no_dup] == [("n1", "duplicate_node_ids", False)]
+    assert rules.ITEM_KEYS == {"merge_groups": "canonical_node_id"}
+    assert rules.validate({"merge_groups": [{"canonical_node_id": "n1", "duplicate_node_ids": ["n2"]}],
+                           "distinct_node_ids": ["n3"]}, ids) == []
+
+
+def test_an_answer_still_refused_after_the_correction_stops_the_drain(resolver):
+    from app.assistant.agent_runtime.correction import AgentOutputInvalid, Problem
+
     a, b, c = _mk_node("Walk"), _mk_node("Walk"), _mk_node("Walk")
     first = [_dup_finding(a, b), _dup_finding(b, c)]
     d, e = _mk_node("Dinner"), _mk_node("Dinner")
     later = _dup_finding(d, e)
     big = drain.build_duplicate_clusters()[0]
 
-    resolver.agent = _Resolver([bad_answer, bad_answer])
-    with pytest.raises(ValueError, match=problem):
+    def refused():
+        raise AgentOutputInvalid(drain.AGENT_NAME, [Problem(why="not placed", value=a, structural=True)])
+
+    resolver.agent = _Resolver([None], on_call=refused)
+    with pytest.raises(ValueError, match="not placed"):
         drain.drain_duplicate_clusters(dry_run=False)
 
-    assert len(resolver.agent.inputs) == 2          # the later cluster never ran
+    assert len(resolver.agent.inputs) == 1          # the later cluster never ran
     statuses = _statuses()
     assert all(statuses[f] == "pending" for f in first + [later])
     session = get_session()

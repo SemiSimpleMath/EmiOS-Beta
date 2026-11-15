@@ -1,8 +1,8 @@
 """The one line an ended work object is known by (subconscious/work_line.py, 2026-10-11).
 
 Pins: the agent reads the work's full objective, every main task with the finalizer's account (a task never run is
-shown as not run) and how and when it ended; work not ended is refused; an empty answer gets one correction, then
-raises. The brain's pass writes the line of each recently ended work once, records a failure and does not try it
+shown as not run) and how and when it ended; work not ended is refused; an empty answer is refused by the agent's
+validate.py (corrected once by the agent, agent_runtime/correction.py). The brain's pass writes the line of each recently ended work once, records a failure and does not try it
 again; readers get the lines written. Scratch database; fake agent; invented data only.
 """
 from datetime import datetime, timedelta, timezone
@@ -51,13 +51,17 @@ def test_the_agent_reads_the_whole_report_of_an_ended_work():
     assert "every step finished" in user and NOW.isoformat() not in user
 
 
-def test_an_empty_answer_gets_one_correction_then_raises():
+def test_an_empty_answer_is_refused_and_a_line_is_kept_on_one_line():
+    from app.assistant.agent_registry.agent_registry import AgentRegistry
+    from app.assistant.utils.path_utils import get_app_root
+    rules = AgentRegistry()._load_validator(get_app_root() / "assistant" / "agents" / "subconscious" / "work_line"
+                                            / "validate.py")
+    [problem] = rules.validate({"line": " "}, {})
+    assert (problem.field, problem.why) == ("line", "the answer had no line")
+    assert rules.validate({"line": "AC set at 6."}, {}) == []
     seen = []
-    assert W.write_line(_work(), call=lambda p: seen.append(p) or ({"line": ""} if len(seen) == 1 else
-                                                                     {"line": " AC set  at 6. "})) == "AC set at 6."
-    assert seen[1]["correction"] == "the answer had no line"
-    with pytest.raises(ValueError, match="still empty"):
-        W.write_line(_work(), call=lambda p: {"line": " "})
+    assert W.write_line(_work(), call=lambda p: seen.append(p) or {"line": " AC set  at 6. "}) == "AC set at 6."
+    assert len(seen) == 1
 
 
 def test_the_pass_writes_each_line_once_and_a_failure_is_not_tried_again(tmp_path):

@@ -42,8 +42,6 @@ logger = get_logger(__name__)
 
 _AGENT = "subconscious::day_record"
 STATES = ("planned", "happened", "moved", "cancelled", "did_not_happen", "unconfirmed")
-_MODEL_STATES = ("planned", "happened", "moved", "cancelled", "did_not_happen")
-BASES = ("direct", "inferred")
 
 SCHEMA = [
     """CREATE TABLE IF NOT EXISTS day_record_events (
@@ -299,7 +297,7 @@ def gather(now_utc: datetime, *, connect=None) -> Dict[str, Any]:
         e["shown_by"] = [p.label_of(k, i) or "" for k, i in relations.targets(("day_event", e["id"]), "shown_by",
                                                                                connect=connect)]
     return {"day": day, "now": now_utc.isoformat(), "current": current, "events": events, "milestones": milestones,
-            "concerns": concerns, "matters": matters, "labels": p.labels, "correction": None}
+            "concerns": concerns, "matters": matters, "labels": p.labels}
 
 
 def fingerprint(inputs: Dict[str, Any]) -> str:
@@ -316,45 +314,6 @@ def fingerprint(inputs: Dict[str, Any]) -> str:
 
 
 # ── the answer ─────────────────────────────────────────────────────────────
-
-def problems(data: Any, labels: Dict[str, List[str]]) -> List[str]:
-    """Each change names an event by its label (or "new" with a title and a time), a state the model may set, a basis,
-    and in relies_on what shows it; a milestone has its time, words, a basis and what shows it."""
-    if not isinstance(data, dict):
-        return ["the answer is not an object"]
-    out: List[str] = []
-
-    def shows(where, refs):
-        refs = [str(x).strip() for x in refs or []]
-        if not refs:
-            out.append(f"{where}: relies_on names nothing; name what shows it")
-        unknown = [x for x in refs if x not in labels]
-        if unknown:
-            out.append(f"{where}: relies_on {unknown} are not labels given")
-
-    for ch in data.get("changes") or []:
-        event = str(ch.get("event") or "").strip()
-        where = f"change {event}"
-        if event != "new" and (labels.get(event) or [None])[0] != "day_event":
-            out.append(f"{where}: not an event given (its K label) or \"new\"")
-        if event == "new" and not (str(ch.get("title") or "").strip() and str(ch.get("start") or "").strip()):
-            out.append(f"{where}: a new event names its title and its start")
-        if ch.get("state") not in _MODEL_STATES:
-            out.append(f"{where}: state {ch.get('state')!r} is not one of {list(_MODEL_STATES)}")
-        if ch.get("state") == "moved" and not str(ch.get("start") or "").strip():
-            out.append(f"{where}: moved names the new start")
-        if ch.get("basis") not in BASES:
-            out.append(f"{where}: basis {ch.get('basis')!r} is not direct or inferred")
-        shows(where, ch.get("relies_on"))
-    for i, m in enumerate(data.get("milestones") or [], 1):
-        where = f"milestone {i}"
-        if not str(m.get("time") or "").strip() or not str(m.get("description") or "").strip():
-            out.append(f"{where}: a milestone names its time and what happened")
-        if m.get("basis") not in BASES:
-            out.append(f"{where}: basis {m.get('basis')!r} is not direct or inferred")
-        shows(where, m.get("relies_on"))
-    return out
-
 
 def apply(inputs: Dict[str, Any], data: Dict[str, Any], *, now_utc: datetime, fp: str, connect=None) -> Dict[str, int]:
     """The answer onto the record: each change and its evidence, each new milestone, the run (theme, status)."""
@@ -421,7 +380,8 @@ def run_day_record(*, now_utc: Optional[datetime] = None, connect=None,
                    gather_inputs: Callable[[datetime], Dict[str, Any]] = None,
                    call: Callable[[Dict[str, Any]], Any] = None) -> Dict[str, Any]:
     """Bring the record up to date; ask the model when anything it reads changed. Raises when the answer is still
-    malformed after one correction. The keyword arguments are test seams."""
+    malformed after the agent's one correction (its validate.py, agent_runtime/correction.py). The keyword arguments
+    are test seams."""
     from app.assistant.subconscious.brain_trace import step
     now = now_utc or datetime.now(timezone.utc)
     connect = connect or _connect
@@ -430,15 +390,7 @@ def run_day_record(*, now_utc: Optional[datetime] = None, connect=None,
     fp = fingerprint(inputs)
     if fp == _last_fingerprint(inputs["day"], connect):
         return {"day_record": "unchanged"}
-    call = call or _agent_call
-    data = call(inputs)
-    found = problems(data, inputs["labels"])
-    if found:
-        step("day_record", "answer refused, one correction", subject=inputs["day"], problems=found)
-        data = call({**inputs, "correction": "; ".join(found)})
-        found = problems(data, inputs["labels"])
-        if found:
-            raise ValueError(f"day_record answer still invalid after one correction: {found}")
+    data = (call or _agent_call)(inputs)
     counts = apply(inputs, data, now_utc=now, fp=fp, connect=connect)
     step("day_record", "recorded (shadow)", subject=inputs["day"], **counts)
     logger.info("[day_record] %s: %s (shadow)", inputs["day"], counts)

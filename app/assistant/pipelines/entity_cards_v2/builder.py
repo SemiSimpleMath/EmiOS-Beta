@@ -9,8 +9,9 @@ One entry point:
 
 A failed call (LLM, DB) raises out of build_card before the persist phase:
 nothing is written and an existing card stays stale for the next run. A
-well-formed but incomplete answer gets one targeted correction, then raises
-(owner, 2026-10-05: any failed call in the KG stops processing).
+well-formed but incomplete answer is refused by the agent's validate.py,
+corrected once, then raises (owner, 2026-10-05: any failed call in the KG
+stops processing).
 
 Design: see docs/architecture/12_ENTITY_CARDS_V2_DESIGN.md.
 """
@@ -405,7 +406,8 @@ def _prefilter_facts(
     kg_maintenance::edge_filter to pick the informative ones. A failed
     batch raises out of the build (until 2026-10-05 it kept every fact and
     the card was persisted as a fresh build); a batch answer with no or
-    out-of-range keep_indices gets one correction, then raises.
+    out-of-range keep_indices is refused by the filter's validate.py,
+    corrected once, then raises.
     """
     if len(facts) <= _CARD_PREFILTER_THRESHOLD:
         return facts
@@ -426,14 +428,14 @@ def _prefilter_facts(
             _format_fact_oneliner(facts[global_i], local_i)
             for local_i, global_i in enumerate(global_indices, 1)
         ]
-        data = _ask_with_one_correction(
+        data = _ask(
             agent, f"edge_filter batch {batch_num} for {entity_label!r}",
             {
                 "node_label": entity_label,
                 "node_type": entity_type,
                 "edge_list": "\n".join(lines),
+                "line_count": len(global_indices),
             },
-            lambda d: _keep_indices_problems(d, len(global_indices)),
         )
         for local_idx in data["keep_indices"]:
             keep_global.add(global_indices[local_idx - 1])
@@ -447,43 +449,16 @@ def _prefilter_facts(
     return filtered
 
 
-def _keep_indices_problems(data: Dict[str, Any], n_lines: int) -> List[str]:
-    keep = data.get("keep_indices") or []
-    if not keep:
-        return [f"keep_indices is empty: list the numbers of the edges to keep (1 to {n_lines})"]
-    stray = [i for i in keep if not isinstance(i, int) or not 1 <= i <= n_lines]
-    if stray:
-        return [f"keep_indices {stray} are not edge numbers in the list (1 to {n_lines})"]
-    return []
-
-
 def _ask(agent: Any, what: str, agent_input: Dict[str, Any]) -> Dict[str, Any]:
-    """One agent call; an answer without structured data raises."""
+    """One agent call; an answer without structured data raises. Each card agent's rules are its validate.py: a
+    well-formed but incomplete answer is corrected once by the agent and raises when still refused
+    (agent_runtime/correction.py). Until 2026-11-15 a `correction` prompt slot carried that retry here."""
     result = agent.action_handler(Message(agent_input=agent_input, scope_context=_scope()))
     data = getattr(result, 'data', None)
     if hasattr(data, 'model_dump'):
         data = data.model_dump()
     if not isinstance(data, dict):
         raise RuntimeError(f"{what}: the agent returned no structured answer ({type(data).__name__})")
-    return data
-
-
-def _ask_with_one_correction(
-    agent: Any, what: str, agent_input: Dict[str, Any], problems_of,
-) -> Dict[str, Any]:
-    """A well-formed but incomplete answer gets ONE targeted correction (the
-    agent's `correction` prompt slot); still incomplete -> raise. `correction`
-    is always passed: agent_input lands on the agent's blackboard, so a
-    reused agent would otherwise carry the previous call's correction."""
-    data = _ask(agent, what, {**agent_input, "correction": ""})
-    problems = problems_of(data)
-    if not problems:
-        return data
-    logger.warning("[entity_cards_v2] %s incomplete, one correction: %s", what, "; ".join(problems))
-    data = _ask(agent, what, {**agent_input, "correction": "; ".join(problems)})
-    problems = problems_of(data)
-    if problems:
-        raise RuntimeError(f"{what}: still incomplete after one correction: {'; '.join(problems)}")
     return data
 
 
@@ -1030,23 +1005,11 @@ def _run_section_tagger(
         ),
         "section_list": section_list_str,
         "candidate_facts": "\n\n".join(fact_lines),
+        # Every fact must be tagged (the tagger's validate.py): an untagged fact would silently leave the card.
+        "fact_ids": [f['fact_id'] for f in facts],
     }
-
-    # Every fact must be tagged: an untagged fact would silently leave the card.
-    fact_ids = [f['fact_id'] for f in facts]
-    data = _ask_with_one_correction(
-        agent, f"section_tagger for {entity.label!r}", agent_input,
-        lambda d: _tagger_problems(d, fact_ids),
-    )
+    data = _ask(agent, f"section_tagger for {entity.label!r}", agent_input)
     return [tf for tf in data['tagged_facts'] if isinstance(tf, dict)]
-
-
-def _tagger_problems(data: Dict[str, Any], fact_ids: List[str]) -> List[str]:
-    tagged = {tf.get('fact_id') for tf in (data.get('tagged_facts') or []) if isinstance(tf, dict)}
-    missing = [fid for fid in fact_ids if fid not in tagged]
-    if missing:
-        return [f"fact_ids {missing} have no tagged_facts entry: tag every fact (or 'reject' it)"]
-    return []
 
 
 # --- Implementation: bullet_renderer LLM call -------------------------------
@@ -1087,32 +1050,15 @@ def _run_bullet_renderer(
         ),
         "section_name": section_name,
         "source_facts": "\n\n".join(fact_blocks),
+        # Dropping a fact is the renderer's call; a bullet with no text or citing no input fact is an incomplete
+        # answer (the renderer's validate.py).
+        "fact_ids": [f['fact_id'] for f in source_facts],
     }
-
-    # Dropping a fact is the renderer's call; a bullet with no text or citing
-    # no input fact is an incomplete answer.
-    fact_ids = {f['fact_id'] for f in source_facts}
-    data = _ask_with_one_correction(
-        agent, f"bullet_renderer for {entity.label!r} / {section_name}", agent_input,
-        lambda d: _sourced_bullet_problems(d, 'source_fact_ids', fact_ids),
-    )
+    data = _ask(agent, f"bullet_renderer for {entity.label!r} / {section_name}", agent_input)
     return [
         {'bullet_text': rb['bullet_text'].strip(), 'source_fact_ids': rb['source_fact_ids']}
         for rb in (data.get('bullets') or [])
     ]
-
-
-def _sourced_bullet_problems(data: Dict[str, Any], source_key: str, known_ids: set) -> List[str]:
-    """Each bullet needs text and a non-empty `source_key` naming only input ids."""
-    problems = []
-    for i, b in enumerate(data.get('bullets') or [], 1):
-        if not isinstance(b, dict) or not (b.get('bullet_text') or '').strip():
-            problems.append(f"bullet {i} has no bullet_text")
-            continue
-        ids = b.get(source_key) or []
-        if not ids or any(x not in known_ids for x in ids):
-            problems.append(f"bullet {i} {source_key} {ids} must name input ids only, at least one")
-    return problems
 
 
 # --- Implementation: persistence --------------------------------------------
@@ -1239,27 +1185,14 @@ def _run_section_distiller(
         "section_name": section_name,
         "max_bullets": str(max_bullets),
         "candidate_bullets": bullet_block,
+        # The distiller exists to cut the section to its cap (its validate.py reads max_bullets and these ids).
+        "bullet_ids": [rb['bullet_id'] for rb in renderer_bullets],
     }
-    bullet_ids = {rb['bullet_id'] for rb in renderer_bullets}
-    data = _ask_with_one_correction(
-        agent, f"section_distiller for {entity.label!r} / {section_name}", agent_input,
-        lambda d: _distiller_problems(d, bullet_ids, max_bullets),
-    )
+    data = _ask(agent, f"section_distiller for {entity.label!r} / {section_name}", agent_input)
     return [
         {'bullet_text': db['bullet_text'].strip(), 'source_bullet_ids': db['source_bullet_ids']}
         for db in data['bullets']
     ]
-
-
-def _distiller_problems(data: Dict[str, Any], bullet_ids: set, max_bullets: int) -> List[str]:
-    """The distiller exists to cut the section to its cap: no bullets, or more
-    than the cap, is incomplete."""
-    n = len(data.get('bullets') or [])
-    if n == 0:
-        return [f"no bullets: return the most identity-defining bullets, at most {max_bullets}"]
-    if n > max_bullets:
-        return [f"{n} bullets returned, more than max_bullets {max_bullets}"]
-    return _sourced_bullet_problems(data, 'source_bullet_ids', bullet_ids)
 
 
 # --- Deterministic + summary section builders -------------------------------
@@ -1299,7 +1232,7 @@ def _build_summary_section(
 
     A card with no summary is a failed build, so every miss raises: nothing to
     summarize, no agent, a failed call, or an empty summary after one
-    correction. Returning None used to persist a summary-less card stamped
+    correction (the writer's validate.py). Returning None used to persist a summary-less card stamped
     freshly built, its level_0 cut from the wiki-derived description.
     """
     if not section_bullets and not alias_text:
@@ -1325,10 +1258,7 @@ def _build_summary_section(
         "card_bullets": "\n".join(section_blocks) if section_blocks else "(no bullets)",
     }
 
-    data = _ask_with_one_correction(
-        agent, f"summary_writer for {entity.label!r}", agent_input,
-        lambda d: [] if (d.get('summary') or '').strip() else ["the summary is empty: write the 2-3 sentence summary"],
-    )
+    data = _ask(agent, f"summary_writer for {entity.label!r}", agent_input)
     return data['summary'].strip()
 
 

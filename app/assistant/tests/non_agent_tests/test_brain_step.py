@@ -4,7 +4,8 @@ Pins: events group into matters (by the concern they bear on, else by conversati
 a note lands on the concern as a [brain] journal line with the events as evidence; a resolution
 closes it; a new concern's source is the event it comes from, copied by code, and it carries when it expires;
 every event is decided once, and an event changes one concern (docs/design/concerns_as_state_2026-10-09.md, rule 3);
-an invalid answer gets one correction, then the matter is recorded failed, nothing is written and it is not retried;
+the agent's rules (its validate.py, corrected once by the agent: agent_runtime/correction.py) refuse an invalid
+answer, and an answer still refused records the matter failed, nothing is written and it is not retried;
 the brain reads earlier chat summaries, and each concern's record without its evidence list.
 Scratch stores; the brain and the concern door judge are fakes. Invented data only.
 """
@@ -19,6 +20,12 @@ import app.assistant.tests.test_setup  # noqa: F401
 from app.assistant.subconscious import brain_inbox, brain_step, conversations
 from app.assistant.tests.concern_store_helpers import ScratchRegister
 from belief_engine.intake.store import sqlite_file
+
+from app.assistant.agent_registry.agent_registry import AgentRegistry
+from app.assistant.utils.path_utils import get_app_root
+
+RULES = AgentRegistry()._load_validator(get_app_root() / "assistant" / "agents" / "subconscious" / "brain"
+                                        / "validate.py")
 
 NOW = datetime.now(timezone.utc).replace(microsecond=0)
 LATER = (NOW + timedelta(days=2)).astimezone().strftime("%Y-%m-%d %H:%M")   # a future local time
@@ -164,17 +171,38 @@ def test_a_new_concern_carries_its_source_and_its_expiry(inbox, tmp_path):
     assert c["expires_at"] == future_local_utc(LATER, NOW).isoformat() and "owner_request" not in c
 
 
+def _given(labels, now=NOW):
+    """The agent_input fields the brain's rules read, from a call's labels (label -> [kind, id])."""
+    return {"event_labels": [x for x, (k, _) in labels.items() if k == "brain_event"],
+            "concern_labels": [x for x, (k, _) in labels.items() if k == "concern"],
+            "label_kinds": {x: k for x, (k, _) in labels.items()}, "now_utc": now.isoformat()}
+
+
+def test_the_payload_carries_what_the_rules_check(inbox, tmp_path):
+    reg = _register(tmp_path, active=[_concern("c-vet", "Vet appointment for the dog")])
+    _event(inbox, 1, 10, "The vet moved us to Friday at 9.", route="concern", concerns=["c-vet"])
+    payload, _, labels, call_labels = brain_step.build_payload(brain_step.pending_events(inbox), reg.read(), NOW)
+    assert payload == {**payload, **_given(call_labels)} and payload["concern_labels"] == list(labels)
+
+
 def test_an_invalid_answer_fails_the_matter_once_and_writes_nothing(inbox, tmp_path):
+    from app.assistant.agent_runtime.correction import AgentOutputInvalid
     reg = _register(tmp_path)
     _event(inbox, 1, 10, "Please remind me about the dentist.")
     bad = {"event_decisions": [{"event": "E1", "decision": "new_concern", "concern": "N1", "reason": "asked"}],
            "new_concerns": [{"label": "N1", "title": "Dentist", "kind": "anticipated_need", "severity": "low",
                              "horizon": "this_week", "done_when": "booked", "expires_at": "2020-01-01 09:00",
                              "notes": "n", "relies_on": [], "attach": ["E1"]}]}
-    brain = _brain(bad, bad)
-    out = brain_step.run_brain_step(connect=inbox, register_connect=reg.connect, call=brain, judge=_all_new)
-    assert out["failed"] == 1 and len(brain.seen) == 2
-    assert "N1: expires_at must be a future local YYYY-MM-DD HH:MM" in brain.seen[1]["correction"]
+    [problem] = RULES.validate(bad, _given({"E1": ["brain_event", "1"]}))
+    assert (problem.field, problem.item, problem.at, problem.structural) == ("new_concerns", "N1", "expires_at", False)
+    assert problem.why.startswith("expires_at must be a future local YYYY-MM-DD HH:MM")
+    seen = []
+
+    def refused(payload):
+        seen.append(payload)
+        raise AgentOutputInvalid("subconscious::brain", [problem])
+    out = brain_step.run_brain_step(connect=inbox, register_connect=reg.connect, call=refused, judge=_all_new)
+    assert out["failed"] == 1 and len(seen) == 1
     assert reg.read()["active"] == []
     assert brain_step.pending_events(inbox) == [], "a failed matter is not retried automatically"
     with inbox(False) as db:
@@ -184,24 +212,25 @@ def test_an_invalid_answer_fails_the_matter_once_and_writes_nothing(inbox, tmp_p
 def test_an_event_changes_one_concern_and_an_update_names_only_its_own_events():
     """Rule 3. Until 2026-10-09 an event could be cited on several concerns, and "used" required a concern update, so
     a fact of the day was filed on whatever concern was nearest (a dog-walk follow-up on a friend's birthday)."""
-    events = {"E1": {"text": "x"}, "E2": {"text": "y"}, "E3": {"text": "z"}}
     labels = {"E1": ["brain_event", "1"], "E2": ["brain_event", "2"], "E3": ["brain_event", "3"],
               "C1": ["concern", "c"], "C2": ["concern", "d"]}
-    problems = brain_step._problems(
+    problems = {(p.field, p.item, p.why) for p in RULES.validate(
         {"event_decisions": [{"event": "E1", "decision": "changes_concern", "concern": "C1", "reason": "r"},
                              {"event": "E2", "decision": "no_concern", "reason": "r"},
                              {"event": "E3", "decision": "no_concern", "concern": "C2", "reason": "r"}],
          "concern_updates": [{"concern": "C2", "action": "note", "relies_on": ["E2"], "attach": [], "note": "n"}]},
-        events, ["C1", "C2"], labels, NOW)
-    assert any("E1 changes C1, but no update of C1 records it" in p for p in problems)
-    assert any("C2 is updated but no event is decided changes_concern for it" in p for p in problems)
-    assert any("C2: ['E2'] are not decided to change it; an event changes one concern" in p for p in problems)
-    assert any("E3: no_concern names no concern" in p for p in problems)
+        _given(labels))}
+    assert ("event_decisions", "E1", "it changes C1, but no update of C1 records it") in problems
+    assert any(f == "concern_updates" and i == "C2" and "no event is decided changes_concern" in w
+               for f, i, w in problems)
+    assert ("concern_updates", "C2", "these events are not decided to change it; an event changes one concern") \
+        in problems
+    assert ("event_decisions", "E3", "no_concern names no concern: leave it empty") in problems
     fine = {"event_decisions": [{"event": "E1", "decision": "changes_concern", "concern": "C1", "reason": "r"},
                                 {"event": "E2", "decision": "no_concern", "reason": "r"},
                                 {"event": "E3", "decision": "no_concern", "reason": "r"}],
             "concern_updates": [{"concern": "C1", "action": "note", "relies_on": ["E1"], "attach": ["E1"], "note": "n"}]}
-    assert brain_step._problems(fine, events, ["C1", "C2"], labels, NOW) == []
+    assert RULES.validate(fine, _given(labels)) == []
 
 
 def test_the_brain_prompt_renders_every_section():
@@ -231,8 +260,7 @@ def test_the_brain_prompt_renders_every_section():
                "entities": [{"label": "Karjalohja", "description": "A place the family travels to."}],
                "shared": {"links": [{"type": "Event", "label": "Summer Trip", "start": "2019-07-01", "end": "",
                                      "description": "At the cottage."}], "entities": []},
-               "beliefs": [{"belief_key": "B7", "statement": "Someone else sometimes walks the dogs.", "score": 0.4}],
-               "correction": None}
+               "beliefs": [{"belief_key": "B7", "statement": "Someone else sometimes walks the dogs.", "score": 0.4}]}
     user = work_context._ENV.get_template("subconscious/brain/prompts/user.j2").render(agent_input=payload)
     assert "## Earlier in the chat room" in user and "About master_room." in user and "Talked about the dose." in user
     from app.assistant.utils.time_utils import local_time_text
@@ -290,7 +318,7 @@ def test_each_work_is_shown_in_full_once_under_its_concern(inbox, tmp_path, monk
                                          "note": "The appointment moved to Friday 9:00.", "expires_at": LATER}],
                     "new_concerns": []})
     brain_step.run_brain_step(connect=inbox, register_connect=reg.connect, call=brain, judge=_all_new)
-    user = work_context._ENV.get_template("subconscious/brain/prompts/user.j2").render(agent_input={**brain.seen[0], "correction": None})
+    user = work_context._ENV.get_template("subconscious/brain/prompts/user.j2").render(agent_input=brain.seen[0])
     label = brain.seen[0]["source_labels"]["w1"]
     assert user.count("The vet said Friday at 9.") == 1 and user.count("Send the vet reminder") == 1
     assert (f"- [{label}] Remind about the vet: active, last changed Tue; cites a concern of this matter; "
@@ -354,11 +382,10 @@ def test_only_attach_attaches_and_references_are_stored_as_objects(inbox, tmp_pa
 def test_only_reference_fields_are_checked_never_the_words():
     """Owner, 2026-10-09: the prompt asks for words; scanning prose for labels is as good as a regex. Only the
     reference fields are checked."""
-    events = {"E1": {"text": "x"}}
     labels = {"E1": ["brain_event", "1"], "C1": ["concern", "c"], "W2": ["work", "w"]}
-    problems = brain_step._problems(
+    problems = RULES.validate(
         {"event_decisions": [{"event": "E1", "decision": "changes_concern", "concern": "C1", "reason": "W2 ended"}],
          "concern_updates": [{"concern": "C1", "action": "note", "relies_on": ["E1"], "attach": ["W2", "C1"],
-                              "note": "C1 remains open"}]}, events, ["C1"], labels, NOW)
-    assert not any("written into" in p for p in problems)
-    assert any("attach names events (E) only, got ['W2', 'C1']" in p for p in problems)
+                              "note": "C1 remains open"}]}, _given(labels))
+    assert [(p.item, p.at, p.why, p.value) for p in problems] == [
+        ("C1", "attach", "attach names events (E) only", ["W2", "C1"])]

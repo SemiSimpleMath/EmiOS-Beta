@@ -104,44 +104,6 @@ def build_payload(plan: Dict[str, Any], lines: List[Dict[str, Any]], concerns: L
                       "statements": c["source"]["content"].split("\n")} for i, (b, c) in enumerate(concerns, 1)]}
 
 
-def _problems(data: Dict[str, Any], line_labels: List[str], concern_labels: List[str]) -> List[str]:
-    """What is wrong with the placements: a line label or concern label not given, a line in no placement or in two, a
-    concern continued twice, an empty outcome, a time that is neither a clock time nor 'all day', or a clock time
-    without a clock time it matters until."""
-    from app.assistant.subconscious.day_pass import _clock_hour_minute
-    out, used, continued = [], [], []
-    for n, p in enumerate(data.get("placements") or [], 1):
-        refs = [str(x).strip() for x in p.get("lines") or []]
-        if not refs:
-            out.append(f"placement {n}: name the lines it is made of")
-        for r in refs:
-            if r not in line_labels:
-                out.append(f"placement {n}: {r!r} is not one of the lines given")
-        used += refs
-        cont = str(p.get("continues") or "").strip()
-        if cont:
-            if cont not in concern_labels:
-                out.append(f"placement {n}: {cont!r} is not one of today's concerns")
-            continued.append(cont)
-        if not str(p.get("outcome") or "").strip():
-            out.append(f"placement {n}: say what it asks for today, as an outcome")
-        when, until = str(p.get("time") or "").strip(), str(p.get("until") or "").strip()
-        if when.lower() == "all day":
-            continue
-        if _clock_hour_minute(when) is None:
-            out.append(f"placement {n}: time {when!r} is not a clock time like '9:00 PM', or 'all day'")
-        elif _clock_hour_minute(until) is None:
-            out.append(f"placement {n}: at {when}, until {until!r} is not a clock time like '11:00 PM'")
-    for label in line_labels:
-        if used.count(label) != 1:
-            out.append(f"{label}: put it in exactly one placement" if used.count(label) else
-                       f"{label}: in no placement; every line is in one")
-    for label in sorted(set(continued)):
-        if continued.count(label) > 1:
-            out.append(f"{label}: continued by {continued.count(label)} placements; at most one continues it")
-    return out
-
-
 def _agent_call(payload: Dict[str, Any]) -> Any:
     from app.assistant.routine_handlers.subconscious import _run_subconscious_agent
     return _run_subconscious_agent(handler_label="day_placements", agent_name=_AGENT, context=payload,
@@ -149,20 +111,9 @@ def _agent_call(payload: Dict[str, Any]) -> Any:
 
 
 def placements(payload: Dict[str, Any], *, call: Callable[[Dict[str, Any]], Any]) -> List[Dict[str, Any]]:
-    """The agent's placements, checked; one correction, then a loud failure."""
-    from app.assistant.subconscious.brain_trace import step
-    line_labels = [x["label"] for x in payload["lines"]]
-    concern_labels = [x["label"] for x in payload["concerns"]]
-    data = call(payload)
-    problems = _problems(data if isinstance(data, dict) else {}, line_labels, concern_labels)
-    if problems:
-        logger.warning("[calendar_concerns] invalid placements, one correction: %s", problems)
-        step("day_pass", "placements refused, one correction", problems=problems)
-        data = call({**payload, "correction": "; ".join(problems)})
-        problems = _problems(data if isinstance(data, dict) else {}, line_labels, concern_labels)
-        if problems:
-            raise ValueError(f"day placements still invalid after one correction: {problems}")
-    return data["placements"]
+    """The agent's placements. Its rules are its validate.py; a refused answer is corrected once by the agent and
+    raises when still refused (agent_runtime/correction.py)."""
+    return call(payload)["placements"]
 
 
 def desired(day: str, answer: List[Dict[str, Any]], lines: List[Dict[str, Any]],

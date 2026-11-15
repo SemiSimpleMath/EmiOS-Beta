@@ -5,5 +5,5 @@ llm_params:
   model_tier: "mini"
 allowed_tools: []
 except_tools: []
-user_context_items: [beliefs, fragments, page_retry]
+user_context_items: [beliefs, fragments]
 system_context_items: []

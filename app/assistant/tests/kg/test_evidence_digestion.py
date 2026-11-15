@@ -199,21 +199,33 @@ def test_set_aside_node_is_skipped(monkeypatch):
     assert result["candidates"] == 0 and _rows(nid, action="digest") == []
 
 
-def test_empty_digest_gets_one_correction_then_raises(monkeypatch):
+def test_the_digester_refuses_an_empty_digest():
+    """The rule moved to the agent's validate.py (2026-11-15); the agent corrects once and raises."""
+    from app.assistant.agent_registry.agent_registry import AgentRegistry
+    from app.assistant.utils.path_utils import get_app_root
+
+    rules = AgentRegistry()._load_validator(
+        get_app_root() / "assistant" / "agents" / "kg_maintenance" / "evidence_digester" / "validate.py")
+    assert [p.field for p in rules.validate({"digest": "  "}, {})] == ["digest"]
+    assert rules.validate({"digest": "Started piano (2024-03)."}, {}) == []
+
+
+def test_a_digest_still_refused_after_the_correction_stops_the_run_and_writes_nothing(monkeypatch):
     import app.assistant.routine_handlers.subconscious as sub
+    from app.assistant.agent_runtime.correction import AgentOutputInvalid, Problem
 
     nid = _mk_node()
     _mk_evidence(nid, DIGEST_THRESHOLD)
     seen = []
 
-    def fake_agent(**kwargs):
+    def refused(**kwargs):
         seen.append(dict(kwargs["context"]))
-        return {"digest": ""}
+        raise AgentOutputInvalid(mod.AGENT_NAME, [Problem(why="the digest is empty", field="digest")])
 
-    monkeypatch.setattr(sub, "_run_subconscious_agent", fake_agent)
-    with pytest.raises(RuntimeError, match="after one correction"):
+    monkeypatch.setattr(sub, "_run_subconscious_agent", refused)
+    with pytest.raises(AgentOutputInvalid):
         run_evidence_digestion()
 
-    assert [s["correction"] is None for s in seen] == [True, False]
+    assert len(seen) == 1 and "correction" not in seen[0]
     assert len(_rows(nid, live=True)) == DIGEST_THRESHOLD
     assert _rows(nid, action="digest") == []

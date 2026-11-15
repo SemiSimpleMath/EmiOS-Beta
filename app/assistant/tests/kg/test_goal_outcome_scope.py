@@ -87,26 +87,31 @@ def test_goal_outcome_detect_sets_scope_before_agent(monkeypatch):
     assert result["no_signal"] == 1
 
 
-def test_missing_verdict_gets_one_correction_then_raises(monkeypatch):
-    gid = _mk_goal("Learn Finnish")
-    fake_agent = _FakeAgent([[], []])
-    _patch(monkeypatch, fake_agent)
-
-    import pytest
-    with pytest.raises(RuntimeError, match="after one correction"):
-        step.run(PipelineContext.for_date(pipeline_id="kg_goal_outcome_detect"))
-    assert len(fake_agent.inputs) == 2
-    assert fake_agent.inputs[0]["correction"] is None
-    assert gid in fake_agent.inputs[1]["correction"]
-
-
-def test_corrected_answer_is_used(monkeypatch):
+def test_the_detector_is_asked_once_with_the_candidate_ids(monkeypatch):
     gid = _mk_goal("Run a marathon")
-    fake_agent = _FakeAgent([[], [_no_signal(gid)]])
+    fake_agent = _FakeAgent([[_no_signal(gid)]])
     _patch(monkeypatch, fake_agent)
 
     result = step.run(PipelineContext.for_date(pipeline_id="kg_goal_outcome_detect"))
-    assert result["no_signal"] == 1 and len(fake_agent.inputs) == 2
+    assert result["no_signal"] == 1 and len(fake_agent.inputs) == 1
+    assert fake_agent.inputs[0]["goal_node_ids"] == [gid] and "correction" not in fake_agent.inputs[0]
+
+
+def test_the_detector_rules():
+    """Moved from _ask to the detector's validate.py (2026-11-15); the agent corrects once and raises."""
+    from app.assistant.agent_registry.agent_registry import AgentRegistry
+    from app.assistant.utils.path_utils import get_app_root
+
+    rules = AgentRegistry()._load_validator(
+        get_app_root() / "assistant" / "agents" / "goal_outcome_detector" / "validate.py")
+    ids = {"goal_node_ids": ["g1", "g2", "g3"]}
+    answer = {"verdicts": [{**_no_signal("g1"), "outcome": "achieved"}, {**_no_signal("g2"), "confidence": "high"},
+                           _no_signal("g9")]}
+    found = [(p.item, p.at, p.value, p.structural) for p in rules.validate(answer, ids)]
+    assert found == [("g1", "outcome", "achieved", False), ("g2", "confidence", "high", False),
+                     ("", "", "g9", True), ("g3", "", None, True)]
+    assert rules.validate({"verdicts": [_no_signal(g) for g in ids["goal_node_ids"]]}, ids) == []
+    assert rules.ITEM_KEYS == {"verdicts": "goal_node_id"}
 
 
 def test_failed_agent_call_raises(monkeypatch):

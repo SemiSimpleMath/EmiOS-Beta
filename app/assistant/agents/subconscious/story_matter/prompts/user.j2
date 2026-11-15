@@ -22,9 +22,5 @@ Now: {{ agent_input.now }}
 - {{ n.title }}: {{ n.outcome }}
 {% endfor %}
 {% endif %}
-{% if agent_input.correction %}
-## Correct your previous answer
 
-It did not satisfy the contract: {{ agent_input.correction }}
-{% endif %}
 Write the headline, and a line for every event.

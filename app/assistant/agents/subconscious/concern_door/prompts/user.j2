@@ -28,10 +28,5 @@
 {% else -%}
 (the register holds no open, recently closed or dormant concerns)
 {% endfor %}
-{% if agent_input.correction %}
-## Correct your previous answer
 
-It did not satisfy the contract: {{ agent_input.correction }}
-Answer every candidate exactly once, using only the labels above.
-{% endif %}
 Decide every candidate.

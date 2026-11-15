@@ -1,46 +1,24 @@
-"""The architect's answer refused by its form gets one correction (2026-10-10).
+"""The architect's answer refused by its form fails the goal's planning, after the agent's own one correction.
 
-The lights-off-after-bedtime goal failed its planning twice that morning: the architect gave its one step both a time
-(11:00 PM) and a condition ("after he has gone to bed"), the form refused it (a node waits on a time OR a condition),
-the structured-output call failed, and the goal stayed empty to be offered again every tick, with no word to the
-architect of what was wrong. Pins: a form refusal is asked once more with the refusal named, and the corrected answer
-is applied; a second refusal fails the goal's planning, loudly; a failure that is not the form's is not retried.
-Fake agent; the dayflow test store.
+The lights-off-after-bedtime goal failed its planning twice on 2026-10-10: the architect gave its one step both a time
+and a condition, the form refused it, and the goal stayed empty with no word to the architect of what was wrong. From
+2026-10-10 the node re-asked on the form's refusal; since 2026-11-15 every agent's model call corrects a form refusal
+once (agent_runtime/correction.py, its own tests in agent_tests/test_agent_output_correction.py) and raises
+AgentOutputInvalid when still refused. Pins: the node asks the agent once, and a still-refused answer leaves the goal
+unplanned and the tick running. Fake agent; the dayflow test store.
 """
 from __future__ import annotations
 
 from unittest.mock import patch
 
-from pydantic import BaseModel, ValidationError, model_validator
-
 from app.assistant.ServiceLocator.service_locator import DI
-from app.assistant.control_nodes.work_architect_node import WorkArchitectNode, _form_refusal
+from app.assistant.agent_runtime.correction import AgentOutputInvalid, Problem
+from app.assistant.control_nodes.work_architect_node import WorkArchitectNode
 from app.assistant.tests.dayflow.conftest import FakeBlackboard
 
 STEP = {"node_id": "lights_off", "title": "Turn off the lights after bedtime", "detail": "Turn off the lights",
         "depends_on": [], "wake_at": None, "wake_ref": None, "wait_reason": None}
 GOOD = {"architect_summary": "one step at 11 PM", "nodes": [STEP], "revise_objective": None, "end_goal": None}
-
-
-class _Node(BaseModel):
-    wake_at: str = ""
-    wake_ref: str = ""
-
-    @model_validator(mode="after")
-    def _one(self):
-        if self.wake_at and self.wake_ref:
-            raise ValueError("a node waits on a time (wake_at) OR a condition (wake_ref), not both.")
-        return self
-
-
-def _refused() -> RuntimeError:
-    try:
-        _Node(wake_at="2026-10-10T23:00:00-07:00", wake_ref="after he has gone to bed")
-    except ValidationError as e:
-        try:
-            raise RuntimeError(f"LLM structured_output failed: {e}") from e
-        except RuntimeError as r:
-            return r
 
 
 class _Architect:
@@ -77,26 +55,23 @@ def _tick(answers):
             patch("app.assistant.control_nodes.work_architect_node._deliver_ending"):
         WorkArchitectNode(name="work_architect_node", blackboard=bb,
                           agent_registry={}, tool_registry={}).action_handler(message=None)
-    return calls
+    return calls, bb
 
 
-def test_a_form_refusal_is_named_back_once_and_the_corrected_answer_is_applied():
+def test_an_accepted_answer_is_asked_once_and_applied():
     wo = _goal("The household lights are off after the owner has gone to bed")
-    calls = _tick([_refused(), GOOD])
-    assert len(calls) == 2
-    assert "REFUSED" in calls[1] and "not both" in calls[1], "the refusal is named in the correction"
+    calls, _ = _tick([GOOD])
+    assert len(calls) == 1
     after = _store().load(wo.id)
     assert [n.title for n in after.nodes.values() if after.is_work_unit(n)] == ["Turn off the lights after bedtime"]
 
 
-def test_a_second_refusal_leaves_the_goal_unplanned():
+def test_a_still_refused_answer_is_not_asked_again_and_leaves_the_goal_unplanned():
     wo = _goal("The porch light is off after midnight")
-    calls = _tick([_refused(), _refused()])
-    assert len(calls) == 2, "one correction, no more"
+    refused = AgentOutputInvalid("work_architect", [Problem(why="a node waits on a time OR a condition, not both",
+                                                            field="nodes", at="0")])
+    calls, bb = _tick([refused, GOOD])
+    assert len(calls) == 1, "the agent's own call made the one correction"
     after = _store().load(wo.id)
     assert not any(after.is_work_unit(n) for n in after.nodes.values())
-
-
-def test_only_the_forms_refusal_is_corrected():
-    assert "not both" in _form_refusal(_refused())
-    assert _form_refusal(RuntimeError("LLM request failed: connection reset")) is None
+    assert bb.get_state_value("work_decompose_result") == []

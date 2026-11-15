@@ -37,7 +37,6 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Any
 
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.kg import failure_ledger
@@ -62,43 +61,13 @@ MAX_CLUSTER_SIZE_PER_LLM_CALL = 12
 FAILURE_KIND = "kg_finding_cluster"
 
 
-def _problems(data: Any, chunk_ids: set) -> list[str]:
-    """What is missing or malformed in a verdict; empty when it is complete."""
-    if not isinstance(data, dict) or not isinstance(data.get("is_same_root"), bool):
-        return ["is_same_root must be true or false"]
-    if not data["is_same_root"]:
-        return []
-    out = []
-    if data.get("lead_finding_id") not in chunk_ids:
-        out.append(f"lead_finding_id {data.get('lead_finding_id')!r} is not one of the cluster's finding_ids")
-    members = data.get("member_finding_ids")
-    if not isinstance(members, list) or not members:
-        out.append("member_finding_ids is empty")
-    else:
-        foreign = [m for m in members if m not in chunk_ids]
-        if foreign:
-            out.append(f"member_finding_ids {foreign} are not among the cluster's finding_ids")
-    if not str(data.get("root_question") or "").strip():
-        out.append("root_question is empty")
-    return out
-
-
 def _resolve(agent, payload: str, chunk_ids: set) -> dict:
-    """One cluster verdict, complete: an incomplete answer gets one correction
-    naming what is missing, then raises."""
-    def ask(correction):
-        result = agent.action_handler(Message(agent_input={"candidate_cluster": payload,
-                                                           "correction": correction}))
-        return getattr(result, "data", None)
-
-    data = ask(None)
-    problems = _problems(data, chunk_ids)
-    if problems:
-        data = ask("Your previous answer was incomplete: " + "; ".join(problems) + ".")
-        problems = _problems(data, chunk_ids)
-        if problems:
-            raise RuntimeError(f"[cluster_resolve] still incomplete after one correction: {'; '.join(problems)}")
-    return data
+    """One cluster verdict. The resolver's rules are its validate.py (it reads
+    `finding_ids`): an incomplete answer is corrected once by the agent and
+    raises when still refused (agent_runtime/correction.py)."""
+    result = agent.action_handler(Message(agent_input={"candidate_cluster": payload,
+                                                       "finding_ids": sorted(chunk_ids)}))
+    return getattr(result, "data", None)
 
 
 def run(ctx: PipelineContext, *, max_clusters: int | None = None) -> dict:
@@ -156,7 +125,7 @@ def run(ctx: PipelineContext, *, max_clusters: int | None = None) -> dict:
 
             # A failed call stops the run (the cluster stays pending; one that
             # keeps failing is set aside). A "same root" answer missing its
-            # lead, members or question gets one correction, then raises.
+            # lead, members or question is corrected once, then raises.
             payload = _serialize_cluster_for_llm(primary_node_id, chunk)
             chunk_ids = {f["id"] for f in chunk}
             try:

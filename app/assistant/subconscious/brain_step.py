@@ -33,8 +33,8 @@ It answers with a decision on every event (it changes one concern, a new concern
 no concern), notes and resolutions on the concerns the events change, and new concerns, each with what settles it
 and when it expires (docs/design/concerns_as_state_2026-10-09.md, rules 3, 4 and 6). One event changes one concern:
 the update of a concern names only events decided to change it. A new concern's source is the first event it comes
-from, copied by code. Code validates the answer (one correction round), admits new concerns through the concern
-door, applies the rest under the register lock, marks the events consumed and records the matter in `brain_matters`.
+from, copied by code. The agent's validate.py checks the answer, corrected once by the agent
+(agent_runtime/correction.py); code admits new concerns through the concern door, applies the rest under the register lock, marks the events consumed and records the matter in `brain_matters`.
 A matter that still fails is recorded failed and not retried automatically: its events stay in
 the inbox, visible, instead of being dropped or re-sent every five minutes.
 
@@ -220,8 +220,6 @@ def _concern_view(label: str, c: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-# What `attach` may name: an event (its message, email, frame or work report), kept as the concern's evidence.
-_ATTACHABLE = ("brain_event",)
 # Where a concern raised from an event came from (rule 6): the owner, in chat or a ticket reply, or the event's sense.
 _SOURCE_KIND = {"chat": "user", "ticket": "user", "email": "email", "calendar": "calendar", "camera": "camera",
                 "presence": "presence", "work": "work", "noticer": "noticer", "grocery": "grocery"}
@@ -241,7 +239,9 @@ def build_payload(events: List[Dict[str, Any]], register: Dict[str, Any],
     each object it shows carries a label of the call and never its id: events E, concerns C, work W, a concern's
     evidence by what it points to (messages M, emails and other pods P, calendar events K, other sources S),
     reminders R, calendar lines K. Returns (payload, event by label, concern_id by label, the call's labels: label ->
-    [kind, id]). `calendar` is the run's calendar lines (_calendar_lines), read once per run; omitted, read here."""
+    [kind, id]). `calendar` is the run's calendar lines (_calendar_lines), read once per run; omitted, read here. The
+    payload also carries what the agent's validate.py checks the answer against: the event and concern labels, the
+    kind of object each label of the call names, and the clock."""
     from app.assistant.subconscious.projection import Projection
     from app.assistant.subconscious import belief_links, conversations, kg_links, work_links
     from app.assistant.utils.time_utils import utc_to_local
@@ -315,125 +315,12 @@ def build_payload(events: List[Dict[str, Any]], register: Dict[str, Any],
         # (subconscious/belief_links.py, 2026-10-09): context, never an instruction.
         "beliefs": belief_links.beliefs_by_meaning([e["text"] for e in events] +
                                                    [by_id[cid].get("title") for cid in named]),
+        "event_labels": [e["mark"] for e in marked],
+        "concern_labels": list(labels),
+        "label_kinds": {label: kind for label, (kind, _) in p.labels.items()},
+        "now_utc": now.isoformat(),
     }
     return payload, {e["mark"]: e for e in marked}, labels, p.labels
-
-
-# ── checking the answer ─────────────────────────────────────────────────────
-
-def _refs(things: Any, call_labels: Dict[str, List[str]], where: str, *, attach: bool) -> List[str]:
-    """Problems with one reference field: every label given in the call; `attach` names events and work only."""
-    out = []
-    names = [str(x).strip() for x in things or []]
-    unknown = [x for x in names if x not in call_labels]
-    if unknown:
-        out.append(f"{where}: {unknown} are not labels given")
-    if attach:
-        wrong = [x for x in names if x in call_labels and call_labels[x][0] not in _ATTACHABLE]
-        if wrong:
-            out.append(f"{where}: attach names events (E) only, got {wrong}")
-    return out
-
-
-def _when(value: Any, now: datetime, where: str, out: List[str]) -> Optional[datetime]:
-    """A local 'YYYY-MM-DD HH:MM' in the future as UTC, or a problem."""
-    from app.assistant.subconscious.concern_view import future_local_utc
-    try:
-        return future_local_utc(value, now)
-    except ValueError as exc:
-        out.append(f"{where}: expires_at must be a future local YYYY-MM-DD HH:MM ({exc})")
-        return None
-
-
-_DECISIONS = ("changes_concern", "new_concern", "no_concern")
-
-
-def _problems(data: Any, events: Dict[str, Dict[str, Any]], concern_labels: List[str],
-              call_labels: Dict[str, List[str]], now: Optional[datetime] = None) -> List[str]:
-    """The answer's contract (docs/design/concerns_as_state_2026-10-09.md, rule 3): every event decided once; an event
-    that changes a concern names exactly one, which an update records, and an update names only events decided to
-    change it; a new concern comes from the events decided as its own; references name labels given, and attach names
-    events only; expiry times are future local times."""
-    now = now or datetime.now(timezone.utc)
-    if not isinstance(data, dict) or not isinstance(data.get("event_decisions"), list):
-        return ["no event_decisions list"]
-    out: List[str] = []
-    decided: Dict[str, Tuple[str, str]] = {}
-    for d in data["event_decisions"]:
-        ev = str((d or {}).get("event") or "").strip()
-        if ev not in events:
-            out.append(f"event {ev!r} is not one of the events given")
-        elif ev in decided:
-            out.append(f"{ev} decided more than once")
-        else:
-            decided[ev] = (d.get("decision"), str(d.get("concern") or "").strip())
-    missing = [e for e in events if e not in decided]
-    if missing:
-        out.append(f"not decided: {missing}")
-
-    new_labels = [str(n.get("label") or "").strip() for n in data.get("new_concerns") or []]
-    for ev, (decision, concern) in decided.items():
-        if decision not in _DECISIONS:
-            out.append(f"{ev}: decision {decision!r} is not changes_concern, new_concern or no_concern")
-        elif decision == "changes_concern" and concern not in concern_labels:
-            out.append(f"{ev}: changes_concern names one open concern given, got {concern!r}")
-        elif decision == "new_concern" and concern not in new_labels:
-            out.append(f"{ev}: new_concern names one of the new concerns you raise, got {concern!r}")
-        elif decision == "no_concern" and concern:
-            out.append(f"{ev}: no_concern names no concern, got {concern!r}")
-    changing = lambda label: {ev for ev, (d, c) in decided.items() if d == "changes_concern" and c == label}
-    raising = lambda label: {ev for ev, (d, c) in decided.items() if d == "new_concern" and c == label}
-
-    updated = set()
-    for u in data.get("concern_updates") or []:
-        label = str(u.get("concern") or "").strip()
-        if label not in concern_labels:
-            out.append(f"concern {label!r} is not one of the concerns given")
-            continue
-        if label in updated:
-            out.append(f"{label} updated more than once")
-        updated.add(label)
-        if u.get("action") not in ("note", "resolve"):
-            out.append(f"{label}: action {u.get('action')!r} is not note or resolve")
-        if not str(u.get("note") or "").strip():
-            out.append(f"{label}: note is empty")
-        relied, attached = u.get("relies_on") or [], u.get("attach") or []
-        out += _refs(relied, call_labels, f"{label} relies_on", attach=False)
-        out += _refs(attached, call_labels, f"{label} attach", attach=True)
-        mine = changing(label)
-        if not mine:
-            out.append(f"{label} is updated but no event is decided changes_concern for it: decide the events that "
-                       f"change it, or leave it alone")
-        stray = [x for x in [*relied, *attached] if x in events and x not in mine]
-        if stray:
-            out.append(f"{label}: {stray} are not decided to change it; an event changes one concern")
-        if u.get("expires_at"):
-            _when(u["expires_at"], now, label, out)
-    for ev, (decision, concern) in decided.items():
-        if decision == "changes_concern" and concern in concern_labels and concern not in updated:
-            out.append(f"{ev} changes {concern}, but no update of {concern} records it")
-
-    seen_new = set()
-    for n in data.get("new_concerns") or []:
-        label = str(n.get("label") or "").strip()
-        if not label or label in seen_new:
-            out.append(f"new concern label {label!r} is missing or repeated")
-        seen_new.add(label)
-        if not str(n.get("title") or "").strip() or not str(n.get("done_when") or "").strip():
-            out.append(f"{label}: a new concern needs a title and done_when")
-        _when(n.get("expires_at"), now, label, out)
-        relied, attached = n.get("relies_on") or [], n.get("attach") or []
-        out += _refs(relied, call_labels, f"{label} relies_on", attach=False)
-        out += _refs(attached, call_labels, f"{label} attach", attach=True)
-        mine = raising(label)
-        if not mine:
-            out.append(f"{label}: no event is decided new_concern for it")
-        if not any(x in mine for x in attached):
-            out.append(f"{label}: attach names none of the events it comes from")
-        stray = [x for x in attached if x in events and x not in mine]
-        if stray:
-            out.append(f"{label}: attaches {stray}, which are not decided as its own")
-    return out
 
 
 def _agent_call(payload: Dict[str, Any]) -> Any:
@@ -470,7 +357,8 @@ def _evidence(e: Dict[str, Any]) -> Dict[str, Any]:
 def process_matter(events: List[Dict[str, Any]], *, call: Optional[Callable[[Dict[str, Any]], Any]] = None,
                    judge=None, register_connect=None, calendar: Optional[str] = None) -> Dict[str, Any]:
     """Decide and apply one matter. Returns {decisions, admitted, concern_ids}; raises when the
-    brain's answer is still invalid after one correction or applying it fails."""
+    brain's answer is still invalid after the agent's one correction (agent_runtime/correction.py) or applying it
+    fails."""
     from app.assistant.subconscious import concern_door, persist
     from app.assistant.subconscious.concern_store import load_register
     now = datetime.now(timezone.utc)
@@ -478,15 +366,6 @@ def process_matter(events: List[Dict[str, Any]], *, call: Optional[Callable[[Dic
     payload, by_label, labels, call_labels = build_payload(events, register, now, calendar)
     call = call or _agent_call
     data = call(payload)
-    problems = _problems(data, by_label, list(labels), call_labels, now)
-    if problems:
-        from app.assistant.subconscious.brain_trace import step
-        logger.warning("[brain] invalid answer, one correction: %s", problems)
-        step("brain", "answer refused, one correction", subject=[e["id"] for e in events], problems=problems)
-        data = call({**payload, "correction": "; ".join(problems)})
-        problems = _problems(data, by_label, list(labels), call_labels, now)
-        if problems:
-            raise ValueError(f"brain answer still invalid after one correction: {problems}")
 
     # The answer's labels back to objects (docs/design/objects_and_projections_2026-10-08.md): what an update or a new
     # concern rests on and what it attaches are kept as relations (`links`, written with the matter by _record);

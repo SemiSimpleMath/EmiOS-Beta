@@ -64,16 +64,9 @@ def _agent_call(payload: Dict[str, Any]) -> Any:
 
 
 def write_line(wo, *, call: Optional[Callable[[Dict[str, Any]], Any]] = None) -> str:
-    """The line of one ended work; raises when the answer has no line after one correction."""
-    payload = build_payload(wo)
-    call = call or _agent_call
-    data = call(payload)
-    if not isinstance(data, dict) or not str(data.get("line") or "").strip():
-        logger.warning("[work_line] no line for %s, one correction", wo.id)
-        data = call({**payload, "correction": "the answer had no line"})
-        if not isinstance(data, dict) or not str(data.get("line") or "").strip():
-            raise ValueError("work line still empty after one correction")
-    return " ".join(str(data["line"]).split())
+    """The line of one ended work; raises when the answer has no line after the agent's one correction (its
+    validate.py, agent_runtime/correction.py)."""
+    return " ".join(str((call or _agent_call)(build_payload(wo))["line"]).split())
 
 
 def lines(work_ids: Iterable[str], *, connect=None) -> Dict[str, str]:

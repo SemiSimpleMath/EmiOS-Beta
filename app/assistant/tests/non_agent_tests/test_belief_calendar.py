@@ -80,12 +80,24 @@ def test_related_beliefs_are_the_nearest_close_enough(monkeypatch):
     assert related['B4'] == [], "nothing near enough"
 
 
+from app.assistant.agent_registry.agent_registry import AgentRegistry  # noqa: E402
+from app.assistant.utils.path_utils import get_app_root  # noqa: E402
+
+WRITER = AgentRegistry()._load_validator(get_app_root() / "assistant" / "agents" / "dayflow_routine_writer" / "validate.py")
+
+
+def _problems(answer, keys, related=()):
+    """The writer's rules (its validate.py), as (where, why)."""
+    return [(" ".join(x for x in (p.item, p.at) if x) or p.value, p.why)
+            for p in WRITER.validate(answer, {"belief_keys": sorted(keys), "related_keys": sorted(related)})]
+
+
 def test_a_related_belief_is_never_placed_as_an_entry():
-    problems = drs._problems({'judgments': [
+    problems = _problems({'judgments': [
         {'belief_key': 'B1', 'why': 'Not Wednesday.', 'applies_today': False, 'outcome': '', 'times': []},
         {'belief_key': 'B2', 'why': 'A holiday.', 'applies_today': True, 'outcome': 'B2 done',
          'times': [{'time': '9:00 PM', 'until': '11:00 PM'}]}]}, {'B1'}, {'B2'})
-    assert problems == ["'B2' is read beside the approved beliefs, not an entry: leave it out"]
+    assert problems == [('B2', "it is read beside the approved beliefs, not an entry: leave it out")]
 
 
 def test_every_approved_belief_is_judged_once_and_only_those_that_apply_are_placed():
@@ -95,16 +107,14 @@ def test_every_approved_belief_is_judged_once_and_only_those_that_apply_are_plac
          'times': [{'time': 'all day', 'until': ''}]},
         {'belief_key': 'B3', 'why': 'Every day.', 'applies_today': True, 'outcome': 'B3 done',
          'times': [{'time': '10:00 AM', 'until': '11:00 AM'}, {'time': '3:00 PM', 'until': '5:00 PM'}]}]}
-    assert drs._problems(answer, {'B1', 'B3'}) == []
+    assert _problems(answer, {'B1', 'B3'}) == []
     assert drs._placements(answer) == [
         {'belief_key': 'B3', 'time': '10:00 AM', 'until': '11:00 AM', 'outcome': 'B3 done'},
         {'belief_key': 'B3', 'time': '3:00 PM', 'until': '5:00 PM', 'outcome': 'B3 done'}]
-    assert drs._problems({'judgments': answer['judgments'][1:]}, {'B1', 'B3'}) == \
-        ['B1: no judgment; judge every approved belief']
-    assert drs._problems({'judgments': [*answer['judgments'], answer['judgments'][0]]}, {'B1', 'B3'}) == \
-        ['B1: judge each approved belief once']
-    assert drs._problems({'judgments': [answer['judgments'][0], {**answer['judgments'][1], 'times': []}]},
-                         {'B1', 'B3'}) == ["B3: it applies today, so give the time it applies, or 'all day'"]
+    assert _problems({'judgments': answer['judgments'][1:]}, {'B1', 'B3'}) ==         [('B1', 'no judgment; judge every approved belief')]
+    assert _problems({'judgments': [*answer['judgments'], answer['judgments'][0]]}, {'B1', 'B3'}) ==         [('B1', 'judge each approved belief once')]
+    assert _problems({'judgments': [answer['judgments'][0], {**answer['judgments'][1], 'times': []}]},
+                     {'B1', 'B3'}) == [('B3 times', "it applies today, so give the time it applies, or 'all day'")]
 
 
 # ── beliefs are not concerns ──────────────────────────────────────────────────────────────────────────

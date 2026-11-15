@@ -10,8 +10,8 @@ Pins: the plan's lines still ahead are made into placements by an agent, one per
 is one concern carrying every belief it rests on; it expires at its `until`, the next one after its time (after
 midnight when the day runs past it), or at midnight for an all-day placement; a placement that continues one of
 today's concerns keeps it (a moved time moves its expiry, unchanged words keep their time); an open concern no
-placement continues is withdrawn and not offered again; one the brain closed stays closed; the answer is checked,
-corrected once, then fails loud; nothing is raised before the cutover day; calendar concerns have no planner pass.
+placement continues is withdrawn and not offered again; one the brain closed stays closed (the answer's rules are the agent's validate.py, pinned in
+agent_tests/test_agent_output_correction.py); nothing is raised before the cutover day; calendar concerns have no planner pass.
 Scratch register; the agent is a fake; invented data only.
 """
 from datetime import datetime, timedelta, timezone
@@ -123,21 +123,6 @@ def test_one_the_brain_closed_stays_closed(tmp_path):
         "raised": 0, "updated": 0, "withdrawn": 0}
     assert agent.shown[0]["concerns"][0]["state"] == "closed by the brain"
     assert reg.read()["active"] == [] and [c["concern_id"] for c in reg.read()["resolved"]] == [flag["concern_id"]]
-
-
-def test_the_answer_is_corrected_once_then_fails_loud(tmp_path):
-    reg = ScratchRegister(tmp_path).write(EMPTY)
-    now = _local(DAY, 8)
-    plan = _plan(_line("B1", "8:00 AM", "9:00 AM"), _line("B2", "9:00 PM", "10:00 PM"))
-    bad = [_p(["L1", "L1"], "8:00 AM", "9:00 AM", continues="P4")]
-    agent = Agent(bad, [_p(["L1"], "8:00 AM", "9:00 AM"), _p(["L2"], "9:00 PM", "10:00 PM")])
-    assert K.apply(plan, now, context=CONTEXT, call=agent, connect=reg.connect)["raised"] == 2
-    correction = agent.shown[1]["correction"]
-    assert "L1: put it in exactly one placement" in correction and "L2: in no placement" in correction
-    assert "'P4' is not one of today's concerns" in correction
-    with pytest.raises(ValueError, match="still invalid"):
-        K.apply(_plan(_line("B9", "7:00 PM", "8:00 PM")), now, context=CONTEXT,
-                call=Agent([_p(["L1"], "7 pm", "8:00 PM")], [_p(["L1"], "7 pm", "8:00 PM")]), connect=reg.connect)
 
 
 def test_nothing_is_raised_before_the_cutover_day(tmp_path):

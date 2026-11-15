@@ -51,7 +51,7 @@ def test_empty_authoritative_calendar_clears_stale_daily_schedule(tmp_path, monk
     assert drs._read_daily_context()['expected_schedule']==[]
 
 
-# ── the day pass: placements, caching, validation ─────────────────────────────────────────────────────
+# ── the day pass: placements and caching ─────────────────────────────────────────────────────
 
 UNTIL = '11:30 PM'
 
@@ -169,42 +169,6 @@ def test_a_placement_before_the_grid_has_passed_and_is_not_stored(connect, day_i
     assert all(not s['lines'] for s in plan['slots']) and plan['flags'] == []
 
 
-def test_an_invalid_answer_gets_one_correction(connect, day_inputs, monkeypatch):
-    seen = []
-    answers = iter([_judged([{'belief_key': 'lesson.glasses', 'time': 'evening'}]),
-                    _judged([{'belief_key': 'lesson.glasses', 'time': '6:00 PM'}])])
-
-    def write(agent_input):
-        seen.append(agent_input.get('correction'))
-        return next(answers)
-    monkeypatch.setattr(drs, '_write', write)
-    drs.run_day_pass(datetime(2026, 1, 1, 18, tzinfo=timezone.utc), connect=connect)
-    assert seen[0] is None and "'evening' is not a clock time" in seen[1]
-    assert day_plan.load_plan('2026-01-01', connect=connect) is not None
-
-
-@pytest.mark.parametrize('placement,error', [
-    ({'belief_key': 'invented.key', 'time': '6:00 PM'}, 'not one of the beliefs given'),
-    ({'belief_key': 'lesson.glasses', 'time': 'soon'}, 'is not a clock time'),
-])
-def test_a_still_invalid_answer_is_refused(connect, day_inputs, monkeypatch, placement, error):
-    monkeypatch.setattr(drs, '_write', _writer_for([], [placement]))
-    with pytest.raises(ValueError, match=error):
-        drs.run_day_pass(datetime(2026, 1, 1, 18, tzinfo=timezone.utc), connect=connect)
-    assert day_plan.load_plan('2026-01-01', connect=connect) is None
-
-
-def test_an_applying_belief_needs_its_outcome_and_a_clock_time_its_until(connect, day_inputs, monkeypatch):
-    """Rule 7: each placement becomes a concern, which needs what it asks for today and until when it matters."""
-    bad = {'judgments': [{'belief_key': 'lesson.glasses', 'why': 'w', 'applies_today': True, 'outcome': '',
-                          'times': [{'time': '6:00 PM', 'until': 'later'}]},
-                         {'belief_key': 'coffee.morning', 'why': 'w', 'applies_today': False, 'outcome': '', 'times': []}]}
-    monkeypatch.setattr(drs, '_write', lambda agent_input: bad)
-    with pytest.raises(ValueError) as raised:
-        drs.run_day_pass(datetime(2026, 1, 1, 18, tzinfo=timezone.utc), connect=connect)
-    assert "say what it asks for today" in str(raised.value) and "until 'later' is not a clock time" in str(raised.value)
-
-
 def test_no_plan_for_today_says_so(connect):
     assert 'No plan of the day has been written' in day_plan.render_day(
         datetime(2026, 1, 2, 18, tzinfo=timezone.utc), connect=connect)
@@ -225,6 +189,8 @@ def test_the_writer_is_shown_the_schedule_as_a_list(connect, day_inputs, monkeyp
     assert 'Monthly timesheets' not in seen[0]['daily_context'], "the tracker's summary is not a fact for the writer"
     assert seen[0]['day_facts']['business_day_number'] == 1 and seen[0]['day_facts']['weekday'] == 'Thursday'
     assert '[slot' not in seen[0]['daily_context'] and '(open)' not in seen[0]['daily_context']
+    # what the writer's validate.py checks the answer against
+    assert seen[0]['belief_keys'] == ['coffee.morning', 'lesson.glasses'] and seen[0]['related_keys'] == []
 
 
 def test_slot_keys_stay_unique_across_midnight():

@@ -13,9 +13,5 @@
 {% endfor %}
 ## How it ended
 {{ A.ended.status }} at {{ A.ended.at | local_time }}{% if A.ended.reason %}: {{ A.ended.reason }}{% endif %}
-{% if A.get('correction') %}
-## Correct your previous answer
 
-It did not satisfy the contract: {{ A.correction }}
-{% endif %}
 Write the line this work is known by.

@@ -2,8 +2,8 @@
 stop processing").
 
 Pins: the window critic raises instead of accepting every line; a failed window stops the cycle, writes no verdict row
-and is counted in the failure ledger; the enricher gets one targeted correction for State/Event nodes it left out,
-then raises; the runner treats only SQLite lock errors as transient; the segmenter refuses an answer that leaves
+and is counted in the failure ledger; the enricher is asked once and its validate.py refuses an answer leaving out a
+State/Event node (agent_runtime/correction.py, 2026-11-15); the runner treats only SQLite lock errors as transient; the segmenter refuses an answer that leaves
 messages out of every window and sees message labels (M1, M2...), never unified_log ids, refusing an answer that names an
 unknown or inconsistent label; the resolver refuses a message with no resolved text.
 
@@ -11,11 +11,14 @@ Uses the kg conftest (isolated test DB). Fake agents; invented data only.
 """
 from __future__ import annotations
 
+import json
 import sqlite3
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from app.assistant.agent_registry.agent_registry import AgentRegistry
 from app.assistant.kg import failure_ledger
 from app.assistant.pipelines.kg_pipeline import runner
 from app.assistant.pipelines.kg_pipeline.steps import critique_and_extract as CE
@@ -98,19 +101,26 @@ def test_a_failed_window_stops_the_cycle_and_is_counted(monkeypatch):
         s.close()
 
 
-def test_the_enricher_gets_one_correction_for_nodes_it_left_out(agent):
+def test_the_enricher_is_asked_once_for_its_state_and_event_nodes(agent):
     step = EN.EnrichExtractionStep()
     nodes = [{"temp_id": "s1", "node_type": "State", "label": "Call", "sentence": "A call on Mondays."},
-             {"temp_id": "s2", "node_type": "Event", "label": "Trip", "sentence": "A trip in June."}]
-    first = {"Nodes": [{"temp_id": "s1", "start_date": "2026-03-03"}]}
-    agent["agent"] = _Agent(first, {"Nodes": [{"temp_id": "s2", "start_date": "2026-06-01"}]})
+             {"temp_id": "s2", "node_type": "Event", "label": "Trip", "sentence": "A trip in June."},
+             {"temp_id": "e1", "node_type": "Entity", "label": "Sam"}]
+    agent["agent"] = _Agent({"Nodes": [{"temp_id": "s1", "start_date": "2026-03-03"},
+                                       {"temp_id": "s2", "start_date": "2026-06-01"}]})
     out = step._call_meta_data_add(nodes, [], resolved_window="w", message_timestamp="t")
-    assert [n.get("start_date") for n in out] == ["2026-03-03", "2026-06-01"]
-    assert [n["temp_id"] for n in __import__("json").loads(agent["agent"].calls[1]["nodes"])] == ["s2"], \
-        "the correction asks for exactly the node left out"
-    agent["agent"] = _Agent(first, {"Nodes": []})
-    with pytest.raises(ValueError, match="left out"):
-        step._call_meta_data_add(nodes, [], resolved_window="w", message_timestamp="t")
+    assert [n.get("start_date") for n in out] == ["2026-03-03", "2026-06-01", None]
+    (call,) = agent["agent"].calls
+    assert call["temp_ids"] == ["s1", "s2"]
+    assert [n["temp_id"] for n in json.loads(call["nodes"])] == ["s1", "s2"]
+
+
+def test_the_enricher_is_refused_an_answer_leaving_a_node_out():
+    path = Path(__file__).resolve().parents[2] / "agents" / "knowledge_graph_add" / "meta_data_add" / "validate.py"
+    validate = AgentRegistry()._load_validator(path).validate
+    problems = validate({"Nodes": [{"temp_id": "s1"}]}, {"temp_ids": ["s1", "s2"]})
+    assert [(p.field, p.item, p.structural) for p in problems] == [("Nodes", "s2", True)]
+    assert validate({"Nodes": [{"temp_id": "s2"}, {"temp_id": "s1"}]}, {"temp_ids": ["s1", "s2"]}) == []
 
 
 def test_only_sqlite_lock_errors_are_transient():

@@ -13,7 +13,7 @@ class Placement(BaseModel):
                                      "is true when it has been done.")
     time: str = Field(description="When it applies: a clock time such as '9:00 PM' or '7:30 AM', or 'all day'.")
     until: str = Field(description="For a clock time: the clock time after which it no longer matters today, such "
-                                   "as '11:00 PM'. Empty for 'all day'.")
+                                   "as '11:00 PM'; midnight is written '12:00 AM'. Empty for 'all day'.")
 
 
 class AgentForm(BaseModel):

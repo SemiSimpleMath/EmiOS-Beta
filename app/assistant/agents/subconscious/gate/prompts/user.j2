@@ -11,10 +11,5 @@
 ## Events, inside their conversations
 
 {{ conversations(agent_input.conversations) }}
-{% if agent_input.correction %}
-## Correct your previous answer
 
-It did not satisfy the routing contract: {{ agent_input.correction }}
-Answer every event exactly once, using only the labels above.
-{% endif %}
 Route every labelled event.

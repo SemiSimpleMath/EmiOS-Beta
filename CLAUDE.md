@@ -95,6 +95,8 @@ Each agent lives in `app/assistant/agents/<namespace>/<agent_name>/` with:
 - `config.yaml` — name, LLM params, allowed tools, context items
 - `prompts/system.j2`, `prompts/user.j2` — Jinja2 templates
 - `agent_form.py` (optional) — Pydantic model for structured output
+- `validate.py` (optional) — `validate(answer, agent_input)` returns the answer's problems; a refused answer gets one
+  correction that shows the model its answer (`agent_runtime/correction.py`). Callers never retry agents themselves.
 
 Agents produce decisions; they never directly execute actions. Control nodes and tools act on agent output.
 

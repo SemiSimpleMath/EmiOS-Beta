@@ -155,7 +155,9 @@ def run_evidence_digestion(*, max_nodes_per_run: int = 5) -> Dict[str, Any]:
 
 def _generate_digest(item: Dict[str, Any]) -> str:
     """One LLM call: fold the tail rows into a consolidated chronicle. A
-    failed call raises; an empty digest gets one correction, then raises."""
+    failed call raises. The digester's rule is its validate.py: an empty
+    digest is corrected once by the agent and raises when still empty
+    (agent_runtime/correction.py)."""
     from app.assistant.routine_handlers.subconscious import _run_subconscious_agent
 
     context = {
@@ -163,24 +165,12 @@ def _generate_digest(item: Dict[str, Any]) -> str:
         "node_type": item["node_type"],
         "identity_sentence": item["identity_sentence"],
         "rows": item["rows"],
-        # Always present: strict_template raises on undefined variables.
-        "correction": None,
     }
-
-    def ask() -> str:
-        result = _run_subconscious_agent(
-            handler_label="evidence_digester",
-            agent_name=AGENT_NAME,
-            context=context,
-            scope_id=AGENT_NAME,
-            actor_id="evidence_digestion",
-        )
-        return str(result.get("digest") or "").strip()
-
-    digest = ask()
-    if not digest:
-        context["correction"] = "Your previous answer had an empty digest: write the consolidated digest of the rows."
-        digest = ask()
-        if not digest:
-            raise RuntimeError(f"evidence_digester: empty digest for {item['label']!r} after one correction")
-    return digest
+    result = _run_subconscious_agent(
+        handler_label="evidence_digester",
+        agent_name=AGENT_NAME,
+        context=context,
+        scope_id=AGENT_NAME,
+        actor_id="evidence_digestion",
+    )
+    return result["digest"].strip()

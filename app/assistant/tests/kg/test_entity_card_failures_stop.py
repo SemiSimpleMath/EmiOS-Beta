@@ -1,7 +1,8 @@
 """Entity cards: a failed call stops the run (owner, 2026-10-05).
 
 Pins: a failed or missing agent raises out of build_card before anything is written (the edge_filter prefilter,
-the section distiller, the summary writer); a well-formed but incomplete answer gets one correction, then raises;
+the section distiller, the summary writer); a well-formed but incomplete answer is refused by the agent's validate.py
+(the agent corrects once, then raises; the rules are pinned here against each validate.py);
 level_0 comes only from the summary. The nightly refresh stops at the first failed build and records it on the
 failure ledger; a set-aside entity is skipped; a new card is built inactive and activated only when the critic
 passes it, stays inactive on a veto, and is discarded (so the next run rebuilds and judges it) when the critic call
@@ -125,23 +126,31 @@ def test_a_built_card_takes_level_0_from_its_summary_and_can_be_written_inactive
     assert card["sections"]["level_0"] == "A friend of the owner."
 
 
-def test_an_empty_summary_gets_one_correction_then_the_build_raises_and_writes_nothing(agents):
+def _refused(name):
+    from app.assistant.agent_runtime.correction import AgentOutputInvalid, Problem
+    return AgentOutputInvalid(name, [Problem(why="the summary is empty", field="summary")])
+
+
+def test_a_summary_still_refused_after_the_correction_fails_the_build_and_writes_nothing(agents):
     eid = _entity(description="Wiki text that used to become level_0.")
     fake = agents(entity_cards__section_tagger=[_tag_all(2)], entity_cards__bullet_renderer=[_render_each(2)],
-                  entity_cards__summary_writer=[{"summary": ""}, {"summary": "  "}])
-    with pytest.raises(RuntimeError, match="still incomplete after one correction"):
+                  entity_cards__summary_writer=[_refused("entity_cards::summary_writer")])
+    with pytest.raises(ValueError, match="still invalid after one correction"):
         builder.build_card(eid)
-    sent = fake.inputs["entity_cards::summary_writer"]
-    assert [x["correction"] for x in sent] == ["", "the summary is empty: write the 2-3 sentence summary"]
+    assert len(fake.inputs["entity_cards::summary_writer"]) == 1
     assert _card(eid) is None
 
 
-def test_a_summary_corrected_once_is_used(agents):
+def test_each_card_agent_gets_the_ids_its_rules_read_and_no_correction_slot(agents):
     eid = _entity()
-    agents(entity_cards__section_tagger=[_tag_all(2)], entity_cards__bullet_renderer=[_render_each(2)],
-           entity_cards__summary_writer=[{"summary": ""}, {"summary": "A friend."}])
+    fake = agents(entity_cards__section_tagger=[_tag_all(2)], entity_cards__bullet_renderer=[_render_each(2)],
+                  entity_cards__summary_writer=[{"summary": "A friend."}])
     builder.build_card(eid)
     assert _card(eid)["sections"]["summary"] == "A friend."
+    [tagger] = fake.inputs["entity_cards::section_tagger"]
+    [renderer] = fake.inputs["entity_cards::bullet_renderer"]
+    assert tagger["fact_ids"] == ["f1", "f2"] and sorted(renderer["fact_ids"]) == ["f1", "f2"]
+    assert not any("correction" in x for xs in fake.inputs.values() for x in xs)
 
 
 def test_a_summary_writer_without_a_structured_answer_raises(agents):
@@ -174,35 +183,48 @@ def test_a_failed_distiller_raises_and_the_existing_card_is_left_as_it_was(agent
     assert _card(eid) == before
 
 
-def test_a_distiller_answer_over_the_cap_gets_one_correction_then_raises(agents):
-    entity = Node(id="e", label="Pat", node_type="Entity", category="person")
-    rbs = [{"bullet_id": f"b{i}", "bullet_text": f"B{i}"} for i in range(1, 5)]
+def _rules(*parts):
+    from app.assistant.agent_registry.agent_registry import AgentRegistry
+    from app.assistant.utils.path_utils import get_app_root
+    return AgentRegistry()._load_validator(get_app_root().joinpath("assistant", "agents", *parts, "validate.py"))
+
+
+def test_the_distiller_is_given_its_cap_and_bullet_ids():
+    """The distiller's rules moved to its validate.py (2026-11-15); the agent corrects once and raises."""
+    rules = _rules("entity_cards", "section_distiller")
+    given = {"max_bullets": "2", "bullet_ids": ["b1", "b2", "b3"]}
     over = {"bullets": [{"bullet_text": f"B{i}", "source_bullet_ids": [f"b{i}"]} for i in range(1, 4)]}
-    agents(entity_cards__section_distiller=[over, over])
-    with pytest.raises(RuntimeError, match="more than max_bullets 2"):
-        builder._run_section_distiller(entity, "notes", rbs, 2)
+    assert [p.why for p in rules.validate(over, given)] == ["3 bullets returned, more than max_bullets 2"]
+    assert [p.field for p in rules.validate({"bullets": []}, given)] == ["bullets"]
+    bad = {"bullets": [{"bullet_text": "B1", "source_bullet_ids": ["b9"]}, {"bullet_text": " ",
+                                                                            "source_bullet_ids": ["b1"]}]}
+    assert [(p.at, p.value) for p in rules.validate(bad, given)] == [("[0].source_bullet_ids", ["b9"]),
+                                                                      ("[1].bullet_text", None)]
+    assert rules.validate({"bullets": [{"bullet_text": "B1", "source_bullet_ids": ["b1", "b2"]}]}, given) == []
 
 
-def test_a_distiller_bullet_citing_an_unknown_id_is_corrected(agents):
+def test_a_distiller_call_sends_its_cap_and_bullet_ids(agents):
     entity = Node(id="e", label="Pat", node_type="Entity", category="person")
     rbs = [{"bullet_id": f"b{i}", "bullet_text": f"B{i}"} for i in range(1, 4)]
-    bad = {"bullets": [{"bullet_text": "B1", "source_bullet_ids": ["b9"]}]}
-    good = {"bullets": [{"bullet_text": "B1", "source_bullet_ids": ["b1"]}]}
-    fake = agents(entity_cards__section_distiller=[bad, good])
+    fake = agents(entity_cards__section_distiller=[{"bullets": [{"bullet_text": "B1", "source_bullet_ids": ["b1"]}]}])
     assert builder._run_section_distiller(entity, "notes", rbs, 2) == [
         {"bullet_text": "B1", "source_bullet_ids": ["b1"]}]
-    assert "b9" in fake.inputs["entity_cards::section_distiller"][1]["correction"]
+    [sent] = fake.inputs["entity_cards::section_distiller"]
+    assert sent["max_bullets"] == "2" and sent["bullet_ids"] == ["b1", "b2", "b3"]
 
 
-def test_a_tagger_that_skips_a_fact_is_corrected_once_then_raises(agents):
-    entity = Node(id="e", label="Pat", node_type="Entity", category="person", original_sentence="", description="")
-    facts = [{"fact_id": f"f{i}", "direction": "outgoing", "edge_type": "has_state", "object_type": "State",
-              "object_label": "x", "edge_sentence": "", "object_sentence": "", "confidence_tier": "provisional",
-              "temporal": {"start_date": None, "end_date": None, "valid_during": None}} for i in (1, 2)]
+def test_the_tagger_renderer_and_summary_rules():
+    tagger = _rules("entity_cards", "section_tagger")
     one = {"tagged_facts": [{"fact_id": "f1", "section": "notes", "confidence": "high", "reason": "x"}]}
-    agents(entity_cards__section_tagger=[one, one])
-    with pytest.raises(RuntimeError, match=r"\['f2'\] have no tagged_facts entry"):
-        builder._run_section_tagger(entity, facts, ["notes", "general_facts"])
+    assert [(p.value, p.structural) for p in tagger.validate(one, {"fact_ids": ["f1", "f2"]})] == [("f2", True)]
+    renderer = _rules("entity_cards", "bullet_renderer")
+    bad = {"bullets": [{"bullet_text": "B", "source_fact_ids": []}, {"bullet_text": "C", "source_fact_ids": ["f7"]}]}
+    assert [p.at for p in renderer.validate(bad, {"fact_ids": ["f1"]})] == ["[0].source_fact_ids",
+                                                                           "[1].source_fact_ids"]
+    assert renderer.validate({"bullets": []}, {"fact_ids": ["f1"]}) == []   # dropping a fact is its call
+    summary = _rules("entity_cards", "summary_writer")
+    assert [p.field for p in summary.validate({"summary": "  "}, {})] == ["summary"]
+    assert summary.validate({"summary": "A friend."}, {}) == []
 
 
 # ── edge_filter prefilter ─────────────────────────────────────────────────
@@ -225,18 +247,21 @@ def test_a_failed_prefilter_batch_raises_instead_of_keeping_every_fact(agents):
         builder._prefilter_facts(_facts(61), "Pat", "Entity")
 
 
-def test_a_prefilter_batch_with_no_keep_indices_is_corrected_once(agents):
-    fake = agents(kg_maintenance__edge_filter=[{"keep_indices": []}, {"keep_indices": [1, 3]}])
+def test_a_prefilter_batch_is_asked_once_with_its_line_count(agents):
+    fake = agents(kg_maintenance__edge_filter=[{"keep_indices": [1, 3]}])
     facts = _facts(61)
     assert builder._prefilter_facts(facts, "Pat", "Entity") == [facts[0], facts[2]]
-    sent = fake.inputs["kg_maintenance::edge_filter"]
-    assert sent[0]["correction"] == "" and "keep_indices is empty" in sent[1]["correction"]
+    [sent] = fake.inputs["kg_maintenance::edge_filter"]
+    assert sent["line_count"] == 61 and "correction" not in sent
 
 
-def test_a_prefilter_batch_still_incomplete_after_one_correction_raises(agents):
-    agents(kg_maintenance__edge_filter=[{"keep_indices": []}, {"keep_indices": [0, 99]}])
-    with pytest.raises(RuntimeError, match=r"still incomplete after one correction: keep_indices \[0, 99\]"):
-        builder._prefilter_facts(_facts(61), "Pat", "Entity")
+def test_the_edge_filter_rules():
+    """Moved from builder._keep_indices_problems to the filter's validate.py (2026-11-15)."""
+    rules = _rules("kg_maintenance", "edge_filter")
+    assert [p.why for p in rules.validate({"keep_indices": []}, {"line_count": 5})] == [
+        "keep_indices is empty: list the numbers of the edges to keep (1 to 5)"]
+    assert [p.value for p in rules.validate({"keep_indices": [0, 2, 99]}, {"line_count": 5})] == [[0, 99]]
+    assert rules.validate({"keep_indices": [1, 5]}, {"line_count": 5}) == []
 
 
 # ── nightly refresh ───────────────────────────────────────────────────────

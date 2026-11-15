@@ -89,14 +89,14 @@ def select_for_evidence(store, factory, scope, evidence):
             else:
                 from belief_engine.matching.selection import select_records
                 from app.assistant.utils.pydantic_classes import Message
-                def invoke(records, retry):
+                def invoke(records):
                     agent = factory.create_agent('belief_engine::evidence_match')
                     if agent is None:
                         raise RuntimeError('Missing agent: belief_engine::evidence_match')
                     # One id per record: the belief_key. The row id stays out of the model's view.
                     shown = [{k: v for k, v in r.items() if k != 'id'} for r in records]
                     response = agent.action_handler(Message(scope_context=scope, agent_input={
-                        'evidence': evidence_page, 'catalog': shown, 'selection_retry': retry}))
+                        'evidence': evidence_page, 'catalog': shown}))
                     return getattr(response, 'data', None)
                 chosen, reasoning = select_records(catalog_page, invoke, AgentForm)
                 out = {'belief_keys': [r['belief_key'] for r in chosen], 'reasoning': reasoning}

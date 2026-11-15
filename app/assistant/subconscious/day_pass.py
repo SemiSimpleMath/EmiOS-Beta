@@ -287,42 +287,6 @@ def _clock_hour_minute(text: str) -> Optional[Tuple[int, int]]:
     return t.hour, t.minute
 
 
-def _problems(data: Dict[str, Any], belief_keys: set, conditions: set = frozenset()) -> List[str]:
-    """What is wrong with the writer's judgments: a key that is not an approved belief (a related belief is read
-    beside the one it relates to and is never an entry of its own: on 2026-10-03 the condition "keeps the
-    bedroom fan running continuously" was placed for all day and handed over as work), an approved belief judged
-    twice or not at all, a belief that applies with no outcome or no time, a time that is neither a clock time nor
-    'all day', or a clock time without a clock time it matters until."""
-    out = []
-    judged = [str(j.get("belief_key") or "") for j in data.get("judgments") or []]
-    for j in data.get("judgments") or []:
-        key = str(j.get("belief_key") or "")
-        if key not in belief_keys:
-            bare = key.removeprefix("belief:")
-            out.append(f"{key!r}: write the key alone, as {bare!r}" if bare in belief_keys
-                       else f"{key!r} is read beside the approved beliefs, not an entry: leave it out"
-                       if key in conditions else f"{key!r} is not one of the beliefs given")
-        if not j.get("applies_today"):
-            continue
-        if not str(j.get("outcome") or "").strip():
-            out.append(f"{key}: it applies today, so say what it asks for today, as an outcome")
-        if not j.get("times"):
-            out.append(f"{key}: it applies today, so give the time it applies, or 'all day'")
-        for p in j.get("times") or []:
-            when, until = str((p or {}).get("time") or "").strip(), str((p or {}).get("until") or "").strip()
-            if when.lower() == "all day":
-                continue
-            if _clock_hour_minute(when) is None:
-                out.append(f"{key}: time {when!r} is not a clock time like '9:00 PM', or 'all day'")
-            elif _clock_hour_minute(until) is None:
-                out.append(f"{key}: at {when}, until {until!r} is not a clock time like '11:00 PM'")
-    for key in sorted(belief_keys):
-        if judged.count(key) != 1:
-            out.append(f"{key}: judge each approved belief once" if judged.count(key) else
-                       f"{key}: no judgment; judge every approved belief")
-    return out
-
-
 def _placements(data: Dict[str, Any]) -> List[Dict[str, str]]:
     """The beliefs judged to apply today, one placement per time. Until 2026-10-05 the writer returned placements
     alone and listed beliefs its own reason said did not apply (the monthly timesheets on the 3rd business day,
@@ -370,22 +334,15 @@ def _place(placements: List[Dict[str, Any]], slots: List[dict], statements: Dict
 
 
 def _judge(batch: List[dict], related: Dict[str, List[Dict[str, str]]], base: Dict[str, Any], conditions: set,
-           step, earlier: Dict[str, List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+           earlier: Dict[str, List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
     """One writer call for a batch of approved beliefs (each with its related ones and its placements earlier today
-    still ahead), against the day's facts and schedule; one correction, then a loud failure."""
-    keys = {e["belief_key"] for e in batch}
-    agent_input = {**base, "beliefs_block": _render_belief_block(
-        [{**e, "related": related[e["belief_key"]], "earlier": earlier.get(e["belief_key"], [])} for e in batch])}
-    data = _write(agent_input)
-    problems = _problems(data, keys, conditions)
-    if problems:
-        logger.warning("[day_pass] invalid judgments, one correction: %s", problems)
-        step("day_pass", "answer refused, one correction", problems=problems)
-        data = _write({**agent_input, "correction": "; ".join(problems)})
-        problems = _problems(data, keys, conditions)
-        if problems:
-            raise ValueError(f"routine writer judgments still invalid after one correction: {problems}")
-    return data.get("judgments") or []
+    still ahead), against the day's facts and schedule. The writer's rules are its validate.py; a refused answer is
+    corrected once by the agent and raises when still refused (agent_runtime/correction.py)."""
+    agent_input = {**base, "belief_keys": sorted(e["belief_key"] for e in batch), "related_keys": sorted(conditions),
+                   "beliefs_block": _render_belief_block(
+                       [{**e, "related": related[e["belief_key"]], "earlier": earlier.get(e["belief_key"], [])}
+                        for e in batch])}
+    return _write(agent_input).get("judgments") or []
 
 
 def run_day_pass(now_utc: Optional[datetime] = None, *, connect=None, concern_connect=None) -> Dict[str, Any]:
@@ -433,7 +390,7 @@ def run_day_pass(now_utc: Optional[datetime] = None, *, connect=None, concern_co
     judgments: List[Dict[str, Any]] = []
     for i in range(0, len(ordered), BATCH):
         batch = ordered[i:i + BATCH]
-        judgments += _judge(batch, related, base, conditions, step, earlier_lines)
+        judgments += _judge(batch, related, base, conditions, earlier_lines)
     data = {"judgments": judgments}
     placements = [p for key in sorted(kept) for p in kept[key]] + _placements(data)
     plan_slots, flags = _place(placements, slots, given, related, day=day, now_utc=now_utc)

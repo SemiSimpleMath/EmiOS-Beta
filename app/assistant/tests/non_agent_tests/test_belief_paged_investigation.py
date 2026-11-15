@@ -1,5 +1,8 @@
 import json
 import pytest
+import app.assistant.tests.test_setup  # noqa: F401
+from app.assistant.agent_registry.agent_registry import AgentRegistry
+from app.assistant.utils.path_utils import get_app_root
 from belief_engine.matching import investigation as I
 from belief_engine.matching.context import encode
 
@@ -38,13 +41,6 @@ def test_all_pages_are_read_and_receipts_resume(tmp_path,monkeypatch):
     count=sum(name.endswith('evidence_page') for name,_ in calls)
     I.review_pair(db,None,None,a,b,'policy',call,None)
     assert sum(name.endswith('evidence_page') for name,_ in calls)==count
-
-
-def test_missing_fragment_review_refuses_final_decision(tmp_path,monkeypatch):
-    monkeypatch.setattr(I,'DIRECT_LIMIT',10000)
-    def call(*args):return {'findings':[]}
-    with pytest.raises(ValueError,match='omitted'):
-        I.review_pair(tmp_path/'copy.db',None,None,*packets(),'policy',call,None)
 
 
 def test_oversized_findings_remain_pending_without_truncation(tmp_path,monkeypatch):
@@ -91,50 +87,43 @@ def test_evidence_pages_stay_within_the_fragment_cap():
         assert len(page) <= I.MAX_FRAGMENTS_PER_PAGE
 
 
-def test_one_dropped_fragment_is_corrected_instead_of_failing_the_pass(tmp_path, monkeypatch):
-    """The 2026-09-25 failure: a single omitted id aborted the whole global pass."""
+RULES = AgentRegistry()._load_validator(
+    get_app_root() / 'assistant' / 'agents' / 'belief_engine' / 'evidence_page' / 'validate.py')
+PAGE = {'beliefs': {}, 'fragments': [{'fragment_id': 'a:evidence:0:0'}, {'fragment_id': 'a:evidence:0:12000'},
+                                     {'fragment_id': 'b:evidence:0:0'}]}
+
+
+def test_the_page_rules_require_one_finding_per_fragment_coverage_first():
+    """Moved from investigation.page_problem (2026-11-15); a single dropped id once aborted the whole pass."""
+    def answer(*pairs):
+        return {'findings': [{'fragment_id': i, 'findings': f} for i, f in pairs]}
+    assert RULES.validate(answer(('a:evidence:0:0', 'read'), ('a:evidence:0:12000', 'read'),
+                                 ('b:evidence:0:0', 'read')), PAGE) == []
+    bad = RULES.validate(answer(('a:evidence:0:0', 'read'), ('a:evidence:0:0', 'read'), ('x:1', 'read'),
+                                ('b:evidence:0:0', ' ')), PAGE)
+    assert [(p.item, p.value, p.structural) for p in bad] == [
+        ('', 'a:evidence:0:12000', True), ('a:evidence:0:0', None, True), ('', 'x:1', True)]   # empty one not yet
+    empty = RULES.validate(answer(('a:evidence:0:0', 'read'), ('a:evidence:0:12000', ''),
+                                  ('b:evidence:0:0', 'read')), PAGE)
+    assert [(p.item, p.at, p.structural) for p in empty] == [('a:evidence:0:12000', 'findings', False)]
+    assert RULES.ITEM_KEYS == {'findings': 'fragment_id'}
+
+
+def test_each_page_is_reviewed_by_one_call_and_a_stored_receipt_is_checked_by_the_same_rules(tmp_path, monkeypatch):
     monkeypatch.setattr(I, 'DIRECT_LIMIT', 10000)
-    seen = []
+    payloads = []
 
     def call(factory, name, payload, scope, form):
         if not name.endswith('evidence_page'):
             return {'relation': 'unresolved'}
-        seen.append(payload.get('page_retry'))
-        frags = payload['fragments']
-        # Drop one id on the first look at each page, answer completely when corrected.
-        use = frags[1:] if payload.get('page_retry') is None and len(frags) > 1 else frags
-        return {'findings': [{'fragment_id': f['fragment_id'], 'findings': 'read'} for f in use]}
+        payloads.append(payload)
+        return {'findings': [{'fragment_id': f['fragment_id'], 'findings': 'read'} for f in payload['fragments']]}
 
     a, b = packets()
-    I.review_pair(tmp_path / 'copy.db', None, None, a, b, 'policy', call, None)
-
-    corrections = [r for r in seen if r]
-    assert corrections, 'expected at least one correction attempt'
-    # The correction names the specific id that was missed, not just "coverage broke".
-    assert corrections[0]['missing_fragment_ids']
-    assert corrections[0]['required_fragment_ids']
-
-
-def test_still_refuses_after_the_one_correction(tmp_path, monkeypatch):
-    monkeypatch.setattr(I, 'DIRECT_LIMIT', 10000)
-    attempts = []
-
-    def call(factory, name, payload, scope, form):
-        attempts.append(name)
-        return {'findings': []}
-
-    with pytest.raises(ValueError, match='omitted'):
-        I.review_pair(tmp_path / 'copy.db', None, None, *packets(), 'policy', call, None)
-    # Exactly one repair, never an unbounded retry loop.
-    assert attempts.count('belief_engine::evidence_page') == 2
-
-
-def test_empty_finding_is_also_corrected_then_refused(tmp_path, monkeypatch):
-    monkeypatch.setattr(I, 'DIRECT_LIMIT', 10000)
-
-    def call(factory, name, payload, scope, form):
-        return {'findings': [{'fragment_id': f['fragment_id'], 'findings': '  '}
-                             for f in payload['fragments']]}
-
-    with pytest.raises(ValueError, match='empty finding'):
-        I.review_pair(tmp_path / 'copy.db', None, None, *packets(), 'policy', call, None)
+    db = tmp_path / 'copy.db'
+    I.review_pair(db, None, None, a, b, 'policy', call, None)
+    assert payloads and all(set(p) == {'beliefs', 'fragments'} for p in payloads)
+    with I.connection(db) as conn:
+        conn.execute("UPDATE belief_match_pages SET result_json='{\"findings\": []}'")
+    with pytest.raises(ValueError, match='Stored evidence-page receipt is invalid: findings: no finding'):
+        I.review_pair(db, None, None, a, b, 'policy', call, None)

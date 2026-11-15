@@ -15,8 +15,8 @@ impactful — P4.4 conservatism): it lands on /kg-maintenance/needs-input,
 and on Accept the executor performs the split via kg_split_succession.
 'stable'/'unclear' verdicts write a rejected finding as a cooldown stamp
 so the node is re-judged only after COOLDOWN_DAYS (more evidence by then).
-A malformed or incomplete verdict gets one correction, then stops the run
-(never a cooldown stamp).
+A malformed or incomplete verdict is refused by the judge's validate.py,
+corrected once, then stops the run (never a cooldown stamp).
 
 Splits are lazy: nothing here mutates the graph.
 """
@@ -40,7 +40,6 @@ MAX_JUDGES_PER_RUN = 8
 COOLDOWN_DAYS = 30
 MIN_EVIDENCE = 3
 CONFIDENCE_MAP = {"high": 0.9, "medium": 0.7, "low": 0.4}
-VERDICTS = {"stable", "succession", "unclear"}
 FAILURE_KIND = "kg_role_succession"
 
 
@@ -54,41 +53,6 @@ def _run_judge(agent_input: Dict[str, Any]) -> Dict[str, Any]:
         scope_id="kg_maintenance::succession_judge",
         actor_id="role_succession_scan",
     )
-
-
-def _problems(verdict: Dict[str, Any]) -> List[str]:
-    """What is missing or malformed in a verdict; empty when it is complete."""
-    from datetime import date
-
-    v = str(verdict.get("verdict") or "").strip().lower()
-    out = []
-    if v not in VERDICTS:
-        out.append(f"verdict {v!r} is not one of {sorted(VERDICTS)}")
-    conf = str(verdict.get("confidence") or "").strip().lower()
-    if conf not in CONFIDENCE_MAP:
-        out.append(f"confidence {conf!r} is not one of {sorted(CONFIDENCE_MAP)}")
-    if v == "succession":
-        try:
-            date.fromisoformat(str(verdict.get("split_date") or "")[:10])
-        except ValueError:
-            out.append(f"split_date {verdict.get('split_date')!r} is not an ISO date")
-        if not str(verdict.get("split_basis") or "").strip():
-            out.append("split_basis is empty")
-    return out
-
-
-def _judge(agent_input: Dict[str, Any]) -> Dict[str, Any]:
-    """The judge's verdict, complete: an incomplete answer gets one correction
-    naming what is missing, then raises (fail loud, never a cooldown)."""
-    verdict = _run_judge(agent_input)
-    problems = _problems(verdict)
-    if problems:
-        verdict = _run_judge({**agent_input, "correction": (
-            "Your previous answer was incomplete: " + "; ".join(problems) + ".")})
-        problems = _problems(verdict)
-        if problems:
-            raise ValueError(f"succession_judge: still incomplete after one correction: {'; '.join(problems)}")
-    return verdict
 
 
 def run(ctx: PipelineContext) -> dict:
@@ -210,9 +174,12 @@ def run(ctx: PipelineContext) -> dict:
         node_id = ji.pop("node_id")
         label = ji["label"]
         # A failed or incomplete judgment stops the run; the node stays
-        # pending, and one that keeps failing is set aside for review.
+        # pending, and one that keeps failing is set aside for review. The
+        # judge's rules are its validate.py: an incomplete verdict is
+        # corrected once by the agent and raises when still refused
+        # (agent_runtime/correction.py), never a cooldown stamp.
         try:
-            verdict = _judge(ji)
+            verdict = _run_judge(ji)
         except Exception as exc:
             failure_ledger.record_failure(FAILURE_KIND, node_id, exc, label=label)
             raise

@@ -348,34 +348,12 @@ def _render_existing_graph(wo, ids=None) -> str:
     return render_view("portfolio", work=work_data(wo), labels=ids or {}, wording_explained=True)
 
 
-def _form_refusal(exc: BaseException):
-    """The reasons the architect's form refused its answer (agent_form validation: a node with both a time and a
-    condition, for one), from the chain of the structured-output failure; None when the failure is something else."""
-    from pydantic import ValidationError
-    seen = exc
-    while seen is not None:
-        if isinstance(seen, ValidationError):
-            return "; ".join(f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in seen.errors())
-        seen = seen.__cause__ or seen.__context__
-    return None
-
-
 def _ask(agent, task: str, information: str, scope) -> dict:
-    """The architect's answer. When its form refuses the answer, ask once more with the refusal; a second refusal
-    raises. Until 2026-10-10 a refused answer failed the goal's planning with no correction, and the empty goal was
-    offered again every tick: the lights-off-after-bedtime goal failed twice that morning on a step given both a time
-    and a condition."""
-    try:
-        return getattr(agent.action_handler(Message(task=task, information=information, scope_context=scope)),
-                       "data", {}) or {}
-    except RuntimeError as exc:
-        refusal = _form_refusal(exc)
-        if refusal is None:
-            raise
-        logger.warning("[work_architect_node] answer refused by its form, one correction: %s", refusal)
-        correction = render_view("architect_refused", reason=refusal)
-        return getattr(agent.action_handler(Message(task=task + correction, information=information,
-                                                     scope_context=scope)), "data", {}) or {}
+    """The architect's answer. An answer its form refuses is corrected once by the agent's own model call
+    (agent_runtime/correction.py) and raises AgentOutputInvalid when still refused. From 2026-10-10 to 2026-11-15
+    this function also re-asked on the form's refusal, so a refused answer was corrected twice."""
+    return getattr(agent.action_handler(Message(task=task, information=information, scope_context=scope)),
+                   "data", {}) or {}
 
 
 def _apply_with_correction(agent, data: dict, task: str, information: str, scope, apply):

@@ -19,10 +19,5 @@ Now: {{ agent_input.now_local }}
 {% else -%}
 (none yet)
 {% endfor %}
-{% if agent_input.get('correction') %}
-## Correct your previous answer
 
-It did not satisfy the contract: {{ agent_input.correction }}
-Answer again, with every placement correct.
-{% endif %}
 Make the day's placements.

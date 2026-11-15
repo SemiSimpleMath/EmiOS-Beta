@@ -2,7 +2,7 @@
     this call (`ref`, day_tasks.project) and its data, never its id. Expects agent_input: day, own [entry with ref,
     relies_on_labels, work], situation (subconscious/situation.py, rendered by shared/brain/situation.j2; each concern with its plan
     and cancelled entries, day_tasks.with_concerns), matters (each with `ref`),
-    earlier (objects an entry relies on that are not otherwise shown), source_labels, correction. Times local. -#}
+    earlier (objects an entry relies on that are not otherwise shown), source_labels. Times local. -#}
 {%- set A = agent_input -%}
 {%- set wording_explained = true -%}{#- the system prompt states the fixed wording once -#}
 {%- macro relied(labels, pad) %}{% if labels %}
@@ -37,9 +37,6 @@
 {% endfor %}{% endif %}
 
 {% with matters = A.matters %}{% include 'shared/brain/matters_today.j2' %}{% endwith %}
-{% if A.correction %}
-## Your previous answer was refused
-{{ A.correction }}
-{% endif %}
+
 Decide each calendar concern's entry and each concern planner's proposal, and give in entries every change to the
 list.

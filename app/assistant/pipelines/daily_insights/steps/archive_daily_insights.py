@@ -13,21 +13,13 @@ from app.assistant.utils.time_utils import get_local_timezone, get_local_time_st
 from app.assistant.pipelines.context import PipelineContext
 
 
-def cite_sources(items: list[dict], entries: dict[int, dict]) -> tuple[list[dict], list[str]]:
-    """Each item with its cited entries stored as its provenance (`sources`: [{n, ref, entry}]), and what is
-    wrong with the citations: an item citing nothing, or a number that is no entry of the day."""
+def cite_sources(items: list[dict], entries: dict[int, dict]) -> list[dict]:
+    """Each item with its cited entries stored as its provenance (`sources`: [{n, ref, entry}]). The writer's
+    citations were checked by its validate.py (2026-11-15), so every number is an entry of the day."""
     from belief_engine.intake.day_items import entry_ref
-    out, problems = [], []
-    for item in items:
-        cited = list(dict.fromkeys(item.get("sources") or []))
-        bad = [n for n in cited if n not in entries]
-        if not cited:
-            problems.append(f"insight {item.get('fact_summary')!r} cites no entries in sources")
-        if bad:
-            problems.append(f"insight {item.get('fact_summary')!r} cites {bad}, which are not entry numbers")
-        out.append({**item, "sources": [{"n": n, "ref": entry_ref(entries[n]), "entry": entries[n]}
-                                        for n in cited if n in entries]})
-    return out, problems
+    return [{**item, "sources": [{"n": n, "ref": entry_ref(entries[n]), "entry": entries[n]}
+                                 for n in dict.fromkeys(item.get("sources") or [])]}
+            for item in items]
 
 
 class ArchiveDailyInsightsStep:
@@ -63,24 +55,17 @@ class ArchiveDailyInsightsStep:
         agent = DI.agent_factory.create_agent("daily_timeline_insights")
         if agent is None:
             raise RuntimeError("daily_timeline_insights agent unavailable")
-        task = "Extract actionable insights from the merged daily timeline."
-
-        def ask(task_text: str) -> list:
-            result = agent.action_handler(Message(agent_input={
-                "date_time": get_local_time_str(), "task": task_text,
-                "timeline_merged": timeline_text, "memory_available_tags": allowed_tags}))
-            payload = result.data if hasattr(result, "data") else result
-            items = payload.get("actionable_information") if isinstance(payload, dict) else None
-            if not isinstance(items, list):
-                raise RuntimeError("daily_timeline_insights returned no actionable_information list")
-            return [i for i in items if isinstance(i, dict)]
-
-        actionable, problems = cite_sources(ask(task), entries)
-        if problems:
-            actionable, problems = cite_sources(ask(f"{task} Correct your previous answer: {'; '.join(problems)}"),
-                                                entries)
-            if problems:
-                raise RuntimeError(f"daily insights still cite no or unknown entries after one correction: {problems}")
+        # One call: the writer's citations are checked by its validate.py against `entry_numbers` and a refused
+        # answer is corrected once by the agent, raising when still refused (agent_runtime/correction.py).
+        result = agent.action_handler(Message(agent_input={
+            "date_time": get_local_time_str(), "task": "Extract actionable insights from the merged daily timeline.",
+            "timeline_merged": timeline_text, "memory_available_tags": allowed_tags,
+            "entry_numbers": sorted(entries)}))
+        payload = result.data if hasattr(result, "data") else result
+        items = payload.get("actionable_information") if isinstance(payload, dict) else None
+        if not isinstance(items, list):
+            raise RuntimeError("daily_timeline_insights returned no actionable_information list")
+        actionable = cite_sources([i for i in items if isinstance(i, dict)], entries)
 
         filtered = []
         dropped_tags: list[dict[str, Any]] = []

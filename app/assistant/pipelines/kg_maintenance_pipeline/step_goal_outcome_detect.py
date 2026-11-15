@@ -146,21 +146,13 @@ def run(ctx: PipelineContext, *, limit: Optional[int] = None) -> dict:
         kind="pipeline", source_id=ctx.pipeline_id, actor_id="goal_outcome_detector")
     agent.blackboard.update_state_value("scope_context", _scope)
 
-    # A failed call raises (the run stops, every Goal stays as it is). An
-    # answer that leaves a candidate without a valid verdict gets one
-    # correction naming it, then raises.
+    # A failed call raises (the run stops, every Goal stays as it is). The
+    # detector's rules are its validate.py: an answer that leaves a candidate
+    # without a valid verdict is corrected once by the agent and raises when
+    # still refused (agent_runtime/correction.py).
     payload = _serialize_for_agent(has_evidence)
     by_id = {g["id"]: g for g in has_evidence}
-    verdicts, problems = _ask(agent, payload, by_id, correction=None)
-    if problems:
-        verdicts, problems = _ask(
-            agent, payload, by_id,
-            correction="Your previous answer was incomplete: " + "; ".join(problems)
-            + ". Return one verdict for every candidate goal_node_id.",
-        )
-        if problems:
-            raise RuntimeError(
-                f"[goal_outcome_detect] still incomplete after one correction: {'; '.join(problems)}")
+    verdicts = _ask(agent, payload, list(by_id))
 
     completed_count = 0
     abandoned_count = 0
@@ -211,39 +203,18 @@ def run(ctx: PipelineContext, *, limit: Optional[int] = None) -> dict:
     }
 
 
-OUTCOMES = {"completed", "abandoned", "no_signal"}
-
-
-def _ask(agent, payload: str, by_id: Dict[str, Any], *, correction: Optional[str]):
-    """One detector call. Returns ({goal_id: verdict}, problems); problems name
-    every candidate without a valid verdict and every unknown id."""
-    agent_input = {"candidate_outcomes": payload, "correction": correction}
+def _ask(agent, payload: str, goal_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+    """One detector call. Returns {goal_id: verdict}, one for every candidate:
+    the detector's validate.py (it reads `goal_node_ids`) refuses an answer
+    that leaves a candidate without a valid verdict."""
+    agent_input = {"candidate_outcomes": payload, "goal_node_ids": goal_ids}
     result = agent.action_handler(Message(agent_input=agent_input))
     data = getattr(result, "data", None)
     if not isinstance(data, dict) or not isinstance(data.get("verdicts"), list):
         raise RuntimeError("[goal_outcome_detect] goal_outcome_detector returned no verdicts list")
-
-    verdicts: Dict[str, Dict[str, Any]] = {}
-    problems: List[str] = []
-    for v in data["verdicts"]:
-        gid = v.get("goal_node_id") if isinstance(v, dict) else None
-        if gid not in by_id:
-            problems.append(f"goal_node_id {gid!r} is not a candidate")
-            continue
-        outcome = str(v.get("outcome") or "").strip().lower()
-        if outcome not in OUTCOMES:
-            problems.append(f"goal_node_id {gid} outcome {outcome!r} is not one of {sorted(OUTCOMES)}")
-            continue
-        try:
-            conf = float(v.get("confidence"))
-        except (TypeError, ValueError):
-            problems.append(f"goal_node_id {gid} confidence {v.get('confidence')!r} is not a number")
-            continue
-        verdicts[gid] = {**v, "outcome": outcome, "confidence": conf}
-    missing = [gid for gid in by_id if gid not in verdicts]
-    if missing:
-        problems.append(f"no verdict for goal_node_id {missing}")
-    return verdicts, problems
+    return {v["goal_node_id"]: {**v, "outcome": str(v["outcome"]).strip().lower(),
+                                "confidence": float(v["confidence"])}
+            for v in data["verdicts"]}
 
 
 def _empty_result() -> dict:

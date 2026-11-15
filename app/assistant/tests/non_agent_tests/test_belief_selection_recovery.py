@@ -1,37 +1,38 @@
+"""Selection by each record's own belief_key. Since 2026-11-15 the evidence matcher's validate.py refuses a key not in
+the catalog page and agent_runtime/correction.py corrects it once; select_records calls once. Invented data only."""
 from types import SimpleNamespace
 import pytest
+import app.assistant.tests.test_setup  # noqa: F401
+from app.assistant.agent_registry.agent_registry import AgentRegistry
+from app.assistant.utils.path_utils import get_app_root
 from belief_engine.matching.selection import select_records
 from app.assistant.agents.belief_engine.evidence_match.agent_form import AgentForm
 
+RULES = AgentRegistry()._load_validator(
+    get_app_root() / 'assistant' / 'agents' / 'belief_engine' / 'evidence_match' / 'validate.py')
 
-def test_repairs_complete_selection_preserving_all_context():
+
+def test_selects_complete_records_once_each_in_answer_order():
     records=[{'belief_key':'morning.only','statement':'text'*1000,'conditions':{'when':'morning'}},
              {'belief_key':'evening.only','statement':'different'}]
     calls=[]
-    def invoke(rows,retry):
-        calls.append((rows,retry))
-        return {'belief_keys':['S1'] if retry is None else ['evening.only','morning.only','evening.only'], 'reasoning':'both'}
+    def invoke(rows):
+        calls.append(rows)
+        return {'belief_keys':['evening.only','morning.only','evening.only'], 'reasoning':'both'}
     selected,_=select_records(records,invoke,AgentForm)
     assert selected == [records[1],records[0]]
     assert selected[1] is records[0]
-    assert calls[0][0][0]['statement']==records[0]['statement']
-    assert calls[1][1]['allowed_belief_keys']==['morning.only','evening.only']
-    assert calls[1][1]['previous_response']['belief_keys']==['S1']
+    assert len(calls)==1 and calls[0][0]['statement']==records[0]['statement']
 
 
-def test_invalid_selection_never_partially_accepted():
-    calls=[]
-    def invoke(rows,retry):
-        calls.append(retry)
-        return {'belief_keys':['a','S999'],'reasoning':'bad'}
-    with pytest.raises(ValueError,match='after correction'):
-        select_records([{'belief_key':'a'}],invoke,AgentForm)
-    assert len(calls)==2
+def test_the_rules_refuse_a_key_not_in_the_catalog_and_keep_a_repeated_one():
+    given={'evidence':[],'catalog':[{'belief_key':'a','statement':'s'},{'belief_key':'b','statement':'s'}]}
+    assert RULES.validate({'belief_keys':['a','b','a'],'reasoning':'r'},given) == []
+    bad=RULES.validate({'belief_keys':['a','S1','S1'],'reasoning':'r'},given)
+    assert [(p.field,p.value,p.structural) for p in bad] == [('belief_keys','S1',True)]
 
 
-def test_malformed_output_repaired_but_provider_errors_not_retried():
-    outputs=iter([None,{'belief_keys':[],'reasoning':'none relevant'}])
-    assert select_records([{'belief_key':'a'}],lambda *_:next(outputs),AgentForm)==([], 'none relevant')
+def test_provider_errors_propagate_and_are_not_retried():
     calls=[]
     def broken(*args):
         calls.append(1)
@@ -41,7 +42,7 @@ def test_malformed_output_repaired_but_provider_errors_not_retried():
     assert len(calls)==1
 
 
-def test_evidence_path_repairs_and_caches_only_valid_keys(tmp_path, monkeypatch):
+def test_evidence_path_calls_once_and_caches_the_page(tmp_path, monkeypatch):
     import sqlite3
     from contextlib import contextmanager
     from dataclasses import make_dataclass
@@ -61,14 +62,14 @@ def test_evidence_path_repairs_and_caches_only_valid_keys(tmp_path, monkeypatch)
     calls=[]
     def run(msg):
         calls.append(msg.agent_input)
-        return SimpleNamespace(data={'belief_keys':['invented'] if len(calls)==1 else ['actual.key'],'reasoning':'relevant'})
+        return SimpleNamespace(data={'belief_keys':['actual.key'],'reasoning':'relevant'})
     factory=SimpleNamespace(create_agent=lambda _:SimpleNamespace(action_handler=run))
     evidence=[{'source_ref':'source1','raw_text':'complete original evidence'}]
     assert S.select_for_evidence(store,factory,None,evidence)==[{'id':'id1','belief_key':'actual.key','statement':'morning only'}]
-    assert len(calls)==2 and calls[1]['evidence']==evidence
+    assert len(calls)==1 and calls[0]['evidence']==evidence and 'selection_retry' not in calls[0]
     assert [r['belief_key'] for r in calls[0]['catalog']]==['actual.key'] and 'id' not in calls[0]['catalog'][0]   # one id: no row id
     assert S.select_for_evidence(store,factory,None,evidence)==[{'id':'id1','belief_key':'actual.key','statement':'morning only'}]
-    assert len(calls)==2
+    assert len(calls)==1
 
 @pytest.fixture(autouse=True)
 def isolated_selection_services(monkeypatch):

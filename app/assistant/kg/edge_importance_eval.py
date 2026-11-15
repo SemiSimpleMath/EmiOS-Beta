@@ -77,6 +77,7 @@ def run_rater(
     from app.assistant.utils.pydantic_classes import Message
 
     prompt_lines: List[str] = []
+    edge_ids: List[str] = []
     for c in cases:
         eid = str(c["id"])
         e = edge_by_id.get(eid)
@@ -88,6 +89,7 @@ def run_rater(
             print(f"  WARN: edge {eid} has missing endpoint", file=sys.stderr)
             continue
         prompt_lines.append(block)
+        edge_ids.append(eid)
 
     if not prompt_lines:
         return {}
@@ -126,6 +128,7 @@ def run_rater(
         agent_input={
             "task": "\n".join(prompt_lines),
             "information": information_text,
+            "edge_ids": edge_ids,  # the rater's validate.py checks every edge is rated (2026-11-15)
         },
         task="\n".join(prompt_lines),
         information=information_text,

@@ -6,8 +6,9 @@ and repeated only when a stage before it changed (a concern's record or plan), n
 situation alone, and since 2026-10-10 when work a decision relied on ended (a cancellation keeps what it relied on
 too); a concern planner's proposal reaches it by label; the prompts render the rules, the labelled objects
 and the brain's situation, times local. The prompt is a projection (2026-10-08): every object shows a label of the
-call, never its id; the answer refers only by labels in relies_on, concern and entry, code maps them back and keeps
-what an entry relies on as relations, shown again on the next run. Scratch database; fake agent; invented data only.
+call, never its id; the answer refers only by labels in relies_on, concern and entry (the agent's validate.py checks
+them, corrected once by the agent: agent_runtime/correction.py), code maps them back and keeps what an entry relies on
+as relations, shown again on the next run. Scratch database; fake agent; invented data only.
 """
 import json
 from datetime import datetime, timedelta, timezone
@@ -17,6 +18,17 @@ import pytest
 from app.assistant.subconscious import brain_list as L
 from app.assistant.subconscious import day_tasks as D
 from belief_engine.intake.store import sqlite_file
+
+from app.assistant.agent_registry.agent_registry import AgentRegistry
+from app.assistant.utils.path_utils import get_app_root
+
+RULES = AgentRegistry()._load_validator(get_app_root() / "assistant" / "agents" / "subconscious" / "day_tasks"
+                                        / "validate.py")
+
+
+def _problems(answer, changeable, labels):
+    """The rules' problems as lines (where: why), for matching."""
+    return [f"{p.at}: {p.why}" for p in RULES.validate(answer, {"changeable": changeable, "labels": labels})]
 
 NOW = datetime(2026, 3, 10, 15, 0, tzinfo=timezone.utc)
 DAY = "2026-03-10"
@@ -55,7 +67,8 @@ def _gather(conn, chat="I'll start the report at 5", s=None, basis="record-1", e
         for c in sit["concerns"]:
             c.setdefault("basis", basis)
         return {"day": DAY, "now": now.isoformat(), "own": own, "situation": sit, "matters": [], "beliefs": [],
-                "ended_relied_on": list(ended), **D.project(DAY, sit, [], own, connect=conn), "correction": None}
+                "ended_relied_on": list(ended), **D.project(DAY, sit, [], own, connect=conn),
+                "changeable": D.changeable(own, sit["concerns"])}
     return gather
 
 
@@ -115,13 +128,12 @@ def test_the_end_of_work_a_decision_relied_on_wakes_it_and_a_cancellation_keeps_
                            call=lambda p: pytest.fail("woken once per ending")) == {"day_tasks": "unchanged"}
 
 
-def test_an_answer_without_an_entries_list_is_refused(tmp_path):
-    conn = sqlite_file(tmp_path / "d.db")
-    seen = []
-    with pytest.raises(ValueError, match="no entries list"):
-        D.run_day_tasks(now_utc=NOW, connect=conn, gather_inputs=_gather(conn),
-                        call=lambda p: seen.append(p.get("correction")) or {"decisions": []})
-    assert seen == [None, "no entries list"]
+def test_an_answer_without_an_entries_list_is_refused_by_the_form():
+    from pydantic import ValidationError
+    from app.assistant.agents.subconscious.day_tasks.agent_form import AgentForm
+    AgentForm.model_validate(GOOD)
+    with pytest.raises(ValidationError, match="entries"):
+        AgentForm.model_validate({"decisions": []})
 
 
 def test_nothing_to_decide_costs_nothing(tmp_path):
@@ -148,7 +160,7 @@ def test_the_prompts_carry_the_rules_and_the_labelled_situation():
     s = situation()
     projected = D.project(DAY, s, [], [])
     user = _ENV.get_template("subconscious/day_tasks/prompts/user.j2").render(
-        agent_input={"day": DAY, "own": [], "situation": s, "matters": [], "beliefs": [], "correction": None,
+        agent_input={"day": DAY, "own": [], "situation": s, "matters": [], "beliefs": [],
                      **projected})
     assert f"[M1] [{local_time_text(NOW.isoformat())}] Owner: I'll start the report at 5" in user
     assert "- [C1] The house is at 70 for the night (severity: low); record last changed" in user
@@ -207,7 +219,7 @@ def test_the_brain_s_view_concerns_in_full_with_their_entries_and_today_s_decisi
     assert projected["labels"]["E1"] == ["list_entry", entry["id"]] and projected["labels"]["B1"] == ["brain_matter", "1"]
     assert projected["labels"]["C1"] == ["concern", "c-dinner"]
     user = _ENV.get_template("subconscious/day_tasks/prompts/user.j2").render(
-        agent_input={"day": DAY, "own": [], "situation": s, "matters": matters, "correction": None,
+        agent_input={"day": DAY, "own": [], "situation": s, "matters": matters,
                      "beliefs": [{"belief_key": "B7", "statement": "The family eats out on Fridays.", "score": 0.4}],
                      **projected})
     assert "### [C1] Dinner out tonight" in user and "THE WHOLE RECORD of c-dinner (active)" in user
@@ -223,9 +235,9 @@ def test_the_brain_s_view_concerns_in_full_with_their_entries_and_today_s_decisi
     take = {"entries": [{"entry": "E1", "action": "modify", "what": "the owner knows the table is at 6:30",
                          "assistant_part": "tell the owner", "when": "5:30 PM", "why": "The restaurant moved it.",
                          "concern": "", "relies_on": ["C1"]}]}
-    assert D.entries_problems(take, given, projected["labels"]) == []
+    assert _problems(take, given, projected["labels"]) == []
     moved = {"entries": [take["entries"][0] | {"concern": "C2"}]}
-    assert any("stays with it" in p for p in D.entries_problems(moved, given, projected["labels"] | {
+    assert any("stays with it" in p for p in _problems(moved, given, projected["labels"] | {
         "C2": ["concern", "c-other"]}))
     assert "- chat at" in user and ": we are eating out tonight" in user
     assert "the brain: new concern: Dinner plans changed." in user and "- raised a concern: Dinner out tonight" in user
@@ -293,19 +305,24 @@ def test_an_entry_names_what_prompted_it_by_label():
     (O1), never its id."""
     labels = {"K1": ["calendar_event", "k"], "D": ["resource", "r"], "M1": ["message", "m1"],
               "O1": ["list_entry", "day:2026-03-10:ab"]}
-    assert D.entries_problems({"entries": [_own()]}, {}, labels) == []
-    assert "relies_on names nothing" in D.entries_problems({"entries": [_own(relies_on=())]}, {}, labels)[0]
-    assert "not labels given" in D.entries_problems({"entries": [_own(relies_on=("X9",))]}, {}, labels)[0]
+    assert _problems({"entries": [_own()]}, {}, labels) == []
+    assert "relies_on names nothing" in _problems({"entries": [_own(relies_on=())]}, {}, labels)[0]
+    assert "not labels given" in _problems({"entries": [_own(relies_on=("X9",))]}, {}, labels)[0]
     made = {"id": "day:2026-03-10:ab", "ref": "O1", "updated_at": (NOW - timedelta(minutes=30)).isoformat()}
     given = D.changeable([made], [])
-    assert D.entries_problems({"entries": [_own(entry="O1", action="modify", relies_on=("K1", "D"))]},
-                              given, labels) == []
-    assert D.entries_problems({"entries": [_own(entry="O1", action="cancel", what="", part="", when="",
-                                                relies_on=("M1",))]}, given, labels) == []
-    assert "not one of the entries given" in D.entries_problems({"entries": [_own(entry=made["id"],
-                                                                                  action="modify")]}, given, labels)[0]
-    assert D.entries_problems({"entries": [_own(why="M1 says he is back.")]}, {}, labels) == [], \
+    assert _problems({"entries": [_own(entry="O1", action="modify", relies_on=("K1", "D"))]}, given, labels) == []
+    assert _problems({"entries": [_own(entry="O1", action="cancel", what="", part="", when="",
+                                       relies_on=("M1",))]}, given, labels) == []
+    assert "not one of the entries given" in _problems({"entries": [_own(entry=made["id"], action="modify")]},
+                                                       given, labels)[0]
+    assert _problems({"entries": [_own(why="M1 says he is back.")]}, {}, labels) == [], \
         "prose is never checked for labels (owner, 2026-10-09)"
+    assert _problems({"entries": [_own(entry="O1")]}, given, labels) == ['[0].entry: a new entry is written as entry "new"']
+    assert _problems({"entries": [_own(what="", when=" ")]}, {}, labels) == ["[0]: new names what, when"]
+    assert _problems({"entries": [_own(why="")]}, {}, labels) == ["[0].why: why is empty"]
+    twice = RULES.validate({"entries": [_own(entry="O1", action="cancel", relies_on=("M1",))] * 2},
+                           {"changeable": given, "labels": labels})
+    assert [(p.value, p.structural) for p in twice] == [("O1", True)]
 
 
 def test_a_run_puts_an_own_entry_on_the_list_and_the_lane_makes_work_from_it(tmp_path, monkeypatch):
@@ -399,7 +416,7 @@ def test_an_entry_for_a_concern_is_the_concerns(tmp_path, monkeypatch):
                                           at=NOW, connect=conn)
     assert closed == [own["id"]] and L.entries(concern_id="c-sleep", connect=conn) == []
     labels = {"C1": ["concern", "c-sleep"], "W1": ["work", "w"], "D": ["resource", "r"]}
-    assert "concern 'W1' is not an open concern given" in D.entries_problems(
+    assert "[0].concern: it is not an open concern given (its C label)" in _problems(
         {"entries": [_own() | {"concern": "W1"}]}, {}, labels)[0]
 
 
@@ -420,7 +437,7 @@ def test_earlier_entries_whose_work_is_in_motion_are_the_deciders_to_rewrite(tmp
     carried = {**L.open_before(DAY, connect=conn)[0], "work": None, "relies_on": []}
     projected = D.project(DAY, situation(), [], [carried])
     user = _ENV.get_template("subconscious/day_tasks/prompts/user.j2").render(agent_input={
-        "day": DAY, "own": [carried], "situation": situation(), "matters": [], "beliefs": [], "correction": None,
+        "day": DAY, "own": [carried], "situation": situation(), "matters": [], "beliefs": [],
         **projected})
     assert "- [O1] (from 2026-03-09, its work still in motion) hourly check-ins" in user
     L.apply_entries(DAY, [{"entry": carried["id"], "action": "modify", "what": "hourly check-ins from 10:20",
@@ -473,7 +490,7 @@ def test_the_look_back_shows_ended_work_by_its_line_and_work_in_motion_briefly(t
     projected = D.project(DAY, s, matters, [], connect=conn)
     assert projected["labels"]["W1"] == ["work", "work_ac"], "the label leads to the work in full"
     user = _ENV.get_template("subconscious/day_tasks/prompts/user.j2").render(
-        agent_input={"day": DAY, "own": [], "situation": s, "matters": matters, "beliefs": [], "correction": None,
+        agent_input={"day": DAY, "own": [], "situation": s, "matters": matters, "beliefs": [],
                      **projected})
     look = user[user.index("## What the brain read and decided today"):]
     assert "- work [W1], ended (summary): The AC was set to COOL 75 at 6:00 AM.\n- work [W2]" in look, "one line"
@@ -485,7 +502,7 @@ def test_the_look_back_shows_ended_work_by_its_line_and_work_in_motion_briefly(t
     assert f"- chat at {local_time_text(at(3))}: it is cold in here" in look
     assert full not in user and "AC at 75 at 6." not in look and "Met; closed." not in look
     record = _ENV.get_template("subconscious/day_record/prompts/user.j2").render(agent_input={
-        "day": DAY, "now": NOW.isoformat(), "current": None, "events": [], "milestones": [], "correction": None,
+        "day": DAY, "now": NOW.isoformat(), "current": None, "events": [], "milestones": [],
         "concerns": [{"ref": "C1", "title": "AC", "subject": "household", "history": "[Tue 03-10 05:01 AM] At 6: AC to 75."}],
         "matters": [{**m, "ref": "B1", "events": [{**e, "work": dict(briefs[e["work"]["work_id"]])} if "work" in e
                                                    else e for e in m["events"]]}]})
@@ -537,7 +554,7 @@ def test_each_work_is_shown_in_full_once_under_the_entry_it_was_made_from(tmp_pa
     projected = D.project(DAY, s, [], [], connect=conn)
     assert projected["labels"]["W1"] == ["work", "work_ac"]
     user = _ENV.get_template("subconscious/day_tasks/prompts/user.j2").render(
-        agent_input={"day": DAY, "own": [], "situation": s, "matters": [], "beliefs": [], "correction": None,
+        agent_input={"day": DAY, "own": [], "situation": s, "matters": [], "beliefs": [],
                      **projected})
     assert user.count("Still to come:") == 1, "the work's steps once, under its entry"
     assert "- [E1] The house is at 70 tonight" in user and "  its work [W1]: active\n" in user

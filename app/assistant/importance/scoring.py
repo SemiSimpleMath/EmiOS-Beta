@@ -55,6 +55,7 @@ from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
+from app.assistant.agent_runtime.correction import AgentOutputInvalid
 from app.assistant.kg import failure_ledger
 from app.assistant.kg.db.knowledge_graph_db_sqlite import Edge, Node
 from app.assistant.utils.logging_config import get_logger
@@ -121,19 +122,19 @@ def _build_edge_block(
     return "\n".join(lines)
 
 
-def _rate_edges(agent, blocks: Dict[str, str], ids: List[str], correction_ids: List[str], scope) -> Dict[str, float]:
+def _rate_edges(agent, blocks: Dict[str, str], ids: List[str], scope) -> Dict[str, float]:
     """One rater call over these edges. Returns the well-formed ratings among ``ids``.
 
     A rating is well-formed when its id is one of ``ids`` and its score is a finite number; a
-    score of 0 is a real 0. Anything else leaves that edge missing from the result.
+    score of 0 is a real 0. The rater's validate.py refuses an answer leaving an edge of ``ids``
+    without one, and a refused answer is corrected once by the agent, raising AgentOutputInvalid
+    when still refused (agent_runtime/correction.py, 2026-11-15).
     """
     from app.assistant.utils.pydantic_classes import Message
 
     batch_text = "\n".join(blocks[eid] for eid in ids)
-    # correction_ids always travels (empty on a first call) so a previous call's list on the
-    # agent's blackboard is overwritten, never inherited.
     result = agent.action_handler(Message(
-        agent_input={"task": batch_text, "information": "", "correction_ids": correction_ids},
+        agent_input={"task": batch_text, "information": "", "edge_ids": ids},
         task=batch_text,
         information="",
         scope_context=scope,
@@ -274,10 +275,11 @@ def regenerate_edge_importance(
 
     A failed call stops the run (owner, 2026-10-05): the batch in hand is not written, later
     batches stay unrated for the next run, and the exception propagates. An answer that leaves
-    edges unrated or gives a non-numeric score gets ONE correction call listing exactly those
-    edge ids; still incomplete, it raises. Each failure is counted in the failure ledger
-    against the edges it concerns (the whole batch for a failed call or write, the unrated
-    edges for an incomplete answer); an edge failing in three runs is set aside and skipped.
+    edges unrated or gives a non-numeric score is refused by the rater's validate.py and
+    corrected once by the agent; still refused, it raises AgentOutputInvalid. Each failure is
+    counted in the failure ledger against the edges it concerns (the whole batch for a failed
+    call or write, the edges the refusal names for an answer still refused); an edge failing in
+    three runs is set aside and skipped.
 
     Returns: number of edges scored this run.
     """
@@ -341,30 +343,15 @@ def regenerate_edge_importance(
             raise RuntimeError("edge importance: agent me::edge_importance_rater is unavailable")
 
         try:
-            scored = _rate_edges(agent, blocks, batch_ids, [], scope)
+            scored = _rate_edges(agent, blocks, batch_ids, scope)
+        except AgentOutputInvalid as exc:
+            # Counted against the edges the refusal names (the ones still unrated).
+            named = {p.item for p in exc.problems}
+            _record([eid for eid in batch_ids if eid in named] or batch_ids, exc)
+            raise
         except Exception as exc:
             _record(batch_ids, exc)
             raise
-
-        missing = [eid for eid in batch_ids if eid not in scored]
-        if missing:
-            logger.warning(
-                "edge importance: batch %d/%d left %d edge(s) without a well-formed rating; one correction for them",
-                batch_no, total_batches, len(missing),
-            )
-            try:
-                scored.update(_rate_edges(agent, blocks, missing, missing, scope))
-            except Exception as exc:
-                _record(missing, exc)
-                raise
-            still_missing = [eid for eid in missing if eid not in scored]
-            if still_missing:
-                exc = ValueError(
-                    f"edge importance: no well-formed rating after one correction for "
-                    f"{len(still_missing)} edge(s): {', '.join(still_missing)}"
-                )
-                _record(still_missing, exc)
-                raise exc
 
         try:
             with get_db_manager().transaction(op="me_edge_importance") as session:

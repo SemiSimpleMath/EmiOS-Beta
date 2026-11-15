@@ -3,8 +3,9 @@
 Pins: code assigns every new concern's id and records its origin; a candidate the judge matches to
 an open concern is folded into it (evidence kept, merge journalled), never tracked twice; one that
 repeats a closed matter is journalled there and not admitted; duplicates inside one batch become one
-concern, and each label follows to where it landed; every candidate must say when it is done; an invalid judge
-answer gets one correction and then raises, writing nothing. Candidates come from the brain (persist.
+concern, and each label follows to where it landed; every candidate must say when it is done; the judge's rules are its
+validate.py (corrected once by the agent, agent_runtime/correction.py), and an answer still refused raises, writing
+nothing. Candidates come from the brain (persist.
 apply_brain_matter); until 2026-10-09 the noticer raised them too. Scratch register; the judge is a fake. Invented
 data only.
 """
@@ -18,6 +19,11 @@ import pytest
 import app.assistant.tests.test_setup  # noqa: F401
 from app.assistant.subconscious import concern_door, persist
 from app.assistant.tests.concern_store_helpers import ScratchRegister
+from app.assistant.agent_registry.agent_registry import AgentRegistry
+from app.assistant.utils.path_utils import get_app_root
+
+RULES = AgentRegistry()._load_validator(get_app_root() / "assistant" / "agents" / "subconscious" / "concern_door"
+                                        / "validate.py")
 
 NOW = datetime.now(timezone.utc)
 
@@ -125,21 +131,52 @@ def test_every_candidate_must_say_when_it_is_done(tmp_path):
         _admit(reg, [_candidate("N1", "No closing condition", done_when="")], _judge())
 
 
-def test_an_invalid_answer_gets_one_correction_then_nothing_is_written(tmp_path):
+def test_an_answer_still_refused_writes_nothing(tmp_path):
+    from app.assistant.agent_runtime.correction import AgentOutputInvalid, Problem
     reg = _register(tmp_path, active=[_open("c-bake", "Bake sale")])
-    bad = _judge(("N1", "same_open", "C9"))
-    with pytest.raises(ValueError, match="still invalid"):
-        _admit(reg, [_candidate("N1", "Bake sale moved")], bad)
-    assert len(bad.seen) == 2 and "C9" in bad.seen[1]["correction"]
-    assert [c["concern_id"] for c in reg.read()["active"]] == ["c-bake"]
+    payload = concern_door.build_payload([_candidate("N1", "Bake sale moved")],
+                                         [{**_open("c-bake", "Bake sale"), "_status": "active"}])
+    [problem] = RULES.validate({"decisions": [{"candidate": "N1", "decision": "same_open", "same_as": "C9"}]},
+                               payload)
+    assert (problem.item, problem.at, problem.value) == ("N1", "same_as", "C9")
+    seen = []
+
+    def refused(payload):
+        seen.append(payload)
+        raise AgentOutputInvalid("subconscious::concern_door", [problem])
+    with pytest.raises(AgentOutputInvalid, match="still invalid"):
+        _admit(reg, [_candidate("N1", "Bake sale moved")], refused)
+    assert len(seen) == 1 and [c["concern_id"] for c in reg.read()["active"]] == ["c-bake"]
+
+
+def _given(candidates=("N1", "N2"), existing=(), owner=()):
+    return {"candidates": [{"label": x} for x in candidates],
+            "existing": [{"label": x, "status": status} for x, status in existing], "owner_labels": list(owner)}
 
 
 def test_same_candidate_must_point_at_a_new_one():
-    problems = concern_door._problems(
+    assert RULES.ITEM_KEYS == {"decisions": "candidate"}
+    problems = RULES.validate(
         {"decisions": [{"candidate": "N1", "decision": "same_candidate", "same_as": "N2"},
-                       {"candidate": "N2", "decision": "same_candidate", "same_as": "N1"}]},
-        ["N1", "N2"], [], [])
-    assert any("must name a candidate decided new" in p for p in problems)
+                       {"candidate": "N2", "decision": "same_candidate", "same_as": "N1"}]}, _given())
+    assert any("names a candidate decided new" in p.why and p.structural for p in problems)
+
+
+def test_the_door_s_other_rules():
+    given = _given(candidates=("N1", "N2", "N3"), existing=(("C1", "active"), ("C2", "resolved")), owner=("N3",))
+    problems = RULES.validate({"decisions": [
+        {"candidate": "N1", "decision": "new", "same_as": "C1"},
+        {"candidate": "N2", "decision": "same_closed", "same_as": "C1"},
+        {"candidate": "N3", "decision": "same_closed", "same_as": "C2"},
+        {"candidate": "N9", "decision": "new", "same_as": None}]}, given)
+    assert {(p.item, p.at, p.structural) for p in problems} == {
+        ("N1", "same_as", False), ("N2", "same_as", False), ("N3", "decision", False), ("", "", True)}
+    assert [p.why for p in problems if p.item == "N3"] == [
+        "it comes from the owner's own words, so it is live: it cannot be same_closed"]
+    missing = RULES.validate({"decisions": [{"candidate": "N1", "decision": "new", "same_as": None},
+                                            {"candidate": "N1", "decision": "new", "same_as": None}]}, _given())
+    assert {(p.item, p.why) for p in missing} == {("N1", "answer each candidate once"),
+                                                  ("N2", "not answered; answer every candidate")}
 
 
 def test_the_judge_prompt_renders_every_field():
@@ -147,8 +184,8 @@ def test_the_judge_prompt_renders_every_field():
     payload = concern_door.build_payload(
         [_candidate("N1", "Bake sale moved to Monday")],
         [{**_open("c1", "PTSA bake sale", done_when="cookies delivered"), "_status": "active"}])
-    user = work_context._ENV.get_template("subconscious/concern_door/prompts/user.j2").render(
-        agent_input={**payload, "correction": None})
+    assert payload["owner_labels"] == []
+    user = work_context._ENV.get_template("subconscious/concern_door/prompts/user.j2").render(agent_input=payload)
     assert "### [N1] Bake sale moved to Monday" in user and "anchor" not in user
     assert "- done when: it is done" in user and "### [C1] PTSA bake sale (active)" in user
     assert "- done when: cookies delivered" in user and "datapod:email:N1" in user

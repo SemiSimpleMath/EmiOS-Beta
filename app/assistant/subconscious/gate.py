@@ -4,8 +4,8 @@ One `subconscious::gate` call per page of pending events. Each event gets exactl
 `concern` (with the one concern it changes), `new_matter` or `none` — validated here: every event
 answered once, only the labels given, a concern route names one concern (docs/design/concerns_as_state_2026-10-09.md,
 rule 3: one event changes one concern; until 2026-10-09 the gate listed every concern an event bore on, and one event
-was filed on several). One correction
-round; an answer still invalid after it marks the page `failed`, which the brain still reads
+was filed on several). The rules are the agent's validate.py, corrected once by the agent
+(agent_runtime/correction.py); an answer still invalid after it marks the page `failed`, which the brain still reads
 (a routing failure must not drop an event).
 
 Labels are request-local (E1… for events, C1… for concerns) and mapped back by code, so the model
@@ -35,37 +35,12 @@ def open_concerns(register: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [{**c, "_bucket": b} for b in ("active", "addressing") for c in register.get(b) or []]
 
 
-def _problems(data: Any, event_labels: List[str], concern_labels: List[str]) -> List[str]:
-    if not isinstance(data, dict) or not isinstance(data.get("decisions"), list):
-        return ["no decisions list"]
-    out, seen = [], []
-    for d in data["decisions"]:
-        ev = str((d or {}).get("event") or "").strip()
-        if ev not in event_labels:
-            out.append(f"event {ev!r} is not one of the events given")
-            continue
-        seen.append(ev)
-        route, named = d.get("route"), str(d.get("concern") or "").strip()
-        if route not in ("concern", "new_matter", "none"):
-            out.append(f"{ev}: route {route!r} is not concern, new_matter or none")
-        elif route == "concern" and named not in concern_labels:
-            out.append(f"{ev}: route concern names one open concern given, got {named!r}")
-        elif route != "concern" and named:
-            out.append(f"{ev}: route {route} names no concern, got {named!r}")
-    dup = sorted({e for e in seen if seen.count(e) > 1})
-    if dup:
-        out.append(f"answered more than once: {dup}")
-    missing = [e for e in event_labels if e not in seen]
-    if missing:
-        out.append(f"not answered: {missing}")
-    return out
-
-
 def build_payload(events: List[Dict[str, Any]], concerns: List[Dict[str, Any]]) -> Dict[str, Any]:
     """The gate agent's input for one page: labelled open concerns, and the events labelled inside
-    their conversations."""
+    their conversations; `event_labels` are the labels its validate.py checks the answer against."""
     from app.assistant.subconscious import conversations, persist
     return {
+        "event_labels": [f"E{i}" for i in range(1, len(events) + 1)],
         "open_concerns": [{"label": f"C{i}", "title": c.get("title"), "subject": c.get("subject") or "household",
                            "status": c["_bucket"], "history": persist.history_for_prompt(c)}
                           for i, c in enumerate(concerns, 1)],
@@ -76,22 +51,11 @@ def build_payload(events: List[Dict[str, Any]], concerns: List[Dict[str, Any]]) 
 def route_page(events: List[Dict[str, Any]], concerns: List[Dict[str, Any]],
                call: Callable[[Dict[str, Any]], Any]) -> Dict[int, Dict[str, Any]]:
     """Route one page. Returns event id -> {route, concern_ids, reasoning}; raises when the answer
-    is still invalid after one correction."""
-    ev_labels = [f"E{i}" for i in range(1, len(events) + 1)]
-    c_labels = [f"C{i}" for i in range(1, len(concerns) + 1)]
-    c_by_label = dict(zip(c_labels, concerns))
+    is still invalid after the agent's one correction (agent_runtime/correction.py)."""
+    c_by_label = {f"C{i}": c for i, c in enumerate(concerns, 1)}
     payload = build_payload(events, concerns)
     data = call(payload)
-    problems = _problems(data, ev_labels, c_labels)
-    if problems:
-        from app.assistant.subconscious.brain_trace import step
-        logger.warning("[gate] invalid routing, one correction: %s", problems)
-        step("gate", "answer refused, one correction", subject=[e["id"] for e in events], problems=problems)
-        data = call({**payload, "correction": "; ".join(problems)})
-        problems = _problems(data, ev_labels, c_labels)
-        if problems:
-            raise ValueError(f"gate routing still invalid after one correction: {problems}")
-    by_label = dict(zip(ev_labels, events))
+    by_label = dict(zip(payload["event_labels"], events))
     out = {}
     for d in data["decisions"]:
         e = by_label[d["event"]]

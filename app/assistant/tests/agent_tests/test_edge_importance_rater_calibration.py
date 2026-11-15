@@ -271,7 +271,8 @@ def all_ratings(rater, scope):
     batch_text = "\n\n".join(blocks)
 
     msg = Message(
-        agent_input={"task": batch_text, "information": ""},
+        agent_input={"task": batch_text, "information": "",
+                     "edge_ids": [f"test-{i}" for i in range(1, len(CALIBRATION_CASES) + 1)]},
         task=batch_text,
         information="",
         scope_context=scope,

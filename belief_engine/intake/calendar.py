@@ -6,12 +6,14 @@ and marks each `proposed` (with when it would appear and why) or `not_proposed`.
 proposals in the morning review; nothing here puts a belief on the calendar. The first run reads the whole catalog;
 after that, each night's new beliefs.
 
-Pages of PAGE_SIZE beliefs, one agent call each; an answer that does not decide every belief of its page exactly
-once, by a key shown, with a `when` for every candidate, gets one correction, and a page still invalid raises.
+Pages of PAGE_SIZE beliefs, one agent call each. The agent's validate.py refuses an answer that does not decide every
+belief of its page exactly once, by a key shown, with a `when` for every candidate; it is corrected once in
+conversation and a page still invalid raises AgentOutputInvalid (agent_runtime/correction.py; until 2026-11-15 this
+module re-asked with a correction string).
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Optional
 
 from app.assistant.utils.logging_config import get_logger
 
@@ -19,25 +21,6 @@ logger = get_logger(__name__)
 
 AGENT = "belief_engine::calendar_candidate"
 PAGE_SIZE = 50
-
-
-def _problems(data: Any, keys: List[str]) -> List[str]:
-    if not isinstance(data, dict) or not isinstance(data.get("decisions"), list):
-        return ["no decisions list"]
-    out, seen = [], set()
-    for d in data["decisions"]:
-        key = str((d or {}).get("belief_key") or "").strip()
-        if key not in keys:
-            out.append(f"{key!r} is not one of the beliefs given")
-        elif key in seen:
-            out.append(f"{key} decided more than once")
-        seen.add(key)
-        if (d or {}).get("candidate") and not str(d.get("when") or "").strip():
-            out.append(f"{key}: a candidate needs `when`")
-    missing = [k for k in keys if k not in seen]
-    if missing:
-        out.append(f"not decided: {missing}")
-    return out
 
 
 def _agent_call(payload: Dict[str, Any]) -> Any:
@@ -51,17 +34,7 @@ def tag_calendar_candidates(store, *, call: Optional[Callable[[Dict[str, Any]], 
     todo = store.calendar_undecided()
     counts = {"proposed": 0, "not_proposed": 0}
     for start in range(0, len(todo), PAGE_SIZE):
-        page = todo[start:start + PAGE_SIZE]
-        keys = [b["id"] for b in page]
-        payload = {"beliefs": page, "correction": ""}
-        data = call(payload)
-        problems = _problems(data, keys)
-        if problems:
-            logger.warning("[calendar] invalid decisions, one correction: %s", problems)
-            data = call({**payload, "correction": "; ".join(problems)})
-            problems = _problems(data, keys)
-            if problems:
-                raise ValueError(f"calendar decisions still invalid after one correction: {problems}")
+        data = call({"beliefs": todo[start:start + PAGE_SIZE]})
         for d in data["decisions"]:
             if d["candidate"]:
                 store.set_calendar(d["belief_key"].strip(), "proposed", f"{d['when'].strip()}: {d['reason'].strip()}")

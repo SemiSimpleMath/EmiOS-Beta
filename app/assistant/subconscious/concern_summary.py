@@ -65,16 +65,9 @@ def _agent_call(payload: Dict[str, Any]) -> Any:
 
 def write_summary(concern: Dict[str, Any], bucket: str, *,
                   call: Optional[Callable[[Dict[str, Any]], Any]] = None) -> str:
-    """The new summary of one concern; raises when the answer has no summary after one correction."""
-    payload = build_payload(concern, bucket)
-    call = call or _agent_call
-    data = call(payload)
-    if not isinstance(data, dict) or not str(data.get("summary") or "").strip():
-        logger.warning("[concern_summary] no summary for %s, one correction", concern["concern_id"])
-        data = call({**payload, "correction": "the answer had no summary"})
-        if not isinstance(data, dict) or not str(data.get("summary") or "").strip():
-            raise ValueError("concern summary still empty after one correction")
-    return str(data["summary"]).strip()
+    """The new summary of one concern; raises when the answer has no summary after the agent's one correction (its
+    validate.py, agent_runtime/correction.py)."""
+    return str((call or _agent_call)(build_payload(concern, bucket))["summary"]).strip()
 
 
 def run_summaries(*, call=None, register_connect=None) -> Dict[str, Any]:
