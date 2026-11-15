@@ -233,6 +233,20 @@ def test_an_event_changes_one_concern_and_an_update_names_only_its_own_events():
     assert RULES.validate(fine, _given(labels)) == []
 
 
+def test_an_event_feeding_a_new_concern_is_decided_new_concern_and_the_refusal_says_so():
+    """2026-11-15: twice in one morning a second event was decided changes_concern naming the concern raised in the same
+    answer; the refusal named only what changes_concern names, and the correction repeated the mistake."""
+    labels = {"E1": ["brain_event", "1"], "E2": ["brain_event", "2"], "C1": ["concern", "c"]}
+    problems = [(p.field, p.item, p.at, p.value, p.why) for p in RULES.validate(
+        {"event_decisions": [{"event": "E1", "decision": "new_concern", "concern": "N1", "reason": "r"},
+                             {"event": "E2", "decision": "changes_concern", "concern": "N1", "reason": "r"}],
+         "new_concerns": [{"label": "N1", "title": "t", "done_when": "d", "expires_at": "2099-01-01 12:00",
+                           "relies_on": ["E1", "E2"], "attach": ["E1"]}]}, _given(labels))]
+    assert problems == [("event_decisions", "E2", "concern", "N1",
+                         "an event that raises or feeds a new concern is decided new_concern naming it; "
+                         "changes_concern names an open concern given")]
+
+
 def test_the_brain_prompt_renders_every_section():
     from app.assistant.dayflow_orchestrator import work_context
     payload = {"now": "Tue 2026-09-30 09:00", "events": "### Room master_room\nAbout.\n",

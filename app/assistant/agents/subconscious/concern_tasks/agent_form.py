@@ -6,7 +6,8 @@ from pydantic import BaseModel, ConfigDict, Field
 class EntryChange(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    entry: str = Field(description="The id of an entry on the list now, or \"new\" for an entry you add.")
+    entry: str = Field(description="For modify and cancel: the id of an entry on the list now, exactly as it stands "
+                                   "between the brackets, con: included. \"new\" for an entry you add.")
     action: Literal["new", "modify", "cancel"] = Field(
         description="new: an outcome the concern needs that nothing on the list covers. modify: an entry that still "
                     "belongs to the concern but whose outcome, part or time changed. cancel: an entry that no longer "

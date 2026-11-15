@@ -2,11 +2,13 @@
 The agent_input is day_record.gather: `labels` (every label of the call -> [kind, id]).
 
 Refused: a change that names neither an event given (its K label) nor "new", a new event without its title and start,
-a move without the new start, and a change or milestone whose relies_on names nothing or a label not given; a
+a move without the new start, a start or end that is not a clock time (2026-11-15: a move answered with
+"7:00 PM, Thu Jan 14, 2027" crashed day_record.apply five times), and a change or milestone whose relies_on names nothing or a label not given; a
 milestone without its time and what happened. The state and basis values are the form's (agent_form.py). Changes have
 no key of their own (every new event is "new") and milestones none, so a refused answer is answered again whole.
 """
 from app.assistant.agent_runtime.correction import Problem
+from app.assistant.subconscious.day_pass import _clock_hour_minute
 
 
 def _shows(refs, labels, field, at):
@@ -33,6 +35,11 @@ def validate(answer, agent_input):
             out.append(Problem(why="a new event names its title and its start", field="changes", at=at))
         if ch.get("state") == "moved" and not str(ch.get("start") or "").strip():
             out.append(Problem(why="moved names the new start", field="changes", at=f"{at}.start"))
+        for part in ("start", "end"):
+            given = str(ch.get(part) or "").strip()
+            if given and _clock_hour_minute(given) is None:
+                out.append(Problem(why=f"{part} is a time on this day's clock, such as '7:00 PM'", field="changes",
+                                   at=f"{at}.{part}", value=given))
         out += _shows(ch.get("relies_on"), labels, "changes", at)
     for n, m in enumerate(answer.get("milestones") or []):
         at = f"[{n}]"

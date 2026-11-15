@@ -25,7 +25,9 @@
 
 **Sleep Status:**
 - User is up: {{ resource_sleep_output.user_is_up }}
-- Day start: {{ resource_sleep_output.day_start_time_local | default("unknown") }}
+{%- if resource_sleep_output.day_started %}
+- Day start: {{ resource_sleep_output.day_start_time }}
+{%- endif %}
 {%- endif %}
 
 ########## DAILY CONTEXT ##########
@@ -57,12 +59,23 @@
 {%- endif %}
 
 ########## ACTIVITY TIMERS ##########
+{#- The recorder restarts an activity's timer at the day start and on return to the computer
+    (last_occurrence_utc == last_reset_utc); the reason is shown so the timer is not read as a
+    recorded occurrence. #}
+{%- macro since_text(activity, mins, count_val) -%}
+{%- if mins is none -%}N/A
+{%- elif activity.last_occurrence_utc == activity.last_reset_utc and activity.last_reset_reason == "afk_return" -%}{{ mins | round(1) }} min since back at the computer; timer restarted then
+{%- elif activity.last_occurrence_utc == activity.last_reset_utc and activity.last_reset_reason == "daily_boundary" -%}{{ mins | round(1) }} min since the day started; timer started then
+{%- elif count_val == 0 -%}{{ mins | round(1) }} min on the timer; none recorded today
+{%- else -%}{{ mins | round(1) }} min since last
+{%- endif -%}
+{%- endmacro %}
 **Consumption Log (Today):**
 {%- for key, activity in resource_tracked_activities_output.activities.items() %}
 {%- if activity.show_daily_count %}
 {%- set count_val = time_since[key ~ "_count_today"] | default(0) %}
 {%- set mins_val = time_since["minutes_since_" ~ key] | default(none) %}
-- {{ activity.display_name | default(key) }}: {{ count_val }} ({% if mins_val is not none %}{{ mins_val | round(1) }} min since last{% else %}N/A{% endif %})
+- {{ activity.display_name | default(key) }}: {{ count_val }} ({{ since_text(activity, mins_val, count_val) }})
 {%- endif %}
 {%- endfor %}
 
@@ -71,7 +84,7 @@
 - **null ("As scheduled", "Max X/day", etc.)**: Use common sense - check calendar events, daily limits, or time windows, NOT the "Time Since" value.
 - Suggesting an action *before* the threshold is reached should be very rare (health override, safety issue, or strong schedule constraint only).
 
-| Activity | Time Since Last | Threshold | Minutes Until Threshold |
+| Activity | Time Since | Threshold | Minutes Until Threshold |
 | :--- | :--- | :--- | :--- |
 {%- for key, activity in resource_tracked_activities_output.activities.items() %}
 {%- set mins = time_since["minutes_since_" ~ key] | default(none) %}
@@ -83,17 +96,20 @@
 {%- else %}
 {%- set mins_until = "N/A" %}
 {%- endif %}
-| {{ activity.display_name }} | {% if mins is not none %}{{ mins | round(1) }} min{% else %}N/A{% endif %} | {{ threshold_label }} | {{ mins_until }} |
+| {{ activity.display_name }} | {{ since_text(activity, mins, time_since[key ~ "_count_today"]) }} | {{ threshold_label }} | {{ mins_until }} |
 {%- endfor %}
+{%- set any_responses = recent_responded_tickets and (recent_responded_tickets.accepted or recent_responded_tickets.acknowledged or recent_responded_tickets.declined or recent_responded_tickets.snoozed) %}
+{%- if active_tickets or any_responses %}
 
 ########## TICKET STATE ##########
+{%- endif %}
 {%- if active_tickets %}
 **Active Tickets (do not duplicate):**
 {%- for ticket in active_tickets %}
 - [ACTIVE] {{ ticket.suggestion_type }}: {{ ticket.title }}{% if ticket.message %} - {{ ticket.message }}{% endif %}
 {%- endfor %}
 {%- endif %}
-{%- if recent_responded_tickets and (recent_responded_tickets.accepted or recent_responded_tickets.acknowledged or recent_responded_tickets.declined or recent_responded_tickets.snoozed) %}
+{%- if any_responses %}
 
 **Ticket Responses:**
 {%- if recent_responded_tickets.accepted %}
@@ -136,10 +152,8 @@
 
 ########## YOUR TASK ##########
 Synthesize preferences, health, timers, and ticket state to generate a prioritized list of suggestions.
-**Output constraints:**
-- Do NOT mention "pending reminders" unless you actually output suggestions OR there are active tickets.
 **Logic Checklist:**
-1. **Check Rules:** Does the routine allow this? (e.g., Check "Coffee Cutoff Time" vs Current Time).
+1. **Check Rules:** Does the user's routine allow this activity at the current time?
 2. **Check Timers:** Is the "Time Since" value high enough based on the user's frequency preferences?
-3. **Check Context:** Does the health profile demand an override? (e.g., "Back Pain" = suggest stretch sooner).
+3. **Check Context:** Does the Health section give a reason to override the threshold (Override Protocol)?
 4. **Check Current time:** How close is an upcoming event? Do not say things like an event 6 hours away is close.

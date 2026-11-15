@@ -1,25 +1,25 @@
+from typing import List
+
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict
+
+
+class ActivityCount(BaseModel):
+    activity: str = Field(description="The activity's field_name from the tracked activities, e.g. 'hydration'.")
+    count: int = Field(description="Its NEW TOTAL count today, not the increment.")
+
 
 class AgentForm(BaseModel):
-    """
-    Output schema for activity_tracker agent.
-    Returns a simple list of activity category names that should be reset,
-    plus the NEW TOTAL counts for countable activities (e.g., hydration, coffee),
-    plus any sleep events detected from chat,
-    plus wake segments (when user was awake during sleep hours),
-    plus signals about whether day has started.
-    """
+    """Output schema for activity_tracker: the new totals of countable activities the chat shows happened, and the
+    activities whose timer resets to now. Until 2026-11-15 `activity_counts` was a Dict[str, int], which OpenAI's
+    structured output refuses ("'properties' is required for object schemas"), so every call failed."""
 
-    activity_counts: Optional[Dict[str, int]] = Field(
-        default_factory=dict,
-        description="Dict of activity names to their NEW TOTAL counts today (e.g., {'hydration': 3, 'coffee': 2}). CRITICAL: Return the complete updated total, not the increment!"
+    activity_counts: List[ActivityCount] = Field(
+        description="The countable activities the chat shows happened, each with its NEW TOTAL today. Empty when "
+                    "none did."
     )
-    activities_to_reset: Optional[List[str]] = Field(
-        default_factory=list,
-        description="List of activity field_names where evidence indicates the activity just occurred and the timer should be reset (e.g., ['meal', 'snack', 'finger_stretch']). This sets last_occurrence_utc to now."
+    activities_to_reset: List[str] = Field(
+        description="field_names of activities the chat shows just happened; their timer resets to now (e.g. "
+                    "['meal', 'finger_stretch'])."
     )
-    reasoning: str = Field(
-        ...,
-        description="Brief explanation of what evidence was found and what activities were detected"
-    )
+    reasoning: str = Field(description="Brief explanation of what evidence was found and what activities were "
+                                       "detected")

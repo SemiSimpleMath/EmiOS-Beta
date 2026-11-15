@@ -105,8 +105,9 @@ class AgentForm(BaseModel):
         "nothing of the assistant. Leave empty while any step can still move it.")
     revise_objective: Optional[ObjectiveRevision] = Field(
         default=None,
-        description="RE-PLAN ONLY: the goal itself changed — its premise expired or a result moved it — "
-        "and work continues toward the revised goal. Not together with end_goal.")
+        description="On a first plan or a re-plan: the goal itself changed — its premise expired, a result moved "
+        "it, or the outcome cannot be reached as asked — and work continues toward the revised goal. Not together "
+        "with end_goal.")
     nodes: List[WorkNode] = Field(
         default_factory=list,
         description="The DAG of work nodes for this goal. Keep it lean — 1-5 nodes for most goals.")

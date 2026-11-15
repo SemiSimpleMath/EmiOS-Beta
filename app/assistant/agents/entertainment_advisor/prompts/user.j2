@@ -18,7 +18,7 @@
 {% endif %}
 
 {% if resource_sleep_output %}
-**Sleep:** User is up: {{ resource_sleep_output.user_is_up }} | Day start: {{ resource_sleep_output.day_start_time_local | default("unknown") }}
+**Sleep:** User is up: {{ resource_sleep_output.user_is_up }}{% if resource_sleep_output.day_started %} | Day start: {{ resource_sleep_output.day_start_time }}{% endif %}
 {% endif %}
 
 ########## SCHEDULE & ROUTINE ##########

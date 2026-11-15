@@ -205,7 +205,9 @@ class ActivityTrackerStep(BaseStep):
 
                 agent_input: Dict[str, Any] = {
                     "current_activity_counts": current_counts,
-                    "recent_chat": recent_chat,
+                    # The agent's prompt reads `recent_chat_excerpts` (config user_context_items); until 2026-11-15
+                    # this was passed as `recent_chat`, and the agent was always shown "No recent chat messages".
+                    "recent_chat_excerpts": recent_chat,
                 }
                 history_scope = resolve_room_scope(pipeline_config=ctx.pipeline_config, step_config=ctx.step_config)
                 scope_context = self._build_pipeline_scope_context(history_scope=history_scope)
@@ -223,9 +225,9 @@ class ActivityTrackerStep(BaseStep):
                                 logger.info(f"ActivityTracker: timer reset for '{field_name}' from chat detection")
 
                     # Update counts for countable activities
-                    activity_updates = output.get("activity_counts") or output.get("activities") or {}
-                    for field_name, new_count in activity_updates.items():
-                        if field_name in recorder._defs and isinstance(new_count, int):
+                    for item in output["activity_counts"]:
+                        field_name, new_count = item["activity"], item["count"]
+                        if field_name in recorder._defs:
                             current = current_counts.get(field_name, 0)
                             if new_count != current:
                                 recorder.set_count_today(field_name, new_count)

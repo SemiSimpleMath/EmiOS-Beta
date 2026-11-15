@@ -69,7 +69,8 @@ def validate(answer, agent_input):
     new_labels = [str(n.get("label") or "").strip() for n in answer.get("new_concerns") or []]
     for ev, (decision, concern) in decided.items():
         if decision == "changes_concern" and concern not in concern_labels:
-            out.append(Problem(why="changes_concern names the one open concern given that it changes",
+            out.append(Problem(why="an event that raises or feeds a new concern is decided new_concern naming it; "
+                                   "changes_concern names an open concern given",
                                field="event_decisions", item=ev, at="concern", value=concern))
         elif decision == "new_concern" and concern not in new_labels:
             out.append(Problem(why="new_concern names one of the new concerns you raise", field="event_decisions",

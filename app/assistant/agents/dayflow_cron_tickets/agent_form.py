@@ -5,7 +5,7 @@ from typing import List
 class StatusEffect(BaseModel):
     """A status field to update when suggestion is accepted."""
     activity_name: str = Field(
-        description="Name of the activity field to update (e.g., 'finger_stretch', 'hydration', 'coffee', 'meal')"
+        description="Key of a tracked activity (one of the suggestion types listed in the system prompt) that the ticket records as done when accepted"
     )
 
 
@@ -13,7 +13,7 @@ class Suggestion(BaseModel):
     """A single proactive suggestion."""
 
     suggestion_type: str = Field(
-        description="Category: 'hydration', 'chronic_conditions', 'nutrition', 'rest', 'movement', 'task', 'reminder'"
+        description="The tracked activity key this suggestion is for: one of the suggestion types listed in the system prompt. Any other type is discarded."
     )
 
     title: str = Field(
@@ -21,11 +21,11 @@ class Suggestion(BaseModel):
     )
 
     message: str = Field(
-        description="Conversational message Emi says. Friendly and natural."
+        description="Conversational message spoken to the user. Friendly and natural."
     )
 
     priority: int = Field(
-        description="1=highest priority, 5=lowest. Chronic pain=1, Hunger=2, Hydration=3, General breaks=4"
+        description="1=most urgent, 5=least urgent, ranked by the Priority rule in the system prompt"
     )
 
     trigger_reason: str = Field(
@@ -34,7 +34,7 @@ class Suggestion(BaseModel):
 
     status_effects: List[StatusEffect] = Field(
         default_factory=list,
-        description="List of status fields to update if accepted."
+        description="Tracked activities to record as done if the user accepts the ticket."
     )
 
 

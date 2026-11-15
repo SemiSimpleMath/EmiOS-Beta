@@ -154,6 +154,23 @@ def test_a_belief_placed_earlier_today_keeps_its_placement_until_the_schedule_or
     assert _lines(day.plans) == []
 
 
+def test_a_passed_placement_is_shown_marked_and_only_placements_ahead_are_kept(day, monkeypatch):
+    """2026-11-15: only placements still ahead were shown, so a belief whose 9:00 AM placement had passed looked never
+    placed and was placed again as all day."""
+    drs.run_day_pass(day.now, connect=day.plans)
+    shown = []
+    monkeypatch.setattr(drs, '_write', lambda agent_input: (shown.append(agent_input['beliefs_block']), {'judgments': [
+        {'belief_key': 'B3', 'why': 'Done for today.', 'applies_today': False, 'outcome': '', 'times': []}]})[1])
+    monkeypatch.setattr(drs, '_read_daily_context', lambda: {'expected_schedule': [], 'milestones': [{'time': '3:00 PM', 'description': 'Coffee had'}]})
+    monkeypatch.setattr(drs, '_last_attempt_utc', None)
+    drs.run_day_pass(day.now + timedelta(hours=3, minutes=30), connect=day.plans)
+    [block] = shown
+    assert '[belief:B1]' not in block, "B1's placement is still ahead: it is kept, not judged again"
+    assert "placed earlier today:\n    - 2:00 PM until 4:00 PM: B3 done (passed)" in block, \
+        "a belief whose placement passed is shown that placement, marked passed"
+    assert [line['belief_key'] for line in _lines(day.plans)] == ['B1']
+
+
 def test_the_same_schedule_written_with_other_clock_text_is_not_a_change(day, monkeypatch):
     """2026-10-14: the calendar's "08:00 PM" became "8:00 PM"; the unchanged schedule read as changed, every belief
     was judged again, and the morning phone-charge reminder was dropped."""

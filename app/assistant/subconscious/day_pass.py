@@ -37,8 +37,9 @@ statement, its related beliefs) changed; only the others are judged again. What 
 its concern through the brain, which notes or resolves it. Until then every rewrite judged every belief afresh, and
 on 2026-10-10 the lights-off-after-bedtime belief was placed at 5:06, not at 6:09 and 7:19, placed at 8:21 and not at
 9:24 ("today's facts do not indicate that he has gone to bed"): each flip withdrew its concern and ended its work.
-A belief judged again is shown its placements earlier today still ahead, and keeps them unless something given now
-changes them (2026-10-14: judged afresh, the phone-charge belief kept the evening dog walk and lost the morning one
+A belief judged again is shown its placements earlier today, each marked when its time has passed (done for today;
+until 2026-11-15 a passed one was not shown and the belief was placed again), and keeps those still ahead unless
+something given now changes them (2026-10-14: judged afresh, the phone-charge belief kept the evening dog walk and lost the morning one
 on the same schedule, and the 7:50 AM reminder's work was ended).
 
 Inputs: resources/dayflow_pipeline_outputs/resource_daily_context_generator_output.json and
@@ -204,14 +205,15 @@ def _schedule_ahead(slots: List[dict], now_utc: datetime) -> List[Tuple[str, Any
 
 
 def _earlier_lines(earlier: Optional[Dict[str, Any]], now_utc: datetime) -> Dict[str, List[Dict[str, Any]]]:
-    """The earlier plan of the same day: belief_key -> its lines still ahead."""
+    """The earlier plan of the same day: belief_key -> every line it stores, each marked `passed` when the time it
+    matters until has gone. Until 2026-11-15 only the lines still ahead were shown, so a belief whose placement had
+    passed looked never placed and was placed again (the 9:00 AM head start, placed again as all day)."""
     from app.assistant.subconscious.calendar_concerns import expires_at
     out: Dict[str, List[Dict[str, Any]]] = {}
     if earlier is None:
         return out
     for line in [*earlier["flags"], *(line for sl in earlier["slots"] for line in sl["lines"])]:
-        if expires_at(earlier["day"], line) > now_utc:
-            out.setdefault(line["belief_key"], []).append(line)
+        out.setdefault(line["belief_key"], []).append({**line, "passed": expires_at(earlier["day"], line) <= now_utc})
     return out
 
 
@@ -224,6 +226,9 @@ def _kept(earlier: Optional[Dict[str, Any]], slots: List[dict], given: Dict[str,
         return {}
     kept: Dict[str, List[Dict[str, Any]]] = {}
     for key, lines in _earlier_lines(earlier, now_utc).items():
+        lines = [line for line in lines if not line["passed"]]
+        if not lines:
+            continue
         same = (given.get(key) == lines[0]["statement"]
                 and [r["belief_key"] for r in related.get(key, [])] == [r["belief_key"] for r in lines[0]["related"]])
         if same:
@@ -335,8 +340,8 @@ def _place(placements: List[Dict[str, Any]], slots: List[dict], statements: Dict
 
 def _judge(batch: List[dict], related: Dict[str, List[Dict[str, str]]], base: Dict[str, Any], conditions: set,
            earlier: Dict[str, List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
-    """One writer call for a batch of approved beliefs (each with its related ones and its placements earlier today
-    still ahead), against the day's facts and schedule. The writer's rules are its validate.py; a refused answer is
+    """One writer call for a batch of approved beliefs (each with its related ones and its placements earlier today,
+    each marked whether its time has passed), against the day's facts and schedule. The writer's rules are its validate.py; a refused answer is
     corrected once by the agent and raises when still refused (agent_runtime/correction.py)."""
     agent_input = {**base, "belief_keys": sorted(e["belief_key"] for e in batch), "related_keys": sorted(conditions),
                    "beliefs_block": _render_belief_block(

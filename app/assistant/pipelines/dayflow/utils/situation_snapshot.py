@@ -31,17 +31,16 @@ def build_situation_snapshot() -> str:
     # ── Calendar ──
     sections.append(_build_calendar(now_utc))
 
-    # ── Active Plans & Tasks ──
-    sections.append(_build_active_items())
+    # ── Requests from chat the assistant carried out directly ──
+    sections.append(_build_chat_requests())
 
-    # ── Active Work Objects (multi-step work in progress) ──
-    sections.append(_build_work_objects())
-
-    # ── Recent Actions ──
-    sections.append(_build_recent_actions(now_utc))
-
-    # ── Recently Closed Items ──
-    sections.append(_build_recently_closed(now_utc))
+    # ── Work objects: in progress, what they did, and what ended ──
+    from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+    store = get_dayflow_work_store()
+    sections.append(_build_work_objects(store))
+    recent = _recent_work_objects(store, now_utc)
+    sections.append(_build_work_activity(recent, now_utc))
+    sections.append(_build_work_ended(recent, now_utc))
 
     # ── Ticket Responses ──
     sections.append(_build_ticket_responses(now_utc))
@@ -62,19 +61,7 @@ def _build_time_and_presence(now_local: datetime) -> str:
         f"**Day:** {now_local.strftime('%A, %B %d, %Y')}",
     ]
 
-    try:
-        from app.assistant.ServiceLocator.service_locator import DI
-        afk_monitor = getattr(DI, "afk_monitor", None)
-        if afk_monitor:
-            snapshot = afk_monitor.get_computer_activity()
-            if isinstance(snapshot, dict):
-                is_afk = bool(snapshot.get("is_afk", False))
-                lines.append(f"**Computer:** {'AWAY FROM KEYBOARD' if is_afk else 'AT KEYBOARD'}")
-                if not is_afk:
-                    session_mins = snapshot.get("current_session_minutes") or snapshot.get("active_work_session_minutes") or 0
-                    lines.append(f"**Active session:** {round(float(session_mins), 1)} min")
-    except Exception as e:
-        logger.debug("situation_snapshot: AFK check failed: %s", e)
+    lines.extend(_presence_lines(now_local))
 
     try:
         from app.assistant.location_manager.location_manager import get_location_manager
@@ -85,6 +72,32 @@ def _build_time_and_presence(now_local: datetime) -> str:
         pass
 
     return "\n".join(lines)
+
+
+def _presence_lines(now_local: datetime) -> List[str]:
+    """At the keyboard or away, and since when, from the AFK monitor's live reading. The session's length is
+    measured from the monitor's `active_start_utc`; until 2026-11-15 this read `current_session_minutes` /
+    `active_work_session_minutes`, keys of the AFK statistics resource that the monitor's reading never carries,
+    so every session showed as 0.0 min."""
+    from app.assistant.ServiceLocator.service_locator import DI
+    from app.assistant.utils.time_utils import local_time_text, parse_iso_utc_strict
+
+    afk_monitor = getattr(DI, "afk_monitor", None)
+    if afk_monitor is None:
+        return ["**Computer:** unknown; the AFK monitor is not running."]
+    snapshot = afk_monitor.get_computer_activity()
+    if not snapshot:
+        return ["**Computer:** unknown; the AFK monitor has taken no reading yet."]
+    if snapshot["is_afk"]:
+        return ["**Computer:** AWAY FROM KEYBOARD"]
+    lines = ["**Computer:** AT KEYBOARD"]
+    start = snapshot.get("active_start_utc")
+    if not start:
+        lines.append("**Active session:** the AFK monitor has not recorded when this session began.")
+        return lines
+    minutes = (now_local - parse_iso_utc_strict(start, label="active_start_utc")).total_seconds() / 60.0
+    lines.append(f"**Active session:** at the keyboard since {local_time_text(start)} ({round(minutes)} min)")
+    return lines
 
 
 def _build_calendar(now_utc: datetime) -> str:
@@ -110,197 +123,122 @@ def _build_calendar(now_utc: datetime) -> str:
         return ""
 
 
-def _build_active_items() -> str:
-    try:
-        from app.assistant.dayflow_orchestrator.state_store import get_dayflow_items
-        from app.assistant.dayflow_orchestrator.contracts import get_meta
+def _build_chat_requests() -> str:
+    """What the owner asked for in chat and the assistant carried out directly (master_room's dispatch markers,
+    `source_type='master_room_dispatch'`): still being done, or done recently (the item view keeps a finished
+    item 2 hours). This section was "Active Plans & Tasks" and "Recently Closed Items" until 2026-11-15, read from
+    every item by state; plan synopses and action logs stopped being written in 2026-06, and work runs on work
+    objects (the sections below), so these markers were all that still reached it. It read the result under
+    `execution_result_summary`; master_room_tool_caller writes `execution_result`."""
+    from app.assistant.dayflow_orchestrator.state_store import get_dayflow_items
+    from app.assistant.dayflow_orchestrator.contracts import get_meta
+    from app.assistant.utils.time_utils import local_time_text
 
-        all_items = get_dayflow_items()
-        plans = []
-        active = []
-        dispatched = []
-        waiting = []
+    lines = []
+    for item in get_dayflow_items():
+        meta = get_meta(item)
+        if meta.get("source_type") != "master_room_dispatch":
+            continue
+        state = meta.get("state")
+        if state == "dispatched":
+            lines.append(f"- being done now (asked {local_time_text(meta['dispatched_at'])}): {meta['summary']}")
+        elif state == "closed":
+            lines.append(f"- done {local_time_text(meta['executed_at'])}: {meta['summary']}")
+            lines.append(f"  result: {meta['execution_result']}")
+    if not lines:
+        return "### Requests From Chat\nNone being done, and none done in the last 2 hours."
+    return ("### Requests From Chat (being done, or done in the last 2 hours)\n"
+            "*What the owner asked for in chat and the assistant carried out directly, outside the work objects.*\n"
+            + "\n".join(lines))
 
-        for item in all_items:
-            meta = get_meta(item)
-            source_type = str(meta.get("source_type") or "").strip().lower()
-            state = str(meta.get("state") or "").strip().lower()
 
-            if source_type == "plan_synopsis":
-                plans.append(meta)
+def _build_work_objects(store) -> str:
+    """Active work objects — multi-step work executing on the work graph."""
+    from app.assistant.dayflow_orchestrator.work_portfolio import render_active_portfolio
+
+    portfolio, count, _ = render_active_portfolio(store, store.list_work_objects())
+    if not count:
+        return "### Active Work Objects\nNo work in progress."
+    return (
+        "### Active Work Objects (work IN PROGRESS — not finished)\n"
+        "*Ongoing work the assistant carries until every step is done, or abandons with a reason. Flag a work "
+        "object's scheduled action (e.g. a delayed email) only if it collides with something needing the user.*\n"
+        + portfolio
+    )
+
+
+_WINDOW_HOURS = 4
+
+
+def _recent_work_objects(store, now_utc: datetime) -> list:
+    """Every work object changed in the window, loaded. Every act, judgment and ending is a store write, which
+    stamps the work object's updated_at; the summaries are newest-updated first."""
+    from app.assistant.utils.time_utils import parse_iso_utc_strict
+
+    cutoff = now_utc - timedelta(hours=_WINDOW_HOURS)
+    out = []
+    for s in store.list_work_objects():
+        if parse_iso_utc_strict(s["updated_at"], label=f"{s['id']} updated_at") < cutoff:
+            break
+        out.append(store.load(s["id"]))
+    return out
+
+
+def _build_work_activity(work_objects: list, now_utc: datetime) -> str:
+    """What the work did in the window: each outward act from its ledger (a ticket, an email), and each step's
+    result in the finalizer's own words, oldest first, under the work it belongs to. Until 2026-11-15 this section
+    ("Recent Actions") read dayflow action-log items, which stopped being written in 2026-06, so it always said
+    "No actions" while the work turned off lights and sent tickets."""
+    from app.assistant.utils.time_utils import local_time_text, parse_iso_utc_strict
+
+    cutoff = now_utc - timedelta(hours=_WINDOW_HOURS)
+    blocks = []
+    for wo in work_objects:
+        events = [(a.ts, f"{a.channel} to {a.target} ({a.outcome}): {a.summary}")
+                  for a in wo.actions if a.ts >= cutoff]
+        for node in wo.nodes.values():
+            fin = node.payload.get("finalizer") if wo.is_work_unit(node) else None
+            if not fin:
                 continue
-            if source_type in ("action_dispatch", "action_result", "action_log", "chat"):
-                continue
-
-            if state in ("important_open", "actionable"):
-                active.append(meta)
-            elif state == "dispatched":
-                dispatched.append(meta)
-            elif state in ("waiting", "watching"):
-                waiting.append(meta)
-
-        lines = ["### Active Plans & Tasks"]
-
-        if plans:
-            lines.append("**Plans:**")
-            for p in plans:
-                plan_id = p.get("plan_id", "")
-                synopsis = str(p.get("synopsis") or p.get("summary") or "")
-                lines.append(f"- [{plan_id}] {synopsis}")
-
-        if active:
-            lines.append(f"**Actionable tasks ({len(active)}):**")
-            for m in active:
-                sid = m.get("short_id", "")
-                summary = str(m.get("summary") or "")
-                lines.append(f"- task {sid}: {summary}")
-
-        if dispatched:
-            lines.append(f"**Dispatched tasks ({len(dispatched)}):**")
-            for m in dispatched:
-                sid = m.get("short_id", "")
-                summary = str(m.get("summary") or "")
-                result = str(m.get("execution_result_summary") or "")
-                lines.append(f"- task {sid}: {summary}")
-                if result:
-                    lines.append(f"  result: {result}")
-
-        if waiting:
-            lines.append(f"**Waiting tasks ({len(waiting)}):**")
-            for m in waiting:
-                sid = m.get("short_id", "")
-                summary = str(m.get("summary") or "")
-                wait_reason = str(m.get("wait_reason") or m.get("state_reason") or "")
-                lines.append(f"- task {sid}: {summary}")
-                if wait_reason:
-                    lines.append(f"  waiting for: {wait_reason}")
-
-        if not plans and not active and not dispatched and not waiting:
-            lines.append("No active plans or tasks.")
-
-        return "\n".join(lines)
-    except Exception as e:
-        logger.debug("situation_snapshot: active items failed: %s", e)
-        return ""
+            at = parse_iso_utc_strict(fin["at"], label=f"{wo.id}::{node.id} finalizer at")
+            if at >= cutoff:
+                events.append((at, f'step "{node.title}", its result: {fin["outcome"]}'))
+        if not events:
+            continue
+        lines = [f"- {wo.id}: {(wo.constraints or {}).get('objective') or wo.title}"]
+        lines += [f"  - {local_time_text(at)}: {text}" for at, text in sorted(events, key=lambda e: e[0])]
+        blocks.append((min(at for at, _ in events), "\n".join(lines)))
+    if not blocks:
+        return f"### What The Work Did (last {_WINDOW_HOURS} hours)\nNo step ran and nothing was sent."
+    return (f"### What The Work Did (last {_WINDOW_HOURS} hours)\n"
+            "*Each act the work performed and each step's result as the finalizer judged it, by work object.*\n"
+            + "\n".join(text for _, text in sorted(blocks, key=lambda b: b[0])))
 
 
-def _build_work_objects() -> str:
-    """Active work objects — multi-step work executing on the work graph. Without this, the auditor
-    only sees dayflow items and mis-reads ongoing work: a consumed intake item shows 'closed' (it was
-    handed to a work object) so the auditor thinks the task is DONE when it is still in flight."""
-    try:
-        from app.assistant.dayflow_orchestrator.work_portfolio import render_portfolio
-        from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+def _build_work_ended(work_objects: list, now_utc: datetime) -> str:
+    """Work objects that ended in the window, completed or dropped, with when and why (recent_work's view, the
+    one the architect reads). Until 2026-11-15 this section ("Recently Closed Items") read dayflow items, so a work
+    object finished or abandoned that morning never reached the auditor."""
+    from app.assistant.dayflow_orchestrator.recent_work import ended_item, render_recent_ended
+    from app.assistant.utils.time_utils import parse_iso_utc_strict
 
-        store = get_dayflow_work_store()
-        active = [store.load(s["id"]) for s in store.list_work_objects()
-                  if str(s.get("status") or "").lower() not in ("done", "abandoned")]
-        if not active:
-            return ""
-        return (
-            "### Active Work Objects (multi-step work IN PROGRESS — not finished)\n"
-            "*Ongoing multi-step efforts. A related intake item showing 'closed' just means it was "
-            "handed to a work object — the work itself is still live. Flag a work object's scheduled "
-            "action (e.g. a delayed email) only if it collides with something needing the user.*\n"
-            + render_portfolio(active)
-        )
-    except Exception as e:
-        logger.debug("situation_snapshot: work objects failed: %s", e)
-        return ""
-
-
-def _build_recent_actions(now_utc: datetime) -> str:
-    try:
-        from app.assistant.dayflow_orchestrator.state_store import get_dayflow_items
-        from app.assistant.dayflow_orchestrator.contracts import get_meta
-        from app.assistant.utils.time_utils import parse_iso_utc
-
-        cutoff = now_utc - timedelta(hours=4)
-        local_tz = get_local_timezone()
-        all_items = get_dayflow_items()
-
-        actions = []
-        for item in all_items:
-            meta = get_meta(item)
-            if str(meta.get("source_type") or "").strip().lower() != "action_log":
-                continue
-            created = parse_iso_utc(str(meta.get("created_at") or ""))
-            if created and created >= cutoff:
-                time_local = created.astimezone(local_tz).strftime("%I:%M %p")
-                summary = str(meta.get("summary") or "")
-                actions.append(f"- [{time_local}] {summary}")
-
-        if not actions:
-            return "### Recent Actions\nNo actions in last 4 hours."
-
-        return "### Recent Actions (last 4 hours)\n" + "\n".join(actions)
-    except Exception as e:
-        logger.debug("situation_snapshot: recent actions failed: %s", e)
-        return ""
-
-
-def _build_recently_closed(now_utc: datetime) -> str:
-    """Items that closed recently — completions the auditor otherwise wouldn't see.
-
-    Without this section, the auditor sees active/dispatched/waiting items but has
-    no evidence of what finished. That leads to false positives like "the wrap-up
-    task is still open" when in fact it closed 20 minutes ago.
-    """
-    try:
-        from app.assistant.dayflow_orchestrator.state_store import get_dayflow_items
-        from app.assistant.dayflow_orchestrator.contracts import get_meta
-        from app.assistant.utils.time_utils import parse_iso_utc
-
-        cutoff = now_utc - timedelta(hours=4)
-        local_tz = get_local_timezone()
-        all_items = get_dayflow_items()
-
-        closed_entries = []
-        for item in all_items:
-            meta = get_meta(item)
-            state = str(meta.get("state") or "").strip().lower()
-            if state != "closed":
-                continue
-            source_type = str(meta.get("source_type") or "").strip().lower()
-            if source_type in ("action_dispatch", "action_result", "action_log", "chat"):
-                continue
-
-            # Prefer the most recent timestamp we have for this item.
-            ts_candidates = [
-                meta.get("updated_at"),
-                meta.get("dispatched_at"),
-                meta.get("created_at"),
-            ]
-            ts = None
-            for raw in ts_candidates:
-                if not raw:
-                    continue
-                parsed = parse_iso_utc(str(raw))
-                if parsed is not None:
-                    ts = parsed
-                    break
-            if ts is None or ts < cutoff:
-                continue
-
-            time_local = ts.astimezone(local_tz).strftime("%I:%M %p")
-            sid = meta.get("short_id", "")
-            summary = str(meta.get("summary") or "")
-            result = str(meta.get("execution_result_summary") or "")
-            closed_entries.append((ts, sid, time_local, summary, result))
-
-        if not closed_entries:
-            return "### Recently Closed Items\nNone in last 4 hours."
-
-        closed_entries.sort(key=lambda x: x[0])
-        lines = [f"### Recently Closed Items (last 4 hours) ({len(closed_entries)})"]
-        for _, sid, time_local, summary, result in closed_entries:
-            lines.append(f"- [{time_local}] task {sid}: {summary}")
-            if result:
-                lines.append(f"  result: {result}")
-        return "\n".join(lines)
-    except Exception as e:
-        logger.debug("situation_snapshot: recently closed failed: %s", e)
-        return ""
+    cutoff = now_utc - timedelta(hours=_WINDOW_HOURS)
+    done, dropped = [], []
+    for wo in work_objects:
+        if wo.status not in ("done", "abandoned"):
+            continue
+        terminal = wo.nodes[wo.goal_node_id].payload["terminal"]
+        if parse_iso_utc_strict(terminal["at"], label=f"{wo.id} ended at") < cutoff:
+            continue
+        (done if wo.status == "done" else dropped).append(ended_item(wo, finalizers=False))
+    if not done and not dropped:
+        return f"### Work That Ended (last {_WINDOW_HOURS} hours)\nNone."
+    completed, abandoned = render_recent_ended(done, dropped, window_hours=_WINDOW_HOURS,
+                                               labels={item["id"]: item["id"] for item in done + dropped})
+    lines = [f"### Work That Ended (last {_WINDOW_HOURS} hours)", "**Completed:**", completed]
+    if abandoned:
+        lines += ["**Dropped:**", abandoned]
+    return "\n".join(lines)
 
 
 def _build_ticket_responses(now_utc: datetime) -> str:

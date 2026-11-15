@@ -23,14 +23,3 @@ Recent chat messages:
 No recent chat messages.
 {% endif %}
 
-Completed calendar events:
-{% if calendar_events_completed %}
-{% for event in calendar_events_completed %}
-- {{ event.event_name }} (ended at {{ event.end_time }})
-{% endfor %}
-{% else %}
-No recently completed calendar events.
-{% endif %}
-
-Recently accepted tickets:
-Not used here (ticket processing handled elsewhere).

@@ -16,7 +16,7 @@
 {%- if belief.get('earlier') %}
   placed earlier today:
 {%- for p in belief.earlier %}
-    - {{ p.time }}{% if p.until %} until {{ p.until }}{% endif %}: {{ p.outcome }}
+    - {{ p.time }}{% if p.until %} until {{ p.until }}{% endif %}: {{ p.outcome }}{% if p.passed %} (passed){% endif %}
 {%- endfor %}
 {%- endif %}
 {% else %}

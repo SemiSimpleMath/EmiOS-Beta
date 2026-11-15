@@ -152,6 +152,10 @@ def _rules():
     (lambda a: a["changes"][0].update(event="C1"), ("changes", "[0].event"), "not an event given"),
     (lambda a: a["changes"][1].update(start=""), ("changes", "[1]"), "a new event names its title and its start"),
     (lambda a: a["changes"][0].update(state="moved"), ("changes", "[0].start"), "moved names the new start"),
+    # 2026-11-15: "7:00 PM, Thu Jan 14, 2027" crashed day_record.apply
+    (lambda a: a["changes"][0].update(state="moved", start="7:00 PM, Thu Jan 14, 2027"), ("changes", "[0].start"),
+     "a time on this day's clock"),
+    (lambda a: a["changes"][1].update(end="late evening"), ("changes", "[1].end"), "a time on this day's clock"),
     (lambda a: a["milestones"][0].update(relies_on=[]), ("milestones", "[0].relies_on"), "relies_on names nothing"),
     (lambda a: a["milestones"][0].update(time=""), ("milestones", "[0]"), "a milestone names its time"),
 ])

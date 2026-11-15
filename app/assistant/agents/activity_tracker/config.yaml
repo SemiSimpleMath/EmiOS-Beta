@@ -12,4 +12,3 @@ user_context_items:
 - resource_tracked_activities_output
 - current_activity_counts
 - recent_chat_excerpts
-- calendar_events_completed

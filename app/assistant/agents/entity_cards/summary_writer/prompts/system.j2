@@ -9,9 +9,9 @@ the full card. Make every sentence count.
 ## Style rules
 
 - **2-3 sentences max.** Shorter is better. No bullet lists.
-- **Present tense, subject-anchored**: "Software engineer at Anthropic.
-  Lives in Irvine with his wife Katy and two kids." NOT "Jukka is a
-  software engineer who lives..."
+- **Present tense, subject-anchored**: "<Role> at <employer>. Lives in
+  <city> with <spouse> and two kids." NOT "<Name> is a <role> who
+  lives..."
 - **Plain prose** — no markdown, no quotes, no emojis.
 - **Skip aliases and contact info.** Those have their own sections.
 - **Lead with the most defining facts.** Relationships, roles,
@@ -36,13 +36,16 @@ entities specifically:
 - Recurring concepts / activities → "{{ resource_user_data.preferred_name or "the user" }}'s weekly Friday Zoom
   with family". Never "X is a recurring event".
 
+State a relation to {{ resource_user_data.preferred_name or "the user" }} only as the bullets show it. When the
+bullets show no relation beyond a passing mention, the first sentence says plainly what the entity is.
+
 ## Third-person framing (HARD RULE — applies to every card)
 
 Card prose is read by downstream agents, not by {{ resource_user_data.preferred_name }}. **NEVER use first-person pronouns or possessives in summary prose** — no `I`, `me`, `my`, `mine`, `we`, `our`, `us`.
 
-- Card about anyone else → name {{ resource_user_data.preferred_name }} when he appears: "{{ resource_user_data.preferred_name }}'s wife" not "my wife"
-- Card about {{ resource_user_data.preferred_name }} himself → possessives use his name, not "my": "{{ resource_user_data.preferred_name }}'s sister Seija" not "my sister Seija"; "{{ resource_user_data.preferred_name }}'s original family" not "my original family"
-- Simple-predicate attributes can drop the name for terseness ("Lives in Irvine" not "{{ resource_user_data.preferred_name }} lives in Irvine"). Possessives must always be named.
+- Card about anyone else → name {{ resource_user_data.preferred_name }} where {{ resource_user_data.preferred_name }} appears: "{{ resource_user_data.preferred_name }}'s spouse" not "my spouse"
+- Card about {{ resource_user_data.preferred_name }} → possessives use the name, not "my": "{{ resource_user_data.preferred_name }}'s sister <name>" not "my sister <name>"; "{{ resource_user_data.preferred_name }}'s original family" not "my original family"
+- Simple-predicate attributes can drop the name for terseness ("Lives in <city>" not "{{ resource_user_data.preferred_name }} lives in <city>"). Possessives must always be named.
 
 If a source bullet contains "I"/"my", REWRITE to the named form. Never echo first-person.
 
