@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import unicodedata
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -110,10 +111,24 @@ def put_email_pod(email_data: Dict[str, Any], *, store=None) -> Tuple[str, bool]
     return pod.pod_id, True
 
 
+def _readable_body(body: str) -> str:
+    """The body as readers see it: invisible padding removed. Marketing and receipt emails pad their preview text
+    with zero-width and other format characters (soft hyphens, zero-width non-joiners, combining grapheme joiners),
+    which reached prompts as blocks of blank-looking lines. The pod keeps the body verbatim; this drops the invisible
+    characters, the trailing whitespace they leave, and runs of blank lines."""
+    visible = "".join(ch for ch in body if unicodedata.category(ch) != "Cf" and ch != "͏")
+    lines: List[str] = []
+    for line in visible.splitlines():
+        line = line.rstrip()
+        if line or (lines and lines[-1]):
+            lines.append(line)
+    return "\n".join(lines).strip()
+
+
 def email_record(pod: Pod) -> Dict[str, Any]:
     """The pod as the email dict readers use: every header and parser field, plus the body."""
     record = dict(pod.metadata or {})
-    record[_BODY_KEY] = pod.body or ""
+    record[_BODY_KEY] = _readable_body(pod.body or "")
     record["pod_id"] = pod.pod_id
     return record
 

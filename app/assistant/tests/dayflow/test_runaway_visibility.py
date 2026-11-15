@@ -314,7 +314,9 @@ def test_a_plan_changing_completion_is_legible_in_its_epitaph(store):
                 actor="finalizer")
     store.apply("consume_finalizer_instruction", {"work_id": wo.id, "node_id": nid, "expected_finalizer": store.load(wo.id).nodes[nid].payload["finalizer"]}, actor="architect")
     store.apply("edit_node", {"work_id": wo.id, "node_id": nid, "title": "Find the packet"})
-    assert "achieved_plan_changes" in _goal_epitaph(store.load(wo.id))
+    epitaph = _goal_epitaph(store.load(wo.id))
+    # The step is named in words; its verdict stays with dayflow (prose accounts, not enums, 2026-11-15).
+    assert "Find the packet" in epitaph and "achieved" not in epitaph
 
 
 # --------------------------------------------------------------------------- #

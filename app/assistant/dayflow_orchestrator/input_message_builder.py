@@ -117,11 +117,9 @@ def _build_email_message(*, email_data: Dict[str, Any], now_utc: datetime) -> Me
     from app.assistant.pod_store.email_pods import email_sender_line
     sender = email_sender_line(email_data) or "Unknown"
     summary = str(email_data.get("summary") or "").strip()
-    # First ~2000 chars of the email body — enough to capture the salutation
-    # ("Dear Parent of <name>", account IDs, first paragraph of context) which
-    # is what disambiguates the subject person for transactional/school emails.
-    body_full = str(email_data.get("body") or "").strip()
-    body_excerpt = body_full[:2000]
+    # The whole body (email_pods.email_record, invisible padding removed). Until 2026-11-15 it was cut at
+    # 2000 characters, mid-word ("Your subscription will contin").
+    body_excerpt = str(email_data.get("body") or "").strip()
 
     importance_raw = email_data.get("importance")
     if importance_raw is None:

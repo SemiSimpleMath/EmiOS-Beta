@@ -4,7 +4,7 @@ The architect reads the work completed recently beside the goal it plans; work_l
 reason. Moved here on 2026-10-10 from the steward's prep node (strategic_planner_wo_prep_node), retired with the
 steward: the steward read these logs so as not to recreate work it had just finished or dropped.
 """
-from app.assistant.dayflow_orchestrator.work_context import render_view
+from app.assistant.dayflow_orchestrator.work_context import objective_of, render_view
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -20,8 +20,8 @@ def goal_epitaph(wo) -> str:
 
 
 def ended_item(wo, *, finalizers: bool) -> dict:
-    """One recently ended work object: its FULL objective (the goal node's content; the stored title is the objective
-    cut at 80 characters), when it ended in local time, and why.
+    """One recently ended work object: its full objective (constraints.objective; the goal node's content is the
+    stored goal text with its success criteria and sources), when it ended in local time, and why.
 
     The end time is the goal's `terminal.at`, which every ending writes (set_work_status, the rollup, a terminal
     set_status); an ended goal without one raises."""
@@ -31,7 +31,7 @@ def ended_item(wo, *, finalizers: bool) -> dict:
     terminal = (goal.payload.get("terminal") if goal is not None else None) or {}
     if not terminal.get("at"):
         raise ValueError(f"ended work object {wo.id} records no end time on its goal")
-    return {"id": wo.id, "title": (goal.content or goal.title).strip(), "when": local_time_text(terminal["at"]),
+    return {"id": wo.id, "title": objective_of(wo).strip(), "when": local_time_text(terminal["at"]),
             "reason": goal_epitaph(wo),
             "finalizers": [task.payload["finalizer"] for task in wo.nodes.values()
                            if wo.is_work_unit(task) and task.payload.get("finalizer")] if finalizers else []}

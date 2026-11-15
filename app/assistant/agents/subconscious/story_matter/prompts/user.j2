@@ -8,7 +8,7 @@ Now: {{ agent_input.now }}
 {% for e in agent_input.events %}
 [{{ e.label }}] {{ e.when }} · {{ e.source }}{% if e.who %} · {{ e.who }}{% endif %}
   routed: {{ e.route }}
-  decision: {{ e.decision }}{% if e.reason %}: {{ e.reason }}{% endif %}
+  decided: {{ e.decision or "(no decision recorded)" }}{% if e.reason %}. Why: {{ e.reason }}{% endif %}
 {% endfor %}
 {% if agent_input.concern_updates %}
 ## Notes added to concerns

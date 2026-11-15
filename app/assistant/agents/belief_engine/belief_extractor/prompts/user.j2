@@ -3,7 +3,7 @@
 
 ## What was noticed that day, each with the entries it rests on
 {% for i in insights %}
-### Insight {{ i.n }} ({{ i.scope }})
+### Insight {{ i.n }} (scope: {{ i.scope }})
 {{ i.insight }}
 Sources:
 {% for s in i.sources %}- {{ s | tojson }}

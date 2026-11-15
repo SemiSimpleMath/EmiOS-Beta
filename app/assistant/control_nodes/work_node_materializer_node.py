@@ -46,6 +46,10 @@ class WorkNodeMaterializerNode(ControlNode):
             logger.error("[%s] work-node materialize failed: %s", self.name, e)
             logger.debug("[%s] materialize exception", self.name, exc_info=True)
 
+        # The selector picks by a short label; canonical_pick maps the label back to the node's ref
+        # (models never copy ids).
+        for i, item in enumerate(items, 1):
+            item["short_id"] = f"T{i}"
         self.blackboard.update_state_value("actionable_items", items)
         # Mirror view_materializer's empty short-circuit: nothing ready -> skip action_selector.
         if not items:
@@ -69,7 +73,6 @@ class WorkNodeMaterializerNode(ControlNode):
             task = (f"{n.title}. {n.content}" if n.content else (n.title or "")).strip()
             out.append({
                 "item_id": f"{wo.id}::{n.id}",
-                "short_id": f"{wo.id}::{n.id}",
                 "summary": task,
                 "source_type": "work_node",
                 "state": "actionable",

@@ -101,6 +101,10 @@ class EventScheduler:
                     elapsed = (filter_start - start).total_seconds()
                     n_intervals = int(elapsed // event.interval)
                     dtstart = start + timedelta(seconds=n_intervals * event.interval)
+                    # The first occurrence IN the window: rounding down landed on the one before it, so a weekly
+                    # reminder listed last Monday and a yearly one last month (fixed 2026-11-15).
+                    if dtstart < filter_start:
+                        dtstart += timedelta(seconds=event.interval)
                 else:
                     dtstart = start
 

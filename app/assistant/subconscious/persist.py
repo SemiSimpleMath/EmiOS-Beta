@@ -198,7 +198,7 @@ def expire_concerns(now_utc: Optional[datetime] = None, *, connect=None) -> List
                     continue
                 register[bucket].remove(c)
                 c["resolved_at_utc"] = now.isoformat()
-                c["resolution_reason"] = f"its time passed: it mattered until {local_time_text(expires)}"
+                c["resolution_reason"] = f"it expired at {local_time_text(expires)}, the time it mattered until"
                 register.setdefault("resolved", []).append(c)
                 closed.append(c["concern_id"])
         if closed:

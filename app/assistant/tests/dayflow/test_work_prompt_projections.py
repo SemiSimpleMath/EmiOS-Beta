@@ -241,3 +241,59 @@ def test_a_stranded_goal_asks_for_the_architects_judgment():
     assert "THIS GOAL HAS NOTHING LEFT TO RUN" in text
     assert "judge whether the goal's outcome is reached: if it is, end it as done" in text
     assert "not achieved" not in text
+
+
+def _listed_work():
+    """A work object as the brain's list makes it: the structured objective, success criteria and sources in its
+    constraints, and the goal's stored text rendered from them (shared/work/goal_content.j2)."""
+    sources = [{"item_id": "message:m1", "source_type": "chat", "pod_id": "",
+                "summary": "Sat 2026-11-14 09:51 in master_room, owner: please pick up the parcel"},
+               {"item_id": "dayflow_email:a:1", "source_type": "email", "pod_id": "datapod:email:1",
+                "summary": "The parcel office closes at five.", "created_at": "2026-11-14T17:00:00+00:00"}]
+    objective = "The parcel is picked up today. (when: 4:00 PM; decided Sat 11-14 10:00 AM)"
+    wo = WorkObject(id="work_parcel", title=objective, goal_node_id="goal",
+                    constraints={"objective": objective, "success_criteria": "The parcel is picked up today.",
+                                 "source_intake": sources})
+    wo.add_node(WorkNode(id="goal", work_id=wo.id, type="goal", title=objective,
+                         content=render_view("goal_content", objective=objective, sources=sources,
+                                             success_criteria="The parcel is picked up today.")))
+    wo.add_node(WorkNode(id="ask", work_id=wo.id, type="subtask", parent_id="goal", title="Ask who picks it up",
+                         content="Ask who picks up the parcel.", status="closed", payload={
+                             "dispatch_epoch": 1, "finalized_epoch": 1,
+                             "terminal": {"reason": "The owner will pick it up."},
+                             "finalizer": {"verdict": "achieved", "dispatch_epoch": 1,
+                                           "outcome": "The owner will pick it up."}}))
+    wo.add_node(WorkNode(id="call", work_id=wo.id, type="subtask", parent_id="goal", title="Call the office",
+                         content="Call the parcel office.", status="abandoned",
+                         payload={"terminal": {"reason": "The owner collects it himself."}}))
+    return wo
+
+
+def test_each_part_of_a_work_object_is_printed_once():
+    """2026-11-15 audit: the success criteria and the sources rode inside the objective (the goal's stored text) and
+    were printed again from their own fields; a closed task's REASON repeated its finalizer OUTCOME."""
+    wo = _listed_work()
+    text = render_view("portfolio", work=work_data(wo))
+    assert text.count("The parcel is picked up today.") == 2          # the objective, then its success criteria
+    assert text.count("please pick up the parcel") == 1
+    assert text.count("The owner will pick it up.") == 1
+    assert "REASON: The owner collects it himself." in text
+    assert "SOURCE CONTEXT" in text
+    assert "source message, word for word: Sat 2026-11-14 09:51" in text
+    assert "source summary (not a verbatim quote): The parcel office closes at five." in text
+    assert "unknown" not in text and "\n  source timestamp: " in text
+    worker = render_view("worker", view=worker_data(wo, "ask"))
+    assert worker.count("The parcel is picked up today.") == 2 and "success when:" not in worker
+
+
+def test_a_work_object_without_sources_prints_no_source_header():
+    wo = _listed_work()
+    wo.constraints["source_intake"] = []
+    assert "SOURCE CONTEXT" not in render_view("portfolio", work=work_data(wo))
+
+
+def test_the_ended_work_view_titles_a_goal_by_its_objective():
+    from app.assistant.dayflow_orchestrator.recent_work import ended_item
+    wo = _listed_work()
+    wo.nodes["goal"].payload["terminal"] = {"at": "2026-11-14T23:00:00+00:00", "reason": "done"}
+    assert ended_item(wo, finalizers=False)["title"] == wo.constraints["objective"]

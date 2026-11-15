@@ -63,8 +63,8 @@ class NewConcern(BaseModel):
                     "the time in the future when it stops mattering.")
     notes: str = Field(description="Why this matters to the household, and what is known so far, in words; no "
                                    "labels.")
-    relies_on: List[str] = Field(description="The labels of anything else it rests on (W, R, K, other events). Empty "
-                                             "when it rests on its own events alone.")
+    relies_on: List[str] = Field(description="The labels of what it rests on: the events, and anything else shown "
+                                             "(W, R, K).")
     attach: List[str] = Field(description="The events (E) it comes from, kept as its evidence.")
 
 

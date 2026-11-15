@@ -11,7 +11,6 @@ def messages_to_chat_excerpts(
     messages: List[Message],
     *,
     consumer_room_id: Optional[str] = None,
-    cross_room_prefix: str = "[CROSS_ROOM_CONTEXT_ONLY]",
 ) -> List[Dict[str, Any]]:
     """
     Convert Message objects into stable, LLM-friendly excerpt dicts.
@@ -24,6 +23,11 @@ def messages_to_chat_excerpts(
     - origin_room_id: room where the message originated
     - cross_room_tf: True when message origin differs from consumer_room_id
     - actionability: "local_actionable" or "external_context_only"
+
+    Sender and content are the message's own. Until 2026-11-15 a cross-room message had "[room:<id>]" appended to
+    its sender and "[CROSS_ROOM_CONTEXT_ONLY]" prefixed to its content, and pipeline prompts (daily_context_tracker,
+    dayflow_cron_tickets), which read the owner's chat rooms on purpose, showed the raw markers on every line. A room
+    seeding another room's history tags it itself (room_session_manager).
     """
 
     consumer_room = str(consumer_room_id or "").strip()
@@ -40,10 +44,6 @@ def messages_to_chat_excerpts(
             cross_room_tf = bool(consumer_room and origin_room_id and origin_room_id != consumer_room)
             sender = getattr(m, "sender", "") or ""
             content = getattr(m, "content", "") or ""
-            if cross_room_tf:
-                # Hard tag: cross-room content is context only.
-                sender = f"{sender} [room:{origin_room_id}]"
-                content = f"{cross_room_prefix} {content}".strip()
             out.append(
                 {
                     "timestamp_utc": ts_utc.isoformat(),
@@ -64,7 +64,6 @@ def messages_to_chat_history_text(
     messages: List[Message],
     *,
     consumer_room_id: Optional[str] = None,
-    cross_room_prefix: str = "[CROSS_ROOM_CONTEXT_ONLY]",
 ) -> str:
     """
     Convert Message objects into a compact multi-line chat history string.
@@ -73,7 +72,6 @@ def messages_to_chat_history_text(
     excerpts = messages_to_chat_excerpts(
         messages,
         consumer_room_id=consumer_room_id,
-        cross_room_prefix=cross_room_prefix,
     )
     lines = [f"[{m['time_local']}] {m['sender']}: {m['content']}" for m in excerpts]
     return "\n".join(lines)

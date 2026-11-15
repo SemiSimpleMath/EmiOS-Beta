@@ -21,7 +21,10 @@
 {% endif %}{{ pad }}  - {{ t.title }}{% if t.at %} ({{ t.at | local_time }}){% endif %}
 {% endfor -%}
 {% for t in p.dropped -%}{% if loop.first %}{{ pad }}Dropped from the plan:
-{% endif %}{{ pad }}  - {{ t.title }}{% if t.reason %}: {{ t.reason }}{% endif %}
+{% endif %}{{ pad }}  - {{ t.titles | join("; ") }}{% if t.reason %}: {{ t.reason }}{% endif %}
+{% endfor -%}
+{% for t in p.not_achieved -%}{% if loop.first %}{{ pad }}Did not succeed:
+{% endif %}{{ pad }}  - {{ t.title }}: {% if t.after == "stopped" %}the assistant stopped trying it{% elif t.after == "replanned" %}the assistant has already changed the plan in answer to it{% else %}{{ t.after_has_no_wording }}{% endif %}
 {% endfor -%}
 {% for t in p.unfinished -%}{% if loop.first %}{{ pad }}Not finished when the work ended:
 {% endif %}{{ pad }}  - {{ t.title }}

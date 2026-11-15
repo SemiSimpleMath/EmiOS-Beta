@@ -107,7 +107,11 @@ def brief(entry: Dict[str, Any]) -> str:
                  if c["concern_id"] == entry["concern_id"]]
         if not found:
             raise KeyError(f"brain list entry {entry['id']}: concern {entry['concern_id']} is not in the register")
-        sources = [_evidence_text(e) for e in found[0].get("evidence") or []]
+        # What raised the concern is shown with the concern itself ("raised from", concern_view.source_text), word for
+        # word; the brief carries the rest of its evidence.
+        raised_from = (found[0].get("source") or {}).get("ref")
+        sources = [_evidence_text(e) for e in found[0].get("evidence") or []
+                   if not (raised_from and e.get("ref") == raised_from)]
     elif entry["kind"] == "calendar":
         from app.assistant.subconscious.day_tasks import decided_placement
         belief = decided_placement(entry["day"], entry["belief_key"])

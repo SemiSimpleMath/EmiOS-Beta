@@ -248,7 +248,7 @@ def _build_key_dates(*, now_local: datetime) -> str:
         upcoming.extend(_next_occurrence_within(today, horizon, anniversary, "Anniversary"))
 
     if not upcoming:
-        return "(no key dates within 90 days; house_rules may carry anniversary)"
+        return "(no birthdays or anniversary recorded in the next 90 days)"
     return "\n".join(sorted(upcoming))
 
 

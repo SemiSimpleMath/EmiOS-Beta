@@ -10,9 +10,9 @@ status: {{ work.status }} | progress: {{ work.completed }}/{{ work.tasks|length 
 {% endif %}{% if work.unrun %}STILL UNRUN ({{ work.unrun }}){% if not terse %}: completing this work object would DISCARD these outstanding tasks{% endif %}.
 {% endif %}
 {% include 'shared/work/execution_state.j2' %}
-SOURCE CONTEXT
-{% with sources = work.sources | default([]), compact_sources = true %}{% include 'shared/work/source_context.j2' %}{% endwith %}
-{% if work.concerns | default([]) %}CONCERN THIS WORK SERVES (the brain's record of it)
+{% if work.sources | default([]) %}SOURCE CONTEXT
+{% with sources = work.sources, compact_sources = true %}{% include 'shared/work/source_context.j2' %}{% endwith %}
+{% endif %}{% if work.concerns | default([]) %}CONCERN THIS WORK SERVES (the brain's record of it)
 {% for c in work.concerns %}{% if c.get('concern_id') and c.concern_id in L %}- [{{ L[c.concern_id] }}] {{ c.title }}: its record is under THE CONCERNS THE WORK SERVES
 {% else %}{% with concerns = [c] %}{% include 'shared/work/concern_view.j2' %}{% endwith %}{% endif %}{% endfor %}
 {% endif %}
@@ -24,7 +24,7 @@ TASKS (main assignments only)
 {% endif %}{% if task.awaiting_judgment %}  AWAITING JUDGMENT: result exists; completion has not been accepted.
 {% endif %}{% if task.dependencies %}  DEPENDS ON: {% for dep in task.dependencies %}{{ L.get(dep.id, dep.id) }} [{{ dep.status }}; {% if dep.satisfied %}satisfied{% else %}BLOCKED{% endif %}]{% if not loop.last %}, {% endif %}{% endfor %}
 {% endif %}{% if task.wake_kind %}  WAIT: {{ task.wake_kind }}{% if task.wake_at %} | {{ task.wake_at }}{% endif %}{% if task.wake_ref %} | {{ task.wake_ref }}{% endif %}
-{% endif %}{% with watch = task.watch %}{% include 'shared/work/watch.j2' %}{% endwith %}{% if task.terminal %}  REASON: {{ task.terminal.get('reason', '') }}
+{% endif %}{% with watch = task.watch %}{% include 'shared/work/watch.j2' %}{% endwith %}{% if task.terminal and task.terminal.get('reason') != (task.finalizer or {}).get('outcome') %}  REASON: {{ task.terminal.get('reason', '') }}
 {% endif %}{% if task.finalizer or task.awaiting_judgment %}{% set finalizer = task.finalizer %}{% include 'shared/work/finalizer_summary.j2' %}{% endif %}
 {% endfor %}
 {% if work.actions %}ACTIONS TAKEN ({{ work.actions|length }}) — already performed; do not repeat without justification

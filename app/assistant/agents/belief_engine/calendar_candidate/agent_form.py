@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 class Decision(BaseModel):
     belief_key: str = Field(description="The belief's key, exactly as shown (B<number>).")
-    candidate: bool = Field(description="True when this belief might belong on the day-planning calendar some day.")
+    candidate: bool = Field(description="True when this belief might be a calendar item on some day.")
     when: str = Field(
         default="",
         description="For a candidate: when it would appear on the calendar, in plain words ('every Wednesday "

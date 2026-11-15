@@ -17,6 +17,13 @@ def render_view(template, **data):
 def local_stamp(value):
     return local_time_text(value)
 
+def objective_of(wo):
+    """The work's objective as its readers see it: the structured `constraints.objective`. The goal node's content
+    is the stored goal text (shared/work/goal_content.j2: the objective with its success criteria and sources, which
+    every reader renders from their own fields), read only for work made without a structured objective."""
+    goal = wo.nodes.get(wo.goal_node_id)
+    return (wo.constraints or {}).get("objective") or ((goal.content or goal.title) if goal else wo.title)
+
 def record_data(record):
     content = record.content
     if not content and record.pod_ref:
@@ -83,7 +90,7 @@ def work_data(wo, now=None):
     pending = any(isinstance(n.payload.get("finalizer"), dict) and n.payload["finalizer"].get("next_step")
                   and not n.payload["finalizer"].get("consumed_at") for n in tasks)
     contacts = Counter((a.channel, (a.target or "").lower()) for a in wo.actions)
-    return {"id": wo.id, "status": wo.status, "objective": (goal.content or goal.title) if goal else wo.title,
+    return {"id": wo.id, "status": wo.status, "objective": objective_of(wo),
             "success_criteria": wo.constraints.get("success_criteria", ""),
             "failure_count": int((goal.payload if goal else {}).get("goal_unmet_attempts") or 0),
             "failure_episode_count": int((goal.payload if goal else {}).get("goal_unmet_since_progress") or 0),
@@ -129,8 +136,7 @@ def used_work(work_id):
     a fact chosen by another work was chosen again."""
     from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
     other = get_dayflow_work_store().load(work_id)
-    goal = other.nodes.get(other.goal_node_id)
-    return {"objective": (goal.content or goal.title) if goal else other.title, "status": other.status,
+    return {"objective": objective_of(other), "status": other.status,
             "tasks": [{"title": n.title, "status": n.status,
                        "outcome": (n.payload.get("finalizer") or {}).get("outcome")}
                       for n in other.nodes.values() if other.is_work_unit(n)]}
@@ -184,7 +190,6 @@ def worker_data(wo, node_id):
 
 def state_mover_candidate(wo, node):
     """Structured timing context shared by ordinary ticks and targeted wakes."""
-    goal = wo.nodes.get(wo.goal_node_id)
     return {"task_id": f"{wo.id}::{node.id}", "context": node.title or "",
-            "kind": node.type, "objective": (goal.content or goal.title) if goal else wo.title,
+            "kind": node.type, "objective": objective_of(wo),
             "task": task_data(wo, node)}

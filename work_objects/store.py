@@ -118,19 +118,17 @@ _SUBTREE_CASCADE_STATUSES = {"done", "closed", "abandoned", "superseded"}
 
 
 def _satisfying_children(wo: WorkObject, goal) -> str:
-    """The goal's own children and how each one was judged, as the epitaph of an auto-completion.
-
-    The finalizer's verdict is the part that carries meaning: `achieved` says the step met its
-    goal; anything else says it did not. A reader can tell a real completion from a hollow one
-    here, which is invisible from the status alone.
+    """The goal's own children, as the epitaph of an auto-completion: the rollup completes a goal only
+    when every child is closed, which only the finalizer's achieved judgment gives, so the steps are
+    named in words. Until 2026-11-15 each carried its verdict in parentheses, an enum that reached
+    readers outside dayflow in the work's ending reason; each step's account is its finalizer outcome.
     """
     parts = []
     for cid in wo.children_of(goal.id):
         child = wo.nodes.get(cid)
         if child is None or child.type != "subtask":
             continue
-        verdict = str(((child.payload or {}).get("finalizer") or {}).get("verdict") or "").strip()
-        parts.append(f"{child.title or child.id}" + (f" ({verdict})" if verdict else ""))
+        parts.append(f"{child.title or child.id}")
     if not parts:
         return "the goal had no owned steps"
     return "every owned step finished: " + "; ".join(parts)
@@ -853,7 +851,7 @@ class WorkStore(ConcernOutboxMixin, BeliefOutboxMixin, ExecutionStoreMixin):
             raise ValueError("revise_goal: cannot change a terminal work object")
         goal = wo.nodes[wo.goal_node_id]
         goal.content = data["content"]
-        goal.title = str(data["objective"])[:80]
+        goal.title = str(data["objective"])
         goal.updated_at = now
         wo.title = goal.title
         wo.constraints = dict(data["constraints"])

@@ -34,7 +34,7 @@ What to output:
 - When Google Calendar events are provided with calendar_item_id, copy that ID verbatim into schedule items. Preserve calendar_item_id on later updates.
 - Adjust based on evidence from chat, tickets, and AFK: if the user says "dentist moved to 2 PM", update that item's times. If the user says something is cancelled today, mark it cancelled. If the user mentions a new activity, add it with source "user_chat" (leave calendar_item_id empty for non-calendar items).
 - Use local 12-hour times (e.g., "9:00 AM", "4:30 PM"). The pipeline will convert to UTC.
-- `reported` is what the evidence says of an item: "cancelled" when the user, a ticket answer or the calendar says it is off today; "done" when the user, a ticket answer or telemetry shows it has already happened; otherwise "scheduled". The clock is not evidence: whether a scheduled item is upcoming, ongoing or past is computed from its times, and the [status] shown on the input items is that computation.
+- `reported` is what the evidence says of an item: "cancelled" when the user, a ticket answer or the calendar says it is off today; "done" when the user, a ticket answer or telemetry shows it has already happened; otherwise "scheduled". The clock is not evidence: an item whose time has passed has not thereby happened. Whether a scheduled item is upcoming, ongoing or past is computed from its times. The [status] shown on the input items is that computation, except that an item reported done earlier also shows "completed"; so "completed" says the item's time passed or it was reported done, never by itself that it happened. An item is "done" when the user, a ticket answer, telemetry or an existing (Reported) or (Inferred) milestone shows it happened.
 
 Provenance per item (CRITICAL — this is how the system resolves conflicts):
 - For every item, record `source` (where this item came from / what last asserted it) and `updated_at_local` (the local time when that source last asserted it).
@@ -73,9 +73,12 @@ If there is clear evidence as to what user is doing write that instead, otherwis
 outside work hours unless there is evidence. For the last milestone the time is just [Currently]. ie. [Currently] Away from computer. [Currently] Reading reddit posts.
 
 EvidenceLabel rules:
-- Use (Reported) only for information from user chat and (calendar) for calendar events.
+- Use (Reported) only for what the user said, in chat or in a ticket answer.
+- Use (Calendar) only for a change the calendar itself shows (an event added, moved or cancelled).
 - Use (Inferred) only for telemetry-based interpretation (AFK, location, etc.).
 - Never upgrade (Inferred) to (Reported) without explicit user input.
+- A calendar event becomes a milestone only when the user's words or telemetry show it happened; an event whose time has passed is still only a plan.
+- Each milestone states the event in its own words, readable without its source: a ticket answer is recorded as what it confirms or reports, not as the bare reply.
 
 Edit policy (minimal change, non-paraphrasing):
 - Do not paraphrase, reword, reorder, or clean up existing milestones unless:
@@ -83,6 +86,7 @@ Edit policy (minimal change, non-paraphrasing):
   2) New contradictory evidence: clearly wrong time or event, fix only the necessary facts.
   3) Merge duplicates: two entries refer to the same underlying event, merge into one while preserving wording of the surviving text.
   4) Since you are recording major AFK events you may edit the AFK entry to be an actual entry if you learn what happened during the AFK.
+  5) Unsupported or unreadable milestone: a milestone that lacks the evidence the EvidenceLabel rules require, or does not say in words what happened, is rewritten from the evidence it came from when that evidence is in the input, and removed otherwise. A milestone is judged by its own label and words: one whose label fits the rules and whose words say what happened stands, even when its evidence is no longer in the input. Newer evidence, and what the user said, outweighs an older entry.
 
 AFK anti-spam rule (critical):
 - At most one milestone per AFK interval.

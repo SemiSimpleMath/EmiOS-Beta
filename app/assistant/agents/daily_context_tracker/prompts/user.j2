@@ -39,10 +39,6 @@
 - **{{ item.title }}** ({{ item.start_local }}{% if item.end_local %} - {{ item.end_local }}{% endif %}) [status: {{ item.status }}] [source: {{ item.source or "google_calendar" }}]{% if item.updated_at_local %} [updated_at: {{ item.updated_at_local }}]{% endif %}{% if item.calendar_item_id %} [calendar_item_id: {{ item.calendar_item_id }}]{% endif %}
 {%- endfor %}
 {%- endif %}
-{%- if expected_calendar_markdown %}
-## Today's Schedule
-{{ expected_calendar_markdown }}
-{%- endif %}
 {%- if calendar_events_upcoming %}
 
 ## Google Calendar Events (upcoming horizon)
@@ -53,7 +49,8 @@
 {%- endif %}
 {%- if calendar_events_completed %}
 
-## Completed Calendar Events (recent horizon)
+## Calendar Events Whose Time Has Passed (recent horizon)
+*The calendar's plan only: an event's end passing does not show it happened.*
 {%- for event in calendar_events_completed %}
 - **{{ event.event_name }}** (ended at {{ event.end_time }})
 {%- endfor %}

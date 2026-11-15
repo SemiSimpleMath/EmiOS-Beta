@@ -183,3 +183,15 @@ def test_a_watch_woken_once_shows_the_arrival_as_taken_and_waits_from_its_run():
     text = render_view("worker", view=worker_data(store.load(wid), "relay"))
     assert "forwarded the approval" in text and "owner@example.test" in text
     assert "run, attempt 1, judged" in text
+
+
+def test_assistant_chat_lines_are_not_arrivals():
+    """The assistant's own chat lines and workers' results posted to the chat are not incoming events (2026-11-15:
+    the assistant's own message woke a task)."""
+    _store, wid = scenario()
+    own = {"metadata": {"item_id": "chat:own", "source_type": "chat", "chat_role": "assistant",
+                        "summary": "Assistant: Created the event.", "created_at": "2026-09-20T15:05:00+00:00"}}
+    user = {"metadata": {"item_id": "chat:user", "source_type": "chat", "chat_role": "user",
+                         "summary": "Owner: option B is approved.", "created_at": "2026-09-20T15:06:00+00:00"}}
+    bb = prepare(wid, [own, user])
+    assert [s["item_id"] for s in bb.get_state_value("work_wait_intake")] == ["chat:user"]

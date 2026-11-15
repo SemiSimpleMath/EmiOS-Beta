@@ -28,12 +28,12 @@ A belief should be split when it contains multiple independently-changeable rule
 **The test:** Draw an "and" between clauses. If both halves could independently be true or false - if changing one half would not require rewriting the other - they are two beliefs, not one.
 
 **Examples that should be split:**
-- "Jukka wants X and also Y" -> two beliefs if X and Y are unrelated topics
+- "{{ resource_user_data.preferred_name }} wants X and also Y" -> two beliefs if X and Y are unrelated topics
 - A belief that covers bedtime policy, liquids cutoff, CPAP checks, and dog crating is four beliefs
-- A belief that covers email filtering rules for school, safety alerts, Katy sharing, and job suppression is four beliefs
+- A belief that covers email filtering rules for school, safety alerts, sharing with a family member, and job suppression is four beliefs
 
 **Examples that should stay together:**
-- "On Mondays when X happens, Jukka wants Y" - one belief, even though it has a condition. The condition and the action are not independently changeable.
+- "On Mondays when X happens, {{ resource_user_data.preferred_name }} wants Y" - one belief, even though it has a condition. The condition and the action are not independently changeable.
 - "Usually X, but Y when partner is home" - one belief with a qualifier. The qualifier is not a separate rule.
 
 **Word count signal:** If a belief statement exceeds ~150 words, treat it as a strong signal to check for independent clauses that should be split out.

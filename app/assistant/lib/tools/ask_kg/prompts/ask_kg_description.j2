@@ -1,14 +1,4 @@
-Fast node-local KG RAG Q&A.
-
-Use this when you have a base node (`node`) and you want a fast answer to a question using *only* evidence found within a bounded neighborhood around that node.
-`node` should usually be the node name/title (for example "Alex" or "Phil"), but a node id also works.
-
-How it works:
-- Expand the KG around the base node up to `max_hops` (deterministic bounded BFS).
-- Rank edge evidence sentences by embedding similarity to the question.
-- Send the compact evidence pack to a fast model and return the answer with citations.
-
-Notes:
-- This tool intentionally has only two input fields: `node` and `question`.
-- Retrieval depth and ranking are fixed internally for consistent behavior.
-
+Answer a question from knowledge-graph evidence, with citations. Two modes:
+- Global (omit `node`): searches the whole graph by embedding similarity. Best for general questions about the user, daily life, preferences or people when no single entity anchors the question.
+- Node-anchored (give `node`): searches a bounded neighborhood around that entity. Best when you already know the relevant entity.
+Retrieval depth and ranking are fixed internally.

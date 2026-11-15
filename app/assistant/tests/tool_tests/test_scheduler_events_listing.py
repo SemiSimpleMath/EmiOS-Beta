@@ -51,3 +51,18 @@ def test_interval_event_shows_period_and_next_occurrence():
 def test_empty_window_says_so_instead_of_claiming_success():
     text = format_scheduler_events([], "2026-09-09T00:00:00-07:00", "2026-09-09T23:59:59-07:00")
     assert text == "Found 0 scheduler events from 2026-09-09T00:00:00-07:00 to 2026-09-09T23:59:59-07:00."
+
+
+def test_interval_occurrences_start_inside_the_window():
+    """A weekly reminder's first listed occurrence is the first one in the window, not the one before it (2026-11-15:
+    a Nov 15-22 listing showed Monday Nov 9 and a yearly birthday from October)."""
+    from types import SimpleNamespace
+    from contextlib import nullcontext
+    from app.assistant.scheduler.scheduler.event_scheduler import EventScheduler
+    weekly = SimpleNamespace(event_id="w", event_type="interval", interval=604800, event_payload={"title": "Timesheets"},
+                             start_date="2025-11-03T15:00:00+00:00", end_date=None)
+    sched = EventScheduler.__new__(EventScheduler)
+    sched.app = SimpleNamespace(app_context=nullcontext)
+    sched.event_storage = SimpleNamespace(get_all_time_events=lambda: [weekly])
+    out = sched.get_events(start_date="2026-11-15T08:00:00+00:00", end_date="2026-11-22T08:00:00+00:00")
+    assert [e.event_payload["occurrence"] for e in out] == ["2026-11-16T15:00:00+00:00"]

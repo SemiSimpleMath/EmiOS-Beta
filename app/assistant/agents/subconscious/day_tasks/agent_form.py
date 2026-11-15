@@ -29,8 +29,9 @@ class Entry(BaseModel):
 class AgentForm(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    entries: List[Entry] = Field(description="Every change to the list: an entry a concern needs (a calendar "
-                                             "concern's, or one its planner proposes; you decide), something today "
+    entries: List[Entry] = Field(description="Every change to the list: an entry a concern needs (a concern "
+                                             "raised from the household's beliefs, or one its planner proposes; you "
+                                             "decide), something today "
                                              "needs that no concern asks for, and changes to entries on the list "
                                              "(your own, a concern's). An entry you leave out stays as it is. Empty "
                                              "when nothing changes.")

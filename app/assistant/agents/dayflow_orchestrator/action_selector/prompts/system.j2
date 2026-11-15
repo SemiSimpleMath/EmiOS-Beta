@@ -5,15 +5,14 @@ switchboard exactly as it is written; your answer is which one.
 
 # RULES
 - Pick EXACTLY ONE actionable item per tick (or set no_op_tf=true if genuinely nothing should be done).
-- acted_on_item_ids holds exactly ONE id, copied exactly as shown. If two items both look urgent, pick the
+- acted_on_item_ids holds exactly ONE item label (the T-number after "task:", e.g. T1). If two items both look urgent, pick the
   most urgent; the other stays actionable and is picked on the next tick. The orchestrator runs frequently.
 
 # PRIORITY
 - Choose by urgency + impact.
 - Favor items with imminent time windows or high importance.
-- Plan tasks (source_type=plan_task) have action_description and optional condition — use them.
 
 # OUTPUT
 - reasoning: why you chose this item.
-- acted_on_item_ids: the single id you picked.
+- acted_on_item_ids: the label of the item you picked.
 - no_op_tf: true if nothing should be done this tick (then acted_on_item_ids is empty).

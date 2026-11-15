@@ -365,7 +365,7 @@ def test_work_reports_render_under_their_work_and_attached_work_under_its_concer
             "attached_at": "2026-03-10T10:00:00+00:00", "status": "done",
             "ended": {"outcome": "done", "at": "2026-03-10T11:00:00+00:00", "reason": "judged complete"},
             "progress": {"work_id": "work_a", "state": "done", "ended_at": "2026-03-10T11:00:00+00:00",
-                         "reason": "judged complete", "replanning": False, "dropped": [], "unfinished": [],
+                         "reason": "judged complete", "replanning": False, "dropped": [], "not_achieved": [], "unfinished": [],
                          "to_come": [], "done": [{"title": "Ask", "verdict": "achieved", "at": "2026-03-10T10:30:00+00:00"}]},
             "judgments": [{"node_id": "ask", "title": "Ask", "outcome": "He is less stressed.",
                            "at": "2026-03-10T10:30:00+00:00",
@@ -517,7 +517,7 @@ def test_a_concern_closes_at_its_expiry_whatever_its_state(tmp_path):
     after = reg.read()
     assert [c["concern_id"] for c in after["active"]] == ["c-fine", "c-old"]
     [closed] = after["resolved"]
-    assert closed["resolution_reason"].startswith("its time passed: it mattered until ")
+    assert closed["resolution_reason"].startswith("it expired at ")
     assert persist.expire_concerns(NOW, connect=reg.connect) == []
     assert persist.next_expiry(after, NOW) == NOW + timedelta(days=3)
 

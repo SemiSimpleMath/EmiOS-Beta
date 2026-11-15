@@ -31,6 +31,27 @@ from datetime import datetime, timedelta
 from app.assistant.utils.time_utils import local_to_utc, parse_time_string, to_rfc3339_z
 
 
+def _due_text(raw_due: str) -> str:
+    """A Google Tasks due date as its day. The API stores only the date, as midnight UTC, so it is read as a date and
+    never converted to local time (which would move it to the day before)."""
+    return datetime.fromisoformat(str(raw_due).replace("Z", "+00:00")).strftime("%a %Y-%m-%d")
+
+
+def _task_line(task: Dict[str, Any], indent: str = "") -> str:
+    """One task (and its subtasks) as the agent reads it: title, list, due day, status, notes, id."""
+    line = f"{indent}- {str(task.get('title') or '').strip() or '(no title)'}"
+    if task.get("tasklist_title"):
+        line += f"  list={task['tasklist_title']}"
+    if task.get("due"):
+        line += f"  due={_due_text(task['due'])}"
+    line += f"  status={task.get('status') or ''}"
+    notes = str(task.get("notes") or "").strip()
+    if notes:
+        line += f"  notes={notes}"
+    line += f"  task_id={task.get('id') or ''}"
+    return "\n".join([line, *(_task_line(sub, indent + "  ") for sub in task.get("subtasks") or [])])
+
+
 class ToDoTool(BaseTool):
     """
     Tool to manage To-Do lists and tasks. In addition to the usual operations,
@@ -285,9 +306,13 @@ class ToDoTool(BaseTool):
                         self.repo_manager.store_event(task_id, event_data=task, data_type="todo_task")
                     self.repo_manager.sync_events_with_server(server_ids, "todo_task")
 
+            # Agents read `content`, never `data_list` (history_formatter), so the tasks are written out here, as the
+            # calendar tool writes its events. Until 2026-11-15 the content was only "Retrieved N task(s)."
+            lines = [f"Retrieved {len(tasks)} task(s)." if tasks else "No tasks available."]
+            lines += [_task_line(task) for task in tasks]
             return ToolResult(
                 result_type="todo_tasks",
-                content=f"Retrieved {len(tasks)} task(s)." if tasks else "No tasks available.",
+                content="\n".join(lines),
                 data_list=tasks  # Always return a valid list, even if empty
             )
 

@@ -690,13 +690,18 @@ def activity_spans(
                         is_afk = bool(snapshot.get("is_afk", False))
                         current_type = "AFK" if is_afk else "Active"
 
+                        current_start = None
                         if is_afk:
                             mins = float(snapshot.get("idle_minutes") or snapshot.get("current_afk_minutes") or 0)
-                        else:
-                            mins = float(snapshot.get("active_work_session_minutes") or 0)
+                            if mins > 0:
+                                current_start = now_utc - timedelta(minutes=mins)
+                        elif snapshot.get("active_start_utc"):
+                            # The monitor's live reading carries when the session began (`active_start_utc`), never
+                            # `active_work_session_minutes` (a key of the statistics resource on disk), so until
+                            # 2026-11-15 the ongoing active segment was always dropped.
+                            current_start = _parse_utc(snapshot["active_start_utc"])
 
-                        if mins > 0:
-                            current_start = now_utc - timedelta(minutes=mins)
+                        if current_start is not None and current_start < now_utc:
                             merged.append(
                                 {
                                     "start_utc": current_start,

@@ -33,7 +33,7 @@ def test_the_concern_record_shows_the_account_without_the_verdict():
             "done_when": None, "source": "", "expires": "", "history": "",
             "attempts": [{"work_id": "w1", "objective": "Ask about the fair", "attached_at": FIN["at"],
                           "progress": {"work_id": "w1", "state": "abandoned", "ended_at": FIN["at"], "reason": "r",
-                                       "replanning": False, "done": [], "dropped": [], "unfinished": [], "to_come": []},
+                                       "replanning": False, "done": [], "dropped": [], "not_achieved": [], "unfinished": [], "to_come": []},
                           "judgments": [{**FIN, "title": "Ask", "replies": []}]}]}
     text = render_view("concern_view", concerns=[view])
     assert "- concern c1234567: School fair [active]\n  severity: low (how much it matters" in text

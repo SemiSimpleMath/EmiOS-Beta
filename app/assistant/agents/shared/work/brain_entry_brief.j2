@@ -1,7 +1,8 @@
 {#- The brief of a work object made from an entry on the brain's list (dayflow_orchestrator/brain_list_intake.py):
     the architect's "why this is a work object". Expects `entry` {id, kind, what, assistant_part, when_local, why,
     times}, `belief` {belief_key, statement, related} or None,
-    `sources` [text] (each email or message the concern came from, verbatim); the entry's `day` and `updated_at`
+    `sources` [text] (each further email or message in the concern's evidence, verbatim; the one that raised it is
+    shown with the concern); the entry's `day` and `updated_at`
     (when it was decided, UTC ISO) date it. Times local. -#}
 FROM THE BRAIN'S LIST: the brain decided this is needed; how is yours.
 - the outcome wanted: {{ entry.what }}
@@ -15,7 +16,7 @@ It comes from the calendar of {{ entry.day }}{% if entry.times %} ({{ entry.time
 {%- endfor %}
 {% endif %}
 {%- if sources %}
-WHERE THE CONCERN CAME FROM, word for word:
+MORE OF WHAT THE CONCERN CAME FROM, word for word (what raised it is shown with the concern):
 {% for s in sources %}---
 {{ s }}
 {% endfor %}{% endif %}

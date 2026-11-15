@@ -27,7 +27,7 @@
       "description": "Structured tool result payload."
     }
   ],
-  "arguments_prompt": "Arguments to personal_admin_manager are:\n- task: required detailed instructions for calendar/todo/reminder/email operations.\n- information: optional supporting context and constraints.",
+  "arguments_prompt": "Arguments to personal_admin_manager are:\n- task: required detailed instructions for calendar/todo/reminder/email operations.\n- information: supporting context and constraints; required; '' when there is none.",
   "metadata": {
     "min_authority": 90,
     "approval_min_authority": 90,

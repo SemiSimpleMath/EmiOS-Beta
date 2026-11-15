@@ -25,9 +25,14 @@ Settled when: {{ c.done_when or "(not stated)" }}
 Nothing yet.
 {% endfor %}
 ## The latest decision
-{% if c.plan %}Plan: {{ c.plan.decision }}{% if c.plan.hold_until %} until {{ c.plan.hold_until }}{% endif %}
+{% if c.plan %}{% set decided = {"act_now": "act now", "hold": "hold", "no_action": "no action"} -%}
+Decision: {{ decided.get(c.plan.decision, c.plan.decision) }}{% if c.plan.hold_until %} until {{ c.plan.hold_until }}{% endif %}
+Why: {{ c.plan.why }}
+{% if c.plan.todo %}The things to be done for it, as this decision leaves them:
 {% for t in c.plan.todo %}- {{ t }}
-{% endfor %}Why: {{ c.plan.why }}
+{% endfor %}{% endif %}
+{%- elif c.placed %}None: it was placed from the household's beliefs at its time today, so what is done for it is
+decided from the placement itself, with no separate decision.
 {% else %}No decision yet.
 {% endif %}
 

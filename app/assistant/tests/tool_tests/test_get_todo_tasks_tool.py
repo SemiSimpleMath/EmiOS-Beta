@@ -2,8 +2,8 @@
 Tests for ToDoTool.handle_get_tasks — agent-side retrieval of Google Tasks.
 
 Design intent (from the tool + user):
-- The UI reads tasks from EventRepository, not from tool ``content``. So the
-  agent-facing summary can be terse (count-only) without breaking the UX.
+- The UI reads tasks from EventRepository; agents read only ``content``, so the
+  content lists every task (2026-11-15; it was count-only and agents never saw a task).
 - The important correctness properties are:
   * ``data_list`` carries full task rows for downstream consumers
   * filters (task_name, date range, include_completed) work correctly
@@ -267,3 +267,16 @@ def test_filter_composition_name_plus_date_range(monkeypatch):
     )
     titles = [r["title"] for r in result.data_list]
     assert titles == ["Call Sam about soccer"]
+
+
+def test_content_lists_each_task_for_the_agent(monkeypatch):
+    """Agents never see data_list: the content carries title, list, due day (as stored, not shifted), status, id."""
+    tool, _repo = _build_tool(monkeypatch, [
+        _task(task_id="a", title="Buy groceries", due="2026-11-16T00:00:00.000Z"),
+        _task(task_id="b", title="Send the link"),
+    ])
+    lines = _get_tasks(tool).content.splitlines()
+    assert lines[0] == "Retrieved 2 task(s)."
+    assert "- Buy groceries" in lines[1] and "list=Inbox" in lines[1] and "due=Mon 2026-11-16" in lines[1]
+    assert "status=needsAction" in lines[1] and "task_id=a" in lines[1]
+    assert lines[2].startswith("- Send the link") and "due=" not in lines[2]

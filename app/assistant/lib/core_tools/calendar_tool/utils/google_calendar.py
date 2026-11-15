@@ -348,7 +348,7 @@ def get_events(
         service: Authenticated Google Calendar service instance.
         calendar_names (Optional[List[str]]): List of calendar names to fetch events from.
         calendar_ids (Optional[List[str]]): List of calendar IDs to fetch events from.
-        max_results (int): Maximum number of events per calendar.
+        max_results (int): Events per page; every page of the window is read.
         start_str (Optional[str]): Start datetime in RFC3339 format with timezone.
                                    Defaults to current time if not provided.
         end_str (Optional[str]): End datetime in RFC3339 format with timezone.
@@ -391,17 +391,26 @@ def get_events(
         for calendar_id in resolved_calendar_ids:
             try:
                 logger.info(f"Fetching events from calendar ID: {calendar_id}")
-                events_result = service.events().list(
-                    calendarId=calendar_id,
-                    timeMin=start_str,
-                    timeMax=end_str,
-                    maxResults=max_results,
-                    singleEvents=single_events,
-                    orderBy='startTime' if single_events else None,
-                    timeZone='UTC'
-                ).execute()
-
-                events = events_result.get('items', [])
+                # Every page of the window. Until 2026-11-15 only the first page (max_results events) was read, so a
+                # 30-day window of a calendar full of recurring instances ended five days in and the events after
+                # it (and their repo rows, which the sync then removed) never reached anyone.
+                events = []
+                page_token = None
+                while True:
+                    events_result = service.events().list(
+                        calendarId=calendar_id,
+                        timeMin=start_str,
+                        timeMax=end_str,
+                        maxResults=max_results,
+                        singleEvents=single_events,
+                        orderBy='startTime' if single_events else None,
+                        timeZone='UTC',
+                        pageToken=page_token,
+                    ).execute()
+                    events.extend(events_result.get('items', []))
+                    page_token = events_result.get('nextPageToken')
+                    if not page_token:
+                        break
 
                 logger.info(f"Fetched {len(events)} events from calendar '{calendar_id}'.")
                 all_events.extend(events)

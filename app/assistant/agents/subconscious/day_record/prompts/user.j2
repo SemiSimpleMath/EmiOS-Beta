@@ -3,19 +3,25 @@
     basis, note, shown_by}], milestones [{at_utc, description, basis, origin, shown_by}], concerns [{ref, title,
     subject, history}] (persist.history_for_prompt), matters (day_tasks.matters_today, each with ref). -#}
 {%- set A = agent_input -%}
+{#- What showed a state or a milestone: the labels of what is shown here; what it rested on that this call no longer
+    shows has an empty label and is said in words. -#}
+{%- macro shown(by) -%}
+{%- set seen = by | select | list -%}
+{%- if by %} [shown by {{ (seen + (["something no longer shown here"] if seen | length < by | length else [])) | join(", ") }}]{% endif -%}
+{%- endmacro -%}
 Now: {{ A.now | local_time }}{% if A.current %}; {{ A.current.words }}{% endif %}
 
 ## The day's record ({{ A.day }})
 
 Events:
 {% for e in A.events -%}
-- [{{ e.ref }}] {{ e.title }}{% if e.start_utc %}, {{ e.start_utc | local_time }}{% endif %}{% if e.end_utc %} to {{ e.end_utc | local_time }}{% endif %}: {{ e.state | replace("_", " ") }}{% if e.time_is_now %} (its time is now){% endif %}{% if e.basis %} ({{ e.basis }}){% endif %}{% if e.note %}: {{ e.note }}{% endif %}{% if e.shown_by %} [shown by {{ e.shown_by | select | join(", ") }}]{% endif %}
+- [{{ e.ref }}] {{ e.title }}{% if e.start_utc %}, {{ e.start_utc | local_time }}{% endif %}{% if e.end_utc %} to {{ e.end_utc | local_time }}{% endif %}: {{ e.state | replace("_", " ") }}{% if e.time_is_now %} (its time is now){% endif %}{% if e.basis %} ({{ e.basis }}){% endif %}{% if e.note %}: {{ e.note }}{% endif %}{{ shown(e.shown_by) }}
 {% else -%}
 (nothing on the record yet)
 {% endfor %}
 Milestones recorded:
 {% for m in A.milestones -%}
-- {{ m.at_utc | local_time }}: {{ m.description }} ({{ m.basis }}{% if m.origin == "sleep" %}, from the sleep data{% elif m.origin == "activity" %}, from the activity data{% endif %})
+- {{ m.at_utc | local_time }}: {{ m.description }} ({{ m.basis }}{% if m.origin == "sleep" %}, from the sleep data{% elif m.origin == "activity" %}, from the activity data{% endif %}){{ shown(m.shown_by) }}{% if m.origin == "model" and not m.shown_by %} [nothing recorded shows it]{% endif %}
 {% else -%}
 (none yet)
 {% endfor %}

@@ -629,6 +629,10 @@ class CalendarTool(BaseTool):
             result_events.append(parsed_event)
             server_ids.add(event_id)
 
+        # In time order across calendars: get_events returns each calendar's events in turn, so the holidays calendar's
+        # Thanksgiving was listed before today's events (until 2026-11-15).
+        result_events.sort(key=lambda e: (e["start"] is None, datetime.fromisoformat(e["start"]) if e["start"] else None))
+
         # Batch write to database AFTER all processing is complete
         # This minimizes DB lock time
         if repo_update and result_events:

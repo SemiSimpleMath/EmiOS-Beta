@@ -48,6 +48,13 @@ def _wait(wo: WorkObject, node: WorkNode, now: datetime) -> Dict[str, Any]:
     if status == "done":
         return {"kind": "being_checked"}
     if status == "failed":
+        # What follows a failed step is the finalizer's record of it (for this attempt, once judged): it stopped
+        # the step, or the architect has already revised the plan by its instruction, or the next attempt is open.
+        fin = {} if wo.needs_finalization(node) else (node.payload.get("finalizer") or {})
+        if fin.get("next_step") == "stop":
+            return {"kind": "stopped"}
+        if fin.get("next_step") and fin.get("consumed_at"):
+            return {"kind": "replanned"}
         return {"kind": "failed"}
     if status in {"proposed", "actionable", "waiting"}:
         if node.wake_kind in {"event", "signal"}:
@@ -91,6 +98,7 @@ def work_progress(wo: WorkObject, now: Optional[datetime] = None) -> Dict[str, A
     done: List[Dict[str, Any]] = []
     dropped: List[Dict[str, Any]] = []
     to_come: List[Dict[str, Any]] = []
+    not_achieved: List[Dict[str, Any]] = []    # failed steps the finalizer stopped, or the plan already answered
     unfinished: List[Dict[str, Any]] = []      # open when the work ended (older work); nothing more comes of it
     for node in _plan_order(wo, [n for n in wo.nodes.values() if wo.is_work_unit(n)]):
         fin = node.payload.get("finalizer") or {}
@@ -104,11 +112,21 @@ def work_progress(wo: WorkObject, now: Optional[datetime] = None) -> Dict[str, A
             if ended:
                 unfinished.append({"title": node.title})
             else:
-                to_come.append({"title": node.title, "wait": _wait(wo, node, now)})
+                wait = _wait(wo, node, now)
+                if wait["kind"] in {"stopped", "replanned"}:      # nothing more comes of this step itself
+                    not_achieved.append({"title": node.title, "after": wait["kind"]})
+                else:
+                    to_come.append({"title": node.title, "wait": wait})
         else:
             raise ValueError(f"work_progress: task {node.id} has status {node.status!r}, which has no wording")
+    # Steps dropped together for one reason (the architect's batch gives each the same reason) are one line.
+    by_reason: Dict[Any, List[str]] = {}
+    for d in dropped:
+        by_reason.setdefault(d["reason"], []).append(d["title"])
+    dropped = [{"titles": titles, "reason": reason} for reason, titles in by_reason.items()]
     return {"work_id": wo.id, "state": state,
             "ended_at": _iso(terminal.get("at") or wo.updated_at) if ended else None,
             "reason": terminal.get("reason") if ended else None,
             "replanning": not ended and wo.has_pending_revision(),
-            "done": done, "dropped": dropped, "to_come": to_come, "unfinished": unfinished}
+            "done": done, "dropped": dropped, "not_achieved": not_achieved, "to_come": to_come,
+            "unfinished": unfinished}

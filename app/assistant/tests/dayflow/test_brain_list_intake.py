@@ -258,3 +258,34 @@ def test_a_concerns_work_carries_the_artifacts_it_came_from_by_ref(scratch, monk
     assert [(s["item_id"], s["pod_id"]) for s in sources] == [
         ("message:m-1", ""), ("dayflow_email:acct:x1", "datapod:email:p-ring")], "a work event is not an artifact"
     assert sources[1]["message_id"] == "email:acct:x1" and sources[1]["sender"] == "Ring <ring@example.com>"
+
+
+def test_the_brief_leaves_what_raised_the_concern_to_the_concern(monkeypatch):
+    """The architect reads the concern beside the brief, with what raised it word for word ("raised from"); until
+    2026-11-15 the brief copied the same email again under it. The rest of the concern's evidence stays in the brief."""
+    from app.assistant.subconscious import brain_step, concern_store
+    ring = {"concern_id": "c-ring", "title": "Doorbell battery",
+            "source": {"kind": "email", "at": NOW.isoformat(), "ref": "datapod:email:p-ring", "content": "Low"},
+            "evidence": [{"kind": "pod", "ref": "datapod:email:p-ring", "snippet": "Subject: Low battery"},
+                         {"kind": "chat_msg", "ref": "message:m-1", "snippet": "watch the doorbell emails"}]}
+    monkeypatch.setattr(concern_store, "load_register", lambda connect=None: {**REGISTER, "active": [ring]})
+    monkeypatch.setattr(brain_step, "_evidence_text", lambda e: f"TEXT of {e['ref']}")
+    text = B.brief({"id": "con:c-ring:1", "kind": "concern", "concern_id": "c-ring", "what": "Recharged",
+                    "assistant_part": "tell the owner", "when_local": "9:00 AM", "why": "Low battery.",
+                    "updated_at": NOW.isoformat(), "day": DAY})
+    assert "TEXT of message:m-1" in text and "TEXT of datapod:email:p-ring" not in text
+
+
+def test_a_revised_goal_keeps_its_whole_objective_as_its_title():
+    """Until 2026-11-15 revise_goal cut the title at 80 characters, and readers printed the cut title and then the
+    whole objective again."""
+    from app.assistant.dayflow_orchestrator.work_intake import goal_update
+    from app.assistant.lib.tools.read_work_object.read_work_object import ReadWorkObjectTool
+    store = _store()
+    wo = store.apply("create_work_object", {"title": "short", "goal_content": "short"})
+    text = "The doorbell battery is recharged before the weekend visitors arrive on Saturday morning."
+    store.apply("revise_goal", goal_update(store.load(wo.id), objective=text, success_criteria="Recharged."))
+    loaded = store.load(wo.id)
+    assert loaded.title == text and loaded.nodes[loaded.goal_node_id].title == text
+    shown = ReadWorkObjectTool._render(wo.id)
+    assert shown.count(text) == 1 and "(no steps planned yet)" in shown

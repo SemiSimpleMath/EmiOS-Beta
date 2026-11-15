@@ -50,6 +50,24 @@ def test_a_decorated_echo_is_staged_under_the_canonical_id():
     assert bb.get_state_value("acted_on_item_ids") == [ref]
 
 
+def test_a_picked_label_is_staged_under_its_items_id():
+    """The selector picks by the label its list shows (models never copy ids); code maps it back."""
+    ref = _node("Step", "Do the step.")
+    bb = FakeBlackboard({"last_agent": SELECTOR, "acted_on_item_ids": ["T2"],
+                         "actionable_items": [{"item_id": "work_x::other", "short_id": "T1"},
+                                              {"item_id": ref, "short_id": "T2"}]})
+    _router(bb).action_handler(message=None)
+    assert bb.get_state_value("acted_on_item_ids") == [ref]
+
+
+def test_an_unknown_label_fails_loud():
+    _node("Step", "Do the step.")
+    bb = FakeBlackboard({"last_agent": SELECTOR, "acted_on_item_ids": ["T9"],
+                         "actionable_items": [{"item_id": "work_x::n", "short_id": "T1"}]})
+    with pytest.raises(ValueError):
+        _router(bb).action_handler(message=None)
+
+
 def test_no_op_ends_the_pass():
     bb = FakeBlackboard({"last_agent": SELECTOR, "no_op_tf": True, "acted_on_item_ids": []})
     _router(bb).action_handler(message=None)

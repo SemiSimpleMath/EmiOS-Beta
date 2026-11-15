@@ -75,7 +75,7 @@ def test_finished_and_dropped_steps_and_the_plan_order():
         {"id": "old", "title": "Print it", "status": "abandoned", "payload": {"terminal": {"reason": "not needed"}}},
         edges=[("compile", "deliver")]), NOW)
     assert p["done"] == [{"title": "Compile the briefing", "verdict": "achieved", "at": T0.isoformat()}]
-    assert p["dropped"] == [{"title": "Print it", "reason": "not needed"}]
+    assert p["dropped"] == [{"titles": ["Print it"], "reason": "not needed"}]
     assert p["to_come"] == [{"title": "Deliver the briefing", "wait": {"kind": "ready"}}]
     text = _render(p)
     assert text.startswith("In progress. The assistant carries this work until every step is done, "
@@ -98,6 +98,39 @@ def test_a_pending_replan_is_said():
     assert p["replanning"] and "the assistant is re-planning this work" in _render(p)
 
 
+def test_a_failed_step_says_what_the_finalizer_decided_followed_it():
+    """A step the finalizer stopped is not 'being decided' (2026-11-15: a stopped branch read so for weeks), and one
+    whose instruction the architect already applied is not to come either; one still open is."""
+    judged = {"dispatch_epoch": 1, "finalized_epoch": 1}
+    p = work_progress(_work(
+        {"id": "a", "title": "Ask about the sale", "status": "failed",
+         "payload": {**judged, "finalizer": {"verdict": "unrecoverable", "next_step": "stop", "dispatch_epoch": 1}}},
+        {"id": "b", "title": "Email the school", "status": "failed",
+         "payload": {**judged, "finalizer": {"verdict": "retry", "next_step": "new_approach", "dispatch_epoch": 1,
+                                             "consumed_at": T0.isoformat()}}},
+        {"id": "c", "title": "Book the table", "status": "failed",
+         "payload": {**judged, "finalizer": {"verdict": "retry", "next_step": "new_approach", "dispatch_epoch": 1}}}),
+        NOW)
+    assert p["not_achieved"] == [{"title": "Ask about the sale", "after": "stopped"},
+                                 {"title": "Email the school", "after": "replanned"}]
+    assert [t["title"] for t in p["to_come"]] == ["Book the table"]
+    text = _render(p)
+    assert ("Did not succeed:\n  - Ask about the sale: the assistant stopped trying it\n"
+            "  - Email the school: the assistant has already changed the plan in answer to it") in text
+    assert "  - Book the table: did not succeed; the assistant is deciding the next attempt" in text
+
+
+def test_steps_dropped_for_one_reason_are_one_line():
+    p = work_progress(_work(
+        {"id": "a", "title": "Print it", "status": "abandoned", "payload": {"terminal": {"reason": "not needed"}}},
+        {"id": "b", "title": "Fold it", "status": "abandoned", "payload": {"terminal": {"reason": "not needed"}}},
+        {"id": "c", "title": "Mail it", "status": "abandoned", "payload": {"terminal": {"reason": "sent by hand"}}}),
+        NOW)
+    assert p["dropped"] == [{"titles": ["Print it", "Fold it"], "reason": "not needed"},
+                            {"titles": ["Mail it"], "reason": "sent by hand"}]
+    assert "Dropped from the plan:\n  - Print it; Fold it: not needed\n  - Mail it: sent by hand\n" in _render(p)
+
+
 def test_an_ended_work_says_how_it_ended():
     done = work_progress(_work({"id": "t", "title": "Bake", "status": "closed"}, status="done",
                                goal_payload={"terminal": {"at": T0.isoformat(), "reason": "every step finished"}}), NOW)
@@ -112,7 +145,8 @@ def test_every_main_task_status_has_a_place_and_an_unknown_one_raises():
     for work_status in ("active", "done"):
         for status in TRANSITIONS["spine"]:
             p = work_progress(_work({"id": "t", "title": "Bake", "status": status}, status=work_status), NOW)
-            placed = [t["title"] for key in ("done", "dropped", "to_come", "unfinished") for t in p[key]]
+            placed = [t["title"] for key in ("done", "not_achieved", "to_come", "unfinished") for t in p[key]]
+            placed += [title for t in p["dropped"] for title in t["titles"]]
             assert placed == ["Bake"], (work_status, status)
             _render(p)
     with pytest.raises(ValueError, match="no wording"):

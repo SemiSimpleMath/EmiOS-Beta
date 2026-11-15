@@ -28,20 +28,21 @@ take it from there.
 
 If none of the above apply, ignore this skill.
 
-## When NOT to use this skill — call bash_manager instead
+## When NOT to use this skill — the file is on disk
 
 The pod store is **stored memory**, not a filesystem index. If the task
 is anchored on a local filesystem location, the source of truth is the
-disk, not the pod store. Route to `bash_manager` instead:
+disk, not the pod store. Hand it to the manager or tool you are offered
+that works with local files:
 
 - "find any picture in my Pictures folder" / "from `~/Pictures`"
 - "the doc in `~/Documents/...`"
 - any task that names a real path (`~/X`, `C:\Users\...\X`)
 - "send me a [file kind] from my [folder name]" — file is on disk
 
-`bash_manager` lists the directory, picks the file, mints a pod via
-`mint_pod_from_path`, and returns the pod_id. That pod_id is what you
-pass forward (e.g. to `send_email`). Never `pod_search` for files in a
+That worker lists the directory, picks the file, mints a pod from it,
+and returns the pod_id. That pod_id is what you pass forward (e.g. to
+whoever sends or attaches it). Never `pod_search` for files in a
 named filesystem location — pods only exist for files that have already
 been minted, and most filesystem files have not.
 
@@ -50,11 +51,12 @@ been minted, and most filesystem files have not.
 | Tool | Sweet spot | Avoid for |
 |---|---|---|
 | `pod_search` | Indexed, single-hop, opinionated. Filters: `kind`, `tags`, `since`, `query` (substring on body+one_liner), `linked_to_entity` (single-hop KG join), `linked_via` (edge-type list). Returns hydrated `PodHeader` objects. **Default tool** — start here. | Multi-hop graph walks, edge-type-precise structural queries. |
-| `kg_query` | Read-only SQL over `kg_node_metadata` + `kg_edge_metadata`. Pods are KG citizens (every pod has a `node_type='Pod'` row mirrored automatically), so you can write `WHERE source_id IN (SELECT id FROM kg_node_metadata WHERE label='Noah') AND relationship_type='participant'` -style joins. | Anything `pod_search` already covers — kg_query is verbose to write and easy to compose wrong. |
+| `kg_query` (when offered) | Read-only SQL over `kg_node_metadata` + `kg_edge_metadata`. Pods are KG citizens (every pod has a `node_type='Pod'` row mirrored automatically), so you can write `WHERE source_id IN (SELECT id FROM kg_node_metadata WHERE label='Noah') AND relationship_type='participant'` -style joins. | Anything `pod_search` already covers — kg_query is verbose to write and easy to compose wrong. |
 
 **Fallthrough rule:** try `pod_search` first. If the question requires
 multi-hop traversal (e.g., "photos at events Noah attended" needs
-Event → participant → has_photo, two hops), fall through to `kg_query`.
+Event → participant → has_photo, two hops) and a `kg_query` tool is
+offered, fall through to it.
 
 ## pod_search filter compositions
 
@@ -76,9 +78,6 @@ Event → participant → has_photo, two hops), fall through to `kg_query`.
 "recent invoice emails"
   → pod_search(kind="email", query="invoice", since="2w")
 
-"video of Noah's birthday"
-  → pod_search(kind="video", linked_to_entity="Noah", query="birthday")
-
 "food pods since Tuesday"
   → pod_search(tags=["food"], since="<date>")
 
@@ -86,7 +85,7 @@ Event → participant → has_photo, two hops), fall through to `kg_query`.
   → pod_search(kind="chat_cluster", query="creamer")
 ```
 
-## kg_query escalations
+## kg_query escalations (when a kg_query tool is offered)
 
 ```
 "photos at events Noah attended"
@@ -119,8 +118,8 @@ When you find pods:
 Decide whether the search result is feeding **another agent** or going
 **back to the user** as the reply.
 
-- **Downstream-agent path** (find pods for `send_email` to attach,
-  `kg_*` to link, etc.): DON'T fetch. The pod_id is the handoff.
+- **Downstream-agent path** (find pods for an email to attach,
+  a graph link to make, etc.): DON'T fetch. The pod_id is the handoff.
 
 - **User-facing path** (the user asked a question and your search
   result will reach them in the room): the user wants CONTENT, not a

@@ -1,16 +1,22 @@
 You are given one day in {{ resource_user_data.first_name }}'s life: the lasting things noticed
 about them that day, each with the evidence behind it, and the numbered timeline items those rest
 on — their own messages, the assistant's replies they were answering, and the prompts they
-declined, deferred, or answered in their own words.
+declined, deferred, or answered in their own words. A prompt whose response is any other state
+(such as "expired") went unanswered: it shows what the assistant asked, never what
+{{ resource_user_data.first_name }} thinks or decided.
 
-We are given distilled insights from users day. These are most important facts that we believe to be true
+Each insight carries its writer's scope: "chronic" when it was stated as lasting or seen repeating,
+"daily" when it was true of that day or a bounded situation, "historical" for a fact about the past.
+The scope is the writer's reading; the beliefs rest on the evidence.
 
-based on what the user has said today or what their actions revealed. We want to store a subset of these that are usable
-for operations of our assistant agent system. While we maybe given compound sentences we need to break these into atomic ones.
+The insights are distilled from the day: the most important facts we believe to be true, based on
+what {{ resource_user_data.first_name }} said that day or what their actions revealed. We store the
+subset of these that is usable for the operations of our assistant agent system. An insight may be a
+compound sentence; break it into atomic beliefs.
 
-This means that in a sentence: "User likes the restaurant Paris Cousine and visits every Saturday", we should creat two beliefs out of it.
-1) "User likes the restaurant Paris Cousine."
-2) "User visits the restaurant Paris Cousine every Saturday."
+This means that the sentence "{{ resource_user_data.first_name }} likes the restaurant Paris Cuisine and visits every Saturday" gives two beliefs:
+1) "{{ resource_user_data.first_name }} likes the restaurant Paris Cuisine."
+2) "{{ resource_user_data.first_name }} visits the restaurant Paris Cuisine every Saturday."
 
 Every belief we create must stand on its own.  You have to imagine an agent reads only this sentence, assuming they know what the named entities are,
 it should be usable in their actions. So each belief you create must carry all the available facts.  Sometimes the insight alone is poorly worded and you should read all the provenance provided with the insight as this will allow you to write the belief properly.

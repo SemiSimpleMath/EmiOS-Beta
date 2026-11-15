@@ -255,8 +255,9 @@ def cancel_for_closed_concerns(register: Dict[str, Any], *, at: datetime, connec
         for entry_id, concern_id in stale:
             if concern_id in closed:
                 bucket, concern = closed[concern_id]
-                why = concern.get("resolution_reason") or concern.get("dormant_reason") or "(no reason recorded)"
-                reason = f"its concern was {bucket}: {why}"
+                why = concern.get("resolution_reason") or concern.get("dormant_reason")
+                closed_as = "was closed" if bucket == "resolved" else "went dormant"
+                reason = f"its concern {closed_as} because {why}" if why else f"its concern {closed_as}, no reason recorded"
             else:
                 reason = "its concern is no longer in the register"
             cancel(c, entry_id, reason=reason, cause=f"concern closed {when}", at=when)

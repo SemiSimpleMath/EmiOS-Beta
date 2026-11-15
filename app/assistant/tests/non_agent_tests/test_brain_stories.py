@@ -113,7 +113,7 @@ def test_a_matter_a_concern_and_the_day_are_told_once(reg):
     assert kinds == ["matter", "concern", "day"], "the day is told after its matters"
     matter = agents.seen[0][1]
     assert matter["new_concerns"] == [{"title": "Library fine", "outcome": "joined the open concern “Library fine”"}]
-    assert matter["events"][0]["decision"] == "tracked_as_new" and matter["events"][0]["source"] == "email"
+    assert matter["events"][0]["decision"] == "a new concern was raised from it" and matter["events"][0]["source"] == "email"
     assert matter["conversation"] == "[E1] Your book is overdue."
     day = agents.seen[2][1]
     assert day["matters"][0]["headline"] == "A library notice" and day["handed_on"] == 1

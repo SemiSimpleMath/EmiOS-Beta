@@ -154,11 +154,11 @@ def _render_concern_block(c: Dict[str, Any], *, mark_new: bool) -> List[str]:
     if note_preview and not note_preview.endswith("."):
         note_preview += "."
 
-    routed = ", ".join(c.get("addressable_by") or []) or "(no routing)"
+    # No "Flagged for" line: concerns are no longer routed to consumers (concerns as state, 2026-10-09; every concern
+    # is written with an empty `addressable_by`), so it read "(no routing)" under every concern until 2026-11-15.
     block = [head]
     if note_preview:
         block.append(f"  {note_preview}")
-    block.append(f"  _Flagged for: {routed}_")
     return block
 
 

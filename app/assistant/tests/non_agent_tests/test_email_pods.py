@@ -122,3 +122,11 @@ def test_encoded_subject_and_sender_are_read_decoded():
     plain = EmailProcessor.extract_metadata(message_from_string('From: "Doe, J" <j@x.example>\r\n\r\nb'))
     assert plain["sender"] == "Doe, J" and plain["subject"] == "[No Subject]"
 
+
+
+def test_readers_get_the_body_without_invisible_padding():
+    """Receipt and marketing emails pad preview text with format characters; readers get the body without them and
+    without the blank lines they leave. The pod keeps the body verbatim (2026-11-15)."""
+    from app.assistant.pod_store.email_pods import _readable_body
+    padded = "Rediscover The Times.\n‌ ͏­ ‌ ​\n‌ ‌\n\nView in browser\n"
+    assert _readable_body(padded) == "Rediscover The Times.\n\nView in browser"

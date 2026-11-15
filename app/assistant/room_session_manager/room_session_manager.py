@@ -39,7 +39,6 @@ from app.assistant.room_session_manager.services.room_mode_exit_service import (
 from app.assistant.dayflow_orchestrator.dayflow_tick import block_dayflow_orchestrator_for_master_chat
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message
-from app.assistant.utils.chat_formatting import messages_to_chat_excerpts
 from app.assistant.utils.time_utils import get_local_time
 
 logger = get_logger(__name__)
@@ -303,20 +302,11 @@ class RoomSessionManager:
                 payload = msg.dict()
             else:
                 raise TypeError(f"room seeded message must be Message-like, got {type(msg)}")
-            try:
-                excerpts = messages_to_chat_excerpts([msg], consumer_room_id=room_id)
-                if excerpts:
-                    excerpt = excerpts[0]
-                    content = excerpt.get("content")
-                    sender = excerpt.get("sender")
-                    if isinstance(content, str) and content.strip():
-                        payload["content"] = content
-                    if isinstance(sender, str) and sender.strip():
-                        payload["sender"] = sender
-            except Exception as e:
-                logger.error("Failed applying cross-room excerpt formatting to seeded message: %s", e)
-                logger.debug("seeded message cross-room formatting exception details", exc_info=True)
-                raise
+            # Hard tag: another room's message seeded into this room is context only.
+            seed_origin = str(getattr(msg, "room_id", "") or "").strip()
+            if seed_origin and str(room_id or "").strip() and seed_origin != str(room_id).strip():
+                payload["sender"] = f"{payload.get('sender') or ''} [room:{seed_origin}]"
+                payload["content"] = f"[CROSS_ROOM_CONTEXT_ONLY] {payload.get('content') or ''}".strip()
             metadata = payload.get("metadata")
             if metadata is None:
                 metadata = {}

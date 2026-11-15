@@ -1,30 +1,30 @@
 {
   "name": "get_email",
-  "description": "Background scheduler tool that ingests inbox emails into the runtime EventRepository. Not intended for agent triage \u2014 use get_important_emails for that. Returns raw (unsummarized) email records. Range is capped at 7 days lookback.",
+  "description": "Fetch the user's emails received within a date window of at most the last 7 days (by default only unread ones). Returns triage records: summaries with sender, subject and date; bodies and headers are not guaranteed complete.",
   "inputs": [
     {
       "name": "start_date",
       "type": "string",
       "required": true,
-      "description": ""
+      "description": "Start of the window, ISO 8601; a start more than 7 days ago is moved to 7 days ago."
     },
     {
       "name": "end_date",
       "type": "string",
       "required": true,
-      "description": ""
+      "description": "End of the window, ISO 8601."
     },
     {
       "name": "unseen",
       "type": "boolean",
       "required": false,
-      "description": ""
+      "description": "true (the default) returns only unread emails; false returns every email in the window."
     },
     {
       "name": "repo_update",
       "type": "boolean",
       "required": false,
-      "description": "Internal scheduler flag. When true, stores all fetched emails in EventRepository without LLM filtering. Always set to true by the background scheduler. Agents should not set this."
+      "description": "Set only by the background scheduler: true stores the kept emails as email pods. Leave it unset when reading."
     }
   ],
   "outputs": [
@@ -39,7 +39,7 @@
       "description": "Filtered/summarized email list. Bodies/headers are not guaranteed to be complete. Use get_email_thread for full thread/body retrieval."
     }
   ],
-  "arguments_prompt": "This is an internal background scheduler tool. Agents should use get_important_emails for inbox triage, or get_email_messages for query-driven search.",
+  "arguments_prompt": "Arguments for get_email:\n- start_date (required): start of the window, ISO 8601 (at most 7 days ago).\n- end_date (required): end of the window, ISO 8601.\n- unseen (optional): true (default) returns only unread emails; false returns all emails in the window.\n- repo_update: leave unset; only the background scheduler sets it.",
   "metadata": {
     "min_authority": 90,
     "approval_min_authority": 90,
@@ -63,6 +63,6 @@
     "front_door": false,
     "room_visibility_default": "show",
     "approval_required": false,
-    "planner_description": "Internal scheduler ingest \u2014 agents should prefer get_important_emails or get_email_messages."
+    "planner_description": "Fetch the user's emails received in a date window of at most the last 7 days (unread only by default); returns summarized records, not full bodies."
   }
 }

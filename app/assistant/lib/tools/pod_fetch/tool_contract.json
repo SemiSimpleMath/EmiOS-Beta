@@ -1,6 +1,6 @@
 {
   "name": "pod_fetch",
-  "description": "Fetch the FULL body of one or more pods by pod_id. Use this after calling pod_search and deciding which pods are worth opening.\n\nReturns each pod's header plus its body, source_refs, and metadata. Pod_ids that don't exist are reported in the 'missing' list — no error.",
+  "description": "Fetch the FULL body of one or more pods by pod_id (a datapod:<kind>:<id> reference).\n\nReturns each pod's header plus its body, source_refs, and metadata. Pod_ids that don't exist are reported in the 'missing' list — no error.",
   "inputs": [
     {
       "name": "pod_ids",

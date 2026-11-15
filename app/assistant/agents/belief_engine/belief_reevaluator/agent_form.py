@@ -10,7 +10,7 @@ class RevisedBelief(BaseModel):
         description=(
             "The belief_key of the belief being re-evaluated. Must match the key provided. "
             "If splitting into two beliefs, use the original key for the primary and a new "
-            "dot-suffixed key for the secondary (e.g. routine.dog_walk.morning.katy_covers)."
+            "dot-suffixed key for the secondary (e.g. routine.dog_walk.morning.partner_covers)."
         )
     )
     statement: str = Field(

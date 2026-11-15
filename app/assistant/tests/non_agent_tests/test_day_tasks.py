@@ -151,7 +151,7 @@ def test_the_prompts_carry_the_rules_and_the_labelled_situation():
            "resource_assistant_capabilities": "Device control: the thermostat.",
            "resource_owner_standing_directives": "Wellness nudges are separate cron reminders."}
     system = _ENV.get_template("subconscious/day_tasks/prompts/system.j2").render(**res)
-    assert "A calendar concern has no planner proposal: decide its entry yourself." in system
+    assert "A concern raised from the household's beliefs has no planner proposal: decide its entry yourself." in system
     assert "stays as it is when the day still needs it as it is" in system
     assert "A HEADS-UP is the opposite and belongs exactly on the boundary" in system      # when_to_interrupt.j2
     assert "You are helping the user's day go well" in system                              # stewardship.j2
@@ -520,7 +520,7 @@ def test_each_work_is_shown_in_full_once_under_the_entry_it_was_made_from(tmp_pa
     from app.assistant.dayflow_orchestrator.work_context import _ENV
     conn = sqlite_file(tmp_path / "d.db")
     later = (NOW + timedelta(hours=6)).isoformat()
-    progress = {"state": "in_progress", "replanning": False, "done": [], "dropped": [], "unfinished": [],
+    progress = {"state": "in_progress", "replanning": False, "done": [], "dropped": [], "not_achieved": [], "unfinished": [],
                 "to_come": [{"title": "Set the AC to 70", "wait": {"kind": "scheduled", "at": later}}]}
     s = situation(work={"in_motion": [{"work_id": "work_ac", "objective": "The house is at 70 tonight",
                                        "title": "AC to 70", "created": "Tue 03-10", "list_entry": "con:ac1",

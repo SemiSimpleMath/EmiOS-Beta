@@ -109,9 +109,10 @@ class ToolScopeStateManager:
 
         if isinstance(selected_tool, str) and selected_tool.strip():
             tool_name = selected_tool.strip()
-            if tool_name in visible:
-                visible = [x for x in visible if x != tool_name]
-            visible.insert(0, tool_name)
+            # A tool already shown keeps its place: the tool list renders in this order, and moving
+            # the used tool to the front changed the prompt between turns (no prompt-cache hits).
+            if tool_name not in visible:
+                visible.insert(0, tool_name)
             if tool_name in recently_used:
                 recently_used = [x for x in recently_used if x != tool_name]
             recently_used.insert(0, tool_name)
@@ -123,9 +124,8 @@ class ToolScopeStateManager:
             if installed_name in recently_installed:
                 recently_installed = [x for x in recently_installed if x != installed_name]
             recently_installed.insert(0, installed_name)
-            if installed_name in visible:
-                visible = [x for x in visible if x != installed_name]
-            visible.insert(0, installed_name)
+            if installed_name not in visible:
+                visible.insert(0, installed_name)
             if installed_name.startswith("mcp::"):
                 if installed_name in dyn_allowed:
                     dyn_allowed = [x for x in dyn_allowed if x != installed_name]

@@ -46,9 +46,10 @@ class ReadWorkObjectTool(BaseTool):
         goal = wo.nodes.get(wo.goal_node_id)
         if goal is None:
             return None
-        L = [f"WORK OBJECT {wo.id}  (status: {wo.status})", f"GOAL: {goal.title}"]
-        if goal.content:
-            L.append((goal.content or "")[:_MAX_NODE_CHARS])
+        # The goal's content is its full stored text (the objective, its success criteria, where it came from) and
+        # its title the objective alone, so the content is shown in the title's place, once.
+        L = [f"WORK OBJECT {wo.id}  (status: {wo.status})",
+             f"GOAL: {(goal.content or goal.title)[:_MAX_NODE_CHARS]}"]
         # Where the work stands, in words a reader outside dayflow understands: the step statuses below
         # are dayflow's own (docs/design/work_progress_for_outside_readers_2026-10-04.md).
         from app.assistant.dayflow_orchestrator.work_context import render_view
@@ -56,9 +57,10 @@ class ReadWorkObjectTool(BaseTool):
         L.append("\nWHERE THE WORK STANDS NOW:")
         L.append(render_view("work_progress", p=work_progress(wo), pad="").rstrip())
         L.append("\nSTEPS & RESULTS (every record, with dayflow's own status words):")
-        for n in wo.nodes.values():
-            if n.id == wo.goal_node_id:
-                continue
+        steps = [n for n in wo.nodes.values() if n.id != wo.goal_node_id]
+        if not steps:
+            L.append("(no steps planned yet)")
+        for n in steps:
             L.append(f"- [{n.status}] {n.type}: {n.title}".rstrip())
             body = (n.content or n.pod_ref or "").strip()
             if body:

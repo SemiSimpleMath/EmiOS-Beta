@@ -76,6 +76,10 @@ def _is_ticket_noise(row: UnifiedLog2026) -> bool:
     meta = row.metadata_json if isinstance(row.metadata_json, dict) else {}
     if meta.get("ticket_id") or meta.get("suggestion_type"):
         return True
+    # The chat router's in-flight guard ("[THIS TASK IS ALREADY IN FLIGHT ...]", chat_task_router_node) is a
+    # runtime line for the chat gate, not conversation.
+    if meta.get("agent_guard"):
+        return True
     return False
 
 

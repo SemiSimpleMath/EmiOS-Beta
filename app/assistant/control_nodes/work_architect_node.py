@@ -21,7 +21,7 @@ Inert until the dayflow manager's state_map routes to it.
 """
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.control_nodes.control_node import ControlNode
-from app.assistant.dayflow_orchestrator.work_context import render_view
+from app.assistant.dayflow_orchestrator.work_context import objective_of, render_view
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message
 
@@ -426,9 +426,7 @@ class WorkArchitectNode(ControlNode):
                         wo = store.load(work_id)
                         labels, ids, goal_view = _view(store, wo, history=history, replan=False)
                         why = render_view("architect_context", rationale=rationale, situation=goal_view)
-                        goal = wo.nodes.get(wo.goal_node_id)
-                        objective = (goal.content or goal.title) if goal else c["objective"]
-                        task = render_view("architect_task", mode="create", objective=objective)
+                        task = render_view("architect_task", mode="create", objective=objective_of(wo))
                         data = _ask(agent, task, why, scope)
                         # A new goal is planned or ended, never left empty: an empty one comes back every tick
                         # (2026-10-05: on goals other work already covered, the architect answered "keep the
@@ -473,8 +471,7 @@ class WorkArchitectNode(ControlNode):
                     if str(wo.status or "").lower() in _TERMINAL_WO_STATES:
                         continue
                     try:
-                        goal = wo.nodes.get(wo.goal_node_id)
-                        objective = (getattr(goal, "content", "") or getattr(goal, "title", "")) if goal else ""
+                        objective = objective_of(wo)
                         labels, ids, goal_info = _view(store, wo, history=history, replan=True)
                         finalizer_block, licence = _finalizer_block(pending.get(work_id), ids)
                         # A stranded goal's prunes are licensed by its state: nothing in it can run. The brain's

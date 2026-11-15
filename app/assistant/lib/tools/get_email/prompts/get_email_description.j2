@@ -1,3 +1,1 @@
-Background scheduler tool. Ingests inbox emails into the pod store as email pods.
-Not intended for agent triage — use get_important_emails for reading and summarizing the user's emails.
-Not intended for search — use get_email_messages for query-driven lookup.
+Fetch the user's emails received within a date window of at most the last 7 days (by default only unread ones). Returns triage records: summaries with sender, subject and date; bodies and headers are not guaranteed complete.

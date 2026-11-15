@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from pydantic import BaseModel, create_model
+from pydantic import BaseModel, Field, create_model
 
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
 from app.assistant.lib.core_tools.manager_interface.manager_interface import ManagerInterface
@@ -93,15 +93,15 @@ class finish_args(BaseModel):
 
 
 class graph_search_args(BaseModel):
-    query: str
+    query: str = Field(description="Text to find in task titles and contents (case-insensitive substring).")
 
 
 class graph_peek_args(BaseModel):
-    node_id: str
+    node_id: str = Field(description="The exact ID of a task in this work object.")
 
 
 class graph_summary_args(BaseModel):
-    subtree_only: bool = False
+    subtree_only: bool = Field(default=False, description="true lists only your node and the tasks under it.")
 
 
 # ----------------------------- handlers ----------------------------- #
@@ -203,7 +203,7 @@ def _artifact_fetch(t, a, message):
     return ToolResult(content=text, data=data)
 
 class artifact_fetch_args(BaseModel):
-    artifact_id: str
+    artifact_id: str = Field(description="The exact ID of an artifact, as listed in a task's artifact index.")
 
 def _graph_summary(t, a):
     rows = t.graph_summary(a.get("subtree_only", False))
@@ -228,10 +228,10 @@ _SPECS = [
     _Spec("work_ask_question", ask_question_args, _ask_question, "Open a Question (blocks=true makes my node depend on it)."),
     _Spec("work_defer", defer_args, _defer, "Park my node with a wake condition ('too hard now / wait for X')."),
     _Spec("work_finish", finish_args, _finish, "State your verdict on this node â€” satisfied | failed | abandoned â€” then return_control. Recorded as part of your result; the work_finalizer judges it."),
-    _Spec("work_graph_search", graph_search_args, _graph_search, "Find nodes by substring of title/content."),
-    _Spec("work_artifact_fetch", artifact_fetch_args, None, "Read the complete content of an artifact ID from work_graph_peek, including its linked pod."),
-    _Spec("work_graph_peek", graph_peek_args, _graph_peek, "Read a task node and its artifact titles/IDs. Use work_artifact_fetch to read selected output content."),
-    _Spec("work_graph_summary", graph_summary_args, _graph_summary, "One-line index of nodes (drill down with peek)."),
+    _Spec("work_graph_search", graph_search_args, _graph_search, "Find tasks in this work object whose title or content contains the text; one line per task."),
+    _Spec("work_artifact_fetch", artifact_fetch_args, None, "Read the complete content of one stored artifact of this work object (a task's output), including its linked pod."),
+    _Spec("work_graph_peek", graph_peek_args, _graph_peek, "Read one task of this work object: its content, status and the index of its artifacts (titles and IDs, without their content)."),
+    _Spec("work_graph_summary", graph_summary_args, _graph_summary, "List the tasks of this work object, one line each (ID, type, status, title)."),
 ]
 
 
@@ -259,7 +259,7 @@ def _make_tool_class(spec: _Spec) -> type:
 def _inputs_from_model(model: type) -> list[dict]:
     out = []
     for fname, field in model.model_fields.items():
-        out.append({"name": fname, "type": "string", "required": field.is_required(), "description": ""})
+        out.append({"name": fname, "type": "string", "required": field.is_required(), "description": field.description or ""})
     return out
 
 
@@ -278,6 +278,8 @@ def register_work_tools(tool_registry) -> list[str]:
                 "inputs": _inputs_from_model(spec.args_model),
                 "outputs": [{"path": "data.node_id", "type": "string", "description": "affected node id"}],
                 "metadata": {"domain": "work_graph", "actions": [spec.name],
+                             # The tool card's capability line (these runtime tools have no description template).
+                             "planner_description": spec.description,
                              "min_authority": 0, "approval_min_authority": 0},
             },
         }

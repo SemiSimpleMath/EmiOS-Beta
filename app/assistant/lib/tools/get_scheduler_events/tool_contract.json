@@ -1,18 +1,18 @@
 {
   "name": "get_scheduler_events",
-  "description": "Fetch time-based reminder alerts (APScheduler), not calendar events or meetings. Returns active reminders by default, or filter with optional start_date and end_date in ISO 8601; prefer a one-week window starting today, or a single day when only that date is needed.",
+  "description": "Fetch time-based reminder alerts (APScheduler), not calendar events or meetings, between start_date and end_date (ISO 8601). A one-week window starting today suits most needs; a single day when only that date matters.",
   "inputs": [
     {
       "name": "start_date",
       "type": "string",
       "required": true,
-      "description": ""
+      "description": "Start of the window, ISO 8601 local time (e.g. 2024-12-31T00:00:00)."
     },
     {
       "name": "end_date",
       "type": "string",
       "required": true,
-      "description": ""
+      "description": "End of the window, ISO 8601 local time."
     }
   ],
   "outputs": [
@@ -27,7 +27,7 @@
       "description": "Structured tool result payload."
     }
   ],
-  "arguments_prompt": "- **Arguments**:\n  - `start_date` (str, optional): Fetching reminders in date range.  Use ISO 8601 format (e.g., \"2024-12-31T17:00:00\").\n  - `end_date` (str, optional): Fetching reminders in date range.  Use ISO 8601 format (e.g., \"2024-12-31T17:00:00\").\n\n  Typically use a range of one week (One week starting from today).  Larger ranges than a week are not advisable. If you have a very good reason you can try a larger range.\n  If you only need reminders for one day then one day range is best.",
+  "arguments_prompt": "- **Arguments**:\n  - `start_date` (str, required): Start of the reminder window.  Use ISO 8601 format (e.g., \"2024-12-31T17:00:00\").\n  - `end_date` (str, required): End of the reminder window.  Use ISO 8601 format (e.g., \"2024-12-31T17:00:00\").\n\n  Typically use a range of one week (One week starting from today).  Larger ranges than a week are not advisable. If you have a very good reason you can try a larger range.\n  If you only need reminders for one day then one day range is best.",
   "metadata": {
     "min_authority": 90,
     "approval_min_authority": 90,

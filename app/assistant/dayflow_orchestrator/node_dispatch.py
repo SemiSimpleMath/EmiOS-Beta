@@ -41,11 +41,16 @@ def dispatch_node(store, work_id: str, node_id: str, delegate_to: str) -> None:
 
 
 def canonical_pick(ref: str, offered: list) -> str:
-    """The selector ECHOES an id from its rendered list, and echoes arrive decorated — the
-    prompt's "- task: " label glued on ("task:work_x::node_y"), stray whitespace. Join the echo
-    back to the offered item_ids (the ones the runtime itself put on the blackboard) and return
-    the CANONICAL id. No unique match -> the echo unchanged, so the caller's own check fails loud."""
+    """The selector picks an item by the short label its list shows (`short_id`, e.g. "T1"); the
+    label maps to that item's item_id (the ones the runtime itself put on the blackboard) and the
+    CANONICAL id is returned. A full ref (the wake pass's own pick) is joined back to the offered
+    item_ids the same way, tolerating stray decoration ("task:work_x::node_y", whitespace). No unique
+    match -> the echo unchanged, so the caller's own check fails loud."""
     ref = (ref or "").strip()
+    by_label = {str(i.get("short_id") or ""): str(i.get("item_id") or "") for i in offered
+                if isinstance(i, dict) and i.get("short_id")}
+    if ref in by_label:
+        return by_label[ref]
     if not ref or "::" not in ref:
         return ref
     ids = [str(i.get("item_id") or "") for i in offered

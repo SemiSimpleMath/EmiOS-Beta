@@ -3,7 +3,8 @@ daily plan is built from. Each morning the assistant lays out the day's calendar
 other belief stays available and is read beside the items it bears on.
 
 {% include 'shared/beliefs/calendar_item.j2' %}
-For each belief given, decide whether it is a calendar item on some day of the year (every day, a day of the
-week, a date in the month or the year) and, for each item, say in plain words when it would appear.
-{{ resource_user_data.first_name }} reviews every proposal and decides. Give one short reason for every belief.
+For each belief given, decide whether it might be a calendar item on some day of the year (every day, a day of
+the week, a date in the month or the year) and, for each item, say in plain words when it would appear.
+{{ resource_user_data.first_name }} reviews every proposal and decides, and a belief not proposed is never shown,
+so propose every belief that might be an item. Give one short reason for every belief.
 Decide every belief given, each exactly once, by its key as shown.

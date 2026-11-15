@@ -3,8 +3,8 @@
 id: {{ view.task.id }} | status: {{ view.task.status }}
 title: {{ view.task.title }}
 task: {{ view.task.directive }}
-success when: {{ view.task.success_kind }}
-parent goal: {{ view.work.objective }}
+{% if view.task.success_kind %}success when: {{ view.task.success_kind }}
+{% endif %}parent goal: {{ view.work.objective }}
 {% if view.work.success_criteria %}goal success criteria: {{ view.work.success_criteria }}{% endif %}
 {% with watch = view.task.watch %}{% include 'shared/work/watch.j2' %}{% endwith %}
 {% if not view.owning_task %}{% with task = view.task, receipts = view.earlier_receipts %}{% include 'shared/work/prior_attempt.j2' %}{% endwith %}{% endif %}

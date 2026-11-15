@@ -262,9 +262,12 @@ class StateMoverPrepNode(ControlNode):
         self.blackboard.update_state_value("waiting_work_nodes", waiting)
         from app.assistant.dayflow_orchestrator.work_intake import intake_source
         from app.assistant.dayflow_orchestrator.intake_review import wake_intake_eligible
+        # An arrival is something that came in: the assistant's own chat lines and the workers' results posted to the
+        # chat (chat_role "assistant") are not, and the assistant's own message once woke a task as if it had.
         intake = [intake_source(item) for item in all_items
                   if str(get_meta(item).get("source_type") or "").lower()
                   in {"email", "chat", "pod", "user_request"}
+                  and str(get_meta(item).get("chat_role") or "").lower() != "assistant"
                   and wake_intake_eligible(get_meta(item))] if waiting else []
         from app.assistant.subconscious import relations
         for source in intake:

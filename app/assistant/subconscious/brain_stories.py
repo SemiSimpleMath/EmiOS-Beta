@@ -156,10 +156,24 @@ _DOOR = {"create": "opened as a new concern", "merge_open": "joined the open con
          "merge_candidate": "joined another new concern raised here"}
 _SOURCES = {"chat": "chat message", "email": "email", "work": "report on work done", "camera": "camera sighting",
             "presence": "presence at the computer", "time": "a concern's day ending",
-            "grocery": "step of the weekly grocery list"}
+            "grocery": "step of the weekly grocery list", "calendar": "calendar change",
+            "ticket": "reply to a ticket", "noticer": "issue the assistant noticed"}
 _PLURALS = {"chat": "chat messages", "email": "emails", "work": "reports on work done", "camera": "camera sightings",
             "presence": "comings and goings at the computer", "time": "concerns whose day ended",
-            "grocery": "steps of the weekly grocery list"}
+            "grocery": "steps of the weekly grocery list", "calendar": "calendar changes",
+            "ticket": "replies to tickets", "noticer": "issues the assistant noticed"}
+
+
+# The brain's decision on an event, in words (brain agent_form EventDecision); matters recorded before 2026-10-09
+# carry the brain's earlier names for the same decisions.
+_DECISIONS = {"changes_concern": "it changed a concern", "new_concern": "a new concern was raised from it",
+              "no_concern": "it changed no concern and raised none",
+              "used": "it changed a concern", "tracked_as_new": "a new concern was raised from it",
+              "needs_nothing": "it changed no concern and raised none"}
+
+
+def _decision_words(decision: Optional[str]) -> str:
+    return _DECISIONS[decision] if decision else ""
 
 
 def _event_who(e: Dict[str, Any]) -> str:
@@ -194,7 +208,8 @@ def matter_input(matter: Dict[str, Any], register: Dict[str, Any], now_utc: date
     decided = (matter["decisions"] or {}).get("events") or {}
     events = [{"label": f"E{i}", "when": _local(e["occurred_at"]).strftime("%a %H:%M"),
                "source": _SOURCES.get(e["source"], e["source"]), "who": _event_who(e),
-               "route": _route(e, titles), "decision": (decided.get(e["source_ref"]) or {}).get("decision", ""),
+               "route": _route(e, titles),
+               "decision": _decision_words((decided.get(e["source_ref"]) or {}).get("decision")),
                "reason": (decided.get(e["source_ref"]) or {}).get("reason", "")}
               for i, e in enumerate(matter["events"], 1)]
     new = []
@@ -224,6 +239,8 @@ def concern_input(concern: Dict[str, Any], bucket: str, now_utc: datetime) -> Di
         "attempts": concern_view.attempts(concern),
         "plan": {k: (concern.get("plan") or {}).get(k) for k in ("decision", "todo", "why", "hold_until")}
         if concern.get("plan") else None,
+        # A concern placed from the household's beliefs for its time today gets no planning decision (rule 7).
+        "placed": bool(concern.get("calendar")),
     }}
 
 
@@ -247,7 +264,8 @@ def day_input(day: str, now_utc: datetime, *, connect, register: Dict[str, Any],
     return {"day": _local(start).strftime("%A %Y-%m-%d"), "today": day == _window_days(now_utc)[-1],
             "counts": counts, "matters": matters,
             "opened": [c.get("title") for _, c in every if within(c.get("created_at_utc"))],
-            "settled": [c.get("title") for b, c in every if b == "resolved" and within(c.get("resolved_at_utc"))],
+            "settled": [{"title": c.get("title"), "reason": c.get("resolution_reason")}
+                        for b, c in every if b == "resolved" and within(c.get("resolved_at_utc"))],
             "handed_on": handed_on}
 
 

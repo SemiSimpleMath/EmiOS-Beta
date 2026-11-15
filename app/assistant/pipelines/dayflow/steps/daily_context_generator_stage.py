@@ -363,7 +363,6 @@ class DailyContextGeneratorStep(BaseStep):
         tickets_hours = int(lookbacks.get("recent_tickets", 2))
 
         current_daily_context = self._get_current_daily_context(ctx)
-        current_daily_context["expected_schedule"] = expected_calendar_schedule
         daily_context_mode = self._get_daily_context_mode(current_daily_context, ctx)
 
         is_day_boundary_rebuild = False
@@ -410,9 +409,13 @@ class DailyContextGeneratorStep(BaseStep):
             "history_scope": resolve_room_scope(pipeline_config=ctx.pipeline_config, step_config=ctx.step_config),
             "day_of_week": datetime.strptime(str(boundary_date), "%Y-%m-%d").strftime("%A"),
             "daily_context_mode": daily_context_mode,
-            "current_daily_context": current_daily_context,
+            # The schedule is shown once, as the expected calendar; the previous output's copy of it and its stale
+            # calendar snapshot repeated the same events.
+            "current_daily_context": {
+                k: v for k, v in current_daily_context.items()
+                if k not in ("expected_schedule", "calendar_events_structured")
+            },
             "expected_calendar_payload": expected_calendar_payload,
-            "expected_calendar_markdown": build_expected_calendar_markdown(expected_calendar_schedule),
             "calendar_events_upcoming": get_calendar_events_upcoming_for_daily_context(hours=upcoming_hours),
             "recent_chat_excerpts": chat_excerpts,
             "calendar_events_completed": get_calendar_events_completed(hours=calendar_completed_hours),

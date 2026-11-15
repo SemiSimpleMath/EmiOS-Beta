@@ -15,8 +15,8 @@ None.
 {% for t in agent_input.opened %}- {{ t }}
 {% endfor %}{% endif %}
 {% if agent_input.settled %}
-## Concerns settled
-{% for t in agent_input.settled %}- {{ t }}
+## Concerns closed, each with why
+{% for c in agent_input.settled %}- {{ c.title }}{% if c.reason %}: {{ c.reason }}{% endif %}
 {% endfor %}{% endif %}
 
 Handed on to be done: {{ agent_input.handed_on }}

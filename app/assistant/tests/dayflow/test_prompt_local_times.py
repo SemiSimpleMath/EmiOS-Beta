@@ -46,7 +46,7 @@ def test_architect_instructions_and_concern_history_are_local():
                  "attempts": [{"work_id": "w", "objective": "o", "status": "abandoned",
                                "attached_at": "2026-09-30T07:39:00+00:00",
                                "progress": {"work_id": "w", "state": "abandoned", "ended_at": "2026-09-30T14:20:00+00:00",
-                                            "reason": "r", "replanning": False, "done": [], "dropped": [],
+                                            "reason": "r", "replanning": False, "done": [], "dropped": [], "not_achieved": [],
                                             "unfinished": [], "to_come": []},
                                "ended": {"outcome": "abandoned", "at": "2026-09-30T14:20:00+00:00", "reason": "r"},
                                "judgments": [{"title": "set", "verdict": "retry", "outcome": "x",

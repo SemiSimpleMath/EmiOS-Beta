@@ -265,7 +265,7 @@ def test_the_brain_prompt_renders_every_section():
                "similar_work": [],
                "active_work": [{"work_id": "w2", "title": "Remind about the sale", "objective": "", "created": "Mon",
                                 "progress": {"work_id": "w2", "state": "in_progress", "ended_at": None, "reason": None,
-                                             "replanning": False, "done": [], "dropped": [], "unfinished": [],
+                                             "replanning": False, "done": [], "dropped": [], "not_achieved": [], "unfinished": [],
                                              "to_come": [{"title": "Send the reminder", "wait": {"kind": "ready"}}]}}],
                "reminders": [{"ref": "reminder:r1", "title": "Bake cookies", "kind": "one time", "repeats": "",
                               "start": "Thu 18:00", "end": ""}],
@@ -308,7 +308,7 @@ def test_each_work_is_shown_in_full_once_under_its_concern(inbox, tmp_path, monk
     from app.assistant.dayflow_orchestrator import work_context
     from app.assistant.subconscious import concern_view, work_links
     to_come = {"work_id": "w1", "state": "in_progress", "ended_at": None, "reason": None, "replanning": False,
-               "done": [], "dropped": [], "unfinished": [],
+               "done": [], "dropped": [], "not_achieved": [], "unfinished": [],
                "to_come": [{"title": "Send the vet reminder", "wait": {"kind": "ready"}}]}
     monkeypatch.setattr(concern_view, "attempts", lambda c: [
         {"work_id": "w1", "title": "Remind about the vet", "objective": "Remind about the vet",

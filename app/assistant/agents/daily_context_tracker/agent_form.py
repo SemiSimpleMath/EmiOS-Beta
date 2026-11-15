@@ -20,8 +20,8 @@ class ScheduleItem(BaseModel):
         description=(
             "What the evidence says of this item: 'cancelled' when the user, a ticket answer or the calendar says it "
             "is off today; 'done' when the user, a ticket answer or telemetry shows it has already happened; "
-            "otherwise 'scheduled'. The clock is not evidence: whether a scheduled item is upcoming, ongoing or past "
-            "is computed from its times."
+            "otherwise 'scheduled'. The clock is not evidence: an item whose time has passed has not thereby happened; "
+            "whether a scheduled item is upcoming, ongoing or past is computed from its times."
         )
     )
     source: str = Field(
@@ -63,7 +63,7 @@ class Milestone(BaseModel):
         description="Verbatim event description only (e.g., 'Lunch.' or 'AFK (ongoing).'). Do not include the evidence label in this field."
     )
     evidence: EvidenceLabel = Field(
-        description="Evidence source: 'Reported' (user chat), 'Calendar' (calendar evidence), or 'Inferred' (telemetry)."
+        description="Evidence source: 'Reported' (what the user said, in chat or a ticket answer), 'Calendar' (a change the calendar itself shows), or 'Inferred' (telemetry)."
     )
     ongoing: bool = Field(
         default=False,

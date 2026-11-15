@@ -93,8 +93,8 @@ class ObjectiveRevision(BaseModel):
     objective: str = Field(min_length=1, description="The goal as it now stands, one sentence.")
     success_criteria: str = Field(
         default="", description="The outcome that now meets it (empty keeps the current criteria).")
-    reason: str = Field(min_length=1, description="What changed the goal: the premise that expired, the "
-                        "result or the user's answer that moved it.")
+    reason: str = Field(min_length=1, description="What changed the goal, in words: the premise that expired, "
+                        "the result or the user's answer that moved it.")
 
 
 class AgentForm(BaseModel):
@@ -113,7 +113,7 @@ class AgentForm(BaseModel):
         description="The DAG of work nodes for this goal. Keep it lean — 1-5 nodes for most goals.")
     abandon_reason: str = Field(
         default="",
-        description="RE-PLAN ONLY: WHY the abandoned nodes are moot — one sentence, written for the NEXT planning pass to read as the epitaph (e.g. 'deps can never satisfy: research nodes are done but unclosable' or 'user declined this follow-up'). Required whenever abandon_node_ids is non-empty.")
+        description="RE-PLAN ONLY: WHY the abandoned nodes are moot — one sentence in words, naming each task by what it does (labels hold for this answer only), written for the NEXT planning pass to read as the epitaph (e.g. 'deps can never satisfy: research nodes are done but unclosable' or 'user declined this follow-up'). Required whenever abandon_node_ids is non-empty.")
     abandon_node_ids: List[str] = Field(
         default_factory=list,
         description="RE-PLAN ONLY (leave empty on a fresh decomposition): labels (T…) of EXISTING tasks the "

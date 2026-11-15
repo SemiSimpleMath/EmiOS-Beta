@@ -9,7 +9,7 @@ class AgentForm(BaseModel):
     )
     acted_on_item_ids: List[str] = Field(
         default_factory=list,
-        description="The ONE item id you picked, exactly as shown in the actionable list. Empty only "
+        description="The label of the ONE item you picked (e.g. T1), as shown in the actionable list. Empty only "
         "when no_op_tf is true.",
     )
     no_op_tf: bool = Field(
