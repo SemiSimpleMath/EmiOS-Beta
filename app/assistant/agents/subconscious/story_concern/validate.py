@@ -6,6 +6,8 @@ proposed for a hold.
 """
 from app.assistant.agent_runtime.correction import Problem
 
+_DECISIONS = {"hold": "to hold", "no_action": "no action"}  # the decision as the correction says it, in words
+
 
 def validate(answer, agent_input):
     decision = (agent_input["concern"]["plan"] or {}).get("decision")
@@ -13,6 +15,8 @@ def validate(answer, agent_input):
            if not str(answer.get(f) or "").strip()]
     proposed = [p for p in answer.get("proposed") or [] if str(p).strip()]
     if decision != "act_now" and proposed:
-        out.append(Problem(why=f"the decision is {decision or 'not made'}: nothing is proposed now, so proposed stays "
-                               f"empty", field="proposed", value=proposed))
+        said = _DECISIONS.get(decision, "that no decision has been made")
+        out.append(Problem(why=f"the latest decision is {said}, so nothing is proposed now: proposed stays empty, "
+                               f"and what is still to be done belongs in the story or the fate", field="proposed",
+                           value=proposed))
     return out

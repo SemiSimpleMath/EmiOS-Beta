@@ -160,7 +160,7 @@ def test_nothing_is_proposed_for_a_hold_and_a_new_plan_retells_the_concern(reg):
     _run(reg, agents)
     [told] = [p for k, p in agents.seen if k == "concern"]
     [problem] = RULES["concern"].validate({**CONCERN_STORY, "proposed": ["Pay it"]}, told)
-    assert problem.field == "proposed" and "the decision is hold: nothing is proposed now" in problem.why
+    assert problem.field == "proposed" and "the latest decision is to hold, so nothing is proposed now" in problem.why
     assert RULES["concern"].validate({**CONCERN_STORY, "proposed": ["Pay it"]},
                                      {"concern": {"plan": {"decision": "act_now"}}}) == []
     assert [p.field for p in RULES["concern"].validate({**CONCERN_STORY, "state": ""}, {"concern": {"plan": None}})] \
