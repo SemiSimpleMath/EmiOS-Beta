@@ -267,6 +267,22 @@ def initialize_services(app):
     ServiceLocator.register("env_registry", EnvRegistryService())
     logger.info("✅ Entity catalog initialized")
 
+    # Load the shared embedder and open the chat-memory store in the background, so the first chat of a session
+    # does not pay for them (2026-11-15: the first chat's prompt took 35 s to build, most of it loading models and
+    # their imports; warm it is about 2 s). Boot does not wait on it.
+    def _warm_embeddings():
+        try:
+            from app.assistant.embeddings.embedder import embed_text
+            from app.assistant.agent_runtime.services.chat_memory_rag import _get_collection
+            embed_text("warm up")
+            _get_collection()
+            logger.info("✅ Embedder and chat memory warmed")
+        except Exception as e:
+            logger.error("Embedder warm-up failed; the first chat loads it instead: %s", e, exc_info=True)
+
+    import threading
+    threading.Thread(target=_warm_embeddings, name="embedder-warmup", daemon=True).start()
+
     # Initialize scheduler service (auto-starts via TimingEngine.__init__)
     # APScheduler's BackgroundScheduler runs in its own background threads automatically
     scheduler_service = SchedulerService(app)

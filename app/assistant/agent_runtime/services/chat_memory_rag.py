@@ -45,7 +45,6 @@ _DEFAULT_TOP_K = 8
 
 
 _chroma_client = None
-_embedding_function = None
 
 
 def _get_chroma_client():
@@ -69,29 +68,6 @@ def _get_chroma_client():
     return _chroma_client
 
 
-def _get_embedding_function():
-    """Local ONNX embedder (all-MiniLM-L6-v2) via chroma's bundled default.
-
-    Chroma's DefaultEmbeddingFunction IS all-MiniLM-L6-v2 (_EMBEDDING_MODEL),
-    run through onnxruntime — the same model and the same 384-dim space the
-    sentence-transformers path produced, so stored vectors stay comparable.
-
-    It is used instead of SentenceTransformerEmbeddingFunction because that
-    one imports `sentence_transformers`, which is not in requirements.txt and
-    pulls ~2.5 GB of torch to obtain a model chroma already ships. Without it
-    installed EVERY call raised, which auto-disabled the chat_memory_index
-    routine and made chat_memory_rag recall fail silently on live chat turns.
-
-    onnxruntime is already a dependency (chroma pulls it), and the model is
-    already downloaded at import time by chroma's own cache, so this adds
-    nothing to the image."""
-    global _embedding_function
-    if _embedding_function is None:
-        from chromadb.utils import embedding_functions
-        _embedding_function = embedding_functions.DefaultEmbeddingFunction()
-    return _embedding_function
-
-
 def _augment_doc_text(text: str, *, doc_type: str, timestamp: str) -> str:
     """Prepend a compact `[type date]` header so the embedding model sees
     temporal + role context, not just the raw sentence. Time-aware queries
@@ -102,12 +78,15 @@ def _augment_doc_text(text: str, *, doc_type: str, timestamp: str) -> str:
 
 
 def _get_collection():
-    """Get or create the chat_memory collection."""
+    """Get or create the chat_memory collection. Its vectors are all-MiniLM-L6-v2 (_EMBEDDING_MODEL), made by the
+    shared embedder (app/assistant/embeddings/embedder.py) and handed to chroma: chroma never embeds here. Until
+    2026-11-15 chroma embedded the query text itself and, on the first query of a process, built a
+    SentenceTransformer embedding function from the collection's configuration (importing sentence_transformers
+    and transformers): 24 of the 35 seconds the first chat of a session spent building its prompt."""
     client = _get_chroma_client()
     return client.get_or_create_collection(
         name=_COLLECTION_NAME,
         metadata={"hnsw:space": "cosine"},
-        embedding_function=_get_embedding_function(),
     )
 
 
@@ -246,9 +225,10 @@ def index_recent_summaries(
         logger.info("[chat_memory_rag] All %d documents already indexed.", len(documents))
         return 0
 
-    # Batch add to ChromaDB (it handles embedding internally).
+    from app.assistant.embeddings.embedder import embed_texts
     collection.add(
         documents=new_docs,
+        embeddings=embed_texts(new_docs),
         ids=new_ids,
         metadatas=new_metas,
     )
@@ -278,9 +258,10 @@ def recall(
         return []
 
     try:
+        from app.assistant.embeddings.embedder import embed_text
         collection = _get_collection()
         results = collection.query(
-            query_texts=[query.strip()],
+            query_embeddings=[embed_text(query.strip())],
             n_results=top_k,
             where={"room_id": room_id},
         )
