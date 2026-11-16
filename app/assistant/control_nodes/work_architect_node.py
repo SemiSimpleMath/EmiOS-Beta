@@ -216,14 +216,19 @@ def _concerns(p, works, goal_id):
     """Each concern the active work serves, once, labelled C (this goal's first): every work object names its concern by
     that label (shared/work/portfolio.j2). Until 2026-10-11 each work object printed its concerns' records in full, so
     a concern four work objects serve was read four times, and the goal's own twice (its brief kept a copy)."""
+    from app.assistant.subconscious.projection import ShownOnce
     shown = {}
     for w in sorted(works, key=lambda w: w["id"] != goal_id):
         for c in w["concerns"]:
             if c.get("concern_id") and c["concern_id"] not in shown:
                 shown[c["concern_id"]] = {**c, "label": p.label("C", "concern", c["concern_id"])}
+    # One email or message behind several concerns is shown in full under the first (projection.ShownOnce).
+    sources = ShownOnce()
     for c in shown.values():
         for a in c.get("attempts") or []:
             a["ref"] = p.label_of("work", a["work_id"])
+        c["source_shown_under"] = (sources.first(("source", c["source_ref"]), f"[{c['label']}]")
+                                   if c["source_ref"] else None)
     return list(shown.values())
 
 

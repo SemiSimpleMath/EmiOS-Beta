@@ -1,0 +1,19 @@
+{#- What three fixed phrases of the work and concern views mean, said once in a prompt (2026-11-15: the situation auditor
+    read each up to 18 times, once per work object or concern). A reader shown many of them states this in its system
+    prompt and its input sets `explained_once` (shared/work/portfolio.j2, concern_view.j2, work_progress.j2 then leave
+    it out); a concern list rendered without that states the lines it needs once at its head (concern_view.j2).
+    `explain_failures`, `explain_carried`, `explain_record` switch a line off when false. Terse readers
+    (`wording_explained`) read shared/work/wording_explained.j2, which includes the carried and record lines from here
+    (each sentence lives in one file). -#}
+{% if explain_failures | default(true) -%}
+- Historical failure totals (a work object's "goal failures judged by finalizer") do not request another user decision.
+  Follow current finalizer instructions and the user's recorded answers; do not re-ask a resolved question because
+  of that tally.
+{% endif -%}
+{% if explain_carried | default(true) -%}
+- A work "In progress" or "On hold" is carried by the assistant until every step is done, or abandoned with a reason.
+{% endif -%}
+{% if explain_record | default(true) -%}
+- A concern's record is oldest first: a summary of the older notes, then every note since, each with when it was
+  written.
+{% endif -%}

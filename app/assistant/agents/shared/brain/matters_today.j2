@@ -2,7 +2,9 @@
     words with the brain's decision; an ended work by its one line (subconscious/work_line.py), a work still in
     motion briefly as it stands now with the brain's decision on each of its reports; the concerns raised. Expects
     `matters`, each with `ref`. The line is an agent's summary of the work's report, never its record: the reader is
-    told so once, and where the work carries its label, that the work in full is under it (owner, 2026-10-11). -#}
+    told so once, and where the work carries its label, that the work in full is under it (owner, 2026-10-11). An
+    email, a message or a work's line already shown in full in this call names where it is (`shown_under`,
+    `line_shown_under`, day_tasks.show_once). -#}
 ## What the brain read and decided today
 {% set seen = namespace(lined=false, labelled=false) -%}
 {% for m in matters %}{% for e in m.events %}{% if e.work is defined and e.work.line %}{% set seen.lined = true %}{% if e.work.get("ref") %}{% set seen.labelled = true %}{% endif %}{% endif %}{% endfor %}{% endfor -%}
@@ -15,7 +17,7 @@ the report is what happened.{% if seen.labelled %} The work in full is under its
 ### [{{ m.ref }}] {{ m.at | local_time }}
 {% for e in m.events -%}
 {% if e.work is defined and e.work.line -%}
-- work{% if e.work.get("ref") %} [{{ e.work.ref }}]{% endif %}, ended (summary): {{ e.work.line }}
+- work{% if e.work.get("ref") %} [{{ e.work.ref }}]{% endif %}, ended {% if e.work.line_shown_under %}(summary shown under {{ e.work.line_shown_under }}){% else %}(summary): {{ e.work.line }}{% endif %}
 {% elif e.work is defined -%}
 {% set w = e.work -%}
 - work{% if w.get("ref") %} [{{ w.ref }}]{% endif %} "{{ w.title }}", as it stands now: {% if w.status == "active" %}in progress{% else %}{{ w.status }} {{ w.updated }}{% if w.ended_because %}: {{ w.ended_because }}{% endif %}{% endif %}
@@ -23,7 +25,7 @@ the report is what happened.{% if seen.labelled %} The work in full is under its
 {{ "  " }}the brain, on its report at {{ d.at | local_time }}: {{ d.decision | replace("_", " ") }}: {{ d.reason }}
 {% endfor -%}
 {% else -%}
-- {{ e.source }} at {{ e.at | local_time }}: {{ e.text }}
+- {{ e.source }} at {{ e.at | local_time }}: {% if e.shown_under %}shown in full under {{ e.shown_under }}{% else %}{{ e.text }}{% endif %}
   the brain: {{ e.decision | replace("_", " ") }}: {{ e.reason }}
 {% endif -%}
 {% endfor -%}

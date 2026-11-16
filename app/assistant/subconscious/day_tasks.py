@@ -156,7 +156,8 @@ def matters_today(day: str, now_utc: datetime, *, connect=None, work_brief=None)
                 e = c.execute("SELECT source, occurred_at, text FROM brain_events WHERE source_ref = ?", (ref,)).fetchone()
                 said = {"at": e["occurred_at"], "decision": decided["decision"], "reason": decided["reason"]}
                 if e["source"] != "work":
-                    events.append({"source": e["source"], "at": e["occurred_at"], "text": e["text"], **said})
+                    events.append({"source": e["source"], "source_ref": ref, "at": e["occurred_at"], "text": e["text"],
+                                   **said})
                     continue
                 work_id = ref.split(":")[1]   # work:<work_id>:<receipt id> (brain_inbox.add_work_event)
                 if work_id not in works:
@@ -167,6 +168,29 @@ def matters_today(day: str, now_utc: datetime, *, connect=None, work_brief=None)
             out.append({"id": r["id"], "at": r["created_at"], "events": events,
                         "new_concerns": d.get("new_concerns") or []})
     return out
+
+
+def show_once(matters: List[Dict[str, Any]], concerns: List[Dict[str, Any]] = ()) -> None:
+    """Each email or message once in full in the call, and each ended work's summary once (projection.ShownOnce), in
+    place, after the call's labels are given. The open concerns come before the look-back in the prompt: a concern's
+    source is shown in full under the first concern raised from it (`source_shown_under` on its view), then each
+    event of the look-back in order (`shown_under`), and each ended work's line (`line_shown_under`); each is None
+    where it is shown in full, else the label of where it is. Until 2026-11-15 an email behind a concern and two of
+    the brain's decisions was pasted three times, and a work the brain decided on twice had its summary listed twice
+    (the day's tasks and the day's record)."""
+    from app.assistant.subconscious.projection import ShownOnce
+    shown = ShownOnce()
+    for c in concerns:
+        v = c.get("view")
+        if v is not None:
+            v["source_shown_under"] = (shown.first(("source", v["source_ref"]), f"[{c['ref']}]")
+                                       if v["source_ref"] else None)
+    for m in matters:
+        for e in m["events"]:
+            if e["source"] != "work":
+                e["shown_under"] = shown.first(("source", e["source_ref"]), f"[{m['ref']}]")
+            elif e["work"]["line"]:
+                e["work"]["line_shown_under"] = shown.first(("work", e["work"]["work_id"]), f"[{m['ref']}]")
 
 
 def _work_brief(work_id: str) -> Dict[str, Any]:
@@ -272,6 +296,7 @@ def project(day: str, situation: Dict[str, Any], matters: List[Dict[str, Any]], 
             f"the concern's entry {label}" if label else
             f"an entry on the list of {entry.split(':')[1]}" if entry.startswith(("cal:", "day:")) else
             _unshown_entry(entry, connect=connect))
+    show_once(matters, situation["concerns"])
     return {"labels": p.labels, "earlier": earlier,
             "source_labels": {i: lab for lab, (k, i) in p.labels.items() if k == "work"}}
 

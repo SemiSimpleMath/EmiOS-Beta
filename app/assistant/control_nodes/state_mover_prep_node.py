@@ -67,8 +67,12 @@ def label_state_mover_view(bb) -> None:
     prompt shows labels and never an id. Sets `state_mover_labels` (label -> [kind, id], for the persist node to map
     the answer back) and `state_mover_ids` (id -> label, for the shared templates). Shared by the planning tick's
     prep and the wake pass's prep. Until 2026-10-08 the model copied `work_x::slug--abc123` and the persist node
-    matched it exactly: a miscopied hold matched nothing, and the task it meant to hold was promoted."""
-    from app.assistant.subconscious.projection import Projection
+    matched it exactly: a miscopied hold matched nothing, and the task it meant to hold was promoted.
+
+    Each source is shown in full once (projection.ShownOnce, keyed by its item id): under the first parked task it
+    belongs to, and every later mention names that task (`shown_under`). Until 2026-11-15 an email behind a parked task
+    that also arrived as intake was pasted twice."""
+    from app.assistant.subconscious.projection import Projection, ShownOnce
     p = Projection()
     ready = bb.get_state_value("ready_work_nodes", []) or []
     waiting = bb.get_state_value("waiting_work_nodes", []) or []
@@ -80,12 +84,18 @@ def label_state_mover_view(bb) -> None:
             p.label("S", "source_item", source["item_id"])
         if source.get("pod_id"):
             p.label("P", "pod", source["pod_id"])
+    shown = ShownOnce()
+    for t in waiting:
+        t["sources"] = [{**s, "shown_under": shown.first(("source_item", s["item_id"]), f"[{t['label']}]")
+                         if s.get("item_id") else None} for s in t.get("sources") or []]
+    intake = [{**s, "shown_under": shown.first(("source_item", s["item_id"]), "RECENT INCOMING")} for s in intake]
     history = bb.get_state_value("scheduled_reminder_history") or None
     if history:
         bb.update_state_value("scheduled_reminder_history", {
             **history, "records": [{**r, "ref": p.label("R", "reminder", r["id"])} for r in history.get("records") or []]})
     bb.update_state_value("ready_work_nodes", ready)
     bb.update_state_value("waiting_work_nodes", waiting)
+    bb.update_state_value("work_wait_intake", intake)
     bb.update_state_value("state_mover_labels", p.labels)
     bb.update_state_value("state_mover_ids", {ref[1]: label for label, ref in p.labels.items()})
 

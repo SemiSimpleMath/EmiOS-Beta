@@ -195,7 +195,7 @@ def test_the_brain_s_view_concerns_in_full_with_their_entries_and_today_s_decisi
                         lambda: {"active": [{"concern_id": "c-dinner", "plan": plan}], "addressing": []})
     monkeypatch.setattr(concern_view, "view", lambda c, b: {
         "concern_id": c["concern_id"], "title": "Dinner out tonight", "status": b, "severity": None, "done_when": None,
-        "source": "", "expires": "", "history": f"THE WHOLE RECORD of {c['concern_id']} ({b})", "plan": None,
+        "source": "", "source_head": "", "source_ref": None, "expires": "", "history": f"THE WHOLE RECORD of {c['concern_id']} ({b})", "plan": None,
         "attempts": []})
     s = situation(concerns=[{"concern_id": "c-dinner", "bucket": "active", "title": "Dinner out tonight",
                              "severity": "low", "changed_at": NOW.isoformat()}])
@@ -501,11 +501,13 @@ def test_the_look_back_shows_ended_work_by_its_line_and_work_in_motion_briefly(t
             f"  the brain, on its report at {local_time_text(at(2))}: changes concern: A fact is ready.\n") in look
     assert f"- chat at {local_time_text(at(3))}: it is cold in here" in look
     assert full not in user and "AC at 75 at 6." not in look and "Met; closed." not in look
+    record_matters = [{**m, "ref": "B1", "events": [{**e, "work": dict(briefs[e["work"]["work_id"]])} if "work" in e
+                                                    else dict(e) for e in m["events"]]}]
+    D.show_once(record_matters)        # as day_record.gather does
     record = _ENV.get_template("subconscious/day_record/prompts/user.j2").render(agent_input={
         "day": DAY, "now": NOW.isoformat(), "current": None, "events": [], "milestones": [],
         "concerns": [{"ref": "C1", "title": "AC", "subject": "household", "history": "[Tue 03-10 05:01 AM] At 6: AC to 75."}],
-        "matters": [{**m, "ref": "B1", "events": [{**e, "work": dict(briefs[e["work"]["work_id"]])} if "work" in e
-                                                   else e for e in m["events"]]}]})
+        "matters": record_matters})
     assert ("## The open concerns\nEach with its record, oldest first: a summary of the older notes, then every note "
             "since, each with when it was written.\n### [C1] AC (about household)\n[Tue 03-10 05:01 AM] At 6: AC to "
             "75.\n") in record, "the order is said once, at the section's head"
@@ -533,7 +535,7 @@ def test_each_work_is_shown_in_full_once_under_the_entry_it_was_made_from(tmp_pa
                                                   "at": None}], "link": "ended", "score": None}]})
     ac = s["concerns"][0]
     ac.update(view={"concern_id": "c-ac", "title": ac["title"], "status": "active", "severity": "low",
-                    "done_when": None, "source": "", "expires": "", "history": "[Mon 03-09 08:00 PM] Set it to 70.",
+                    "done_when": None, "source": "", "source_head": "", "source_ref": None, "expires": "", "history": "[Mon 03-09 08:00 PM] Set it to 70.",
                     "plan": None,
                     "attempts": [{"work_id": "work_old", "objective": "The house was at 70 last night",
                                   "attached_at": (NOW - timedelta(days=1)).isoformat(), "status": "done",

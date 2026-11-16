@@ -290,6 +290,7 @@ def gather(now_utc: datetime, *, connect=None) -> Dict[str, Any]:
         c["ref"] = p.label("C", "concern", c["concern_id"])
     for m in matters:
         m["ref"] = p.label("B", "brain_matter", str(m["id"]))
+    day_tasks.show_once(matters)
     for m in milestones:
         m["shown_by"] = [p.label_of(k, i) or "" for k, i in relations.targets(("milestone", m["id"]), "shown_by",
                                                                                connect=connect)]

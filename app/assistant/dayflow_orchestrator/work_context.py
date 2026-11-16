@@ -90,11 +90,21 @@ def work_data(wo, now=None):
     pending = any(isinstance(n.payload.get("finalizer"), dict) and n.payload["finalizer"].get("next_step")
                   and not n.payload["finalizer"].get("consumed_at") for n in tasks)
     contacts = Counter((a.channel, (a.target or "").lower()) for a in wo.actions)
+    task_views = [task_data(wo, n, now) for n in tasks]
+    # Steps one revision dropped together carry the same reason (as work_progress groups them): the first task whose
+    # REASON is printed shows it, and each later one names that task (`reason_as_for`). Until 2026-11-15 the same
+    # paragraph was printed on up to four tasks of one work object.
+    reason_shown_on = {}
+    for t in task_views:
+        reason = (t["terminal"] or {}).get("reason")
+        t["reason_as_for"] = reason_shown_on.get(reason) if reason else None
+        if reason and reason not in reason_shown_on and reason != (t["finalizer"] or {}).get("outcome"):
+            reason_shown_on[reason] = t["id"]
     return {"id": wo.id, "status": wo.status, "objective": objective_of(wo),
             "success_criteria": wo.constraints.get("success_criteria", ""),
             "failure_count": int((goal.payload if goal else {}).get("goal_unmet_attempts") or 0),
             "failure_episode_count": int((goal.payload if goal else {}).get("goal_unmet_since_progress") or 0),
-            "tasks": [task_data(wo, n, now) for n in tasks], "pending_replan": pending,
+            "tasks": task_views, "pending_replan": pending,
             "completed": sum(wo.is_satisfied(n) for n in tasks),
             "unrun": sum(n.status in {"proposed", "actionable", "waiting", "dispatched"} for n in tasks),
             "repeated_contacts": [{"channel": c, "target": t, "count": count} for (c, t), count in contacts.items() if count >= 3],

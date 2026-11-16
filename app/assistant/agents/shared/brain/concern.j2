@@ -1,5 +1,6 @@
 {#- One concern's record, as the brain reads it (docs/design/concerns_as_state_2026-10-09.md, rule 1). Expects `c`
-    (brain_step._concern_view). Where agent_input.source_labels labels a ref, the label is shown in its place. -#}
+    (brain_step._concern_view). Where agent_input.source_labels labels a ref, the label is shown in its place. The
+    record's order is said once in the reader's system prompt where `wording_explained` or `explained_once` is set. -#}
 {%- set L = (agent_input.get("source_labels") if agent_input is defined else none) or {} -%}
 ### [{{ c.label }}] {{ c.title }} ({{ c.status }})
 - about: {{ c.subject }}; kind: {{ c.kind }}; severity: {{ c.severity }}; horizon: {{ c.horizon }}
@@ -21,7 +22,7 @@
 {% endfor -%}
 {% endfor -%}
 {% endfor -%}
-{% if c.history %}- its record, oldest first (a summary of the older notes, then every note since, each with when it was
-  written):
+{% if c.history %}- its record{% if not ((wording_explained is defined and wording_explained) or (explained_once is defined and explained_once)) %}, oldest first (a summary of the older notes, then every note since, each with when it was
+  written){% endif %}:
 {{ c.history }}
 {% endif %}

@@ -153,16 +153,18 @@ def _build_chat_requests() -> str:
 
 
 def _build_work_objects(store) -> str:
-    """Active work objects — multi-step work executing on the work graph."""
+    """Active work objects — multi-step work executing on the work graph. What a work in progress, a failure tally and
+    a concern's record mean is said once, in the auditor's system prompt (shared/work/explained_once.j2); until
+    2026-11-15 each work object and concern repeated it."""
     from app.assistant.dayflow_orchestrator.work_portfolio import render_active_portfolio
 
-    portfolio, count, _ = render_active_portfolio(store, store.list_work_objects())
+    portfolio, count, _ = render_active_portfolio(store, store.list_work_objects(), explained_once=True)
     if not count:
         return "### Active Work Objects\nNo work in progress."
     return (
         "### Active Work Objects (work IN PROGRESS — not finished)\n"
-        "*Ongoing work the assistant carries until every step is done, or abandons with a reason. Flag a work "
-        "object's scheduled action (e.g. a delayed email) only if it collides with something needing the user.*\n"
+        "*Flag a work object's scheduled action (e.g. a delayed email) only if it collides with something needing "
+        "the user.*\n"
         + portfolio
     )
 

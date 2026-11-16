@@ -66,14 +66,24 @@ _SOURCE_WORDS = {"user": "the owner", "email": "an email", "calendar": "the cale
                  "belief": "the household's beliefs", "grocery": "the weekly grocery list"}
 
 
-def source_text(concern: Dict[str, Any]) -> str:
-    """Where the concern came from, as every reader shows it: who or what, when (local), and its own words, copied
-    exactly. Empty for a concern raised before sources were kept (2026-10-09)."""
+def source_head(concern: Dict[str, Any]) -> str:
+    """Who or what the concern came from, and when (local): how a reader names its source without its words (a source
+    the call already shows in full, subconscious/projection.ShownOnce). Empty for a concern raised before sources were
+    kept (2026-10-09)."""
     from app.assistant.utils.time_utils import local_time_text
     src = concern.get("source")
     if not src:
         return ""
-    return f'{_SOURCE_WORDS[src["kind"]]}, {local_time_text(src["at"])}: "{src["content"]}"'
+    return f'{_SOURCE_WORDS[src["kind"]]}, {local_time_text(src["at"])}'
+
+
+def source_text(concern: Dict[str, Any]) -> str:
+    """Where the concern came from, as every reader shows it: who or what, when (local), and its own words, copied
+    exactly. Empty for a concern raised before sources were kept (2026-10-09)."""
+    src = concern.get("source")
+    if not src:
+        return ""
+    return f'{source_head(concern)}: "{src["content"]}"'
 
 
 def expires_text(concern: Dict[str, Any]) -> str:
@@ -85,11 +95,13 @@ def expires_text(concern: Dict[str, Any]) -> str:
 def view(concern: Dict[str, Any], bucket: str) -> Dict[str, Any]:
     """One concern for the shared template every agent working on it reads (shared/work/concern_view.j2): what it
     is, where it came from, what settles it, when it expires, its record (the summary and the notes since, whole), its
-    plan and the work done for it."""
+    plan and the work done for it. `source_ref` names the source (the event it came from) for a call that shows each
+    source in full once, and `source_head` names it without its words."""
     from app.assistant.subconscious.persist import history_for_prompt
     return {"concern_id": concern["concern_id"], "title": concern.get("title"), "status": bucket,
             "severity": concern.get("severity"), "done_when": concern.get("done_when"),
-            "source": source_text(concern), "expires": expires_text(concern),
+            "source": source_text(concern), "source_head": source_head(concern),
+            "source_ref": (concern.get("source") or {}).get("ref"), "expires": expires_text(concern),
             "history": history_for_prompt(concern), "plan": concern.get("plan"), "attempts": attempts(concern)}
 
 

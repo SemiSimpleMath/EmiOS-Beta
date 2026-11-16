@@ -11,7 +11,7 @@ are never stored. `labels` is a plain dict (label -> [kind, id]) so it travels i
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Hashable, List, Optional, Tuple
 
 Ref = Tuple[str, str]           # (kind, id)
 
@@ -51,6 +51,26 @@ class Projection:
         self.labels[label] = [ref[0], ref[1]]
         self._by_ref[ref] = label
         return label
+
+
+class ShownOnce:
+    """What one call shows in full once: an email, a message or a work's summary behind several objects of the prompt
+    is shown in full where it first appears, and each later object names that place (owner, 2026-11-15: one newsletter
+    was pasted three times into one prompt, once under each concern and decision it was behind). Keyed by the thing's
+    ref, never by its text; fed in the order the prompt shows the objects. One per call, never stored."""
+
+    def __init__(self) -> None:
+        self._where: Dict[Hashable, str] = {}
+
+    def first(self, ref: Hashable, where: str) -> Optional[str]:
+        """None when `ref` is not yet shown in this call (show it in full; `where` is now its place); otherwise the
+        place it is shown in full, as the prompt names that place."""
+        if not ref:
+            raise ValueError(f"ShownOnce: no ref for the thing shown under {where}")
+        if ref in self._where:
+            return self._where[ref]
+        self._where[ref] = where
+        return None
 
 
 def resolve(labels: Dict[str, List[str]], label: str) -> Optional[Ref]:

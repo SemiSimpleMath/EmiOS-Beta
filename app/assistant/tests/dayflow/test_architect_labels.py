@@ -152,7 +152,8 @@ def test_each_concern_is_shown_once_and_each_work_object_names_it_by_label(monke
         if w.id == unrelated.id:
             return []
         return [{"concern_id": "c0ffee00aa", "title": "Coursework is done by its due dates", "status": "active",
-                 "severity": "medium", "done_when": "Each assignment is submitted.", "source": "", "expires": "",
+                 "severity": "medium", "done_when": "Each assignment is submitted.", "source": "", "source_head": "",
+                 "source_ref": None, "expires": "",
                  "history": "[Fri 10-09 11:00 PM] Reading notes due Sunday; math practice due the 23rd.",
                  "plan": None,
                  "attempts": [{"work_id": x.id, "objective": x.title, "attached_at": "2026-10-09T23:00:00+00:00",

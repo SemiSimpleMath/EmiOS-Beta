@@ -176,13 +176,25 @@ def render_work_portfolio(wo, now=None) -> str:
     return render_view("portfolio", work=work_data(wo, now))
 
 
-def render_portfolio(work_objects, now=None, shown_above=None, labels=None) -> str:
+def render_portfolio(work_objects, now=None, shown_above=None, labels=None, explained_once=False) -> str:
     """Render each active work object with the shared status definitions. `shown_above` names the work
     object whose full graph the reader already has (the architect's own goal): it is marked, not repeated.
-    `labels` (id -> label of the call) shows labels in place of ids (a projection, 2026-10-08)."""
+    `labels` (id -> label of the call) shows labels in place of ids (a projection, 2026-10-08). `explained_once`:
+    the reader's system prompt states shared/work/explained_once.j2, so no work object or concern repeats it.
+    A concern's source behind several work objects is shown in full under the first (projection.ShownOnce)."""
     from app.assistant.dayflow_orchestrator.work_context import render_view, work_data
-    return render_view("portfolio_list", works=[work_data(wo, now) for wo in (work_objects or [])],
-                       shown_above=shown_above, labels=labels or {})
+    from app.assistant.subconscious.projection import ShownOnce
+    labels = labels or {}
+    works = [work_data(wo, now) for wo in (work_objects or [])]
+    sources = ShownOnce()
+    for w in works:
+        for c in w["concerns"]:
+            if c.get("concern_id"):
+                c["source_shown_under"] = (sources.first(("source", c["source_ref"]),
+                                                         f"WORK OBJECT {labels.get(w['id'], w['id'])}")
+                                           if c["source_ref"] else None)
+    return render_view("portfolio_list", works=works, shown_above=shown_above, labels=labels,
+                       explained_once=explained_once)
 
 
 def active_work_objects(store, summaries) -> tuple[list, list[str]]:
@@ -201,14 +213,15 @@ def active_work_objects(store, summaries) -> tuple[list, list[str]]:
     return active, unreadable
 
 
-def render_active_portfolio(store, summaries, shown_above=None, labels=None) -> tuple[str, int, list[str]]:
+def render_active_portfolio(store, summaries, shown_above=None, labels=None,
+                            explained_once=False) -> tuple[str, int, list[str]]:
     """The portfolio of every non-terminal work object in `summaries`: (text, objects rendered, unreadable ids).
 
     An object that will not load is logged and NAMED at the top of the text, so the reader is told its
     view is partial rather than told the work does not exist."""
     from app.assistant.dayflow_orchestrator.work_context import render_view
     active, unreadable = active_work_objects(store, summaries)
-    portfolio = render_portfolio(active, shown_above=shown_above, labels=labels)
+    portfolio = render_portfolio(active, shown_above=shown_above, labels=labels, explained_once=explained_once)
     if unreadable:
         portfolio = render_view("incomplete_portfolio", unreadable=unreadable, portfolio=portfolio)
     return portfolio, len(active), unreadable

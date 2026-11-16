@@ -1,11 +1,12 @@
 {%- set L = labels | default({}) -%}
 {%- set terse = wording_explained is defined and wording_explained -%}
+{%- set explained = terse or (explained_once is defined and explained_once) -%}
 === WORK OBJECT {{ L.get(work.id, work.id) }} ===
 goal: {{ work.objective }}
 status: {{ work.status }} | progress: {{ work.completed }}/{{ work.tasks|length }} top-level tasks complete
 {% if work.success_criteria %}success criteria: {{ work.success_criteria }}
 {% endif %}{% if not terse or work.failure_count %}goal failures judged by finalizer: {{ work.failure_count }}
-{% endif %}{% if not terse %}Historical failure totals do not request another user decision. Follow current finalizer instructions and the user's recorded answers; do not re-ask a resolved question because of this tally.
+{% endif %}{% if not explained %}Historical failure totals do not request another user decision. Follow current finalizer instructions and the user's recorded answers; do not re-ask a resolved question because of this tally.
 {% endif %}{% if work.pending_replan %}PENDING ARCHITECT REVISION: apply the finalizer instruction before further dispatch.
 {% endif %}{% if work.unrun %}STILL UNRUN ({{ work.unrun }}){% if not terse %}: completing this work object would DISCARD these outstanding tasks{% endif %}.
 {% endif %}
@@ -24,7 +25,7 @@ TASKS (main assignments only)
 {% endif %}{% if task.awaiting_judgment %}  AWAITING JUDGMENT: result exists; completion has not been accepted.
 {% endif %}{% if task.dependencies %}  DEPENDS ON: {% for dep in task.dependencies %}{{ L.get(dep.id, dep.id) }} [{{ dep.status }}; {% if dep.satisfied %}satisfied{% else %}BLOCKED{% endif %}]{% if not loop.last %}, {% endif %}{% endfor %}
 {% endif %}{% if task.wake_kind %}  WAIT: {{ task.wake_kind }}{% if task.wake_at %} | {{ task.wake_at }}{% endif %}{% if task.wake_ref %} | {{ task.wake_ref }}{% endif %}
-{% endif %}{% with watch = task.watch %}{% include 'shared/work/watch.j2' %}{% endwith %}{% if task.terminal and task.terminal.get('reason') != (task.finalizer or {}).get('outcome') %}  REASON: {{ task.terminal.get('reason', '') }}
+{% endif %}{% with watch = task.watch %}{% include 'shared/work/watch.j2' %}{% endwith %}{% if task.terminal and task.terminal.get('reason') != (task.finalizer or {}).get('outcome') %}  REASON: {% if task.reason_as_for %}as for {{ L.get(task.reason_as_for, task.reason_as_for) }} above{% else %}{{ task.terminal.get('reason', '') }}{% endif %}
 {% endif %}{% if task.finalizer or task.awaiting_judgment %}{% set finalizer = task.finalizer %}{% include 'shared/work/finalizer_summary.j2' %}{% endif %}
 {% endfor %}
 {% if work.actions %}ACTIONS TAKEN ({{ work.actions|length }}) — already performed; do not repeat without justification

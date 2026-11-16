@@ -146,8 +146,10 @@ class WorkFinalizerNode(ControlNode):
     def _judge(self, wo, node, scope) -> dict:
         from app.assistant.dayflow_orchestrator.work_portfolio import node_result, render_portfolio
         from app.assistant.dayflow_orchestrator.work_context import render_view, worker_data
-        projection = render_portfolio([wo])
-        info = render_view("finalizer_input", view=worker_data(wo, node.id),
+        # The finalizer's system prompt states shared/work/explained_once.j2: the projection and the input, which both
+        # show the work's concerns, leave it out.
+        projection = render_portfolio([wo], explained_once=True)
+        info = render_view("finalizer_input", view=worker_data(wo, node.id), explained_once=True,
                            result_text=node_result(wo, node), repeat_failure_limit=_REPEAT_FAILURE_LIMIT)
         agent = DI.agent_factory.create_agent("dayflow_orchestrator::work_finalizer")
         res = agent.action_handler(Message(task=projection, information=info, scope_context=scope))

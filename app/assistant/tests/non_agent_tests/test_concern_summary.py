@@ -143,5 +143,7 @@ def test_work_carries_the_record_of_the_concerns_it_serves(tmp_path, monkeypatch
     from app.assistant.dayflow_orchestrator.work_context import render_view
     text = render_view("concern_view", concerns=[served, missing])
     assert "- concern 3f0c2b9a: Flea medication due [active]" in text
-    assert "  its record, oldest first" in text and "    [" in text and "Monthly dose for the dogs." in text
+    assert text.startswith("- A concern's record is oldest first: a summary of the older notes, then every note since, "
+                           "each with when it was\n  written.\n"), "the order is said once, at the list's head"
+    assert "  its record:\n" in text and "    [" in text and "Monthly dose for the dogs." in text
     assert "- concern concern:deadbeef: not found (matches 0 concerns in the register)" in text
