@@ -71,7 +71,7 @@ class PlaywrightPageStateNode(ControlNode):
             self.blackboard.update_state_value("playwright_scroll_state_data", scroll_data)
             self.blackboard.update_state_value("playwright_scroll_state", self._format_scroll_state(scroll_data))
         except Exception:
-            logger.debug("[%s] Failed to get page scroll state", self.name, exc_info=True)
+            logger.error("[%s] Failed to get page scroll state", self.name, exc_info=True)
             self.blackboard.update_state_value("playwright_scroll_state_data", {})
             self.blackboard.update_state_value("playwright_scroll_state", "")
         self.blackboard.update_state_value("playwright_modal_form_state", "")
@@ -640,13 +640,11 @@ class PlaywrightPageStateNode(ControlNode):
       progress: scrollable ? Number((scrollTop / Math.max(1, maxScrollTop)).toFixed(3)) : 1.0,
     };
 }"""
-        try:
-            raw = self._run_js(server_entry=server_entry, js=js)
-            payload = self._extract_json_payload(raw)
-            return payload if isinstance(payload, dict) else {}
-        except Exception:
-            logger.debug("[%s] _get_page_scroll_state failed", self.name, exc_info=True)
-            return {}
+        raw = self._run_js(server_entry=server_entry, js=js)
+        payload = parse_jsonish(raw)
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"[{self.name}] Could not parse page scroll payload: {raw!r}")
+        return payload
 
     @staticmethod
     def _format_page_identity(ident: dict[str, Any]) -> str:
